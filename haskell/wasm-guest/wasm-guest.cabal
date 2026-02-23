@@ -66,6 +66,7 @@ library wasm-guest-internal
         ExoMonad.Guest.Tools.Popup
         ExoMonad.Guest.Tools.Spawn
         ExoMonad.Guest.Tools.Events
+        ExoMonad.Guest.Prompt
         ExoMonad.Guest.Events.Templates
         -- SpawnSpec compiler
         ExoMonad.Guest.SpawnSpec.Types
@@ -98,7 +99,6 @@ library wasm-guest-internal
         ExoMonad.Effects.Events
         ExoMonad.Effects.Session
         ExoMonad.Effects.KV
-        ExoMonad.Effects.Template
         -- Types
         ExoMonad.Guest.Types
         ExoMonad.Types

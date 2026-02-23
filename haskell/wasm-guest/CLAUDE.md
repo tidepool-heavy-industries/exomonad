@@ -29,6 +29,13 @@ The guest exports MCP tools that agents can call. These are defined in `ExoMonad
 - **`spawn_leaf_subtree`**: Fork a Gemini agent in a new git worktree + Zellij tab (dev role, isolated, files PR).
 - **`spawn_workers`**: Spawn ephemeral Gemini agents as panes in the parent directory (no branch, no worktree).
 
+### Prompt Builder (`ExoMonad.Guest.Prompt`)
+
+Pure Haskell prompt assembly for worker/leaf agents. Replaces the former template effect round-trip (Haskell → proto → Rust disk I/O → proto → Haskell) with direct string composition.
+
+- Builder monoid: `task`, `boundary`, `steps`, `context`, `verify`, `doneCriteria`, `readFirst`, `raw`
+- Inline profiles: `leafProfile`, `workerProfile`, `generalProfile`, `rustProfile`, `haskellProfile`
+
 ### Other Tools
 
 - `file_pr` (tl, dev roles)

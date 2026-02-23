@@ -29,8 +29,6 @@ pub mod log;
 pub mod merge_pr;
 pub mod popup;
 pub mod session;
-pub mod template;
-
 pub use agent::AgentHandler;
 pub use copilot::CopilotHandler;
 pub use events::EventHandler;
@@ -45,7 +43,6 @@ pub use log::LogHandler;
 pub use merge_pr::MergePRHandler;
 pub use popup::PopupHandler;
 pub use session::SessionHandler;
-pub use template::TemplateHandler;
 
 // ============================================================================
 // Proto field helpers — shared across handlers

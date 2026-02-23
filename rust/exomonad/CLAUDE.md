@@ -110,8 +110,6 @@ All effects flow through a single `yield_effect` host function using protobuf bi
 | `kv.*` | KvHandler | Key-value store (.exo/kv/) |
 | `session.*` | SessionHandler | Claude session registry |
 
-Handlers are registered via composable group functions: `core_handlers()`, `git_handlers()`, `orchestration_handlers()`.
-
 ## Building
 
 WASM must be built before running hooks or serve mode:

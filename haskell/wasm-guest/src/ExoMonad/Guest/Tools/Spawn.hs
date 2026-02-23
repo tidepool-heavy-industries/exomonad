@@ -16,13 +16,9 @@ import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Either (partitionEithers)
 import Data.Text (Text)
-import Data.Text qualified as T
-import Data.Vector qualified as V
-import Effects.Template qualified as Proto
 import ExoMonad.Effects.Log (emitStructuredEvent)
-import ExoMonad.Effects.Template qualified as Template
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
-import ExoMonad.Guest.Proto (fromText, toText)
+import ExoMonad.Guest.Prompt qualified as P
 import ExoMonad.Guest.Tool.Class
 import ExoMonad.Guest.Tool.Schema (JsonSchema (..), genericToolSchemaWith)
 import GHC.Generics (Generic)
@@ -95,23 +91,7 @@ instance MCPTool SpawnLeafSubtree where
         ("branch_name", "Branch name suffix (will be prefixed with current branch)")
       ]
   toolHandler args = do
-    -- Render task through template system with "leaf" profile for completion protocol.
-    let req =
-          Proto.RenderWorkerPromptRequest
-            { Proto.renderWorkerPromptRequestTask = fromText $ slsTask args,
-              Proto.renderWorkerPromptRequestReadFirst = V.empty,
-              Proto.renderWorkerPromptRequestSteps = V.empty,
-              Proto.renderWorkerPromptRequestVerify = V.empty,
-              Proto.renderWorkerPromptRequestDoneCriteria = V.empty,
-              Proto.renderWorkerPromptRequestBoundary = V.empty,
-              Proto.renderWorkerPromptRequestContext = fromText "",
-              Proto.renderWorkerPromptRequestProfiles = V.fromList [fromText "leaf"],
-              Proto.renderWorkerPromptRequestContextFiles = V.empty,
-              Proto.renderWorkerPromptRequestVerifyTemplates = V.empty
-            }
-    renderedTask <- Template.renderWorkerPrompt req >>= \case
-      Right resp -> pure $ toText $ Proto.renderWorkerPromptResponseRendered resp
-      Left _ -> pure $ slsTask args -- Fallback to raw task on render failure
+    let renderedTask = P.render $ P.task (slsTask args) <> P.leafProfile
     result <- runM $ AC.runAgentControl $ AC.spawnLeafSubtree renderedTask (slsBranchName args)
     case result of
       Left err -> pure $ errorResult err
@@ -179,32 +159,6 @@ instance FromJSON WorkerSpec where
       <*> v .:? "context_files"
       <*> v .:? "verify_templates"
 
--- | Assemble a structured WorkerSpec into a markdown prompt (fallback).
-renderWorkerPromptFallback :: WorkerSpec -> Text
-renderWorkerPromptFallback spec =
-  case wsPrompt spec of
-    Just p -> p -- Raw prompt takes precedence (escape hatch)
-    Nothing ->
-      T.intercalate "\n\n" $
-        filter
-          (not . T.null)
-          [ "## Task: " <> wsTask spec,
-            renderSection "READ FIRST" (fmap (map ("- " <>)) (wsReadFirst spec)),
-            renderNumbered "STEPS" (wsSteps spec),
-            renderSection "VERIFY" (fmap (map ("```\n" <>) . map (<> "\n```")) (wsVerify spec)),
-            renderSection "DONE CRITERIA" (fmap (map ("- " <>)) (wsDoneCriteria spec)),
-            renderSection "BOUNDARY" (fmap (map ("- " <>)) (wsBoundary spec)),
-            maybe "" (\c -> "### CONTEXT\n\n" <> c) (wsContext spec)
-          ]
-  where
-    renderSection _ Nothing = ""
-    renderSection _ (Just []) = ""
-    renderSection heading (Just items) = "### " <> heading <> "\n" <> T.intercalate "\n" items
-
-    renderNumbered _ Nothing = ""
-    renderNumbered _ (Just []) = ""
-    renderNumbered heading (Just items) = "### " <> heading <> "\n" <> T.intercalate "\n" (zipWith (\i s -> T.pack (show (i :: Int)) <> ". " <> s) [1 ..] items)
-
 data SpawnWorkersArgs = SpawnWorkersArgs
   { swsSpecs :: [WorkerSpec]
   }
@@ -224,26 +178,18 @@ instance MCPTool SpawnWorkers where
       ]
   toolHandler args = do
     results <- forM (swsSpecs args) $ \spec -> do
-      prompt <- case wsPrompt spec of
-        Just p -> pure p
-        Nothing -> do
-          let req =
-                Proto.RenderWorkerPromptRequest
-                  { Proto.renderWorkerPromptRequestTask = fromText $ wsTask spec,
-                    Proto.renderWorkerPromptRequestReadFirst = V.fromList $ map fromText $ maybe [] id (wsReadFirst spec),
-                    Proto.renderWorkerPromptRequestSteps = V.fromList $ map fromText $ maybe [] id (wsSteps spec),
-                    Proto.renderWorkerPromptRequestVerify = V.fromList $ map fromText $ maybe [] id (wsVerify spec),
-                    Proto.renderWorkerPromptRequestDoneCriteria = V.fromList $ map fromText $ maybe [] id (wsDoneCriteria spec),
-                    Proto.renderWorkerPromptRequestBoundary = V.fromList $ map fromText $ maybe [] id (wsBoundary spec),
-                    Proto.renderWorkerPromptRequestContext = fromText $ maybe "" id (wsContext spec),
-                    -- Always include "worker" profile for completion protocol
-                    Proto.renderWorkerPromptRequestProfiles = V.fromList $ map fromText $ "worker" : maybe [] id (wsProfiles spec),
-                    Proto.renderWorkerPromptRequestContextFiles = V.fromList $ map fromText $ maybe [] id (wsContextFiles spec),
-                    Proto.renderWorkerPromptRequestVerifyTemplates = V.fromList $ map fromText $ maybe [] id (wsVerifyTemplates spec)
-                  }
-          Template.renderWorkerPrompt req >>= \case
-            Right resp -> pure $ toText $ Proto.renderWorkerPromptResponseRendered resp
-            Left _ -> pure $ renderWorkerPromptFallback spec
+      let prompt = case wsPrompt spec of
+            Just p -> p
+            Nothing ->
+              P.render $
+                P.task (wsTask spec)
+                  <> maybe mempty P.boundary (wsBoundary spec)
+                  <> maybe mempty P.readFirst (wsReadFirst spec)
+                  <> maybe mempty P.steps (wsSteps spec)
+                  <> maybe mempty P.context (wsContext spec)
+                  <> maybe mempty P.verify (wsVerify spec)
+                  <> maybe mempty P.doneCriteria (wsDoneCriteria spec)
+                  <> P.workerProfile
 
       r <- runM $ AC.runAgentControl $ AC.spawnWorker (wsName spec) prompt
       case r of
