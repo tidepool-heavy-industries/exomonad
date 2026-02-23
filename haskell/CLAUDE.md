@@ -47,7 +47,7 @@ The xmonad pattern for LLM agents: users define agent roles in Haskell, compiled
 └── unified.cabal   # Package definition
 ```
 
-Shared code across roles lives in `.exo/lib/` (e.g., `StopHook.hs`, `HttpDevHooks.hs`).
+Shared code across roles lives in `.exo/lib/` (e.g., `HttpDevHooks.hs`).
 
 ### How It Works
 

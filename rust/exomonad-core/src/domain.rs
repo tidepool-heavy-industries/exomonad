@@ -128,16 +128,10 @@ validated_string!(
 );
 
 validated_string!(
-    #[doc = "Jujutsu revision specifier (bookmark name or commit ID prefix)."]
+    #[doc = "Git revision specifier (branch name or commit ID prefix)."]
     #[doc = "Semantically distinct from `BranchName` — revisions resolve to commits via multiple strategies."]
     Revision,
     "revision"
-);
-
-validated_string!(
-    #[doc = "Coordination task identifier (e.g., `task-1`)."]
-    TaskId,
-    "task_id"
 );
 
 validated_string!(
@@ -434,16 +428,6 @@ pub enum FilterState {
     Closed,
     /// All items (open and closed).
     All,
-}
-
-/// Message filter for agent messaging.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MessageFilter {
-    /// All messages (read and unread).
-    All,
-    /// Unread messages only.
-    UnreadOnly,
 }
 
 // ============================================================================
@@ -899,23 +883,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_message_filter_serde() {
-        assert_eq!(deser::<MessageFilter>("all"), MessageFilter::All);
-        assert_eq!(
-            deser::<MessageFilter>("unread_only"),
-            MessageFilter::UnreadOnly
-        );
-
-        for filter in [MessageFilter::All, MessageFilter::UnreadOnly] {
-            let json = serde_json::to_string(&filter).unwrap();
-            let back: MessageFilter = serde_json::from_str(&json).unwrap();
-            assert_eq!(filter, back);
-        }
-    }
-
     // =========================================================================
-    // BranchName, Revision, TaskId tests
+    // BranchName, Revision tests
     // =========================================================================
 
     #[test]
@@ -956,23 +925,6 @@ mod tests {
         let json = serde_json::to_string(&rev).unwrap();
         let back: Revision = serde_json::from_str(&json).unwrap();
         assert_eq!(rev, back);
-    }
-
-    #[test]
-    fn test_task_id_validation() {
-        let id = TaskId::try_from("task-1".to_string()).unwrap();
-        assert_eq!(id.as_str(), "task-1");
-
-        let result = TaskId::try_from("".to_string());
-        assert!(matches!(result, Err(DomainError::Empty { .. })));
-    }
-
-    #[test]
-    fn test_task_id_serde_roundtrip() {
-        let id = TaskId::try_from("task-42".to_string()).unwrap();
-        let json = serde_json::to_string(&id).unwrap();
-        let back: TaskId = serde_json::from_str(&json).unwrap();
-        assert_eq!(id, back);
     }
 
     // =========================================================================
