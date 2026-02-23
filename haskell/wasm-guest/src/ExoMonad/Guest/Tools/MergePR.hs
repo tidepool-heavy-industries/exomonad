@@ -43,16 +43,16 @@ instance FromJSON MergePRArgs where
 data MergePROutput = MergePROutput
   { mpoSuccess :: Bool,
     mpoMessage :: Text,
-    mpoJjFetched :: Bool
+    mpoGitFetched :: Bool
   }
   deriving (Show, Eq, Generic)
 
 instance Aeson.ToJSON MergePROutput where
-  toJSON (MergePROutput s m j) =
+  toJSON (MergePROutput s m g) =
     object
       [ "success" .= s,
         "message" .= m,
-        "jj_fetched" .= j
+        "git_fetched" .= g
       ]
 
 instance MCPTool MergePR where
@@ -63,7 +63,7 @@ instance MCPTool MergePR where
     genericToolSchemaWith @MergePRArgs
       [ ("pr_number", "PR number to merge"),
         ("strategy", "Merge strategy: squash (default), merge, or rebase"),
-        ("working_dir", "Working directory for git/jj operations")
+        ("working_dir", "Working directory for git operations")
       ]
   toolHandler args = do
     let req =
@@ -83,7 +83,7 @@ instance MCPTool MergePR where
               MergePROutput
                 { mpoSuccess = MP.mergePrResponseSuccess resp,
                   mpoMessage = TL.toStrict (MP.mergePrResponseMessage resp),
-                  mpoJjFetched = MP.mergePrResponseJjFetched resp
+                  mpoGitFetched = MP.mergePrResponseGitFetched resp
                 }
         _ <- runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: " <> mpoMessage output), Log.infoRequestFields = ""})
         emitStructuredEvent "pr.merged" $
@@ -95,7 +95,6 @@ instance MCPTool MergePR where
           object
             [ "success" .= mpoSuccess output,
               "message" .= mpoMessage output,
-              "jj_fetched" .= mpoJjFetched output,
+              "git_fetched" .= mpoGitFetched output,
               "next" .= ("Verify build: cargo check --workspace. Especially important after parallel merges — changes may interact." :: Text)
             ]
-

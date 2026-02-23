@@ -42,7 +42,7 @@ impl MergePrEffects for MergePRHandler {
         Ok(MergePrResponse {
             success: result.success,
             message: result.message,
-            jj_fetched: result.git_fetched,
+            git_fetched: result.git_fetched,
         })
     }
 }
