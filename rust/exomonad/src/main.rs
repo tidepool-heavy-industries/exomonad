@@ -1271,26 +1271,46 @@ async fn main() -> Result<()> {
 
             debug!(url = %url, event = ?event, "Forwarding hook to server");
 
-            let response = client
-                .post(&url)
-                .header("content-type", "application/json")
-                .body(body)
-                .send()
-                .await;
+            // SessionStart on root session: retry for up to 5s to wait for server warmup.
+            // On `exomonad init`, the server tab and TL tab start concurrently — the
+            // SessionStart hook can fire before the server is ready to accept connections.
+            let is_root_session_start = event == HookEventType::SessionStart
+                && std::env::var("EXOMONAD_AGENT_ID").is_err();
+            let max_attempts = if is_root_session_start { 10 } else { 1 };
 
-            let resp = match response {
-                Ok(r) => {
-                    debug!(status = %r.status(), "Hook forwarding response");
-                    if r.status().is_success() {
-                        r.json::<HookEnvelope>().await?
-                    } else {
-                        eprintln!("exomonad hook: server returned {}", r.status());
-                        println!(r#"{{"continue":true}}"#);
-                        return Ok(());
+            let mut last_err = String::new();
+            let mut resp_result = None;
+            for attempt in 0..max_attempts {
+                if attempt > 0 {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    debug!(attempt, "Retrying SessionStart hook");
+                }
+                match client
+                    .post(&url)
+                    .header("content-type", "application/json")
+                    .body(body.clone())
+                    .send()
+                    .await
+                {
+                    Ok(r) => {
+                        debug!(status = %r.status(), "Hook forwarding response");
+                        if r.status().is_success() {
+                            resp_result = Some(r.json::<HookEnvelope>().await?);
+                            break;
+                        } else {
+                            last_err = format!("server returned {}", r.status());
+                        }
+                    }
+                    Err(e) => {
+                        last_err = format!("server unreachable: {}", e);
                     }
                 }
-                Err(e) => {
-                    eprintln!("exomonad hook: server unreachable: {}", e);
+            }
+
+            let resp = match resp_result {
+                Some(r) => r,
+                None => {
+                    eprintln!("exomonad hook: {}", last_err);
                     println!(r#"{{"continue":true}}"#);
                     return Ok(());
                 }
