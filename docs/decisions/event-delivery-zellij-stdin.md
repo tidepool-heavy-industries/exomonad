@@ -66,10 +66,6 @@ Implicit from spawn. The branch hierarchy (`main.feature.auth` → parent `main.
 - Natural integration with Claude Code's conversation model
 - Coupled to Zellij for fallback — can't run fully headless without adaptation
 
-## Known Gaps
+## Open Work
 
-- **Headless mode**: Zellij fallback unavailable. Teams-only delivery works but depends on Claude Code polling.
-- **Message ordering**: If two children complete simultaneously, delivery order is non-deterministic.
-- **Inbox growth**: Teams inbox files are JSON arrays that grow unboundedly (idle notifications every 2-4s contribute). No rotation mechanism.
-- **Lock coordination**: Our `teams_mailbox` uses atomic temp+rename. Claude Code uses `.lock` sidecar files. We don't currently coordinate with their lock protocol — potential for lost updates under high concurrency.
-- **Retry**: No retry on delivery failure. If both Teams and Zellij fail, the event is lost (JSONL log is the durable record).
+See [teams-roadmap.md](teams-roadmap.md) for consolidated open items (lock coordination, delivery retry, headless mode, etc.).

@@ -129,12 +129,9 @@ Gemini calls notify_parent(status="success", message="...")
 | Push notification pipeline | Built | Zellij plugin + deferred Enter |
 | SessionStart → TeamRegistry | Built | `handlers/session.rs` |
 
-## What's Left
+## Open Work
 
-- **Lock coordination**: Our `teams_mailbox` uses atomic temp+rename but doesn't coordinate with Claude Code's `.lock` sidecar protocol. Risk of lost updates under high concurrency.
-- **Inbox rotation**: Inbox files grow unboundedly (idle notifications every 2-4s). No compaction or rotation.
-- **Permission cascade**: 3-tier model (agent < TL < human) for typed permission checking. Not yet built.
-- **Zellij popup approval UI**: Human escalation via structured popup dialogs. Infrastructure exists but disabled (blocks WASM plugin lock).
+See [teams-roadmap.md](teams-roadmap.md) for consolidated open items (lock coordination, inbox compaction, permissions, etc.).
 
 ## Consequences
 

@@ -111,21 +111,9 @@ Gemini→Claude:
 | Register on spawn | `services/agent_control.rs` | Built |
 | Wire into server | `exomonad/src/main.rs` | Built |
 
-## Known Risks
+## Open Work
 
-### Lock coordination gap
-
-Our `teams_mailbox` uses atomic temp+rename for writes. Claude Code uses `.lock` sidecar files (advisory locking). We don't currently coordinate with their lock protocol. Under normal usage (writes are infrequent, spaced out), this is fine. Under high concurrency (many workers completing simultaneously), there's a risk of lost updates.
-
-**Mitigation options:** Adopt the `.lock` sidecar protocol, or accept the risk since our messages are also delivered via Zellij fallback.
-
-### Inbox file growth
-
-Claude Code Teams writes idle notifications every 2-4 seconds per idle teammate. These accumulate in inbox JSON arrays. No rotation or compaction mechanism exists. Over long sessions, inbox files can grow large, increasing the cost of read-modify-write operations.
-
-### Claude Code version sensitivity
-
-The Teams on-disk format is not a stable public API. Field names, directory structure, and protocol message types are observed from Claude Code 2.1.x behavior. Updates to Claude Code may change the format.
+See [teams-roadmap.md](teams-roadmap.md) for consolidated open items (lock coordination, inbox compaction, version sensitivity, etc.).
 
 ## Consequences
 
