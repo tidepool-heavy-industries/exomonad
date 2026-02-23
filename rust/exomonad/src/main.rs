@@ -1022,7 +1022,6 @@ async fn main() -> Result<()> {
                     "agent".to_string(),
                     "popup".to_string(),
                     "events".to_string(),
-                    "messaging".to_string(),
                     "session".to_string(),
                 ]);
             // Create structured event log (JSONL)
