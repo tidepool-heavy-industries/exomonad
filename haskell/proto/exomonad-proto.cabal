@@ -54,6 +54,8 @@ library
     Effects.Events
     Effects.MergePr
     Effects.Session
+    Effects.Template
+    Effects.Jj
     -- Hand-written compatibility layer
     ExoMonad.Compat
   build-depends:

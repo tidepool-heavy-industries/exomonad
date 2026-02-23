@@ -102,6 +102,7 @@ library wasm-guest-internal
         ExoMonad.Effects.Session
         ExoMonad.Effects.Messaging
         ExoMonad.Effects.KV
+        ExoMonad.Effects.Template
         -- Types
         ExoMonad.Guest.Types
         ExoMonad.Types

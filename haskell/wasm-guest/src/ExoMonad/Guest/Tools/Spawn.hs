@@ -17,8 +17,12 @@ import Data.Aeson qualified as Aeson
 import Data.Either (partitionEithers)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Vector qualified as V
+import Effects.Template qualified as Proto
 import ExoMonad.Effects.Log (emitStructuredEvent)
+import ExoMonad.Effects.Template qualified as Template
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
+import ExoMonad.Guest.Proto (fromText, toText)
 import ExoMonad.Guest.Tool.Class
 import ExoMonad.Guest.Tool.Schema (JsonSchema (..), genericToolSchemaWith)
 import GHC.Generics (Generic)
@@ -118,7 +122,10 @@ data WorkerSpec = WorkerSpec
     wsDoneCriteria :: Maybe [Text],
     wsBoundary :: Maybe [Text],
     wsContext :: Maybe Text,
-    wsPrompt :: Maybe Text
+    wsPrompt :: Maybe Text,
+    wsProfiles :: Maybe [Text],
+    wsContextFiles :: Maybe [Text],
+    wsVerifyTemplates :: Maybe [Text]
   }
   deriving (Show, Eq, Generic)
 
@@ -133,7 +140,10 @@ instance JsonSchema WorkerSpec where
         ("done_criteria", "Acceptance criteria for completion"),
         ("boundary", "Things the agent must NOT do"),
         ("context", "Freeform context: code snippets, examples, detailed specs"),
-        ("prompt", "Raw prompt (escape hatch). If provided, all other fields except name are ignored.")
+        ("prompt", "Raw prompt (escape hatch). If provided, all other fields except name are ignored."),
+        ("profiles", "Template profiles to include (e.g., 'general', 'haskell', 'rust')"),
+        ("context_files", "Paths to files to include in context"),
+        ("verify_templates", "Verification script templates")
       ]
 
 instance FromJSON WorkerSpec where
@@ -148,10 +158,13 @@ instance FromJSON WorkerSpec where
       <*> v .:? "boundary"
       <*> v .:? "context"
       <*> v .:? "prompt"
+      <*> v .:? "profiles"
+      <*> v .:? "context_files"
+      <*> v .:? "verify_templates"
 
--- | Assemble a structured WorkerSpec into a markdown prompt.
-renderWorkerPrompt :: WorkerSpec -> Text
-renderWorkerPrompt spec =
+-- | Assemble a structured WorkerSpec into a markdown prompt (fallback).
+renderWorkerPromptFallback :: WorkerSpec -> Text
+renderWorkerPromptFallback spec =
   case wsPrompt spec of
     Just p -> p -- Raw prompt takes precedence (escape hatch)
     Nothing ->
@@ -193,9 +206,28 @@ instance MCPTool SpawnWorkers where
       [ ("specs", "Array of worker specifications")
       ]
   toolHandler args = do
-
     results <- forM (swsSpecs args) $ \spec -> do
-      r <- runM $ AC.runAgentControl $ AC.spawnWorker (wsName spec) (renderWorkerPrompt spec)
+      prompt <- case wsPrompt spec of
+        Just p -> pure p
+        Nothing -> do
+          let req =
+                Proto.RenderWorkerPromptRequest
+                  { Proto.renderWorkerPromptRequestTask = fromText $ wsTask spec,
+                    Proto.renderWorkerPromptRequestReadFirst = V.fromList $ map fromText $ maybe [] id (wsReadFirst spec),
+                    Proto.renderWorkerPromptRequestSteps = V.fromList $ map fromText $ maybe [] id (wsSteps spec),
+                    Proto.renderWorkerPromptRequestVerify = V.fromList $ map fromText $ maybe [] id (wsVerify spec),
+                    Proto.renderWorkerPromptRequestDoneCriteria = V.fromList $ map fromText $ maybe [] id (wsDoneCriteria spec),
+                    Proto.renderWorkerPromptRequestBoundary = V.fromList $ map fromText $ maybe [] id (wsBoundary spec),
+                    Proto.renderWorkerPromptRequestContext = fromText $ maybe "" id (wsContext spec),
+                    Proto.renderWorkerPromptRequestProfiles = V.fromList $ map fromText $ maybe [] id (wsProfiles spec),
+                    Proto.renderWorkerPromptRequestContextFiles = V.fromList $ map fromText $ maybe [] id (wsContextFiles spec),
+                    Proto.renderWorkerPromptRequestVerifyTemplates = V.fromList $ map fromText $ maybe [] id (wsVerifyTemplates spec)
+                  }
+          Template.renderWorkerPrompt req >>= \case
+            Right resp -> pure $ toText $ Proto.renderWorkerPromptResponseRendered resp
+            Left _ -> pure $ renderWorkerPromptFallback spec
+
+      r <- runM $ AC.runAgentControl $ AC.spawnWorker (wsName spec) prompt
       case r of
         Right _ ->
           emitStructuredEvent "agent.spawned" $
