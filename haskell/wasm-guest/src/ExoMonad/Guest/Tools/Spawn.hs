@@ -200,7 +200,7 @@ instance FromJSON SpawnWorkersArgs where
 instance MCPTool SpawnWorkers where
   type ToolArgs SpawnWorkers = SpawnWorkersArgs
   toolName = "spawn_workers"
-  toolDescription = "Spawn multiple Gemini worker agents in one call. Each gets a Zellij pane in YOUR tab, working in YOUR directory on YOUR branch (ephemeral, no isolation). Workers call notify_parent when done. After spawning, return immediately — do not poll or wait."
+  toolDescription = "Spawn multiple Gemini worker agents in one call. Like Claude Code teammates but using Gemini — each gets a Zellij pane in YOUR tab, working in YOUR directory on YOUR branch (ephemeral, no isolation, no PR). Workers call notify_parent when done, which delivers a message to your conversation. After spawning, return immediately — do not poll or wait."
   toolSchema =
     genericToolSchemaWith @SpawnWorkersArgs
       [ ("specs", "Array of worker specifications")
