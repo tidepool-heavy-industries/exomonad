@@ -19,7 +19,7 @@ import Data.Text (Text)
 import Data.Text.Lazy qualified as TL
 import ExoMonad.Effects.Log qualified as Log
 import ExoMonad.Effects.Session qualified as Session
-import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
+import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), HookSpecificOutput (..), StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
 import GHC.Generics (Generic)
 
 -- | Effects available to hooks.
@@ -89,6 +89,6 @@ defaultSessionStartHook hookInput = do
       { continue_ = True,
         stopReason = Nothing,
         suppressOutput = Nothing,
-        systemMessage = Just instruction,
-        hookSpecificOutput = Nothing
+        systemMessage = Nothing,
+        hookSpecificOutput = Just $ SessionStartOutput { ssAdditionalContext = Just instruction }
       }

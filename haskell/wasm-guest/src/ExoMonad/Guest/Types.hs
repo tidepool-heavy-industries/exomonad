@@ -153,6 +153,9 @@ data HookSpecificOutput
   | PostToolUseOutput
       { additionalContext :: Maybe Text
       }
+  | SessionStartOutput
+      { ssAdditionalContext :: Maybe Text
+      }
   deriving (Show, Generic)
 
 instance ToJSON HookSpecificOutput where
@@ -170,6 +173,13 @@ instance ToJSON HookSpecificOutput where
       filter
         ((/= Aeson.Null) . snd)
         [ "hookEventName" .= ("PostToolUse" :: Text),
+          "additionalContext" .= ctx
+        ]
+  toJSON (SessionStartOutput ctx) =
+    Aeson.object $
+      filter
+        ((/= Aeson.Null) . snd)
+        [ "hookEventName" .= ("SessionStart" :: Text),
           "additionalContext" .= ctx
         ]
 
