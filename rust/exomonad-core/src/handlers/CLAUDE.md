@@ -85,16 +85,6 @@ Handles effects in the `merge_pr.*` namespace.
 
 `gh pr merge` runs WITHOUT `--delete-branch` because worktree branches cannot be deleted while checked out. Branch cleanup happens via `cleanup_merged` instead.
 
-## CoordinationHandler (`handlers/coordination.rs`)
-
-Handles effects in the `coordination.*` namespace.
-
-### Type Safety
-
-- `Task.owner` is `AgentName` (not String)
-- `Message.from` is `AgentName` (not String)
-- Proto strings are wrapped to `AgentName` at the handler boundary
-
 ## Shared Helpers (`handlers/mod.rs`)
 
 Proto3 uses empty strings/zero values as defaults. These helpers eliminate repetitive empty-check boilerplate at handler boundaries:
@@ -111,17 +101,16 @@ Proto3 uses empty strings/zero values as defaults. These helpers eliminate repet
 
 | Type | Purpose | Used In |
 |------|---------|---------|
-| `AgentName` | Agent identity (e.g., "root", "feature-a") | events, session, agent, coordination |
+| `AgentName` | Agent identity (e.g., "root", "feature-a") | events, session, agent |
 | `BirthBranch` | Branch-based agent identity | events, messaging, github_poller |
 | `BranchName` | Git branch name | file_pr, agent |
 | `PRNumber` | GitHub PR number (wraps u64) | file_pr, merge_pr, copilot, github_poller |
-| `TaskId` | Coordination task identifier | coordination |
 | `AgentType` | Claude vs Gemini enum, provides `tab_display_name()` and `from_dir_name()` | agent, github_poller |
 | `GithubOwner` / `GithubRepo` | GitHub repo coordinates | github_poller |
 
 ### Boundary Conversion Pattern
 
 All handlers convert proto strings/integers to domain newtypes at the handler boundary:
-- Proto `string` → `BranchName::from(req.field.as_str())`, `TaskId::from(req.field.as_str())`
+- Proto `string` → `BranchName::from(req.field.as_str())`
 - Proto `int64` → `PRNumber::new(req.pr_number as u64)`
 - Domain → Proto: `.to_string()` for string types, `.as_u64() as i64` for PRNumber

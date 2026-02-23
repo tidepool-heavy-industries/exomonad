@@ -18,7 +18,6 @@ haskell/proto/
     │   └── Popup.hs        # Generated from popup.proto
     └── Effects/
         ├── Agent.hs         # Generated from effects/agent.proto
-        ├── Coordination.hs  # Generated from effects/coordination.proto
         ├── Copilot.hs       # Generated from effects/copilot.proto
         ├── EffectError.hs   # Generated from effects/effect_error.proto
         ├── Egregore.hs      # Generated from effects/egregore.proto
@@ -28,7 +27,6 @@ haskell/proto/
         ├── Fs.hs            # Generated from effects/fs.proto
         ├── Git.hs           # Generated from effects/git.proto
         ├── Github.hs        # Generated from effects/github.proto
-        ├── Jj.hs            # Generated from effects/jj.proto (legacy, unused)
         ├── Kv.hs            # Generated from effects/kv.proto
         ├── Log.hs           # Generated from effects/log.proto
         ├── MergePr.hs       # Generated from effects/merge_pr.proto

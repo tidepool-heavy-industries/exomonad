@@ -1,6 +1,6 @@
-//! Git worktree management via plain git CLI.
+//! Git worktree management service.
 //!
-//! Replaces `JjWorkspaceService` (jj-lib). All operations shell out to git.
+//! All operations shell out to git.
 
 use crate::domain::BranchName;
 use anyhow::{Context, Result};

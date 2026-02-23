@@ -17,7 +17,6 @@
 //! ```
 
 pub mod agent;
-pub mod coordination;
 pub mod copilot;
 pub mod events;
 pub mod file_pr;
@@ -34,7 +33,6 @@ pub mod session;
 pub mod template;
 
 pub use agent::AgentHandler;
-pub use coordination::CoordinationHandler;
 pub use copilot::CopilotHandler;
 pub use events::EventHandler;
 pub use file_pr::FilePRHandler;
