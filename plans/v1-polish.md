@@ -4,64 +4,70 @@ Target: open-source-ready. Wall clock: 1-2 nights of agent swarms.
 
 ## Principles
 
-1. **Tests first, then refactor.** Write tests against current behavior, then use them to guide structural changes.
-2. **Messaging is the primitive.** All inter-agent communication flows through one effect.
-3. **Continuations are the architecture.** freer-simple was chosen for this. Popup proves it works.
-4. **Speculative polish swarm.** Spawn workers broadly, merge good PRs, close bad ones.
-5. **Plan for success.** Don't hedge — build toward features working. If something is blocked, research the blocker, don't descope.
-6. **Maximize exomonad utilization.** Every wave exercises spawn tools.
+1. **Claude Teams IS the messaging layer.** No custom inbox system. All agent→TL messaging flows through Teams inbox files. Zellij injection is the fallback for non-Teams agents (Gemini workers).
+2. **Continuations are the architecture.** freer-simple was chosen for this. Popup proves it works.
+3. **Speculative polish swarm.** Spawn workers broadly, merge good PRs, close bad ones.
+4. **Plan for success.** Don't hedge — build toward features working. If something is blocked, research the blocker, don't descope.
+5. **Maximize exomonad utilization.** Every wave exercises spawn tools.
 
 ---
 
-## Wave 0: Baseline (parallel, ~30 min)
+## Wave 0: Baseline — DONE
 
-### 0A. cargo fmt + clippy (direct)
-
-TL runs `cargo fmt --all && cargo clippy --workspace --fix` on main. Clean baseline before spawning.
-
-### 0B. Init sequencing (worker)
-
-Rewrite `run_init()` to sequence: start server tab → poll health check → start TL tab.
-
-**Verification:** `exomonad init --recreate` → MCP connects first try, SessionStart hook gets additionalContext.
-
-### 0C. Small fixes (worker)
-
-- `expect()` → `Result` in popup.rs, github.rs, anthropic.rs
-- Rename `docker.rs` → `command.rs`
-- Move `egregore.proto` to `proto/experimental/`
-- Replace "tidepool" in test fixtures
-
-**Verification:** `cargo test --workspace`, `cargo clippy --workspace`.
+- ~~0A. cargo fmt + clippy~~ — done
+- ~~0B. Init sequencing~~ — done (a9dc31da: fixed zellij flag, tokio panic, empty tab)
+- ~~0C. Small fixes~~ — done (ad221f61: docker.rs→command.rs, egregore.proto→experimental/)
 
 ---
 
-## Wave 1: Messaging Unification (Claude subtree, ~3 hours)
+## Wave 1: Messaging Unification
 
-**GATE: Phase 2 must land and be verified before spawning agents in later waves.** notify_parent is the heartbeat of the push-based system.
+**Goal:** Claude Teams inbox is the single messaging channel. Kill the `.exo/messages/` custom inbox system entirely.
 
-### Phase 1: Wire up existing tools
+### What exists now
 
-- Add to roles: TL gets GetAgentMessages + AnswerQuestion; Dev/Worker get Note + Question
-- Basic send/receive verified through server
+Three delivery paths, partially unified:
+| Path | Current channel | Teams? |
+|------|----------------|--------|
+| `notify_parent` (events.rs) | Teams-first, Zellij fallback | Done |
+| `github_poller` Copilot reviews | Teams-first, Zellij fallback | Done |
+| `send_note` / `send_question` (messaging.rs) | `.exo/messages/` + Zellij injection | **Not done** |
 
-### Phase 2: Migrate notify_parent
+### Phase 1: Extract shared delivery helper
 
-- notify_parent emits Completion message through messaging effect
-- Server stores message AND triggers Zellij injection (existing delivery)
-- Same behavior, now queryable
+Create `services/delivery.rs` with a `deliver_to_agent()` function that:
+1. Looks up target in `TeamRegistry`
+2. If found → write to Teams inbox (`teams_mailbox::write_to_inbox`)
+3. If not found → fall back to Zellij injection (`zellij_events::inject_input`)
 
-### Phase 3: Enrichment
+Refactor `events.rs` (notify_parent) and `github_poller.rs` to use this helper instead of inline Teams+Zellij logic.
 
-- StatusUpdate messages mid-task
-- TL queries all child messages
-- Question blocks worker until TL answers
+**Verification:** `cargo test --workspace`, existing notify_parent + Copilot review delivery still works.
 
-**Agent type:** Claude subtree.
+### Phase 2: Kill messaging system
+
+Delete entirely:
+- `handlers/messaging.rs` — the messaging effect handler
+- `services/inbox.rs` — the `.exo/messages/` JSON inbox
+- `services/questions.rs` — the QuestionRegistry (sync blocking questions)
+- `messaging.proto` effects — proto definitions
+- Generated Haskell messaging effect types
+- Role registrations for SendNote, SendQuestion, GetAgentMessages, AnswerQuestion
+- All references in handler registration, RuntimeBuilder, etc.
+
+**Rationale:** `send_note` is unused in practice. `send_question` was a sync blocking pattern that doesn't fit the push-based architecture. Claude Teams provides native messaging (SendMessage tool) that's richer than anything we'd build. notify_parent is the only agent→TL effect that matters.
+
+**Verification:** `cargo test --workspace`, `cargo build -p exomonad`, `just wasm-all`. No messaging effects remain.
+
+### Phase 3: Clean up delivery in notify_parent
+
+After Phase 1 lands, notify_parent should use `delivery::deliver_to_agent()` instead of its inline Teams+Zellij code. Single code path for all agent→parent delivery.
+
+**Verification:** `exomonad init`, spawn a worker, `notify_parent` delivers to TL via Teams inbox.
 
 ---
 
-## Wave 2: Test Infrastructure (2 subtrees, ~3 hours)
+## Wave 2: Test Infrastructure (2 subtrees)
 
 ### 2A. Integration test harness (Claude subtree)
 
@@ -82,7 +88,7 @@ Rewrite `run_init()` to sequence: start server tab → poll health check → sta
 
 ---
 
-## Wave 3: Popup via Continuations (Claude subtree, ~4 hours)
+## Wave 3: Popup via Continuations (Claude subtree)
 
 freer-simple reifies continuations as data. This is the architecture working as designed.
 
@@ -154,7 +160,7 @@ Resume path:
 
 ---
 
-## Wave 5: Open Source Polish (parallel, ~2 hours)
+## Wave 5: Open Source Polish (parallel)
 
 ### 5A. README + docs (worker)
 
@@ -173,8 +179,8 @@ Resume path:
 ## Execution Order
 
 ```
-PARALLEL: Wave 0A (direct) + 0B (worker) + 0C (worker)
-THEN:     Wave 1 (messaging subtree) — Phase 2 is a gate
+DONE:     Wave 0 (baseline)
+NEXT:     Wave 1 (messaging unification) — Phase 1 is a gate for Phase 2-3
 PARALLEL: Wave 2A (test harness) alongside Wave 1
 THEN:     Wave 2B (agent_control refactor, needs 2A)
 THEN:     Wave 4 (polish swarm, needs 2B merged)
@@ -182,5 +188,5 @@ PARALLEL: Wave 3 (popup) — independent, can run alongside 2A/2B
 PARALLEL: Wave 5A (docs) + 5B (WASM tests, needs 2A)
 ```
 
-**Critical path:** Wave 0 → Wave 1 (messaging gate) → Waves 2-5 fan out
+**Critical path:** Wave 1 (messaging gate) → Wave 2 → Wave 4
 **Parallel capacity:** 3-4 subtrees + workers simultaneously
