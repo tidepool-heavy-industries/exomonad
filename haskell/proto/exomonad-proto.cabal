@@ -48,7 +48,7 @@ library
     Effects.FilePr
     Effects.Copilot
     Effects.Kv
-    Effects.Messaging
+
     Effects.Events
     Effects.MergePr
     Effects.Session
