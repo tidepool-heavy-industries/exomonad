@@ -114,6 +114,12 @@ impl TemplateEffects for TemplateHandler {
         // 4. Render markdown prompt
         let mut rendered = String::new();
 
+        if !req.task.is_empty() {
+            rendered.push_str("## TASK\n");
+            rendered.push_str(&req.task);
+            rendered.push_str("\n\n");
+        }
+
         if !boundary.is_empty() {
             rendered.push_str("## BOUNDARY\n");
             for line in boundary {
