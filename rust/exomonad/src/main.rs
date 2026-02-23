@@ -16,7 +16,6 @@ use exomonad_core::protocol::{Runtime as HookRuntime, ServiceRequest};
 use exomonad_core::services::external::otel::OtelService;
 use exomonad_core::services::external::ExternalService;
 use exomonad_core::services::{git, zellij_events};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use axum::response::IntoResponse;
@@ -25,7 +24,6 @@ use exomonad_core::{
     InternalStopHookOutput, PluginManager, RuntimeBuilder, StopDecision, ToolPermission,
 };
 use std::collections::HashMap;
-use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
@@ -538,7 +536,7 @@ async fn handle_hook_inner(
 ///
 /// With `--recreate`: delete any existing session (even alive), then create fresh.
 ///
-fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Result<()> {
+async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Result<()> {
     // Preflight: warn if XDG_RUNTIME_DIR missing (SSH edge case)
     if std::env::var("XDG_RUNTIME_DIR").is_err() {
         eprintln!("Warning: XDG_RUNTIME_DIR not set. Zellij may fail to find sessions.");
@@ -600,10 +598,11 @@ fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Resu
     } else if session_alive {
         // Attach to running session
         eprintln!("Attaching to session: {}", session);
-        let err = std::process::Command::new("zellij")
+        let status = std::process::Command::new("zellij")
             .args(["attach", &session])
-            .exec();
-        return Err(err).context("Failed to exec zellij attach");
+            .status()
+            .context("Failed to attach to Zellij session")?;
+        std::process::exit(status.code().unwrap_or(1));
     } else if session_exited {
         // Kill stale serialized state to prevent resurrection
         eprintln!("Cleaning up exited session: {}", session);
@@ -623,22 +622,24 @@ fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Resu
     let server_layout_path = generate_server_layout(port, config.shell_command.as_deref())?;
 
     eprintln!("Starting server...");
-    let status = std::process::Command::new("zellij")
-        .args(["attach", "--create-background", "--new-session-with-layout"])
+    // Create zellij session with server layout in background (fork, don't attach).
+    // `-n` creates the session with the layout; spawning without waiting keeps it detached.
+    let mut child = std::process::Command::new("zellij")
+        .args(["-s", &session, "-n"])
         .arg(&server_layout_path)
-        .arg(&session)
-        .status()
-        .context("Failed to start server in Zellij")?;
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("Failed to start Zellij session with server layout")?;
 
-    if !status.success() {
-        return Err(anyhow::anyhow!(
-            "Failed to start Zellij session: {}",
-            status
-        ));
-    }
+    // Give zellij a moment to create the session before we try to add tabs
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Reap the background process (zellij -n detaches into daemon, this child exits)
+    let _ = child.try_wait();
 
     // 2. Poll health
-    wait_for_server(port)?;
+    wait_for_server(port).await?;
 
     // 3. Start TL tab
     eprintln!("Server healthy, starting TL tab...");
@@ -657,12 +658,13 @@ fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Resu
         ));
     }
 
-    // 4. Attach
+    // 4. Attach (use spawn+wait instead of exec to avoid tokio runtime drop panic)
     eprintln!("Attaching to session: {}", session);
-    let err = std::process::Command::new("zellij")
+    let status = std::process::Command::new("zellij")
         .args(["attach", &session])
-        .exec();
-    Err(err).context("Failed to exec zellij attach")
+        .status()
+        .context("Failed to attach to Zellij session")?;
+    std::process::exit(status.code().unwrap_or(1))
 }
 
 /// Ensure .gitignore has entries for .exo/ (track config, ignore the rest).
@@ -697,8 +699,8 @@ fn ensure_gitignore(project_dir: &std::path::Path) -> Result<()> {
 }
 
 /// Wait for the server health endpoint to be healthy.
-fn wait_for_server(port: u16) -> Result<()> {
-    let client = reqwest::blocking::Client::builder()
+async fn wait_for_server(port: u16) -> Result<()> {
+    let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(500))
         .build()?;
     let url = format!("http://localhost:{}/health", port);
@@ -707,12 +709,12 @@ fn wait_for_server(port: u16) -> Result<()> {
 
     eprintln!("Waiting for server health...");
     while start.elapsed() < timeout {
-        match client.get(&url).send() {
+        match client.get(&url).send().await {
             Ok(resp) if resp.status().is_success() => {
                 return Ok(());
             }
             _ => {
-                thread::sleep(Duration::from_millis(500));
+                tokio::time::sleep(Duration::from_millis(500)).await;
             }
         }
     }
@@ -1398,7 +1400,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Init { session, recreate } => {
-            run_init(session, recreate, config.port)?;
+            run_init(session, recreate, config.port).await?;
         }
 
         Commands::Reply {
