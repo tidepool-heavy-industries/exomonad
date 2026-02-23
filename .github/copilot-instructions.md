@@ -48,12 +48,10 @@ exomonad-core/              # Core library (Graph DSL, effects, templates)
 │   ├── Schema.hs           # JSON Schema derivation
 │   └── Graph/              # Type-level DSL for agent graphs
 
-exomonad-native-gui/        # Native execution layer
-├── server/                 # Servant + WebSocket server
-├── llm-executor/           # Anthropic API interpreter
-├── ui-executor/            # UI effect interpreter
-├── observability-executor/ # OTLP + Loki
-└── ...                     # Other effect executors
+haskell/wasm-guest/         # WASM guest with MCP tool definitions
+haskell/effects/            # Effect interpreters (LLM, Git, GitHub, etc.)
+rust/exomonad/              # Rust binary (WASM host, MCP server)
+rust/exomonad-core/         # Framework, handlers, services, protocol
 ```
 
 ## Building and Testing

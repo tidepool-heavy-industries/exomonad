@@ -16,7 +16,7 @@ description: Use when spawning subagents, monitoring their progress, or interven
 | Type | Model | Harness | Oversight | Use When |
 |------|-------|---------|-----------|----------|
 | **Tactical** | Haiku | `claude` | Light - batch review PRs | Formulaic: docs, tests, simple tools |
-| **Strategic** | Opus | `./start-augmented.sh` | Heavy - active collaboration | Ambiguous: architecture, refactors, new subsystems |
+| **Strategic** | Opus | `exomonad init` | Heavy - active collaboration | Ambiguous: architecture, refactors, new subsystems |
 
 **Strategic agents serve dual purpose:**
 - Execute complex work
@@ -48,9 +48,7 @@ claude                    # Uses default model (haiku)
 **Strategic agent (opus):**
 ```bash
 cd /path/to/worktree
-./start-augmented.sh      # Full harness with MCP tools
-# Or if harness not needed:
-ANTHROPIC_MODEL=claude-3-5-sonnet-latest claude
+claude                    # Uses exomonad MCP tools via exomonad serve
 ```
 
 ## Monitoring Patterns

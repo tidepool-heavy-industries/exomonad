@@ -2,7 +2,7 @@
 
 ## Language-Specific Guidance
 
-### Haskell (exomonad-core/, exomonad-native-gui/)
+### Haskell (haskell/dsl/core/, haskell/wasm-guest/, haskell/effects/)
 
 **Effect System (freer-simple)**
 - Effect constraints should be ordered correctly - effects are interpreted outermost-first
