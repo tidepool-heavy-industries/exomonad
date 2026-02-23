@@ -1,6 +1,4 @@
-use crate::effects::{
-    dispatch_merge_pr_effect, EffectResult, MergePrEffects, ResultExt,
-};
+use crate::effects::{dispatch_merge_pr_effect, EffectResult, MergePrEffects, ResultExt};
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::merge_pr;
 use async_trait::async_trait;
@@ -28,11 +26,19 @@ impl MergePrEffects for MergePRHandler {
     ) -> EffectResult<MergePrResponse> {
         let pr_number = crate::domain::PRNumber::new(req.pr_number as u64);
         tracing::info!(pr_number = pr_number.as_u64(), strategy = %req.strategy, "[MergePR] merge_pr starting");
-        let result =
-            merge_pr::merge_pr_async(pr_number, &req.strategy, &req.working_dir, self.git_wt.clone())
-                .await
-                .effect_err("merge_pr")?;
-        tracing::info!(success = result.success, git_fetched = result.git_fetched, "[MergePR] merge_pr complete");
+        let result = merge_pr::merge_pr_async(
+            pr_number,
+            &req.strategy,
+            &req.working_dir,
+            self.git_wt.clone(),
+        )
+        .await
+        .effect_err("merge_pr")?;
+        tracing::info!(
+            success = result.success,
+            git_fetched = result.git_fetched,
+            "[MergePR] merge_pr complete"
+        );
         Ok(MergePrResponse {
             success: result.success,
             message: result.message,

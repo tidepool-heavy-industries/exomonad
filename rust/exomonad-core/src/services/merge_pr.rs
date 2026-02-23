@@ -32,7 +32,12 @@ pub async fn merge_pr_async(
         strategy
     };
 
-    info!(pr_number = pr_number.as_u64(), strategy = strat, working_dir = dir, "Merging PR");
+    info!(
+        pr_number = pr_number.as_u64(),
+        strategy = strat,
+        working_dir = dir,
+        "Merging PR"
+    );
 
     // Get branch name before merge to identify potential worktree
     let branch_output = tokio::time::timeout(
@@ -105,7 +110,8 @@ pub async fn merge_pr_async(
             let git_wt_clone = git_wt.clone();
             let path_clone = worktree_path.clone();
             let cleanup_result =
-                tokio::task::spawn_blocking(move || git_wt_clone.remove_workspace(&path_clone)).await;
+                tokio::task::spawn_blocking(move || git_wt_clone.remove_workspace(&path_clone))
+                    .await;
 
             match cleanup_result {
                 Ok(Ok(())) => info!(
@@ -129,9 +135,7 @@ pub async fn merge_pr_async(
     // Step 2: git fetch (best-effort, pulls merged changes)
     let dir_path = std::path::PathBuf::from(dir);
     let git_wt_clone = git_wt.clone();
-    let git_result = tokio::task::spawn_blocking(move || {
-        git_wt_clone.fetch(&dir_path)
-    }).await;
+    let git_result = tokio::task::spawn_blocking(move || git_wt_clone.fetch(&dir_path)).await;
 
     let git_fetched = match git_result {
         Ok(Ok(())) => {

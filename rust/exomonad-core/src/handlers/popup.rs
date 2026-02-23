@@ -2,9 +2,7 @@
 //!
 //! Uses proto-generated types from `exomonad_proto::effects::popup`.
 
-use crate::effects::{
-    dispatch_popup_effect, EffectError, EffectResult, PopupEffects, ResultExt,
-};
+use crate::effects::{dispatch_popup_effect, EffectError, EffectResult, PopupEffects, ResultExt};
 use crate::services::popup::{PopupInput, PopupService};
 use async_trait::async_trait;
 use exomonad_proto::effects::popup::*;

@@ -20,7 +20,12 @@ impl GitWorktreeService {
     /// Create a new git worktree with a new branch based on a given base.
     ///
     /// Equivalent to: `git worktree add -b {branch} {path} {base}`
-    pub fn create_workspace(&self, path: &Path, branch: &BranchName, base: &BranchName) -> Result<()> {
+    pub fn create_workspace(
+        &self,
+        path: &Path,
+        branch: &BranchName,
+        base: &BranchName,
+    ) -> Result<()> {
         info!(path = %path.display(), branch = %branch, base = %base, "Creating git worktree");
 
         let output = std::process::Command::new("git")
@@ -63,8 +68,9 @@ impl GitWorktreeService {
             // If the worktree dir doesn't exist, git worktree remove fails — clean up manually
             if path.exists() {
                 warn!(stderr = %stderr, "git worktree remove failed, removing directory manually");
-                std::fs::remove_dir_all(path)
-                    .with_context(|| format!("Failed to remove worktree dir: {}", path.display()))?;
+                std::fs::remove_dir_all(path).with_context(|| {
+                    format!("Failed to remove worktree dir: {}", path.display())
+                })?;
             } else {
                 warn!(stderr = %stderr, "git worktree remove failed (directory already gone)");
             }

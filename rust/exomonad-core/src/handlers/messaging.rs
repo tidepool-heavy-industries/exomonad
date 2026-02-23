@@ -8,8 +8,8 @@
 //! - **TL→Agent**: `get_agent_messages`, `answer_question` (called by TL)
 
 use crate::effects::{
-    dispatch_messaging_effect, EffectError, EffectHandler, EffectResult, MessagingEffects,
-    spawn_blocking_effect,
+    dispatch_messaging_effect, spawn_blocking_effect, EffectError, EffectHandler, EffectResult,
+    MessagingEffects,
 };
 use crate::services::inbox;
 use crate::services::questions::QuestionRegistry;

@@ -143,7 +143,9 @@ where
     let ns = namespace.to_string();
     tokio::task::spawn_blocking(f)
         .await
-        .map_err(|e| EffectError::custom(format!("{}_error", ns), format!("spawn_blocking: {}", e)))?
+        .map_err(|e| {
+            EffectError::custom(format!("{}_error", ns), format!("spawn_blocking: {}", e))
+        })?
         .map_err(|e| EffectError::custom(format!("{}_error", ns), e.to_string()))
 }
 

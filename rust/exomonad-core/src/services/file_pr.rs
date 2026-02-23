@@ -49,16 +49,16 @@ struct GhPr {
 #[derive(Debug, thiserror::Error)]
 enum FilePrError {
     #[error("push failed: {0}")]
-    PushFailed(String),
+    Push(String),
 
     #[error("gh pr create failed: {0}")]
-    CreateFailed(String),
+    Create(String),
 
     #[error("gh pr edit failed: {0}")]
-    UpdateFailed(String),
+    Update(String),
 
     #[error("gh pr list failed: {0}")]
-    ListFailed(String),
+    List(String),
 }
 
 // ============================================================================
@@ -104,10 +104,10 @@ fn find_existing_pr(head_branch: &str, dir: &str) -> Result<Option<GhPr>, FilePr
     )
     .dir(dir)
     .read()
-    .map_err(|e| FilePrError::ListFailed(e.to_string()))?;
+    .map_err(|e| FilePrError::List(e.to_string()))?;
 
-    let prs: Vec<GhPr> = serde_json::from_str(&json)
-        .map_err(|e| FilePrError::ListFailed(format!("JSON parse: {e}")))?;
+    let prs: Vec<GhPr> =
+        serde_json::from_str(&json).map_err(|e| FilePrError::List(format!("JSON parse: {e}")))?;
     Ok(prs.into_iter().next())
 }
 
@@ -124,7 +124,7 @@ fn update_pr(number: PRNumber, title: &str, body: &str, dir: &str) -> Result<(),
     )
     .dir(dir)
     .read()
-    .map_err(|e| FilePrError::UpdateFailed(e.to_string()))?;
+    .map_err(|e| FilePrError::Update(e.to_string()))?;
     Ok(())
 }
 
@@ -137,21 +137,11 @@ fn create_pr(
 ) -> Result<GhPr, FilePrError> {
     // gh pr create outputs the PR URL to stdout on success (no --json support)
     let url = cmd!(
-        "gh",
-        "pr",
-        "create",
-        "--title",
-        title,
-        "--body",
-        body,
-        "--base",
-        base,
-        "--head",
-        head
+        "gh", "pr", "create", "--title", title, "--body", body, "--base", base, "--head", head
     )
     .dir(dir)
     .read()
-    .map_err(|e| FilePrError::CreateFailed(e.to_string()))?;
+    .map_err(|e| FilePrError::Create(e.to_string()))?;
     info!("[FilePR] Created PR: {}", url.trim());
 
     // Fetch structured PR data via `gh pr view` using the branch name (stable, no URL parsing)
@@ -165,10 +155,9 @@ fn create_pr(
     )
     .dir(dir)
     .read()
-    .map_err(|e| FilePrError::CreateFailed(format!("gh pr view after create: {e}")))?;
+    .map_err(|e| FilePrError::Create(format!("gh pr view after create: {e}")))?;
 
-    serde_json::from_str(&view_json)
-        .map_err(|e| FilePrError::CreateFailed(format!("JSON parse: {e}")))
+    serde_json::from_str(&view_json).map_err(|e| FilePrError::Create(format!("JSON parse: {e}")))
 }
 
 // ============================================================================
@@ -176,19 +165,20 @@ fn create_pr(
 // ============================================================================
 
 /// File a PR using `gh` CLI. Pushes the branch, creates or updates the PR.
-pub async fn file_pr_async(input: &FilePRInput, git_wt: Arc<GitWorktreeService>) -> Result<FilePROutput> {
+pub async fn file_pr_async(
+    input: &FilePRInput,
+    git_wt: Arc<GitWorktreeService>,
+) -> Result<FilePROutput> {
     let dir = input.working_dir.as_deref().unwrap_or(".");
 
     // Get branch from the agent's working directory, not server CWD
     let dir_path = std::path::PathBuf::from(dir);
     let git_wt_clone = git_wt.clone();
-    let head = tokio::task::spawn_blocking(move || {
-        git_wt_clone.get_workspace_bookmark(&dir_path)
-    })
-    .await
-    .context("spawn_blocking failed")?
-    .context("Failed to get workspace bookmark")?
-    .ok_or_else(|| anyhow::anyhow!("No bookmark found for workspace at {}", dir))?;
+    let head = tokio::task::spawn_blocking(move || git_wt_clone.get_workspace_bookmark(&dir_path))
+        .await
+        .context("spawn_blocking failed")?
+        .context("Failed to get workspace bookmark")?
+        .ok_or_else(|| anyhow::anyhow!("No bookmark found for workspace at {}", dir))?;
 
     let base = detect_base_branch(&head, input.base_branch.as_deref());
 
@@ -199,12 +189,10 @@ pub async fn file_pr_async(input: &FilePRInput, git_wt: Arc<GitWorktreeService>)
         let dir_path = std::path::PathBuf::from(dir);
         let bookmark = crate::domain::BranchName::from(head.as_str());
         let git_wt_clone = git_wt.clone();
-        tokio::task::spawn_blocking(move || {
-            git_wt_clone.push_bookmark(&dir_path, &bookmark)
-        })
-        .await
-        .context("spawn_blocking failed")?
-        .map_err(|e| FilePrError::PushFailed(e.to_string()))?;
+        tokio::task::spawn_blocking(move || git_wt_clone.push_bookmark(&dir_path, &bookmark))
+            .await
+            .context("spawn_blocking failed")?
+            .map_err(|e| FilePrError::Push(e.to_string()))?;
         info!("[FilePR] Pushed bookmark: {}", head);
     }
 
@@ -371,14 +359,18 @@ mod tests {
 
         // 1. Init git repo
         cmd!("git", "init", "-b", "main").dir(dir).read()?;
-        cmd!("git", "config", "user.email", "test@example.com").dir(dir).read()?;
+        cmd!("git", "config", "user.email", "test@example.com")
+            .dir(dir)
+            .read()?;
         cmd!("git", "config", "user.name", "Test").dir(dir).read()?;
         std::fs::write(dir.join("README.md"), "test")?;
         cmd!("git", "add", "README.md").dir(dir).read()?;
         cmd!("git", "commit", "-m", "init").dir(dir).read()?;
 
         // 2. Create a feature branch
-        cmd!("git", "checkout", "-b", "feature-branch").dir(dir).read()?;
+        cmd!("git", "checkout", "-b", "feature-branch")
+            .dir(dir)
+            .read()?;
         let git_wt = Arc::new(GitWorktreeService::new(dir.to_path_buf()));
 
         let input = FilePRInput {

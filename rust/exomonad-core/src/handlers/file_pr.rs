@@ -65,7 +65,11 @@ impl FilePrEffects for FilePRHandler {
             .await
             .effect_err("file_pr")?;
 
-        tracing::info!(pr_number = output.pr_number.as_u64(), created = output.created, "[FilePR] file_pr complete");
+        tracing::info!(
+            pr_number = output.pr_number.as_u64(),
+            created = output.created,
+            "[FilePR] file_pr complete"
+        );
         Ok(FilePrResponse {
             pr_url: output.pr_url,
             pr_number: output.pr_number.as_u64() as i64,

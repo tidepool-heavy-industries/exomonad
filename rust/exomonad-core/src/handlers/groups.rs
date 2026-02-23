@@ -9,8 +9,8 @@ use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
 use crate::services::filesystem::FileSystemService;
 use crate::services::git::GitService;
-use crate::services::github::GitHubService;
 use crate::services::git_worktree::GitWorktreeService;
+use crate::services::github::GitHubService;
 use crate::services::questions::QuestionRegistry;
 use crate::services::team_registry::TeamRegistry;
 
@@ -66,6 +66,7 @@ pub fn git_handlers(
 /// Orchestration handlers for agent spawning, messaging, events, popups.
 ///
 /// Returns the handlers AND the QuestionRegistry (shared with MCP for answer_question).
+#[allow(clippy::too_many_arguments)]
 pub fn orchestration_handlers(
     agent_control: Arc<AgentControlService>,
     event_queue: Arc<EventQueue>,
@@ -94,9 +95,7 @@ pub fn orchestration_handlers(
             project_dir,
         )),
         Box::new(CoordinationHandler::new(coordination_service)),
-        Box::new(
-            SessionHandler::new(claude_session_registry).with_team_registry(team_registry),
-        ),
+        Box::new(SessionHandler::new(claude_session_registry).with_team_registry(team_registry)),
     ];
 
     (handlers, question_registry)

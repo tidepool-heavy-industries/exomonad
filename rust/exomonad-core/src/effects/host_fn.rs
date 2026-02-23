@@ -33,7 +33,11 @@ fn to_proto_error(err: &EffectError) -> proto_error::EffectError {
         EffectError::Timeout { message } => Kind::Timeout(proto_error::Timeout {
             message: message.clone(),
         }),
-        EffectError::Custom { code, message, data } => Kind::Custom(proto_error::Custom {
+        EffectError::Custom {
+            code,
+            message,
+            data,
+        } => Kind::Custom(proto_error::Custom {
             code: code.clone(),
             message: message.clone(),
             data: data

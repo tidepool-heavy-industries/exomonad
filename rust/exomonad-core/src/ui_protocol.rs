@@ -410,21 +410,17 @@ impl PopupState {
                 }
             }),
             VisibilityRule::GreaterThan { id, min_value } => {
-                self.get_number(id).map_or(false, |v| v >= *min_value)
+                self.get_number(id).is_some_and(|v| v >= *min_value)
             }
             VisibilityRule::LessThan { id, max_value } => {
-                self.get_number(id).map_or(false, |v| v <= *max_value)
+                self.get_number(id).is_some_and(|v| v <= *max_value)
             }
-            VisibilityRule::CountEquals { id, exact_count } => {
-                self.get_multichoice(id).map_or(false, |v| {
-                    v.iter().filter(|&&b| b).count() == *exact_count as usize
-                })
-            }
-            VisibilityRule::CountGreaterThan { id, min_count } => {
-                self.get_multichoice(id).map_or(false, |v| {
-                    v.iter().filter(|&&b| b).count() >= *min_count as usize
-                })
-            }
+            VisibilityRule::CountEquals { id, exact_count } => self
+                .get_multichoice(id)
+                .is_some_and(|v| v.iter().filter(|&&b| b).count() == *exact_count as usize),
+            VisibilityRule::CountGreaterThan { id, min_count } => self
+                .get_multichoice(id)
+                .is_some_and(|v| v.iter().filter(|&&b| b).count() >= *min_count as usize),
         }
     }
 

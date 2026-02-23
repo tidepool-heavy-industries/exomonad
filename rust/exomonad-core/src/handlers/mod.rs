@@ -31,6 +31,7 @@ pub mod merge_pr;
 pub mod messaging;
 pub mod popup;
 pub mod session;
+pub mod template;
 
 pub use agent::AgentHandler;
 pub use coordination::CoordinationHandler;
@@ -48,6 +49,7 @@ pub use merge_pr::MergePRHandler;
 pub use messaging::MessagingHandler;
 pub use popup::PopupHandler;
 pub use session::SessionHandler;
+pub use template::TemplateHandler;
 
 // ============================================================================
 // Proto field helpers — shared across handlers
@@ -58,12 +60,20 @@ pub use session::SessionHandler;
 /// Proto3 uses empty string as the default for string fields.
 /// Handlers that pass optional strings to services need this everywhere.
 pub fn non_empty(s: String) -> Option<String> {
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 /// Default an empty proto working_dir field to ".".
 pub fn working_dir_or_default(dir: String) -> String {
-    if dir.is_empty() { ".".to_string() } else { dir }
+    if dir.is_empty() {
+        ".".to_string()
+    } else {
+        dir
+    }
 }
 
 /// Default an empty proto working_dir field to PathBuf::from(".").
