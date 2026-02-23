@@ -14,9 +14,12 @@ where
 
 import Control.Monad (void)
 import Control.Monad.Freer (Eff, sendM)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
+import Data.Text.Lazy qualified as TL
+import ExoMonad.Effects.Log qualified as Log
 import ExoMonad.Effects.Session qualified as Session
-import ExoMonad.Guest.Types (HookInput (..), HookOutput, StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
+import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
 import GHC.Generics (Generic)
 
 -- | Effects available to hooks.
@@ -58,14 +61,32 @@ defaultHooks =
       onSessionStart = defaultSessionStartHook
     }
 
--- | Default SessionStart hook: registers the Claude session UUID for fork-session support.
+-- | Default SessionStart hook: registers Claude session UUID and team info,
+-- then instructs Claude to create the team via TeamCreate.
 defaultSessionStartHook :: HookInput -> Eff HookEffects HookOutput
 defaultSessionStartHook hookInput = do
   let claudeUuid = hiSessionId hookInput
+  let agentId = fromMaybe "root" (hiAgentId hookInput)
+  let teamName = "exo-" <> agentId
+  let inboxName = "team-lead"
   sendM $ void $ Session.registerClaudeSession claudeUuid
-  -- Register with Claude Teams for inbox-based message delivery
-  let sessionId = maybe "main" id (hiExomonadSessionId hookInput)
-      agentId = maybe "root" id (hiAgentId hookInput)
-      teamName = "exo-" <> sessionId
-  sendM $ void $ Session.registerTeam teamName agentId
-  pure (allowResponse Nothing)
+  teamResult <- sendM $ Session.registerTeam teamName inboxName
+  case teamResult of
+    Left _err ->
+      sendM $
+        void $
+          Log.logError
+            Log.ErrorRequest
+              { Log.errorRequestMessage = TL.fromStrict $ "[SessionStart] registerTeam failed for team: " <> teamName,
+                Log.errorRequestFields = ""
+              }
+    Right _ -> pure ()
+  let instruction = "Create a team named \"" <> teamName <> "\" using TeamCreate before proceeding."
+  pure $
+    HookOutput
+      { continue_ = True,
+        stopReason = Nothing,
+        suppressOutput = Nothing,
+        systemMessage = Just instruction,
+        hookSpecificOutput = Nothing
+      }

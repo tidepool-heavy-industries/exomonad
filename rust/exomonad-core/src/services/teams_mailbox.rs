@@ -1,11 +1,8 @@
 //! Claude Teams inbox writer.
 //!
 //! Writes messages to `~/.claude/teams/{team_name}/inboxes/{recipient}.json`.
-//! Claude Code's native file watcher picks up inbox writes and injects them
-//! as `<teammate-message>` into the LLM context.
-//!
-//! This replaces Zellij STDIN injection for Claude-to-Claude communication,
-//! eliminating the Ink paste timing hack.
+//! Expects Claude Code to have created the team directories via TeamCreate.
+//! Returns an error if the inbox directory does not exist.
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -59,7 +56,15 @@ fn write_to_inbox_at_base(
         .join(team_name)
         .join("inboxes");
 
-    std::fs::create_dir_all(&inbox_dir)?;
+    if !inbox_dir.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "Teams inbox directory does not exist: {}. Create the team with TeamCreate first.",
+                inbox_dir.display()
+            ),
+        ));
+    }
 
     let inbox_file = inbox_dir.join(format!("{}.json", recipient));
 
@@ -119,30 +124,34 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn test_teams_mailbox_missing_dir() {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path();
+        let result =
+            write_to_inbox_at_base(base, "no-team", "nobody", "agent", "msg", "sum", "blue");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert!(err.to_string().contains("TeamCreate"));
+    }
+
+    #[test]
     fn test_teams_mailbox_append() -> std::io::Result<()> {
         let tmp = tempdir()?;
         let base = tmp.path();
         let team_name = "test-team";
         let recipient = "test-recipient";
 
-        write_to_inbox_at_base(
-            base,
-            team_name,
-            recipient,
-            "agent1",
-            "Hello from agent1",
-            "Message 1",
-            "blue",
-        )?;
-        write_to_inbox_at_base(
-            base,
-            team_name,
-            recipient,
-            "agent2",
-            "Hello from agent2",
-            "Message 2",
-            "green",
-        )?;
+        // Pre-create inbox directory (normally done by Claude Code's TeamCreate)
+        let inbox_dir = base
+            .join(".claude")
+            .join("teams")
+            .join(team_name)
+            .join("inboxes");
+        std::fs::create_dir_all(&inbox_dir)?;
+
+        write_to_inbox_at_base(base, team_name, recipient, "agent1", "Hello from agent1", "Message 1", "blue")?;
+        write_to_inbox_at_base(base, team_name, recipient, "agent2", "Hello from agent2", "Message 2", "green")?;
 
         let inbox_file = base
             .join(".claude")
