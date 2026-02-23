@@ -16,6 +16,8 @@ import Control.Monad (void)
 import Control.Monad.Freer (Eff, sendM)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
+import Data.Text.Lazy qualified as TL
+import ExoMonad.Effects.Log qualified as Log
 import ExoMonad.Effects.Session qualified as Session
 import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
 import GHC.Generics (Generic)
@@ -68,7 +70,17 @@ defaultSessionStartHook hookInput = do
   let teamName = "exo-" <> agentId
   let inboxName = "team-lead"
   sendM $ void $ Session.registerClaudeSession claudeUuid
-  sendM $ void $ Session.registerTeam teamName inboxName
+  teamResult <- sendM $ Session.registerTeam teamName inboxName
+  case teamResult of
+    Left _err ->
+      sendM $
+        void $
+          Log.logError
+            Log.ErrorRequest
+              { Log.errorRequestMessage = TL.fromStrict $ "[SessionStart] registerTeam failed for team: " <> teamName,
+                Log.errorRequestFields = ""
+              }
+    Right _ -> pure ()
   let instruction = "Create a team named \"" <> teamName <> "\" using TeamCreate before proceeding."
   pure $
     HookOutput
