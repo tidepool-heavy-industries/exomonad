@@ -944,6 +944,7 @@ async fn main() -> Result<()> {
                     "messaging".to_string(),
                     "coordination".to_string(),
                     "session".to_string(),
+                    "template".to_string(),
                 ]);
             // Create structured event log (JSONL)
             let event_log = match exomonad_core::services::EventLog::open(
@@ -963,6 +964,7 @@ async fn main() -> Result<()> {
                 project_dir.clone(),
                 event_log.clone(),
             ));
+            builder = builder.with_effect_handler(exomonad_core::handlers::template::TemplateHandler::new(project_dir.clone()));
             builder = builder.with_handlers(exomonad_core::git_handlers(git, github, git_wt));
             let team_registry = Arc::new(exomonad_core::services::team_registry::TeamRegistry::new());
             let (orch_handlers, question_registry) = exomonad_core::orchestration_handlers(

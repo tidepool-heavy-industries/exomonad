@@ -31,6 +31,7 @@ pub mod merge_pr;
 pub mod messaging;
 pub mod popup;
 pub mod session;
+pub mod template;
 
 pub use agent::AgentHandler;
 pub use coordination::CoordinationHandler;
@@ -48,6 +49,7 @@ pub use merge_pr::MergePRHandler;
 pub use messaging::MessagingHandler;
 pub use popup::PopupHandler;
 pub use session::SessionHandler;
+pub use template::TemplateHandler;
 
 // ============================================================================
 // Proto field helpers — shared across handlers
