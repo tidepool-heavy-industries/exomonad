@@ -2,11 +2,11 @@
 
 ## Status
 
-Accepted
+Implemented
 
 ## Context
 
-ExoMonad orchestrates heterogeneous agent teams: Claude (expensive, capable) and Gemini (cheap, fast). Claude Code now has native Teams support — `TeamCreate`, `SendMessage`, `TaskCreate` — with file-based transport at `~/.claude/teams/{team}/`.
+ExoMonad orchestrates heterogeneous agent teams: Claude (expensive, capable) and Gemini (cheap, fast). Claude Code has native Teams support — `TeamCreate`, `SendMessage`, `TaskCreate` — with file-based transport at `~/.claude/teams/{team}/`.
 
 The problem: Claude is trained to use `SendMessage` for teammate communication. Gemini workers don't speak Teams. We need Claude to communicate with Gemini workers without tool shadowing (competing tools that do similar things, forcing the agent to remember which to use).
 
@@ -16,7 +16,7 @@ The problem: Claude is trained to use `SendMessage` for teammate communication. 
 
 ExoMonad registers Gemini workers as "synthetic" members in the Claude team's `config.json`. When Claude sends a `SendMessage` to a synthetic member, Claude Code writes to `inboxes/{member}.json` as usual. ExoMonad's serve process watches these inbox files (inotify) and routes messages to the Gemini worker's Zellij pane.
 
-The reverse direction (Gemini→Claude) already works: `notify_parent` writes to the Claude's Teams inbox.
+The reverse direction (Gemini→Claude) uses the unified delivery helper (`services/delivery.rs`): Teams inbox first, Zellij injection fallback.
 
 ### On-disk format
 
@@ -49,6 +49,7 @@ Inbox file (`~/.claude/teams/{team}/inboxes/rust-impl.json`):
     "text": "Switch to using BTreeMap instead of HashMap",
     "summary": "Change data structure",
     "timestamp": "2026-02-22T20:30:00Z",
+    "color": "blue",
     "read": false
   }
 ]
@@ -60,15 +61,15 @@ Inbox file (`~/.claude/teams/{team}/inboxes/rust-impl.json`):
 Claude→Gemini:
   Claude calls SendMessage(recipient="rust-impl", content="...")
   → Claude Code writes to inboxes/rust-impl.json
-  → ExoMonad inotify watcher detects write
+  → ExoMonad InboxWatcher (inotify) detects write
   → Looks up rust-impl in synthetic member registry
   → Injects message text into Gemini's Zellij pane
 
 Gemini→Claude:
   Gemini calls notify_parent(status="success", message="...")
-  → ExoMonad resolves parent's team info from TeamRegistry
-  → Appends message to inboxes/team-lead.json
-  → Claude Code's native file watcher delivers it as <teammate-message>
+  → delivery::deliver_to_agent() resolves parent's team info from TeamRegistry
+  → Writes to inboxes/team-lead.json (or falls back to Zellij injection)
+  → Claude Code polls the file and delivers as <teammate-message>
 ```
 
 ### Naming convention
@@ -82,40 +83,49 @@ Gemini→Claude:
 
 ### Components
 
-1. **SyntheticMemberService** — Manages synthetic member entries in team config.json
+1. **SyntheticMemberService** (`services/synthetic_members.rs`) — Manages synthetic member entries in team config.json
    - `register_synthetic(team_name, member_name, agent_type)` — append to members array
    - `remove_synthetic(team_name, member_name)` — remove from members array
 
-2. **InboxWatcher** — inotify-based service watching synthetic member inbox files
+2. **InboxWatcher** (`services/inbox_watcher.rs`) — inotify-based service watching synthetic member inbox files
    - On write: parse new messages, route to Gemini pane via Zellij injection
    - Track read cursor (last seen array length) to only process new messages
    - Debounce: 100ms after inotify event before reading (atomic writes)
 
-3. **teams_mailbox.rs fixes** — Current implementation writes a single JSON object; needs to append to the JSON array format that Claude Code uses.
+3. **Delivery helper** (`services/delivery.rs`) — Unified Teams+Zellij delivery for Gemini→Claude direction
+   - Called by `notify_parent` (events.rs) and GitHub poller
+   - Replaces the old `.exo/messages/` inbox system (deleted)
 
-4. **spawn_workers/spawn_leaf_subtree changes** — After spawning a Gemini agent, register it as a synthetic member in the parent's team.
+4. **teams_mailbox.rs** — Writes to Claude Code's Teams inbox format (JSON array, atomic temp+rename)
 
-5. **Spawn prompt for Claude subtrees** — Include instruction to create a team named `exo-{slug}` on startup.
+5. **spawn_workers/spawn_leaf_subtree** — After spawning a Gemini agent, registers it as a synthetic member in the parent's team
 
 ### What changes where
 
-| Component | File(s) | Change |
+| Component | File(s) | Status |
 |-----------|---------|--------|
-| SyntheticMemberService | `rust/exomonad-core/src/services/synthetic_members.rs` | New service |
-| InboxWatcher | `rust/exomonad-core/src/services/inbox_watcher.rs` | New service (inotify + tokio) |
-| Fix inbox format | `rust/exomonad-core/src/services/teams_mailbox.rs` | Write array append, not single object |
-| Register on spawn | `rust/exomonad-core/src/services/agent_control.rs` | After Gemini spawn, call SyntheticMemberService |
-| Wire into server | `rust/exomonad/src/main.rs` | Start InboxWatcher, pass to services |
+| SyntheticMemberService | `services/synthetic_members.rs` | Built |
+| InboxWatcher | `services/inbox_watcher.rs` | Built |
+| Delivery helper | `services/delivery.rs` | Built |
+| teams_mailbox | `services/teams_mailbox.rs` | Built |
+| Register on spawn | `services/agent_control.rs` | Built |
+| Wire into server | `exomonad/src/main.rs` | Built |
 
-### Dependencies between components
+## Known Risks
 
-```
-Fix inbox format (independent)
-SyntheticMemberService (independent)
-InboxWatcher (depends on: SyntheticMemberService for knowing which inboxes to watch)
-Register on spawn (depends on: SyntheticMemberService)
-Wire into server (depends on: all above)
-```
+### Lock coordination gap
+
+Our `teams_mailbox` uses atomic temp+rename for writes. Claude Code uses `.lock` sidecar files (advisory locking). We don't currently coordinate with their lock protocol. Under normal usage (writes are infrequent, spaced out), this is fine. Under high concurrency (many workers completing simultaneously), there's a risk of lost updates.
+
+**Mitigation options:** Adopt the `.lock` sidecar protocol, or accept the risk since our messages are also delivered via Zellij fallback.
+
+### Inbox file growth
+
+Claude Code Teams writes idle notifications every 2-4 seconds per idle teammate. These accumulate in inbox JSON arrays. No rotation or compaction mechanism exists. Over long sessions, inbox files can grow large, increasing the cost of read-modify-write operations.
+
+### Claude Code version sensitivity
+
+The Teams on-disk format is not a stable public API. Field names, directory structure, and protocol message types are observed from Claude Code 2.1.x behavior. Updates to Claude Code may change the format.
 
 ## Consequences
 
