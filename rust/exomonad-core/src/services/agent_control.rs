@@ -1914,18 +1914,19 @@ impl AgentControlService {
         // Create tab with layout - wait for zellij action to complete before deleting temp file
         // Note: zellij action new-tab returns quickly after reading the layout,
         // it doesn't wait for the spawned pane command to finish
-        let output = Command::new("zellij")
-            .args([
-                "action",
-                "new-tab",
-                "--layout",
-                layout_file
-                    .to_str()
-                    .ok_or_else(|| anyhow!("Invalid layout file path (utf8 error)"))?,
-            ])
-            .output()
-            .await
-            .context("Failed to run zellij")?;
+        let mut cmd = Command::new("zellij");
+        cmd.args([
+            "action",
+            "new-tab",
+            "--layout",
+            layout_file
+                .to_str()
+                .ok_or_else(|| anyhow!("Invalid layout file path (utf8 error)"))?,
+        ]);
+        if let Some(ref session) = self.zellij_session {
+            cmd.env("ZELLIJ_SESSION_NAME", session);
+        }
+        let output = cmd.output().await.context("Failed to run zellij")?;
 
         // Clean up temp file after zellij has read it
         let _ = tokio::fs::remove_file(&layout_file).await;
