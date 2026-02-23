@@ -66,8 +66,10 @@ defaultHooks =
 defaultSessionStartHook :: HookInput -> Eff HookEffects HookOutput
 defaultSessionStartHook hookInput = do
   let claudeUuid = hiSessionId hookInput
-  let agentId = fromMaybe "root" (hiAgentId hookInput)
-  let teamName = "exo-" <> agentId
+  -- Use birth_branch (exomonad_session_id) for team name to match spawn_workers lookup.
+  -- Falls back to agent_id, then "root".
+  let identity = fromMaybe (fromMaybe "root" (hiAgentId hookInput)) (hiExomonadSessionId hookInput)
+  let teamName = "exo-" <> identity
   let inboxName = "team-lead"
   sendM $ void $ Session.registerClaudeSession claudeUuid
   teamResult <- sendM $ Session.registerTeam teamName inboxName

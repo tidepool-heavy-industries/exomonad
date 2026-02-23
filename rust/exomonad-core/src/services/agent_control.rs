@@ -995,6 +995,11 @@ impl AgentControlService {
 
             // Write Gemini settings to worker config dir in project root
             fs::create_dir_all(&agent_config_dir).await?;
+
+            // Write parent's birth_branch so the server can resolve it for notify_parent routing.
+            // Workers don't have worktrees, so git-based resolution fails. This file is the fallback.
+            let parent_bb = self.effective_birth_branch(Some(&ctx.birth_branch));
+            fs::write(agent_config_dir.join(".birth_branch"), parent_bb.as_str()).await?;
             let mcp_url = format!(
                 "http://localhost:{}/agents/worker/{}/mcp",
                 mcp_port, internal_name
@@ -1194,6 +1199,38 @@ impl AgentControlService {
             crate::hooks::HookConfig::write_persistent(&worktree_path, &binary_path)
                 .map_err(|e| anyhow!("Failed to write hook config in worktree: {}", e))?;
             info!(worktree = %worktree_path.display(), "Wrote hook configuration for spawned Claude agent");
+
+            // Symlink Claude project dir so child can discover parent's sessions for --fork-session.
+            // Claude Code stores sessions at ~/.claude/projects/{path-encoded}/ where / becomes -.
+            // Without this symlink, --resume --fork-session fails with "no conversation ID found".
+            {
+                let claude_projects_dir = dirs::home_dir()
+                    .unwrap_or_default()
+                    .join(".claude")
+                    .join("projects");
+                let encode_path = |p: &Path| -> String {
+                    p.to_string_lossy().replace('/', "-")
+                };
+                let parent_encoded = encode_path(&self.project_dir);
+                let worktree_encoded = encode_path(&worktree_path);
+                let parent_project = claude_projects_dir.join(&parent_encoded);
+                let child_project = claude_projects_dir.join(&worktree_encoded);
+                if parent_project.exists() && !child_project.exists() {
+                    match std::os::unix::fs::symlink(&parent_project, &child_project) {
+                        Ok(()) => info!(
+                            parent = %parent_encoded,
+                            child = %worktree_encoded,
+                            "Symlinked Claude project dir for session inheritance"
+                        ),
+                        Err(e) => warn!(
+                            parent = %parent_encoded,
+                            child = %worktree_encoded,
+                            error = %e,
+                            "Failed to symlink Claude project dir (fork-session may not work)"
+                        ),
+                    }
+                }
+            }
 
             // Build task prompt with worktree context warning
             let task_with_context = format!(

@@ -89,27 +89,23 @@ impl SessionEffects for SessionHandler {
         // Register in-memory only — Claude Code owns team directory lifecycle via TeamCreate.
         // SessionStart hook instructs Claude to call TeamCreate, which creates ~/.claude/teams/{name}/.
         if let Some(ref team_registry) = self.team_registry {
-            team_registry
-                .register(
-                    &key,
-                    TeamInfo {
-                        team_name: req.team_name.clone(),
-                        inbox_name: req.inbox_name.clone(),
-                    },
-                )
-                .await;
+            let info = TeamInfo {
+                team_name: req.team_name.clone(),
+                inbox_name: req.inbox_name.clone(),
+            };
+
+            team_registry.register(&key, info.clone()).await;
+
+            // Also store under birth_branch — notify_parent looks up by parent's birth_branch.
+            let bb = ctx.birth_branch.to_string();
+            if bb != key {
+                info!(key = %bb, team_name = %req.team_name, "Also registering team under birth_branch");
+                team_registry.register(&bb, info.clone()).await;
+            }
 
             // Also store under slug variant for broader lookup
             if let Some(slug) = key.strip_suffix("-claude") {
-                team_registry
-                    .register(
-                        slug,
-                        TeamInfo {
-                            team_name: req.team_name,
-                            inbox_name: req.inbox_name,
-                        },
-                    )
-                    .await;
+                team_registry.register(slug, info).await;
             }
         } else {
             tracing::warn!(

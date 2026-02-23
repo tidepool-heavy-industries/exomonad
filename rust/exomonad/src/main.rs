@@ -787,6 +787,8 @@ async fn resolve_agent_birth_branch(
     let slug = agent_name
         .trim_end_matches("-claude")
         .trim_end_matches("-gemini");
+
+    // 1. Try worktree (subtrees have their own git branch)
     let worktree_path = worktree_base.join(slug);
     match tokio::process::Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -797,27 +799,27 @@ async fn resolve_agent_birth_branch(
         Ok(output) if output.status.success() => {
             let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
             tracing::debug!(agent = %agent_name, branch = %branch, "Resolved agent birth branch from worktree");
-            exomonad_core::BirthBranch::from(branch.as_str())
+            return exomonad_core::BirthBranch::from(branch.as_str());
         }
-        Ok(output) => {
-            tracing::warn!(
-                agent = %agent_name,
-                path = %worktree_path.display(),
-                stderr = %String::from_utf8_lossy(&output.stderr),
-                "Failed to resolve birth branch, falling back to root"
-            );
-            exomonad_core::BirthBranch::root()
-        }
-        Err(e) => {
-            tracing::warn!(
-                agent = %agent_name,
-                path = %worktree_path.display(),
-                error = %e,
-                "Failed to run git in worktree, falling back to root"
-            );
-            exomonad_core::BirthBranch::root()
+        _ => {}
+    }
+
+    // 2. Try agent config dir (workers write .birth_branch at spawn time)
+    if let Some(exo_dir) = worktree_base.parent() {
+        let bb_file = exo_dir.join("agents").join(agent_name).join(".birth_branch");
+        if let Ok(contents) = tokio::fs::read_to_string(&bb_file).await {
+            let branch = contents.trim().to_string();
+            tracing::debug!(agent = %agent_name, branch = %branch, "Resolved agent birth branch from config file");
+            return exomonad_core::BirthBranch::from(branch.as_str());
         }
     }
+
+    // 3. Fallback to root
+    tracing::warn!(
+        agent = %agent_name,
+        "Failed to resolve birth branch from worktree or config, falling back to root"
+    );
+    exomonad_core::BirthBranch::root()
 }
 
 // Main

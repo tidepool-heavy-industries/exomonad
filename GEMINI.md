@@ -42,8 +42,9 @@ git --no-pager diff
 
 When your task is done:
 1. Commit your changes (`git add <specific files> && git commit -m "..."`)
-2. File a PR (`file_pr` MCP tool or `gh pr create`)
-3. Call `notify_parent` to signal completion
+2. Call `notify_parent` to signal completion
+
+**Do NOT file PRs** unless you are running in a leaf subtree (own git branch). Workers are ephemeral and share the parent's branch — PRs are not applicable.
 
 ## Architecture
 
