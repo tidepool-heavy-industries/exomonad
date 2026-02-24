@@ -590,7 +590,7 @@ impl AgentControlService {
             // Zellij display name (emoji + short format)
             let display_name = options.agent_type.display_name(&issue_id, &slug);
 
-            let env_vars = self.common_spawn_env(&internal_name, &self.effective_birth_branch(Some(caller_bb)).to_string());
+            let env_vars = self.common_spawn_env(&internal_name, self.effective_birth_branch(Some(caller_bb)).as_ref());
 
             // Open Zellij tab with cwd = worktree_path
             self.new_zellij_tab(
@@ -730,7 +730,7 @@ impl AgentControlService {
 
             self.create_worktree_checked(&worktree_path, &branch_name, &base_branch).await?;
 
-            let mut env_vars = self.common_spawn_env(&internal_name, &self.effective_birth_branch(Some(caller_bb)).to_string());
+            let mut env_vars = self.common_spawn_env(&internal_name, self.effective_birth_branch(Some(caller_bb)).as_ref());
 
             // Write per-agent MCP config into the worktree
             self.write_agent_mcp_config(&effective_project_dir, &worktree_path, options.agent_type, "dev")
@@ -851,7 +851,7 @@ impl AgentControlService {
                 });
             }
 
-            let mut env_vars = self.common_spawn_env(&internal_name, &self.effective_birth_branch(Some(&ctx.birth_branch)).to_string());
+            let mut env_vars = self.common_spawn_env(&internal_name, self.effective_birth_branch(Some(&ctx.birth_branch)).as_ref());
 
             // Write Gemini settings to worker config dir in project root
             fs::create_dir_all(&agent_config_dir).await?;
