@@ -2,6 +2,12 @@
 name = "exomonad-plugin"
 version = "0.1.0"
 edition = "2021"
+description = "Zellij WASM plugin for ExoMonad agent status and popup UI"
+license = "BSD-3-Clause"
+repository = "https://github.com/tidepool-heavy-industries/exomonad"
+homepage = "https://github.com/tidepool-heavy-industries/exomonad"
+keywords = ["agent", "zellij", "plugin", "wasm"]
+categories = ["development-tools"]
 
 [workspace]
 
