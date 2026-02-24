@@ -117,3 +117,112 @@ impl SessionEffects for SessionHandler {
         Ok(RegisterTeamResponse { success: true })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{AgentName, BirthBranch};
+    use crate::effects::{EffectContext, EffectHandler};
+
+    fn test_ctx() -> EffectContext {
+        EffectContext {
+            agent_name: AgentName::from("test"),
+            birth_branch: BirthBranch::from("main"),
+        }
+    }
+
+    #[test]
+    fn test_namespace() {
+        let registry = Arc::new(ClaudeSessionRegistry::new());
+        let handler = SessionHandler::new(registry);
+        assert_eq!(handler.namespace(), "session");
+    }
+
+    #[tokio::test]
+    async fn test_register_claude_id() {
+        let registry = Arc::new(ClaudeSessionRegistry::new());
+        let handler = SessionHandler::new(registry.clone());
+        let ctx = test_ctx();
+
+        let req = RegisterClaudeSessionRequest {
+            claude_session_id: "7343ced0-1d95-450a-8ae5-976fe94421f0".into(),
+        };
+
+        let resp = handler.register_claude_id(req, &ctx).await.unwrap();
+        assert!(resp.success);
+
+        let registered = registry.get("test").await.unwrap();
+        assert_eq!(registered.to_string(), "7343ced0-1d95-450a-8ae5-976fe94421f0");
+    }
+
+    #[tokio::test]
+    async fn test_register_team() {
+        let registry = Arc::new(ClaudeSessionRegistry::new());
+        let team_registry = Arc::new(TeamRegistry::new());
+        let handler = SessionHandler::new(registry).with_team_registry(team_registry.clone());
+        let ctx = test_ctx();
+
+        let req = RegisterTeamRequest {
+            team_name: "test-team".into(),
+            inbox_name: "test-inbox".into(),
+        };
+
+        let resp = handler.register_team(req, &ctx).await.unwrap();
+        assert!(resp.success);
+
+        // Verify it was registered in team_registry
+        let info = team_registry.get("test").await.unwrap();
+        assert_eq!(info.team_name, "test-team");
+        assert_eq!(info.inbox_name, "test-inbox");
+
+        // Verify it was registered under birth_branch (main)
+        let info_bb = team_registry.get("main").await.unwrap();
+        assert_eq!(info_bb.team_name, "test-team");
+    }
+
+    #[tokio::test]
+    async fn test_register_team_slug_variant() {
+        let registry = Arc::new(ClaudeSessionRegistry::new());
+        let team_registry = Arc::new(TeamRegistry::new());
+        let handler = SessionHandler::new(registry).with_team_registry(team_registry.clone());
+        
+        let ctx = EffectContext {
+            agent_name: AgentName::from("foo-claude"),
+            birth_branch: BirthBranch::from("main"),
+        };
+
+        let req = RegisterTeamRequest {
+            team_name: "test-team".into(),
+            inbox_name: "test-inbox".into(),
+        };
+
+        handler.register_team(req, &ctx).await.unwrap();
+
+        // Should be found under "foo-claude"
+        assert!(team_registry.get("foo-claude").await.is_some());
+        // Should be found under slug "foo"
+        assert!(team_registry.get("foo").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_register_claude_id_slug_variant() {
+        let registry = Arc::new(ClaudeSessionRegistry::new());
+        let handler = SessionHandler::new(registry.clone());
+        
+        let ctx = EffectContext {
+            agent_name: AgentName::from("foo-claude"),
+            birth_branch: BirthBranch::from("main"),
+        };
+
+        let req = RegisterClaudeSessionRequest {
+            claude_session_id: "7343ced0-1d95-450a-8ae5-976fe94421f0".into(),
+        };
+
+        handler.register_claude_id(req, &ctx).await.unwrap();
+
+        // Should be found under "foo-claude"
+        assert!(registry.get("foo-claude").await.is_some());
+        // Should be found under slug "foo"
+        assert!(registry.get("foo").await.is_some());
+    }
+}
