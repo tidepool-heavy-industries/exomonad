@@ -40,3 +40,38 @@ impl ClaudeSessionRegistry {
         map.get(key).cloned()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_get_missing_returns_none() {
+        let reg = ClaudeSessionRegistry::new();
+        assert!(reg.get("nonexistent").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_register_then_get() {
+        let reg = ClaudeSessionRegistry::new();
+        let uuid = ClaudeSessionUuid::from("uuid-123");
+        reg.register("root", uuid.clone()).await;
+        let result = reg.get("root").await;
+        assert_eq!(result, Some(uuid));
+    }
+
+    #[tokio::test]
+    async fn test_register_overwrites() {
+        let reg = ClaudeSessionRegistry::new();
+        reg.register("root", ClaudeSessionUuid::from("uuid-1")).await;
+        reg.register("root", ClaudeSessionUuid::from("uuid-2")).await;
+        let result = reg.get("root").await;
+        assert_eq!(result, Some(ClaudeSessionUuid::from("uuid-2")));
+    }
+
+    #[tokio::test]
+    async fn test_default_same_as_new() {
+        let reg = ClaudeSessionRegistry::default();
+        assert!(reg.get("any").await.is_none());
+    }
+}

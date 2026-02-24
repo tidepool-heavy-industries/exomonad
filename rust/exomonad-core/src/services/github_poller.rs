@@ -522,3 +522,47 @@ impl GitHubPoller {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_copilot_message_empty() {
+        let poller = GitHubPoller::new(Arc::new(EventQueue::new()), PathBuf::from("."));
+        let msg = poller.format_copilot_message(&[], &[]);
+        assert_eq!(msg, "Copilot review activity detected (no body text)");
+    }
+
+    #[test]
+    fn test_format_copilot_message_with_reviews() {
+        let poller = GitHubPoller::new(Arc::new(EventQueue::new()), PathBuf::from("."));
+        let reviews = vec!["LGTM!".to_string(), "Great job.".to_string()];
+        let msg = poller.format_copilot_message(&[], &reviews);
+        assert!(msg.contains("Review summary:"));
+        assert!(msg.contains("LGTM!"));
+        assert!(msg.contains("Great job."));
+    }
+
+    #[test]
+    fn test_format_copilot_message_with_inline_comments() {
+        let poller = GitHubPoller::new(Arc::new(EventQueue::new()), PathBuf::from("."));
+        let inline = vec![
+            CopilotComment {
+                body: "Fix this typo".to_string(),
+                path: Some("src/main.rs".to_string()),
+                diff_hunk: Some("@@ -1,3 +1,3 @@".to_string()),
+            },
+            CopilotComment {
+                body: "Add a comment here".to_string(),
+                path: None,
+                diff_hunk: None,
+            },
+        ];
+        let msg = poller.format_copilot_message(&inline, &[]);
+        assert!(msg.contains("Inline comments:"));
+        assert!(msg.contains("1. [src/main.rs] Fix this typo"));
+        assert!(msg.contains("```diff\n   @@ -1,3 +1,3 @@\n   ```"));
+        assert!(msg.contains("2. [unknown file] Add a comment here"));
+    }
+}

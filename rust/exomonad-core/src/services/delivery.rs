@@ -62,3 +62,23 @@ pub async fn deliver_to_agent(
     zellij_events::inject_input(zellij_tab_name, message);
     DeliveryResult::Zellij
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_delivery_result_variants_distinct() {
+        assert_ne!(DeliveryResult::Teams, DeliveryResult::Zellij);
+        assert_ne!(DeliveryResult::Teams, DeliveryResult::Failed);
+        assert_ne!(DeliveryResult::Zellij, DeliveryResult::Failed);
+    }
+
+    #[tokio::test]
+    async fn test_deliver_no_registry_returns_zellij() {
+        let result = deliver_to_agent(
+            None, "agent-1", "tab-1", "test", "hello", "summary", "green",
+        ).await;
+        assert_eq!(result, DeliveryResult::Zellij);
+    }
+}
