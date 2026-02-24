@@ -299,18 +299,23 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 ├── haskell/CLAUDE.md  ← Haskell package organization
 │   ├── dsl/core/CLAUDE.md      ← Graph DSL reference (START HERE for handlers)
 │   ├── effects/CLAUDE.md       ← Effect interpreters
-│   │   ├── llm-interpreter/     ← Anthropic/OpenAI API
-│   │   ├── worktree-interpreter/ ← Git worktree management
-│   │   ├── github-interpreter/  ← GitHub API integration
-│   │   ├── git-interpreter/      ← Native git operations
-│   │   └── filesystem-interpreter/ ← Local filesystem access
+│   │   ├── env-interpreter/
+│   │   ├── filesystem-interpreter/
+│   │   ├── git-interpreter/
+│   │   ├── github-interpreter/
+│   │   ├── justfile-interpreter/
+│   │   ├── llm-interpreter/
+│   │   ├── observability-interpreter/
+│   │   ├── socket-client/
+│   │   ├── worktree-interpreter/
+│   │   └── zellij-interpreter/
 │   ├── proto/CLAUDE.md         ← Generated Haskell types for proto
 │   ├── protocol/CLAUDE.md      ← Wire formats
 │   ├── tools/CLAUDE.md         ← Dev tools
 │   └── wasm-guest/CLAUDE.md    ← MCP tool definitions (WASM guest logic)
 ├── rust/CLAUDE.md             ← Rust workspace overview (3 crates)
 │   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (binary)
-│   ├── exomonad-core/      ← Unified library: framework, handlers, services, protocol, UI types
+│   ├── exomonad-core/CLAUDE.md ← Unified library: framework, handlers, services, protocol, UI types
 │   ├── exomonad-proto/     ← Proto-generated types (prost) for FFI + effects
 │   └── exomonad-plugin/CLAUDE.md   ← Zellij WASM plugin (status + popups)
 ├── docs/decisions/            ← Architecture decision records (living docs)
@@ -321,6 +326,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 |--------------|-----------|
 | Add FFI boundary types | `proto/CLAUDE.md` |
 | Understand MCP tool architecture | `rust/exomonad/CLAUDE.md` |
+| Work on exomonad-core framework | `rust/exomonad-core/CLAUDE.md` |
 | Work on effect handlers or services | `rust/exomonad-core/` (handlers/, services/) |
 | Extend the effect framework | `rust/exomonad-core/` (effects/) |
 | Understand shared protocol types | `rust/exomonad-core/` (protocol/) |
