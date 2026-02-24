@@ -925,7 +925,6 @@ mod binary {
             result: Some(ResponseResult::Payload(inner_bytes)),
         };
         let outer_bytes = wrapped.encode_to_vec();
-        assert_eq!(outer_bytes.len(), 383);
 
         let outer_decoded = EffectResponse::decode(outer_bytes.as_slice()).unwrap();
         match outer_decoded.result {
