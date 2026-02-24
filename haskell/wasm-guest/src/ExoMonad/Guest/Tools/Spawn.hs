@@ -11,7 +11,7 @@ module ExoMonad.Guest.Tools.Spawn
 where
 
 import Control.Monad (forM)
-import Control.Monad.Freer (runM)
+import Control.Monad.Freer (Eff, runM, sendM)
 import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Either (partitionEithers)
@@ -63,6 +63,19 @@ instance MCPTool SpawnSubtree where
             ]
         pure $ successResult $ Aeson.toJSON spawnResult
 
+  toolHandlerEff args = do
+    result <- AC.runAgentControlSuspend $ AC.spawnSubtree (ssTask args) (ssBranchName args) ""
+    case result of
+      Left err -> pure $ errorResult err
+      Right spawnResult -> do
+        sendM $ emitStructuredEvent "agent.spawned" $
+          object
+            [ "slug" .= ssBranchName args,
+              "agent_type" .= ("claude" :: Text),
+              "task_summary" .= ssTask args
+            ]
+        pure $ successResult $ Aeson.toJSON spawnResult
+
 -- ============================================================================
 -- SpawnLeafSubtree
 -- ============================================================================
@@ -97,6 +110,20 @@ instance MCPTool SpawnLeafSubtree where
       Left err -> pure $ errorResult err
       Right spawnResult -> do
         emitStructuredEvent "agent.spawned" $
+          object
+            [ "slug" .= slsBranchName args,
+              "agent_type" .= ("gemini" :: Text),
+              "task_summary" .= slsTask args
+            ]
+        pure $ successResult $ Aeson.toJSON spawnResult
+
+  toolHandlerEff args = do
+    let renderedTask = P.render $ P.task (slsTask args) <> P.leafProfile
+    result <- AC.runAgentControlSuspend $ AC.spawnLeafSubtree renderedTask (slsBranchName args)
+    case result of
+      Left err -> pure $ errorResult err
+      Right spawnResult -> do
+        sendM $ emitStructuredEvent "agent.spawned" $
           object
             [ "slug" .= slsBranchName args,
               "agent_type" .= ("gemini" :: Text),
@@ -195,6 +222,39 @@ instance MCPTool SpawnWorkers where
       case r of
         Right _ ->
           emitStructuredEvent "agent.spawned" $
+            object
+              [ "slug" .= wsName spec,
+                "agent_type" .= ("gemini-worker" :: Text),
+                "task_summary" .= wsTask spec
+              ]
+        Left _ -> pure ()
+      pure r
+    let (errs, successes) = partitionEithers results
+    pure $
+      successResult $
+        object
+          [ "spawned" .= map Aeson.toJSON successes,
+            "errors" .= map Aeson.String errs
+          ]
+
+  toolHandlerEff args = do
+    results <- forM (swsSpecs args) $ \spec -> do
+      let prompt = case wsPrompt spec of
+            Just p -> p
+            Nothing ->
+              P.render $
+                P.task (wsTask spec)
+                  <> maybe mempty P.boundary (wsBoundary spec)
+                  <> maybe mempty P.readFirst (wsReadFirst spec)
+                  <> maybe mempty P.steps (wsSteps spec)
+                  <> maybe mempty P.context (wsContext spec)
+                  <> maybe mempty P.verify (wsVerify spec)
+                  <> maybe mempty P.doneCriteria (wsDoneCriteria spec)
+                  <> P.workerProfile
+      r <- AC.runAgentControlSuspend $ AC.spawnWorker (wsName spec) prompt
+      case r of
+        Right _ ->
+          sendM $ emitStructuredEvent "agent.spawned" $
             object
               [ "slug" .= wsName spec,
                 "agent_type" .= ("gemini-worker" :: Text),
