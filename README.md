@@ -32,16 +32,17 @@ spawn_workers agents=[
 ## Install
 
 ### For Users
-*Public release coming soon. Once published:*
+Requires [Nix](https://nixos.org/) (for Haskell WASM compilation) and [Zellij](https://zellij.dev/).
 ```bash
-cargo install exomonad
-# Download pre-built WASM binaries to ~/.exo/wasm/
+git clone https://github.com/tidepool-heavy-industries/exomonad
+cd exomonad
+just install-all  # Builds WASM via Nix, compiles Rust, installs to ~/.cargo/bin/
 ```
 
 ### For Developers
 Requires [Nix](https://nixos.org/) for the Haskell WASM build.
 ```bash
-git clone https://github.com/inanna-malick/exomonad
+git clone https://github.com/tidepool-heavy-industries/exomonad
 cd exomonad
 just install-all-dev  # Builds WASM via Nix and installs the Rust binary to ~/.cargo/bin/
 ```
