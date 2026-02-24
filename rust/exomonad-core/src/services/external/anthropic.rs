@@ -94,7 +94,12 @@ impl ExternalService for AnthropicService {
                 system,
                 thinking,
             } => (model, messages, max_tokens, tools, system, thinking),
-            _ => panic!("Invalid request type for AnthropicService"),
+            _ => {
+                return Err(ServiceError::Api {
+                    code: 400,
+                    message: "Invalid request type for AnthropicService".to_string(),
+                })
+            }
         };
 
         let payload = AnthropicRequestPayload {
@@ -105,7 +110,10 @@ impl ExternalService for AnthropicService {
             system,
             thinking,
         };
-        let url = self.base_url.join("/v1/messages").unwrap();
+        let url = self.base_url.join("/v1/messages").map_err(|e| ServiceError::Api {
+            code: 500,
+            message: format!("URL join failed: {}", e),
+        })?;
         let mut attempts = 0;
         let max_attempts = 3;
         let mut backoff = Duration::from_millis(500);

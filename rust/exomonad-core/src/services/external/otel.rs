@@ -299,7 +299,10 @@ impl ExternalService for OtelService {
 
                 Ok(ServiceResponse::Ack)
             }
-            _ => panic!("Invalid request type for OtelService"),
+            _ => Err(ServiceError::Api {
+                code: 400,
+                message: "Invalid request type for OtelService".to_string(),
+            }),
         }
     }
 }

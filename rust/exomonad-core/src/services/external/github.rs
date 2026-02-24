@@ -761,7 +761,10 @@ impl ExternalService for GitHubService {
                     reviews,
                 })
             }
-            _ => panic!("Invalid request type for GitHubService"),
+            _ => Err(ServiceError::Api {
+                code: 400,
+                message: "Invalid request type for GitHubService".to_string(),
+            }),
         }
     }
 }
