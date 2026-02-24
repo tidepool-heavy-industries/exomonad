@@ -11,16 +11,15 @@ module ExoMonad.Guest.Tools.Spawn
 where
 
 import Control.Monad (forM, void)
-import Control.Monad.Freer (Eff, sendM)
 import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as BSL
 import Data.Either (partitionEithers)
 import Data.Text (Text)
+import Data.Text qualified as T
 import Effects.Log qualified as Log
 import ExoMonad.Effects.Log (LogEmitEvent)
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
-import ExoMonad.Guest.Prompt qualified as P
 import ExoMonad.Guest.Tool.Class
 import ExoMonad.Guest.Tool.Schema (JsonSchema (..), genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
@@ -98,7 +97,10 @@ instance MCPTool SpawnLeafSubtree where
         ("branch_name", "Branch name suffix (will be prefixed with current branch)")
       ]
   toolHandlerEff args = do
-    let renderedTask = P.render $ P.task (slsTask args) <> P.leafProfile
+    -- WASM32 BUG WORKAROUND: Prompt's derived Semigroup (<>) hangs when
+    -- evaluated inside the freer-simple coroutine context on GHC WASM32.
+    -- Build prompts as raw Text instead of using the Prompt builder.
+    let renderedTask = slsTask args <> "\n\n" <> leafProfileText
     result <- AC.spawnLeafSubtree renderedTask (slsBranchName args)
     case result of
       Left err -> pure $ errorResult err
@@ -189,18 +191,10 @@ instance MCPTool SpawnWorkers where
       ]
   toolHandlerEff args = do
     results <- forM (swsSpecs args) $ \spec -> do
+      -- WASM32 BUG WORKAROUND: see renderWorkerPrompt comment.
       let prompt = case wsPrompt spec of
             Just p -> p
-            Nothing ->
-              P.render $
-                P.task (wsTask spec)
-                  <> maybe mempty P.boundary (wsBoundary spec)
-                  <> maybe mempty P.readFirst (wsReadFirst spec)
-                  <> maybe mempty P.steps (wsSteps spec)
-                  <> maybe mempty P.context (wsContext spec)
-                  <> maybe mempty P.verify (wsVerify spec)
-                  <> maybe mempty P.doneCriteria (wsDoneCriteria spec)
-                  <> P.workerProfile
+            Nothing -> renderWorkerPrompt spec
       r <- AC.spawnWorker (wsName spec) prompt
       case r of
         Right _ -> do
@@ -223,3 +217,38 @@ instance MCPTool SpawnWorkers where
           [ "spawned" .= map Aeson.toJSON successes,
             "errors" .= map Aeson.String errs
           ]
+
+-- ============================================================================
+-- Raw Text prompt builders (WASM32 workaround)
+-- ============================================================================
+
+-- WASM32 BUG: The Prompt newtype's derived Semigroup (<>) hangs when evaluated
+-- inside the freer-simple coroutine context on GHC 9.12 WASM32-WASI. Even
+-- `P.task t <> mempty` hangs, while `P.render (P.task t)` alone works fine.
+-- Root cause unknown (possibly coerce + list ++ codegen, possibly stack overflow
+-- in WASM RTS during derived instance evaluation).
+--
+-- Workaround: build all prompts as raw Text, bypassing the Prompt type entirely.
+-- The Prompt module is still used by native Haskell code; only WASM tool handlers
+-- are affected.
+
+-- | Render a structured worker prompt as raw Text.
+renderWorkerPrompt :: WorkerSpec -> Text
+renderWorkerPrompt spec =
+  T.intercalate "\n\n" $ filter (not . T.null) $
+    [ "## TASK\n" <> wsTask spec ]
+    <> maybe [] (\items -> ["## BOUNDARY\n" <> T.intercalate "\n" (map ("- " <>) items)]) (wsBoundary spec)
+    <> maybe [] (\items -> ["## READ FIRST\n" <> T.intercalate "\n" (map ("- " <>) items)]) (wsReadFirst spec)
+    <> maybe [] (\items -> ["## STEPS\n" <> T.intercalate "\n" (zipWith (\i s -> T.pack (show (i :: Int)) <> ". " <> s) [1..] items)]) (wsSteps spec)
+    <> maybe [] (\t -> if T.null t then [] else ["## CONTEXT\n" <> t]) (wsContext spec)
+    <> maybe [] (\items -> ["## VERIFY\n" <> T.intercalate "\n" (map (\c -> "- `" <> c <> "`") items)]) (wsVerify spec)
+    <> maybe [] (\items -> ["## DONE CRITERIA\n" <> T.intercalate "\n" (map ("- " <>) items)]) (wsDoneCriteria spec)
+    <> [workerProfileText]
+
+-- | Pre-rendered leaf profile text.
+leafProfileText :: Text
+leafProfileText = "## Completion Protocol (Leaf Subtree)\nYou are a **leaf agent** in your own git worktree and branch. Your branch name follows the pattern `{parent}.{slug}`.\n\nWhen you are done:\n\n1. **Commit your changes** with a descriptive message.\n   - `git add <specific files>` \x2014 NEVER `git add .` or `git add -A`\n   - `git commit -m \"feat: <description>\"`\n2. **File a PR** using `file_pr` tool. The base branch is auto-detected from your branch name.\n3. **Wait for Copilot review** if it arrives. Address review comments, push fixes.\n4. **Call `notify_parent`** with status `success`, a one-line summary, and the PR number.\n   - If you failed after multiple attempts, call `notify_parent` with status `failure` and explain what went wrong.\n\n**DO NOT:**\n- Merge your own PR (the parent TL merges)\n- Push to main or any branch other than your own\n- Create additional branches"
+
+-- | Pre-rendered worker profile text. Same WASM workaround.
+workerProfileText :: Text
+workerProfileText = "## Completion Protocol (Worker)\nYou are an **ephemeral worker** \x2014 you run in the parent's directory on the parent's branch. You do NOT have your own worktree or branch.\n\nWhen you are done:\n\n1. **Commit your changes** to the current branch with a descriptive message.\n   - `git add <specific files>` \x2014 NEVER `git add .` or `git add -A`\n   - `git commit -m \"feat: <description>\"`\n2. **Call `notify_parent`** with status `success` and a one-line summary of what you accomplished.\n   - If you failed after multiple attempts, call `notify_parent` with status `failure` and explain what went wrong.\n\n**DO NOT:**\n- File a PR (you have no branch to PR from)\n- Push to remote (you're on the parent's branch)\n- Create new branches\n- Run `git checkout` or `git switch`"

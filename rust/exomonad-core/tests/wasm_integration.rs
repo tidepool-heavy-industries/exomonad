@@ -1036,3 +1036,121 @@ async fn wasm_spawn_subtree_long_text() {
 
     assert_tool_success(&output, "spawn_subtree (long text)");
 }
+
+/// Diagnostic: does spawn_subtree hang with multiline text containing newlines?
+/// If this passes but spawn_leaf_subtree hangs, the issue is in the Haskell handler,
+/// not in text encoding.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_spawn_subtree_multiline_text() {
+    let runtime = build_test_runtime().await;
+
+    // Simulate the text that P.render would produce for spawn_leaf_subtree
+    let multiline_task = "## TASK\nImplement the Rust handler\n\n## Completion Protocol (Leaf Subtree)\nYou are a **leaf agent** in your own git worktree and branch.\n\nWhen you are done:\n\n1. **Commit your changes** with a descriptive message.\n2. **File a PR** using `file_pr` tool.\n3. **Wait for Copilot review** if it arrives.\n4. **Call `notify_parent`** with status `success`.\n\n**DO NOT:**\n- Merge your own PR\n- Push to main\n- Create additional branches";
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        call_tool(
+            &runtime,
+            "tl",
+            "spawn_subtree",
+            json!({
+                "task": multiline_task,
+                "branch_name": "multiline-test"
+            }),
+        ),
+    )
+    .await;
+
+    match result {
+        Ok(output) => {
+            eprintln!("=== spawn_subtree with multiline text completed: {output:#} ===");
+            assert_tool_success(&output, "spawn_subtree (multiline)");
+        }
+        Err(_) => {
+            panic!("spawn_subtree with multiline text hung after 30s — text encoding issue");
+        }
+    }
+}
+
+/// Diagnostic: spawn_leaf_subtree with timeout to observe trampoline logs.
+/// Calls spawn_subtree first to warm up the WASM runtime, then tries spawn_leaf_subtree.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_spawn_leaf_subtree_timeout_diagnostic() {
+    let runtime = build_test_runtime().await;
+
+    // Warm up: call spawn_subtree first (this works)
+    eprintln!("=== DIAGNOSTIC: Warming up with spawn_subtree ===");
+    let warmup = call_tool(
+        &runtime,
+        "tl",
+        "spawn_subtree",
+        json!({"task": "warmup", "branch_name": "warmup"}),
+    )
+    .await;
+    eprintln!("=== Warmup completed: success={} ===", warmup["success"]);
+
+    eprintln!("=== DIAGNOSTIC: Starting spawn_leaf_subtree call ===");
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        call_tool(
+            &runtime,
+            "tl",
+            "spawn_leaf_subtree",
+            json!({
+                "task": "Test task",
+                "branch_name": "test-leaf"
+            }),
+        ),
+    )
+    .await;
+
+    match result {
+        Ok(output) => {
+            eprintln!("=== DIAGNOSTIC: spawn_leaf_subtree completed: {output:#} ===");
+            assert_tool_success(&output, "spawn_leaf_subtree (diagnostic)");
+        }
+        Err(_) => {
+            eprintln!("=== DIAGNOSTIC: spawn_leaf_subtree TIMED OUT after 30s ===");
+            panic!("spawn_leaf_subtree hung — check trampoline logs above");
+        }
+    }
+}
+
+/// Diagnostic: spawn_workers with timeout.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_spawn_workers_timeout_diagnostic() {
+    let runtime = build_test_runtime().await;
+
+    eprintln!("=== DIAGNOSTIC: Starting spawn_workers call ===");
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        call_tool(
+            &runtime,
+            "tl",
+            "spawn_workers",
+            json!({
+                "specs": [{
+                    "name": "diag-worker",
+                    "task": "Test task"
+                }]
+            }),
+        ),
+    )
+    .await;
+
+    match result {
+        Ok(output) => {
+            eprintln!("=== DIAGNOSTIC: spawn_workers completed: {output:#} ===");
+            assert_tool_success(&output, "spawn_workers (diagnostic)");
+        }
+        Err(_) => {
+            eprintln!("=== DIAGNOSTIC: spawn_workers TIMED OUT after 30s ===");
+            panic!("spawn_workers hung — check trampoline logs above");
+        }
+    }
+}
