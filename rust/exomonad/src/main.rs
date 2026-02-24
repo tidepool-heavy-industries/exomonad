@@ -537,6 +537,8 @@ async fn handle_hook_inner(
 /// With `--recreate`: delete any existing session (even alive), then create fresh.
 ///
 async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Result<()> {
+    use std::os::unix::process::CommandExt;
+
     // Preflight: warn if XDG_RUNTIME_DIR missing (SSH edge case)
     if std::env::var("XDG_RUNTIME_DIR").is_err() {
         eprintln!("Warning: XDG_RUNTIME_DIR not set. Zellij may fail to find sessions.");
@@ -596,13 +598,12 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
             eprintln!("Warning: zellij delete-session exited with {}", status);
         }
     } else if session_alive {
-        // Attach to running session
+        // Attach to running session (exec replaces process, releasing the binary)
         eprintln!("Attaching to session: {}", session);
-        let status = std::process::Command::new("zellij")
+        let err = std::process::Command::new("zellij")
             .args(["attach", &session])
-            .status()
-            .context("Failed to attach to Zellij session")?;
-        std::process::exit(status.code().unwrap_or(1));
+            .exec();
+        return Err(anyhow::anyhow!("exec zellij attach failed: {}", err));
     } else if session_exited {
         // Kill stale serialized state to prevent resurrection
         eprintln!("Cleaning up exited session: {}", session);
@@ -658,13 +659,12 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
         ));
     }
 
-    // 4. Attach (use spawn+wait instead of exec to avoid tokio runtime drop panic)
+    // 4. Attach (exec replaces process, releasing the binary for hot-swap)
     eprintln!("Attaching to session: {}", session);
-    let status = std::process::Command::new("zellij")
+    let err = std::process::Command::new("zellij")
         .args(["attach", &session])
-        .status()
-        .context("Failed to attach to Zellij session")?;
-    std::process::exit(status.code().unwrap_or(1))
+        .exec();
+    Err(anyhow::anyhow!("exec zellij attach failed: {}", err))
 }
 
 /// Ensure .gitignore has entries for .exo/ (track config, ignore the rest).
@@ -1337,7 +1337,8 @@ async fn main() -> Result<()> {
                 .context("Failed to read stdin")?;
 
             let client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(30))
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(10))
                 .build()?;
 
             debug!(url = %url, event = ?event, "Forwarding hook to server");

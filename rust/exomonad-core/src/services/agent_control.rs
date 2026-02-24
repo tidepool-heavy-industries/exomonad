@@ -555,59 +555,7 @@ impl AgentControlService {
             // Create worktree
             let worktree_path = self.worktree_base.join(&internal_name);
 
-            // Clean up existing worktree if it exists (idempotency)
-            if worktree_path.exists() {
-                info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
-                let git_wt = self.git_wt.clone();
-                let path = worktree_path.clone();
-                match tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await {
-                    Err(join_err) => {
-                        warn!(error = %join_err, "Join error while removing existing workspace (non-fatal)");
-                    }
-                    Ok(Err(e)) => {
-                        warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
-                    }
-                    Ok(Ok(_)) => {
-                        // Successfully removed existing workspace
-                    }
-                }
-            }
-
-            info!(
-                base_branch = %base,
-                branch_name = %branch_name,
-                worktree_path = %worktree_path.display(),
-                "Creating git worktree"
-            );
-
-            // Create the workspace
-            {
-                let git_wt = self.git_wt.clone();
-                let path = worktree_path.clone();
-                let bookmark = crate::domain::BranchName::from(branch_name.as_str());
-                let base = crate::domain::BranchName::from(base);
-                let result = tokio::task::spawn_blocking(move || {
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        git_wt.create_workspace(&path, &bookmark, &base)
-                    }))
-                })
-                .await
-                .context("tokio task join error while creating git worktree")?;
-
-                match result {
-                    Ok(Ok(())) => {},
-                    Ok(Err(e)) => return Err(e).context("Failed to create git worktree"),
-                    Err(panic_val) => {
-                        let msg = panic_val
-                            .downcast_ref::<String>()
-                            .map(|s| s.as_str())
-                            .or_else(|| panic_val.downcast_ref::<&str>().copied())
-                            .unwrap_or("unknown panic");
-                        return Err(anyhow!("git worktree creation panicked: {}", msg));
-                    }
-                }
-            }
-            info!(worktree_path = %worktree_path.display(), "git worktree created successfully");
+            self.create_worktree_checked(&worktree_path, &branch_name, base).await?;
 
             // Use worktree path as agent_dir
             let agent_dir = worktree_path;
@@ -642,35 +590,19 @@ impl AgentControlService {
             // Zellij display name (emoji + short format)
             let display_name = options.agent_type.display_name(&issue_id, &slug);
 
-            let mut env_vars = HashMap::new();
-            env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.effective_birth_branch(Some(caller_bb)).to_string());
-            if let Some(port) = self.mcp_server_port {
-                env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
-            }
+            let env_vars = self.common_spawn_env(&internal_name, &self.effective_birth_branch(Some(caller_bb)).to_string());
 
             // Open Zellij tab with cwd = worktree_path
             self.new_zellij_tab(
                 &display_name,
-                &agent_dir, // Use worktree path
+                &agent_dir,
                 options.agent_type,
                 Some(&initial_prompt),
                 env_vars,
             )
             .await?;
 
-            // Emit agent:started event
-            if let Some(ref session) = self.zellij_session {
-                let agent_id = crate::ui_protocol::AgentId::try_from(internal_name.clone())
-                    .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
-                let event = crate::ui_protocol::AgentEvent::AgentStarted {
-                    agent_id,
-                    timestamp: zellij_events::now_iso8601(),
-                };
-                if let Err(e) = zellij_events::emit_event(session, &event) {
-                    warn!("Failed to emit agent:started event: {}", e);
-                }
-            }
+            self.emit_agent_started(&internal_name)?;
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: agent_dir.clone(),
@@ -796,64 +728,9 @@ impl AgentControlService {
             let branch_name = format!("{}.{}", base_branch, slug);
             let worktree_path = self.worktree_base.join(&internal_name);
 
-            // Clean up existing worktree if it exists
-            if worktree_path.exists() {
-                info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
-                let git_wt = self.git_wt.clone();
-                let path = worktree_path.clone();
-                match tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await {
-                    Err(join_err) => {
-                        warn!(error = %join_err, "Join error while removing existing workspace (non-fatal)");
-                    }
-                    Ok(Err(e)) => {
-                        warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
-                    }
-                    Ok(Ok(_)) => {
-                        // Successfully removed existing workspace
-                    }
-                }
-            }
+            self.create_worktree_checked(&worktree_path, &branch_name, &base_branch).await?;
 
-            info!(
-                base_branch = %base_branch,
-                branch_name = %branch_name,
-                worktree_path = %worktree_path.display(),
-                "Creating git worktree"
-            );
-
-            {
-                let git_wt = self.git_wt.clone();
-                let path = worktree_path.clone();
-                let bookmark = crate::domain::BranchName::from(branch_name.as_str());
-                let base = crate::domain::BranchName::from(base_branch.as_str());
-                let result = tokio::task::spawn_blocking(move || {
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        git_wt.create_workspace(&path, &bookmark, &base)
-                    }))
-                })
-                .await
-                .context("tokio task join error while creating git worktree")?;
-
-                match result {
-                    Ok(Ok(())) => {},
-                    Ok(Err(e)) => return Err(e).context("Failed to create git worktree"),
-                    Err(panic_val) => {
-                        let msg = panic_val
-                            .downcast_ref::<String>()
-                            .map(|s| s.as_str())
-                            .or_else(|| panic_val.downcast_ref::<&str>().copied())
-                            .unwrap_or("unknown panic");
-                        return Err(anyhow!("git worktree creation panicked: {}", msg));
-                    }
-                }
-            }
-
-            let mut env_vars = HashMap::new();
-            env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.effective_birth_branch(Some(caller_bb)).to_string());
-            if let Some(port) = self.mcp_server_port {
-                env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
-            }
+            let mut env_vars = self.common_spawn_env(&internal_name, &self.effective_birth_branch(Some(caller_bb)).to_string());
 
             // Write per-agent MCP config into the worktree
             self.write_agent_mcp_config(&effective_project_dir, &worktree_path, options.agent_type, "dev")
@@ -868,7 +745,6 @@ impl AgentControlService {
                 );
             }
 
-            // Open Zellij tab with cwd = worktree_path (Heavy/Isolated agents get Tabs)
             self.new_zellij_tab(
                 &display_name,
                 &worktree_path,
@@ -878,18 +754,7 @@ impl AgentControlService {
             )
             .await?;
 
-            // Emit agent:started event
-            if let Some(ref session) = self.zellij_session {
-                let agent_id = crate::ui_protocol::AgentId::try_from(internal_name.clone())
-                    .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
-                let event = crate::ui_protocol::AgentEvent::AgentStarted {
-                    agent_id,
-                    timestamp: zellij_events::now_iso8601(),
-                };
-                if let Err(e) = zellij_events::emit_event(session, &event) {
-                    warn!("Failed to emit agent:started event: {}", e);
-                }
-            }
+            self.emit_agent_started(&internal_name)?;
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: PathBuf::new(),
@@ -986,12 +851,7 @@ impl AgentControlService {
                 });
             }
 
-            let mut env_vars = HashMap::new();
-            env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.effective_birth_branch(Some(&ctx.birth_branch)).to_string());
-            if let Some(port) = self.mcp_server_port {
-                env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
-            }
+            let mut env_vars = self.common_spawn_env(&internal_name, &self.effective_birth_branch(Some(&ctx.birth_branch)).to_string());
 
             // Write Gemini settings to worker config dir in project root
             fs::create_dir_all(&agent_config_dir).await?;
@@ -1041,18 +901,7 @@ impl AgentControlService {
                 warn!(agent = %slug, team = %team_name, error = %e, "Failed to register synthetic team member (non-fatal)");
             }
 
-            // Emit agent:started event
-            if let Some(ref session) = self.zellij_session {
-                let agent_id = crate::ui_protocol::AgentId::try_from(internal_name.clone())
-                    .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
-                let event = crate::ui_protocol::AgentEvent::AgentStarted {
-                    agent_id,
-                    timestamp: zellij_events::now_iso8601(),
-                };
-                if let Err(e) = zellij_events::emit_event(session, &event) {
-                    warn!("Failed to emit agent:started event: {}", e);
-                }
-            }
+            self.emit_agent_started(&internal_name)?;
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: PathBuf::new(),
@@ -1125,65 +974,9 @@ impl AgentControlService {
             // Worktree location: {worktree_base}/{slug}
             let worktree_path = self.worktree_base.join(&slug);
 
-            // Clean up existing worktree if it exists
-            if worktree_path.exists() {
-                info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
-                let git_wt = self.git_wt.clone();
-                let path = worktree_path.clone();
-                match tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await {
-                    Err(join_err) => {
-                        warn!(error = %join_err, "Join error while removing existing workspace (non-fatal)");
-                    }
-                    Ok(Err(e)) => {
-                        warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
-                    }
-                    Ok(Ok(_)) => {
-                        // Successfully removed existing workspace
-                    }
-                }
-            }
+            self.create_worktree_checked(&worktree_path, &branch_name, current_branch).await?;
 
-            info!(
-                base_branch = %current_branch,
-                branch_name = %branch_name,
-                worktree_path = %worktree_path.display(),
-                "Creating git worktree for subtree"
-            );
-
-            {
-                let git_wt = self.git_wt.clone();
-                let path = worktree_path.clone();
-                let bookmark = crate::domain::BranchName::from(branch_name.as_str());
-                let base = crate::domain::BranchName::from(current_branch);
-                let result = tokio::task::spawn_blocking(move || {
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        git_wt.create_workspace(&path, &bookmark, &base)
-                    }))
-                })
-                .await
-                .context("tokio task join error while creating git worktree")?;
-
-                match result {
-                    Ok(Ok(())) => {},
-                    Ok(Err(e)) => return Err(e).context("Failed to create git worktree"),
-                    Err(panic_val) => {
-                        let msg = panic_val
-                            .downcast_ref::<String>()
-                            .map(|s| s.as_str())
-                            .or_else(|| panic_val.downcast_ref::<&str>().copied())
-                            .unwrap_or("unknown panic");
-                        return Err(anyhow!("git worktree creation panicked: {}", msg));
-                    }
-                }
-            }
-
-            let mut env_vars = HashMap::new();
-            env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            // Session ID = birth-branch (the new branch name)
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), branch_name.clone());
-            if let Some(port) = self.mcp_server_port {
-                env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
-            }
+            let mut env_vars = self.common_spawn_env(&internal_name, &branch_name);
             // Enable Claude Code Agent Teams for native inter-agent messaging
             env_vars.insert(
                 "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".to_string(),
@@ -1314,65 +1107,9 @@ impl AgentControlService {
             let branch_name = child_birth.to_string();
             let worktree_path = self.worktree_base.join(&slug);
 
-            // Clean up existing worktree
-            if worktree_path.exists() {
-                info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
-                let git_wt = self.git_wt.clone();
-                let path = worktree_path.clone();
-                match tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await {
-                    Err(join_err) => {
-                        warn!(error = %join_err, "Join error while removing existing workspace (non-fatal)");
-                    }
-                    Ok(Err(e)) => {
-                        warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
-                    }
-                    Ok(Ok(_)) => {
-                        // Successfully removed existing workspace
-                    }
-                }
-            }
+            self.create_worktree_checked(&worktree_path, &branch_name, &current_branch).await?;
 
-            info!(
-                base_branch = %current_branch,
-                branch_name = %branch_name,
-                worktree_path = %worktree_path.display(),
-                "Creating git worktree for leaf subtree"
-            );
-
-            {
-                let git_wt = self.git_wt.clone();
-                let path = worktree_path.clone();
-                let bookmark = crate::domain::BranchName::from(branch_name.as_str());
-                let base = crate::domain::BranchName::from(current_branch.as_str());
-                let result = tokio::task::spawn_blocking(move || {
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        git_wt.create_workspace(&path, &bookmark, &base)
-                    }))
-                })
-                .await
-                .context("tokio task join error while creating git worktree")?;
-
-                match result {
-                    Ok(Ok(())) => {},
-                    Ok(Err(e)) => return Err(e).context("Failed to create git worktree"),
-                    Err(panic_val) => {
-                        let msg = panic_val
-                            .downcast_ref::<String>()
-                            .map(|s| s.as_str())
-                            .or_else(|| panic_val.downcast_ref::<&str>().copied())
-                            .unwrap_or("unknown panic");
-                        return Err(anyhow!("git worktree creation panicked: {}", msg));
-                    }
-                }
-            }
-
-            let mut env_vars = HashMap::new();
-            env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            // Session ID = birth-branch (the new branch name)
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), branch_name.clone());
-            if let Some(port) = self.mcp_server_port {
-                env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
-            }
+            let mut env_vars = self.common_spawn_env(&internal_name, &branch_name);
 
             // Write .gemini/settings.json in worktree root
             self.write_agent_mcp_config(effective_project_dir, &worktree_path, AgentType::Gemini, "dev")
@@ -1600,6 +1337,12 @@ impl AgentControlService {
                 }
             }
 
+            // Skip SharedDir (worker pane) agents — their liveness can't be
+            // reliably detected via tab queries, so "Stopped" may be wrong.
+            if agent.topology == Topology::SharedDir {
+                continue;
+            }
+
             // Only clean up stopped agents (no running tab)
             if agent.status == AgentStatus::Stopped {
                 info!(issue_id = %agent.issue_id, "Agent is stopped, marking for cleanup");
@@ -1775,6 +1518,109 @@ impl AgentControlService {
             .context("Not running inside a Zellij session (ZELLIJ_SESSION_NAME not set)")
     }
 
+    /// Build a `Command` for `zellij` with session targeting.
+    ///
+    /// Every zellij CLI invocation must target the correct session via
+    /// `ZELLIJ_SESSION_NAME`. Without it, commands can hang or target the wrong session.
+    fn zellij_cmd(&self) -> Command {
+        let mut cmd = Command::new("zellij");
+        if let Some(ref session) = self.zellij_session {
+            cmd.env("ZELLIJ_SESSION_NAME", session);
+        }
+        cmd
+    }
+
+    /// Clean up an existing worktree (if present) and create a fresh one.
+    ///
+    /// Consolidates the idempotent cleanup + spawn_blocking + catch_unwind boilerplate
+    /// shared across spawn_agent, spawn_subtree, spawn_leaf_subtree, and spawn_gemini_teammate.
+    async fn create_worktree_checked(
+        &self,
+        worktree_path: &Path,
+        branch_name: &str,
+        base_branch: &str,
+    ) -> Result<()> {
+        if worktree_path.exists() {
+            info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
+            let git_wt = self.git_wt.clone();
+            let path = worktree_path.to_path_buf();
+            match tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await {
+                Err(join_err) => {
+                    warn!(error = %join_err, "Join error while removing existing workspace (non-fatal)");
+                }
+                Ok(Err(e)) => {
+                    warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
+                }
+                Ok(Ok(_)) => {}
+            }
+        }
+
+        info!(
+            base_branch = %base_branch,
+            branch_name = %branch_name,
+            worktree_path = %worktree_path.display(),
+            "Creating git worktree"
+        );
+
+        let git_wt = self.git_wt.clone();
+        let path = worktree_path.to_path_buf();
+        let bookmark = crate::domain::BranchName::from(branch_name);
+        let base = crate::domain::BranchName::from(base_branch);
+        let result = tokio::task::spawn_blocking(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                git_wt.create_workspace(&path, &bookmark, &base)
+            }))
+        })
+        .await
+        .context("tokio task join error while creating git worktree")?;
+
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(e).context("Failed to create git worktree"),
+            Err(panic_val) => {
+                let msg = panic_val
+                    .downcast_ref::<String>()
+                    .map(|s| s.as_str())
+                    .or_else(|| panic_val.downcast_ref::<&str>().copied())
+                    .unwrap_or("unknown panic");
+                return Err(anyhow!("git worktree creation panicked: {}", msg));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Build the common env vars shared by all spawn functions.
+    fn common_spawn_env(
+        &self,
+        internal_name: &str,
+        session_id: &str,
+    ) -> HashMap<String, String> {
+        let mut env_vars = HashMap::new();
+        env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.to_string());
+        env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session_id.to_string());
+        if let Some(port) = self.mcp_server_port {
+            env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
+        }
+        env_vars
+    }
+
+    /// Emit an agent:started event if zellij_session is configured.
+    fn emit_agent_started(&self, internal_name: &str) -> Result<()> {
+        if let Some(ref session) = self.zellij_session {
+            let agent_id = crate::ui_protocol::AgentId::try_from(internal_name.to_string())
+                .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
+            let event = crate::ui_protocol::AgentEvent::AgentStarted {
+                agent_id,
+                timestamp: zellij_events::now_iso8601(),
+            };
+            if let Err(e) = zellij_events::emit_event(session, &event) {
+                warn!("Failed to emit agent:started event: {}", e);
+            }
+        }
+        Ok(())
+    }
+
     #[tracing::instrument(skip(self, prompt, env_vars))]
     async fn new_zellij_tab(
         &self,
@@ -1809,7 +1655,7 @@ impl AgentControlService {
                 let escaped_prompt = Self::escape_for_shell_command(p);
                 let escaped_session = Self::escape_for_shell_command(session_id);
                 format!(
-                    "{}{} --resume {} --fork-session -p {}",
+                    "{}{} --resume {} --fork-session {}",
                     cmd, skip_perms, escaped_session, escaped_prompt
                 )
             }
@@ -1876,7 +1722,7 @@ impl AgentControlService {
             cwd,
             shell: &shell,
             focus: true,
-            close_on_exit: true,
+            close_on_exit: false,
         };
 
         let layout_content = crate::layout::generate_agent_layout(&params)
@@ -1899,22 +1745,15 @@ impl AgentControlService {
             .await
             .context("Failed to write temporary layout file")?;
 
-        debug!(
+        info!(
             layout_file = %layout_file.display(),
-            "Generated temporary Zellij layout"
-        );
-
-        // Log the command we're about to execute
-        debug!(
-            name,
-            layout_file = %layout_file.display(),
-            "Executing zellij action new-tab"
+            "Generated Zellij layout (preserved for inspection)"
         );
 
         // Create tab with layout - wait for zellij action to complete before deleting temp file
         // Note: zellij action new-tab returns quickly after reading the layout,
         // it doesn't wait for the spawned pane command to finish
-        let mut cmd = Command::new("zellij");
+        let mut cmd = self.zellij_cmd();
         cmd.args([
             "action",
             "new-tab",
@@ -1923,13 +1762,15 @@ impl AgentControlService {
                 .to_str()
                 .ok_or_else(|| anyhow!("Invalid layout file path (utf8 error)"))?,
         ]);
-        if let Some(ref session) = self.zellij_session {
-            cmd.env("ZELLIJ_SESSION_NAME", session);
+        cmd.env("ZELLIJ", "0");
+        if self.zellij_session.is_none() {
+            warn!("No zellij_session configured - new-tab may create a new session!");
         }
         let output = cmd.output().await.context("Failed to run zellij")?;
-
-        // Clean up temp file after zellij has read it
-        let _ = tokio::fs::remove_file(&layout_file).await;
+        debug!(
+            exit_code = %output.status,
+            "zellij action new-tab completed"
+        );
 
         // Check if zellij command failed
         if !output.status.success() {
@@ -1943,7 +1784,7 @@ impl AgentControlService {
         }
 
         // Explicitly rename pane to ensure it matches display_name exactly
-        let _ = Command::new("zellij")
+        let _ = self.zellij_cmd()
             .args(["action", "rename-pane", name])
             .output()
             .await;
@@ -1954,10 +1795,11 @@ impl AgentControlService {
     #[tracing::instrument(skip(self))]
     async fn get_zellij_tabs(&self) -> Result<Vec<String>> {
         debug!("Querying Zellij tab names");
-        let output = Command::new("zellij")
+        let output = timeout(ZELLIJ_TIMEOUT, self.zellij_cmd()
             .args(["action", "query-tab-names"])
-            .output()
+            .output())
             .await
+            .map_err(|_| anyhow!("zellij query-tab-names timed out after {}s", ZELLIJ_TIMEOUT.as_secs()))?
             .context("Failed to execute zellij action query-tab-names")?;
 
         if !output.status.success() {
@@ -1984,7 +1826,7 @@ impl AgentControlService {
         info!(name, "Running zellij action close-tab");
 
         let result = timeout(ZELLIJ_TIMEOUT, async {
-            Command::new("zellij")
+            self.zellij_cmd()
                 .args(["action", "close-tab", "--tab-name", name])
                 .output()
                 .await
@@ -2032,7 +1874,7 @@ impl AgentControlService {
 
         if let Some(tn) = tab_name {
             debug!(tab = %tn, "Switching to tab before spawning pane");
-            let _ = Command::new("zellij")
+            let _ = self.zellij_cmd()
                 .args(["action", "go-to-tab-name", tn])
                 .output()
                 .await;
@@ -2041,7 +1883,7 @@ impl AgentControlService {
         let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd);
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
 
-        let output = Command::new("zellij")
+        let output = self.zellij_cmd()
             .args([
                 "action",
                 "new-pane",
@@ -2049,7 +1891,6 @@ impl AgentControlService {
                 name,
                 "--cwd",
                 &cwd.display().to_string(),
-                "--close-on-exit",
                 "--",
                 &shell,
                 "-l",
@@ -2074,7 +1915,7 @@ impl AgentControlService {
         }
 
         // Explicitly rename pane to ensure it's visible in the UI
-        let _ = Command::new("zellij")
+        let _ = self.zellij_cmd()
             .args(["action", "rename-pane", name])
             .output()
             .await;
