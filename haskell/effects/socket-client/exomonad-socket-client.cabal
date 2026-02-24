@@ -2,9 +2,8 @@ cabal-version:      3.0
 name:               exomonad-socket-client
 version:            0.1.0.0
 synopsis:           Unix socket client for ExoMonad effects
-license:            MIT
-author:             Tidepool Heavy Industries
-maintainer:         engineering@exomonad.io
+license:            BSD-3-Clause
+author:             Inanna Malick
 category:           Network
 build-type:         Simple
 

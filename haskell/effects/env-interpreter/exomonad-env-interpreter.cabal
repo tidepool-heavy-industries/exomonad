@@ -2,9 +2,8 @@ cabal-version:      3.0
 name:               exomonad-env-interpreter
 version:            0.1.0.0
 synopsis:           Env effect interpreter for ExoMonad
-license:            MIT
+license:            BSD-3-Clause
 author:             Inanna Malick
-maintainer:         inanna@malick.com
 category:           Control
 build-type:         Simple
 

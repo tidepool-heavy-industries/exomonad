@@ -4,8 +4,8 @@ version:            0.1.0.0
 synopsis:           LLM effect interpreter - Anthropic client
 description:        Socket-based implementation of LLMComplete effect for Anthropic.
                     Supports Anthropic with type-level provider switch.
-license:            MIT
-author:             Inanna
+license:            BSD-3-Clause
+author:             Inanna Malick
 build-type:         Simple
 
 common defaults

@@ -8,8 +8,8 @@ description:
     Enables graphs to manage isolated git worktrees for parallel agent execution.
     Each worktree gets its own branch and working directory, allowing multiple
     Claude Code sessions to work in parallel without conflicts.
-license:            MIT
-author:             Inanna
+license:            BSD-3-Clause
+author:             Inanna Malick
 build-type:         Simple
 
 common warnings
