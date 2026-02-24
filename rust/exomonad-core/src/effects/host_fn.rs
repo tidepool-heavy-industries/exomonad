@@ -12,7 +12,7 @@ use prost::Message;
 use std::sync::Arc;
 
 /// Convert runtime EffectError to proto EffectError.
-fn to_proto_error(err: &EffectError) -> proto_error::EffectError {
+pub fn to_proto_error(err: &EffectError) -> proto_error::EffectError {
     use proto_error::effect_error::Kind;
 
     let kind = match err {
@@ -116,15 +116,18 @@ fn yield_effect_impl(
         "yield_effect: dispatching"
     );
 
-    // Get context and dispatch
-    let ctx = user_data.get()?;
-    let ctx_lock = ctx.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+    // Clone Arc<EffectRegistry> and EffectContext out of the mutex, then drop the lock.
+    // This prevents holding the UserData mutex across the async dispatch.
+    let (registry, effect_ctx) = {
+        let ctx = user_data.get()?;
+        let guard = ctx.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+        (guard.registry.clone(), guard.ctx.clone())
+    };
 
-    // Block on the async dispatch
-    let result = block_on(ctx_lock.registry.dispatch(
+    let result = block_on(registry.dispatch(
         &envelope.effect_type,
         &envelope.payload,
-        &ctx_lock.ctx,
+        &effect_ctx,
     ))?;
 
     match &result {
