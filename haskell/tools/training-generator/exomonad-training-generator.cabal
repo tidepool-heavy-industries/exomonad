@@ -8,9 +8,8 @@ description:
   Arbitrary instances to generate synthetic edge contexts and heuristic
   scoring to produce ground-truth rubrics.
 
-license:       MIT
-author:        ExoMonad Authors
-maintainer:    dev@exomonad.so
+license:       BSD-3-Clause
+author:        Inanna Malick
 category:      Development
 build-type:    Simple
 

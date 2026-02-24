@@ -4,8 +4,8 @@ version:            0.1.0.0
 synopsis:           Justfile effect interpreter - just CLI client
 description:
     Implements Justfile effect by calling the just CLI tool.
-license:            MIT
-author:             Inanna
+license:            BSD-3-Clause
+author:             Inanna Malick
 build-type:         Simple
 
 common warnings
