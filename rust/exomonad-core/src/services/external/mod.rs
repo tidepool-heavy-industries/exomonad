@@ -47,3 +47,31 @@ pub enum ServiceError {
     #[error("Timeout after {0}ms")]
     Timeout(u64),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_service_error_api_display() {
+        let err = ServiceError::Api {
+            code: 404,
+            message: "Not Found".to_string(),
+        };
+        assert_eq!(err.to_string(), "API error: 404 - Not Found");
+    }
+
+    #[test]
+    fn test_service_error_rate_limited_display() {
+        let err = ServiceError::RateLimited {
+            retry_after_ms: 1000,
+        };
+        assert!(err.to_string().contains("retry after 1000ms"));
+    }
+
+    #[test]
+    fn test_service_error_timeout_display() {
+        let err = ServiceError::Timeout(5000);
+        assert!(err.to_string().contains("Timeout after 5000ms"));
+    }
+}
