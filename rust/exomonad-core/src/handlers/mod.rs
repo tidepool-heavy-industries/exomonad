@@ -105,3 +105,39 @@ macro_rules! impl_pass_through_handler {
         }
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_non_empty_empty() {
+        assert_eq!(non_empty("".to_string()), None);
+    }
+
+    #[test]
+    fn test_non_empty_full() {
+        assert_eq!(non_empty("hello".to_string()), Some("hello".to_string()));
+    }
+
+    #[test]
+    fn test_working_dir_or_default_empty() {
+        assert_eq!(working_dir_or_default("".to_string()), ".");
+    }
+
+    #[test]
+    fn test_working_dir_or_default_path() {
+        assert_eq!(working_dir_or_default("/some/path".to_string()), "/some/path");
+    }
+
+    #[test]
+    fn test_working_dir_path_or_default_empty() {
+        assert_eq!(working_dir_path_or_default(""), PathBuf::from("."));
+    }
+
+    #[test]
+    fn test_working_dir_path_or_default_path() {
+        assert_eq!(working_dir_path_or_default("/some/path"), PathBuf::from("/some/path"));
+    }
+}

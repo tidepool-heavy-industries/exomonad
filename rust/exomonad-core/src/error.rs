@@ -43,3 +43,42 @@ impl From<std::io::Error> for ExoMonadError {
         Self::Io(e)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_from_json() {
+        let json_err = serde_json::from_str::<String>("not valid json").unwrap_err();
+        let exo_err = ExoMonadError::from(json_err);
+        assert!(matches!(exo_err, ExoMonadError::JsonParse { .. }));
+    }
+
+    #[test]
+    fn test_error_from_io() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let exo_err = ExoMonadError::from(io_err);
+        assert!(matches!(exo_err, ExoMonadError::Io(_)));
+    }
+
+    #[test]
+    fn test_error_json_parse_display() {
+        let json_err = serde_json::from_str::<String>("not valid json").unwrap_err();
+        let exo_err = ExoMonadError::JsonParse { source: json_err };
+        assert!(exo_err.to_string().contains("JSON parse error"));
+    }
+
+    #[test]
+    fn test_error_io_display() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let exo_err = ExoMonadError::Io(io_err);
+        assert!(exo_err.to_string().contains("I/O error"));
+    }
+
+    #[test]
+    fn test_error_mcp_server_display() {
+        let exo_err = ExoMonadError::McpServer("test error".to_string());
+        assert!(exo_err.to_string().contains("MCP server error"));
+    }
+}
