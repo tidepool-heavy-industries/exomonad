@@ -230,7 +230,10 @@ impl ActiveWizard {
         );
         // Pop current pane
         self.pane_history.pop();
-        let prev = self.pane_history.last().unwrap().clone();
+        let prev = match self.pane_history.last() {
+            Some(p) => p.clone(),
+            None => return false,
+        };
 
         if let Some(pane) = self.wizard.panes.get(&prev) {
             self.current_pane = prev.clone();
@@ -1282,7 +1285,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                     // Get title and form reference based on mode
                     let (title, breadcrumbs, is_terminal) = match &mode {
                         RenderMode::Wizard => {
-                            let w = self.active_wizard.as_ref().unwrap();
+                            let Some(w) = self.active_wizard.as_ref() else { return };
                             (
                                 format!("{} — {}", w.wizard.title, w.form.definition.title),
                                 Some(w.breadcrumbs()),
@@ -1290,7 +1293,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                             )
                         }
                         RenderMode::Form => {
-                            let f = self.active_form.as_ref().unwrap();
+                            let Some(f) = self.active_form.as_ref() else { return };
                             (f.definition.title.clone(), None, true)
                         }
                     };
@@ -1326,8 +1329,14 @@ impl ZellijPlugin for ExoMonadPlugin {
 
                     // Get form reference for component rendering
                     let form = match &mode {
-                        RenderMode::Wizard => &self.active_wizard.as_ref().unwrap().form,
-                        RenderMode::Form => self.active_form.as_ref().unwrap(),
+                        RenderMode::Wizard => {
+                            let Some(w) = self.active_wizard.as_ref() else { return };
+                            &w.form
+                        }
+                        RenderMode::Form => {
+                            let Some(f) = self.active_form.as_ref() else { return };
+                            f
+                        }
                     };
 
                     let focused_id = form.focused_id().unwrap_or("");
