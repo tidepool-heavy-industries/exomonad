@@ -285,3 +285,54 @@ fn format_parent_notification(agent_id: &str, status: &str, message: &str) -> St
         _ => format!("[CHILD STATUS: {} - {}] {}", agent_id, status, message),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{AgentName, BirthBranch};
+    use crate::effects::EffectContext;
+
+    fn test_ctx() -> EffectContext {
+        EffectContext {
+            agent_name: AgentName::from("test"),
+            birth_branch: BirthBranch::from("main"),
+        }
+    }
+
+    #[test]
+    fn test_format_parent_notification_success() {
+        let msg = format_parent_notification("agent-1", "success", "All done");
+        assert_eq!(msg, "[CHILD COMPLETE: agent-1] All done");
+    }
+
+    #[test]
+    fn test_format_parent_notification_success_empty() {
+        let msg = format_parent_notification("agent-1", "success", "");
+        assert_eq!(msg, "[CHILD COMPLETE: agent-1] Task completed successfully.");
+    }
+
+    #[test]
+    fn test_format_parent_notification_failure() {
+        let msg = format_parent_notification("agent-2", "failure", "Something went wrong");
+        assert_eq!(msg, "[CHILD FAILED: agent-2] Something went wrong");
+    }
+
+    #[test]
+    fn test_format_parent_notification_failure_empty() {
+        let msg = format_parent_notification("agent-2", "failure", "");
+        assert_eq!(msg, "[CHILD FAILED: agent-2] Task failed.");
+    }
+
+    #[test]
+    fn test_format_parent_notification_unknown() {
+        let msg = format_parent_notification("agent-3", "running", "Working...");
+        assert_eq!(msg, "[CHILD STATUS: agent-3 - running] Working...");
+    }
+
+    #[test]
+    fn test_event_handler_namespace() {
+        let queue = Arc::new(EventQueue::new());
+        let handler = EventHandler::new(queue, None, None);
+        assert_eq!(handler.namespace(), "events");
+    }
+}
