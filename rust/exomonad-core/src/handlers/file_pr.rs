@@ -79,3 +79,39 @@ impl FilePrEffects for FilePRHandler {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{AgentName, BirthBranch};
+    use crate::effects::EffectContext;
+    use std::path::PathBuf;
+
+    fn test_ctx(branch: &str) -> EffectContext {
+        EffectContext {
+            agent_name: AgentName::from("test"),
+            birth_branch: BirthBranch::from(branch),
+        }
+    }
+
+    #[test]
+    fn test_namespace() {
+        let git_wt = Arc::new(GitWorktreeService::new(PathBuf::from(".")));
+        let handler = FilePRHandler::new(git_wt);
+        assert_eq!(handler.namespace(), "file_pr");
+    }
+
+    #[test]
+    fn test_resolve_working_dir_root() {
+        let ctx = test_ctx("main");
+        let working_dir = crate::services::agent_control::resolve_agent_working_dir(&ctx);
+        assert_eq!(working_dir, PathBuf::from("."));
+    }
+
+    #[test]
+    fn test_resolve_working_dir_spawned() {
+        let ctx = test_ctx("main.feature");
+        let working_dir = crate::services::agent_control::resolve_agent_working_dir(&ctx);
+        assert_eq!(working_dir, PathBuf::from(".exo/worktrees/feature/"));
+    }
+}
