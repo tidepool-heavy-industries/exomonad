@@ -278,4 +278,48 @@ mod tests {
         registry.register_owned(TestHandler::new("test"));
         registry.register_owned(TestHandler::new("test"));
     }
+
+    struct MockHandler;
+
+    #[async_trait]
+    impl EffectHandler for MockHandler {
+        fn namespace(&self) -> &str {
+            "mock"
+        }
+        async fn handle(
+            &self,
+            _effect_type: &str,
+            _payload: &[u8],
+            _ctx: &EffectContext,
+        ) -> EffectResult<Vec<u8>> {
+            Ok(vec![42])
+        }
+    }
+
+    #[tokio::test]
+    async fn test_registry_empty_dispatch_fails() {
+        let registry = EffectRegistry::new();
+        let result = registry.dispatch("unknown.thing", &[], &test_ctx()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_registry_routes_by_namespace() {
+        let mut registry = EffectRegistry::new();
+        registry.register_owned(MockHandler);
+
+        let result = registry
+            .dispatch("mock.action", &[], &test_ctx())
+            .await
+            .unwrap();
+        assert_eq!(result, vec![42]);
+    }
+
+    #[test]
+    fn test_registry_namespaces_list() {
+        let mut registry = EffectRegistry::new();
+        registry.register_owned(MockHandler);
+        let ns = registry.namespaces();
+        assert_eq!(ns, vec!["mock"]);
+    }
 }
