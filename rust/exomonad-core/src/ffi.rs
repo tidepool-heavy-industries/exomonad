@@ -155,3 +155,137 @@ impl FFIBoundary for u32 {}
 impl FFIBoundary for usize {}
 impl FFIBoundary for u8 {}
 impl FFIBoundary for u16 {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_error_code_serde_roundtrip() {
+        let cases = vec![
+            (ErrorCode::NotFound, "not_found"),
+            (ErrorCode::NotAuthenticated, "not_authenticated"),
+            (ErrorCode::GitError, "git_error"),
+            (ErrorCode::IoError, "io_error"),
+            (ErrorCode::NetworkError, "network_error"),
+            (ErrorCode::InvalidInput, "invalid_input"),
+            (ErrorCode::InternalError, "internal_error"),
+            (ErrorCode::Timeout, "timeout"),
+            (ErrorCode::AlreadyExists, "already_exists"),
+        ];
+
+        for (code, expected_json) in cases {
+            let serialized = serde_json::to_string(&code).unwrap();
+            assert_eq!(serialized, format!("\"{}\"", expected_json));
+
+            let deserialized: ErrorCode = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(deserialized, code);
+        }
+    }
+
+    #[test]
+    fn test_error_code_default() {
+        assert_eq!(ErrorCode::default(), ErrorCode::InternalError);
+    }
+
+    #[test]
+    fn test_ffi_error_serde_full() {
+        let error = FFIError {
+            message: "Test message".to_string(),
+            code: ErrorCode::NotFound,
+            context: Some(ErrorContext {
+                command: Some("git status".to_string()),
+                exit_code: Some(1),
+                stderr: Some("fatal: not a git repository".to_string()),
+                stdout: Some("".to_string()),
+                file_path: Some("/tmp/test".to_string()),
+                working_dir: Some("/tmp".to_string()),
+            }),
+            suggestion: Some("Try git init".to_string()),
+        };
+
+        let serialized = serde_json::to_string(&error).unwrap();
+        let deserialized: FFIError = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, error);
+    }
+
+    #[test]
+    fn test_ffi_error_serde_minimal() {
+        let error = FFIError {
+            message: "Test message".to_string(),
+            code: ErrorCode::InternalError,
+            context: None,
+            suggestion: None,
+        };
+
+        let serialized = serde_json::to_string(&error).unwrap();
+        // context and suggestion should be omitted from JSON
+        assert!(!serialized.contains("\"context\""));
+        assert!(!serialized.contains("\"suggestion\""));
+
+        let deserialized: FFIError = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, error);
+    }
+
+    #[test]
+    fn test_ffi_error_display() {
+        let error = FFIError {
+            message: "Something failed".to_string(),
+            code: ErrorCode::IoError,
+            context: None,
+            suggestion: None,
+        };
+        assert_eq!(format!("{}", error), "[IoError] Something failed");
+    }
+
+    #[test]
+    fn test_ffi_result_success_serde() {
+        let result = FFIResult::Success("payload".to_string());
+        let expected = json!({
+            "kind": "Success",
+            "payload": "payload"
+        });
+
+        let serialized = serde_json::to_value(&result).unwrap();
+        assert_eq!(serialized, expected);
+
+        let deserialized: FFIResult<String> = serde_json::from_value(serialized).unwrap();
+        assert_eq!(deserialized, result);
+    }
+
+    #[test]
+    fn test_ffi_result_error_serde() {
+        let error = FFIError {
+            message: "Fail".to_string(),
+            code: ErrorCode::Timeout,
+            context: None,
+            suggestion: None,
+        };
+        let result: FFIResult<String> = FFIResult::Error(error.clone());
+        let expected = json!({
+            "kind": "Error",
+            "payload": {
+                "message": "Fail",
+                "code": "timeout"
+            }
+        });
+
+        let serialized = serde_json::to_value(&result).unwrap();
+        assert_eq!(serialized, expected);
+
+        let deserialized: FFIResult<String> = serde_json::from_value(serialized).unwrap();
+        assert_eq!(deserialized, result);
+    }
+
+    #[test]
+    fn test_error_context_default() {
+        let default_ctx = ErrorContext::default();
+        assert!(default_ctx.command.is_none());
+        assert!(default_ctx.exit_code.is_none());
+        assert!(default_ctx.stderr.is_none());
+        assert!(default_ctx.stdout.is_none());
+        assert!(default_ctx.file_path.is_none());
+        assert!(default_ctx.working_dir.is_none());
+    }
+}
