@@ -63,3 +63,27 @@ impl PopupEffects for PopupHandler {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::effects::EffectHandler;
+
+    #[test]
+    fn test_namespace() {
+        let handler = PopupHandler::new(None);
+        assert_eq!(handler.namespace(), "popup");
+    }
+
+    #[test]
+    fn test_construction_no_session() {
+        let handler = PopupHandler::new(None);
+        assert_eq!(handler.namespace(), "popup");
+    }
+
+    #[test]
+    fn test_construction_with_session() {
+        let handler = PopupHandler::new(Some("my-session".to_string()));
+        assert_eq!(handler.namespace(), "popup");
+    }
+}
