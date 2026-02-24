@@ -312,10 +312,35 @@ impl PluginManager {
                         "Handling suspended effect"
                     );
 
-                    let effect_result = self
+                    // Dispatch effect — wrap result as EffectResponse protobuf
+                    // (same wire format as yield_effect) so WASM can handle errors gracefully
+                    use exomonad_proto::effects::EffectResponse;
+                    use exomonad_proto::effects::error::effect_response::Result as ResponseResult;
+                    use prost::Message as ProstMessage;
+
+                    let dispatch_result = self
                         .registry
                         .dispatch(&effect.effect_type, &payload_bytes, &self.ctx)
-                        .await?;
+                        .await;
+
+                    let response = match dispatch_result {
+                        Ok(payload) => EffectResponse {
+                            result: Some(ResponseResult::Payload(payload)),
+                        },
+                        Err(ref err) => {
+                            tracing::warn!(
+                                effect_type = %effect.effect_type,
+                                error = %err,
+                                "Effect dispatch failed, wrapping error for WASM"
+                            );
+                            EffectResponse {
+                                result: Some(ResponseResult::Error(
+                                    crate::effects::host_fn::to_proto_error(err),
+                                )),
+                            }
+                        }
+                    };
+                    let effect_result = response.encode_to_vec();
 
                     // Set up resume call
                     current_function = "resume".to_string();
