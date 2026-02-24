@@ -21,7 +21,6 @@ module ExoMonad.Guest.Effects.AgentControl
     spawnWorker,
 
     -- * Interpreters
-    runAgentControl,
     runAgentControlSuspend,
 
     -- * Types
@@ -30,7 +29,7 @@ module ExoMonad.Guest.Effects.AgentControl
   )
 where
 
-import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
+import Control.Monad.Freer (Eff, Member, interpret, send)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.=))
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -112,47 +111,6 @@ spawnWorker name prompt = send (SpawnWorkerC name prompt)
 -- ============================================================================
 -- Interpreter (uses yield_effect via Effect typeclass)
 -- ============================================================================
-
--- | Interpret AgentControl by calling Rust host via yield_effect.
-runAgentControl :: (LastMember IO r) => Eff (AgentControl ': r) a -> Eff r a
-runAgentControl = interpret $ \case
-  SpawnSubtreeC task branchName parentSessionId -> sendM $ do
-    let req =
-          PA.SpawnSubtreeRequest
-            { PA.spawnSubtreeRequestTask = fromText task,
-              PA.spawnSubtreeRequestBranchName = fromText branchName,
-              PA.spawnSubtreeRequestParentSessionId = fromText parentSessionId
-            }
-    result <- Agent.spawnSubtree req
-    pure $ case result of
-      Left err -> Left (T.pack (show err))
-      Right resp -> case PA.spawnSubtreeResponseAgent resp of
-        Nothing -> Left "SpawnSubtree succeeded but no agent info returned"
-        Just info -> Right (protoAgentInfoToSpawnResult info)
-  SpawnLeafSubtreeC task branchName -> sendM $ do
-    let req =
-          PA.SpawnLeafSubtreeRequest
-            { PA.spawnLeafSubtreeRequestTask = fromText task,
-              PA.spawnLeafSubtreeRequestBranchName = fromText branchName
-            }
-    result <- Agent.spawnLeafSubtree req
-    pure $ case result of
-      Left err -> Left (T.pack (show err))
-      Right resp -> case PA.spawnLeafSubtreeResponseAgent resp of
-        Nothing -> Left "SpawnLeafSubtree succeeded but no agent info returned"
-        Just info -> Right (protoAgentInfoToSpawnResult info)
-  SpawnWorkerC name prompt -> sendM $ do
-    let req =
-          PA.SpawnWorkerRequest
-            { PA.spawnWorkerRequestName = fromText name,
-              PA.spawnWorkerRequestPrompt = fromText prompt
-            }
-    result <- Agent.spawnWorker req
-    pure $ case result of
-      Left err -> Left (T.pack (show err))
-      Right resp -> case PA.spawnWorkerResponseAgent resp of
-        Nothing -> Left "SpawnWorker succeeded but no agent info returned"
-        Just info -> Right (protoAgentInfoToSpawnResult info)
 
 -- | Interpret AgentControl via coroutine suspend (trampoline path).
 -- Effects dispatched async without holding the WASM plugin lock.

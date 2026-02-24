@@ -14,15 +14,17 @@ module ExoMonad.Types
 where
 
 import Control.Monad (void)
-import Control.Monad.Freer (Eff, sendM)
+import Control.Monad.Freer (Eff)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KM
 import Data.Text (Text)
 import Data.Text.Lazy qualified as TL
+import ExoMonad.Effects.Log (LogError, LogInfo)
 import ExoMonad.Effects.Log qualified as Log
 import ExoMonad.Effects.Session qualified as Session
 import ExoMonad.Guest.Tool.Suspend.Types (SuspendYield)
+import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), HookSpecificOutput (..), StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
 import GHC.Generics (Generic)
 
@@ -72,7 +74,8 @@ defaultHooks =
 defaultSessionStartHook :: HookInput -> Eff HookEffects HookOutput
 defaultSessionStartHook hookInput = do
   let claudeUuid = hiSessionId hookInput
-  sendM $ void $ Session.registerClaudeSession claudeUuid
+  void $ suspendEffect_ @Session.SessionRegisterClaudeId
+    (Session.RegisterClaudeSessionRequest { Session.registerClaudeSessionRequestClaudeSessionId = TL.fromStrict claudeUuid })
   let instruction = "Create a team using TeamCreate before proceeding."
   pure $
     HookOutput
@@ -93,32 +96,30 @@ teamRegistrationPostToolUse hookInput =
       case extractTeamName (hiToolResponse hookInput) of
         Just teamName -> do
           let inboxName = "team-lead"
-          teamResult <- sendM $ Session.registerTeam teamName inboxName
+          teamResult <- suspendEffect @Session.SessionRegisterTeam
+            (Session.RegisterTeamRequest
+              { Session.registerTeamRequestTeamName = TL.fromStrict teamName,
+                Session.registerTeamRequestInboxName = TL.fromStrict inboxName
+              })
           case teamResult of
             Left _err ->
-              sendM $
-                void $
-                  Log.logError
-                    Log.ErrorRequest
-                      { Log.errorRequestMessage = TL.fromStrict $ "[PostToolUse] registerTeam failed for team: " <> teamName,
-                        Log.errorRequestFields = ""
-                      }
-            Right _ ->
-              sendM $
-                void $
-                  Log.logInfo
-                    Log.InfoRequest
-                      { Log.infoRequestMessage = TL.fromStrict $ "[PostToolUse] Registered team: " <> teamName,
-                        Log.infoRequestFields = ""
-                      }
-        Nothing ->
-          sendM $
-            void $
-              Log.logError
-                Log.ErrorRequest
-                  { Log.errorRequestMessage = "[PostToolUse] TeamCreate response missing team_name field",
+              void $ suspendEffect_ @Log.LogError
+                (Log.ErrorRequest
+                  { Log.errorRequestMessage = TL.fromStrict $ "[PostToolUse] registerTeam failed for team: " <> teamName,
                     Log.errorRequestFields = ""
-                  }
+                  })
+            Right _ ->
+              void $ suspendEffect_ @Log.LogInfo
+                (Log.InfoRequest
+                  { Log.infoRequestMessage = TL.fromStrict $ "[PostToolUse] Registered team: " <> teamName,
+                    Log.infoRequestFields = ""
+                  })
+        Nothing ->
+          void $ suspendEffect_ @Log.LogError
+            (Log.ErrorRequest
+              { Log.errorRequestMessage = "[PostToolUse] TeamCreate response missing team_name field",
+                Log.errorRequestFields = ""
+              })
       pure (postToolUseResponse Nothing)
     _ -> pure (postToolUseResponse Nothing)
 

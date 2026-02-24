@@ -26,28 +26,13 @@ module ExoMonad.Effects.Log
     LogWarn,
     LogEmitEvent,
 
-    -- * Smart Constructors
-    logInfo,
-    logError,
-    logDebug,
-    logWarn,
-    emitEvent,
-    emitStructuredEvent,
-
     -- * Re-exported proto types
     module Effects.Log,
   )
 where
 
-import Control.Monad (void)
-import Data.Aeson (Value)
-import Data.Aeson qualified as Aeson
-import Data.ByteString.Lazy qualified as BSL
-import Data.Text (Text)
-import Data.Text.Lazy qualified as TL
-import Effects.EffectError (EffectError)
 import Effects.Log
-import ExoMonad.Effect.Class (Effect (..), runEffect, runEffect_)
+import ExoMonad.Effect.Class (Effect (..))
 
 -- ============================================================================
 -- Effect phantom types + instances
@@ -87,36 +72,3 @@ instance Effect LogEmitEvent where
   type Input LogEmitEvent = EmitEventRequest
   type Output LogEmitEvent = EmitEventResponse
   effectId = "log.emit_event"
-
--- ============================================================================
--- Smart constructors
--- ============================================================================
-
-logInfo :: InfoRequest -> IO (Either EffectError LogResponse)
-logInfo = runEffect @LogInfo
-
-logError :: ErrorRequest -> IO (Either EffectError LogResponse)
-logError = runEffect @LogError
-
-logDebug :: DebugRequest -> IO (Either EffectError LogResponse)
-logDebug = runEffect @LogDebug
-
-logWarn :: WarnRequest -> IO (Either EffectError LogResponse)
-logWarn = runEffect @LogWarn
-
-emitEvent :: EmitEventRequest -> IO (Either EffectError EmitEventResponse)
-emitEvent = runEffect @LogEmitEvent
-
--- | Fire-and-forget structured event emission.
---
--- Encodes the payload as JSON and sends it via the @log.emit_event@ effect.
--- Failures are silently ignored (fire-and-forget).
-emitStructuredEvent :: Text -> Value -> IO ()
-emitStructuredEvent eventType payload =
-  void $
-    runEffect_ @LogEmitEvent
-      EmitEventRequest
-        { emitEventRequestEventType = TL.fromStrict eventType,
-          emitEventRequestPayload = BSL.toStrict (Aeson.encode payload),
-          emitEventRequestTimestamp = 0
-        }

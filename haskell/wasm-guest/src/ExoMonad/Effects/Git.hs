@@ -28,15 +28,6 @@ module ExoMonad.Effects.Git
     GitGetRepoInfo,
     GitGetWorktree,
 
-    -- * Smart Constructors
-    getBranch,
-    getStatus,
-    getCommits,
-    hasUnpushedCommits,
-    getRemoteUrl,
-    getRepoInfo,
-    getWorktree,
-
     -- * Re-exported proto types
     module Effects.Git,
   )
@@ -44,7 +35,7 @@ where
 
 import Effects.EffectError (EffectError)
 import Effects.Git
-import ExoMonad.Effect.Class (Effect (..), runEffect)
+import ExoMonad.Effect.Class (Effect (..))
 
 -- ============================================================================
 -- Effect phantom types + instances
@@ -98,28 +89,3 @@ instance Effect GitGetWorktree where
   type Input GitGetWorktree = GetWorktreeRequest
   type Output GitGetWorktree = GetWorktreeResponse
   effectId = "git.get_worktree"
-
--- ============================================================================
--- Smart constructors
--- ============================================================================
-
-getBranch :: GetBranchRequest -> IO (Either EffectError GetBranchResponse)
-getBranch = runEffect @GitGetBranch
-
-getStatus :: GetStatusRequest -> IO (Either EffectError GetStatusResponse)
-getStatus = runEffect @GitGetStatus
-
-getCommits :: GetCommitsRequest -> IO (Either EffectError GetCommitsResponse)
-getCommits = runEffect @GitGetCommits
-
-hasUnpushedCommits :: HasUnpushedCommitsRequest -> IO (Either EffectError HasUnpushedCommitsResponse)
-hasUnpushedCommits = runEffect @GitHasUnpushedCommits
-
-getRemoteUrl :: GetRemoteUrlRequest -> IO (Either EffectError GetRemoteUrlResponse)
-getRemoteUrl = runEffect @GitGetRemoteUrl
-
-getRepoInfo :: GetRepoInfoRequest -> IO (Either EffectError GetRepoInfoResponse)
-getRepoInfo = runEffect @GitGetRepoInfo
-
-getWorktree :: GetWorktreeRequest -> IO (Either EffectError GetWorktreeResponse)
-getWorktree = runEffect @GitGetWorktree

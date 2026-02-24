@@ -22,10 +22,6 @@ module ExoMonad.Effects.KV
     KVGet,
     KVSet,
 
-    -- * Smart Constructors
-    kvGet,
-    kvSet,
-
     -- * Re-exported proto types
     module Effects.Kv,
   )
@@ -33,7 +29,7 @@ where
 
 import Effects.EffectError (EffectError)
 import Effects.Kv
-import ExoMonad.Effect.Class (Effect (..), runEffect)
+import ExoMonad.Effect.Class (Effect (..))
 
 -- ============================================================================
 -- Effect phantom types + instances
@@ -52,13 +48,3 @@ instance Effect KVSet where
   type Input KVSet = SetRequest
   type Output KVSet = SetResponse
   effectId = "kv.set"
-
--- ============================================================================
--- Smart constructors
--- ============================================================================
-
-kvGet :: GetRequest -> IO (Either EffectError GetResponse)
-kvGet = runEffect @KVGet
-
-kvSet :: SetRequest -> IO (Either EffectError SetResponse)
-kvSet = runEffect @KVSet

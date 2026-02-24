@@ -19,7 +19,6 @@ module ExoMonad.Guest.Effects.FileSystem
     writeFile,
 
     -- * Interpreters
-    runFileSystem,
     runFileSystemSuspend,
 
     -- * Types
@@ -30,7 +29,7 @@ module ExoMonad.Guest.Effects.FileSystem
   )
 where
 
-import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
+import Control.Monad.Freer (Eff, Member, interpret, send)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effects.EffectError (EffectError)
@@ -96,44 +95,6 @@ writeFile path content createParents = send (WriteFileOp path content createPare
 -- ============================================================================
 -- Interpreter (uses yield_effect via Effect typeclass)
 -- ============================================================================
-
--- | Interpret FileSystem by calling Rust host via yield_effect.
-runFileSystem :: (LastMember IO r) => Eff (FileSystem ': r) a -> Eff r a
-runFileSystem = interpret $ \case
-  ReadFileOp path maxBytes -> sendM $ do
-    let req =
-          Fs.ReadFileRequest
-            { Fs.readFileRequestPath = fromText path,
-              Fs.readFileRequestMaxBytes = fromIntegral maxBytes,
-              Fs.readFileRequestOffset = 0
-            }
-    result <- Fs.readFile req
-    pure $ case result of
-      Left err -> Left (effectErrorToText err)
-      Right resp ->
-        Right
-          ReadFileOutput
-            { rfoContent = toText (Fs.readFileResponseContent resp),
-              rfoBytesRead = fromIntegral (Fs.readFileResponseBytesRead resp),
-              rfoTruncated = Fs.readFileResponseTruncated resp
-            }
-  WriteFileOp path content createParents -> sendM $ do
-    let req =
-          Fs.WriteFileRequest
-            { Fs.writeFileRequestPath = fromText path,
-              Fs.writeFileRequestContent = fromText content,
-              Fs.writeFileRequestCreateParents = createParents,
-              Fs.writeFileRequestAppend = False
-            }
-    result <- Fs.writeFile req
-    pure $ case result of
-      Left err -> Left (effectErrorToText err)
-      Right resp ->
-        Right
-          WriteFileOutput
-            { wfoBytesWritten = fromIntegral (Fs.writeFileResponseBytesWritten resp),
-              wfoPath = toText (Fs.writeFileResponsePath resp)
-            }
 
 -- | Interpret FileSystem via coroutine suspend (trampoline path).
 -- Effects dispatched async without holding the WASM plugin lock.

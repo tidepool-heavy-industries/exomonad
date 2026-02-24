@@ -13,13 +13,6 @@ module ExoMonad.Effects.Fs
     FsListDirectory,
     FsDeleteFile,
 
-    -- * Smart Constructors
-    readFile,
-    writeFile,
-    fileExists,
-    listDirectory,
-    deleteFile,
-
     -- * Re-exported proto types
     module Effects.Fs,
   )
@@ -27,7 +20,7 @@ where
 
 import Effects.EffectError (EffectError)
 import Effects.Fs
-import ExoMonad.Effect.Class (Effect (..), runEffect)
+import ExoMonad.Effect.Class (Effect (..))
 import Prelude hiding (readFile, writeFile)
 
 -- ============================================================================
@@ -68,22 +61,3 @@ instance Effect FsDeleteFile where
   type Input FsDeleteFile = DeleteFileRequest
   type Output FsDeleteFile = DeleteFileResponse
   effectId = "fs.delete_file"
-
--- ============================================================================
--- Smart constructors
--- ============================================================================
-
-readFile :: ReadFileRequest -> IO (Either EffectError ReadFileResponse)
-readFile = runEffect @FsReadFile
-
-writeFile :: WriteFileRequest -> IO (Either EffectError WriteFileResponse)
-writeFile = runEffect @FsWriteFile
-
-fileExists :: FileExistsRequest -> IO (Either EffectError FileExistsResponse)
-fileExists = runEffect @FsFileExists
-
-listDirectory :: ListDirectoryRequest -> IO (Either EffectError ListDirectoryResponse)
-listDirectory = runEffect @FsListDirectory
-
-deleteFile :: DeleteFileRequest -> IO (Either EffectError DeleteFileResponse)
-deleteFile = runEffect @FsDeleteFile

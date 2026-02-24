@@ -10,17 +10,20 @@ module ExoMonad.Guest.Tools.Spawn
   )
 where
 
-import Control.Monad (forM)
-import Control.Monad.Freer (Eff, runM, sendM)
+import Control.Monad (forM, void)
+import Control.Monad.Freer (Eff, sendM)
 import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
+import Data.ByteString.Lazy qualified as BSL
 import Data.Either (partitionEithers)
 import Data.Text (Text)
-import ExoMonad.Effects.Log (emitStructuredEvent)
+import Effects.Log qualified as Log
+import ExoMonad.Effects.Log (LogEmitEvent)
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
 import ExoMonad.Guest.Prompt qualified as P
 import ExoMonad.Guest.Tool.Class
 import ExoMonad.Guest.Tool.Schema (JsonSchema (..), genericToolSchemaWith)
+import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
 import GHC.Generics (Generic)
 
 -- ============================================================================
@@ -50,30 +53,21 @@ instance MCPTool SpawnSubtree where
       [ ("task", "Description of the sub-problem to solve"),
         ("branch_name", "Branch name suffix (will be prefixed with current branch)")
       ]
-  toolHandler args = do
-    result <- runM $ AC.runAgentControl $ AC.spawnSubtree (ssTask args) (ssBranchName args) ""
-    case result of
-      Left err -> pure $ errorResult err
-      Right spawnResult -> do
-        emitStructuredEvent "agent.spawned" $
-          object
-            [ "slug" .= ssBranchName args,
-              "agent_type" .= ("claude" :: Text),
-              "task_summary" .= ssTask args
-            ]
-        pure $ successResult $ Aeson.toJSON spawnResult
-
   toolHandlerEff args = do
-    result <- AC.runAgentControlSuspend $ AC.spawnSubtree (ssTask args) (ssBranchName args) ""
+    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) ""
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
-        sendM $ emitStructuredEvent "agent.spawned" $
-          object
-            [ "slug" .= ssBranchName args,
-              "agent_type" .= ("claude" :: Text),
-              "task_summary" .= ssTask args
-            ]
+        let eventPayload = BSL.toStrict $ Aeson.encode $ object
+              [ "slug" .= ssBranchName args,
+                "agent_type" .= ("claude" :: Text),
+                "task_summary" .= ssTask args
+              ]
+        void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
+          { Log.emitEventRequestEventType = "agent.spawned",
+            Log.emitEventRequestPayload = eventPayload,
+            Log.emitEventRequestTimestamp = 0
+          })
         pure $ successResult $ Aeson.toJSON spawnResult
 
 -- ============================================================================
@@ -103,32 +97,22 @@ instance MCPTool SpawnLeafSubtree where
       [ ("task", "Description of the sub-problem to solve"),
         ("branch_name", "Branch name suffix (will be prefixed with current branch)")
       ]
-  toolHandler args = do
-    let renderedTask = P.render $ P.task (slsTask args) <> P.leafProfile
-    result <- runM $ AC.runAgentControl $ AC.spawnLeafSubtree renderedTask (slsBranchName args)
-    case result of
-      Left err -> pure $ errorResult err
-      Right spawnResult -> do
-        emitStructuredEvent "agent.spawned" $
-          object
-            [ "slug" .= slsBranchName args,
-              "agent_type" .= ("gemini" :: Text),
-              "task_summary" .= slsTask args
-            ]
-        pure $ successResult $ Aeson.toJSON spawnResult
-
   toolHandlerEff args = do
     let renderedTask = P.render $ P.task (slsTask args) <> P.leafProfile
-    result <- AC.runAgentControlSuspend $ AC.spawnLeafSubtree renderedTask (slsBranchName args)
+    result <- AC.spawnLeafSubtree renderedTask (slsBranchName args)
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
-        sendM $ emitStructuredEvent "agent.spawned" $
-          object
-            [ "slug" .= slsBranchName args,
-              "agent_type" .= ("gemini" :: Text),
-              "task_summary" .= slsTask args
-            ]
+        let eventPayload = BSL.toStrict $ Aeson.encode $ object
+              [ "slug" .= slsBranchName args,
+                "agent_type" .= ("gemini" :: Text),
+                "task_summary" .= slsTask args
+              ]
+        void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
+          { Log.emitEventRequestEventType = "agent.spawned",
+            Log.emitEventRequestPayload = eventPayload,
+            Log.emitEventRequestTimestamp = 0
+          })
         pure $ successResult $ Aeson.toJSON spawnResult
 
 -- ============================================================================
@@ -203,40 +187,6 @@ instance MCPTool SpawnWorkers where
     genericToolSchemaWith @SpawnWorkersArgs
       [ ("specs", "Array of worker specifications")
       ]
-  toolHandler args = do
-    results <- forM (swsSpecs args) $ \spec -> do
-      let prompt = case wsPrompt spec of
-            Just p -> p
-            Nothing ->
-              P.render $
-                P.task (wsTask spec)
-                  <> maybe mempty P.boundary (wsBoundary spec)
-                  <> maybe mempty P.readFirst (wsReadFirst spec)
-                  <> maybe mempty P.steps (wsSteps spec)
-                  <> maybe mempty P.context (wsContext spec)
-                  <> maybe mempty P.verify (wsVerify spec)
-                  <> maybe mempty P.doneCriteria (wsDoneCriteria spec)
-                  <> P.workerProfile
-
-      r <- runM $ AC.runAgentControl $ AC.spawnWorker (wsName spec) prompt
-      case r of
-        Right _ ->
-          emitStructuredEvent "agent.spawned" $
-            object
-              [ "slug" .= wsName spec,
-                "agent_type" .= ("gemini-worker" :: Text),
-                "task_summary" .= wsTask spec
-              ]
-        Left _ -> pure ()
-      pure r
-    let (errs, successes) = partitionEithers results
-    pure $
-      successResult $
-        object
-          [ "spawned" .= map Aeson.toJSON successes,
-            "errors" .= map Aeson.String errs
-          ]
-
   toolHandlerEff args = do
     results <- forM (swsSpecs args) $ \spec -> do
       let prompt = case wsPrompt spec of
@@ -251,15 +201,19 @@ instance MCPTool SpawnWorkers where
                   <> maybe mempty P.verify (wsVerify spec)
                   <> maybe mempty P.doneCriteria (wsDoneCriteria spec)
                   <> P.workerProfile
-      r <- AC.runAgentControlSuspend $ AC.spawnWorker (wsName spec) prompt
+      r <- AC.spawnWorker (wsName spec) prompt
       case r of
-        Right _ ->
-          sendM $ emitStructuredEvent "agent.spawned" $
-            object
-              [ "slug" .= wsName spec,
-                "agent_type" .= ("gemini-worker" :: Text),
-                "task_summary" .= wsTask spec
-              ]
+        Right _ -> do
+          let eventPayload = BSL.toStrict $ Aeson.encode $ object
+                [ "slug" .= wsName spec,
+                  "agent_type" .= ("gemini-worker" :: Text),
+                  "task_summary" .= wsTask spec
+                ]
+          void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
+            { Log.emitEventRequestEventType = "agent.spawned",
+              Log.emitEventRequestPayload = eventPayload,
+              Log.emitEventRequestTimestamp = 0
+            })
         Left _ -> pure ()
       pure r
     let (errs, successes) = partitionEithers results

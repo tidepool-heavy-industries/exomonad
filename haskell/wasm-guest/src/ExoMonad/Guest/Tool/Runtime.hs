@@ -27,11 +27,11 @@ import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Lazy qualified as TL
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
 import Data.Vector qualified as V
 import Effects.Events qualified as ProtoEvents
 import Effects.Log qualified as Log
-import ExoMonad.Effect.Class (runEffect_)
 import ExoMonad.Effects.Events qualified as Events
 import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
 import ExoMonad.Guest.Continuations (retrieveContinuation)
@@ -40,6 +40,7 @@ import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), WasmResult (..), toMCPForm
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
 import ExoMonad.Guest.Tool.Suspend (statusToWasmResult)
+import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Types (HookEventType (..), HookInput (..), HookOutput, MCPCallInput (..), Runtime (..), StopDecision (..), StopHookOutput (..), allowResponse)
 import ExoMonad.PDK (input, output)
 import ExoMonad.Types (HookConfig (..), HookEffects)
@@ -47,15 +48,21 @@ import Foreign.C.Types (CInt (..))
 import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName)
 
+-- | Run an effectful hook, converting to WasmResult.
+runHookEff :: (ToJSON a) => Eff HookEffects a -> IO (WasmResult a)
+runHookEff eff = do
+  status <- runM (runC eff)
+  statusToWasmResult status
+
 -- | Helper for fire-and-forget logging via yield_effect.
 logInfo_ :: Text -> IO ()
-logInfo_ msg = void $ runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = fromText msg, Log.infoRequestFields = ""})
+logInfo_ msg = void $ runHookEff $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = fromText msg, Log.infoRequestFields = ""})
 
 logError_ :: Text -> IO ()
-logError_ msg = void $ runEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = fromText msg, Log.errorRequestFields = ""})
+logError_ msg = void $ runHookEff $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = fromText msg, Log.errorRequestFields = ""})
 
 emitEvent_ :: Value -> IO ()
-emitEvent_ val = void $ runEffect_ @LogEmitEvent (Log.EmitEventRequest {Log.emitEventRequestEventType = "custom", Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode val), Log.emitEventRequestTimestamp = 0})
+emitEvent_ val = void $ runHookEff $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest {Log.emitEventRequestEventType = "custom", Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode val), Log.emitEventRequestTimestamp = 0})
 
 -- | MCP call handler - dispatches to tools based on a record.
 mcpHandlerRecord :: forall tools. (DispatchRecord tools) => tools AsHandler -> IO CInt
@@ -127,7 +134,7 @@ parseResumeInput val = flip (maybe (Left "Invalid input format")) (parseMaybe pa
 listHandlerRecord :: forall tools. (ReifyRecord tools) => IO CInt
 listHandlerRecord = do
   let tools = map toMCPFormat (reifyToolDefs (Proxy @tools))
-  output (BSL.toStrict $ Aeson.encode tools)
+  output (BSL.toStrict $ Aeson.encode (Done tools))
   pure 0
 
 -- | Hook handler - handles PreToolUse, SessionEnd, and SubagentStop hooks.
@@ -169,15 +176,13 @@ hookHandler config = do
   where
     handleSessionStart :: HookInput -> (HookInput -> Eff HookEffects HookOutput) -> IO CInt
     handleSessionStart hookInput hook = do
-      status <- runM $ runC (hook hookInput)
-      result <- statusToWasmResult status
+      result <- runHookEff (hook hookInput)
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
 
     handlePreToolUse :: HookInput -> (HookInput -> Eff HookEffects HookOutput) -> IO CInt
     handlePreToolUse hookInput hook = do
-      status <- runM $ runC (hook hookInput)
-      result <- statusToWasmResult status
+      result <- runHookEff (hook hookInput)
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
 
@@ -205,8 +210,7 @@ hookHandler config = do
       emitEvent_ event
 
       -- Run the hook from config (using Freer effects)
-      status <- runM $ runC (hook hookInput)
-      result <- statusToWasmResult status
+      result <- runHookEff (hook hookInput)
 
       -- Check if runtime is Gemini and override Block to Allow
       -- Fix for infinite loop: Gemini agents retry forever on block
@@ -239,27 +243,29 @@ hookHandler config = do
 handleWorkerExit :: HookInput -> IO CInt
 handleWorkerExit hookInput = do
   logInfo_ "WorkerExit hook firing"
-  let maybeAgentId = hiAgentId hookInput
+  result <- runHookEff $ do
+    let maybeAgentId = hiAgentId hookInput
+    case maybeAgentId of
+      Just agentId -> do
+        let actualStatus = fromMaybe "success" (hiExitStatus hookInput)
+        let statusMsg = case actualStatus of
+              "success" -> "Worker " <> agentId <> " completed successfully"
+              other -> "Worker " <> agentId <> " exited with status: " <> other
 
-  case maybeAgentId of
-    Just agentId -> do
-      logInfo_ $ "Handling exit for agent: " <> agentId
+        res <- suspendEffect @Events.EventsNotifyParent
+                (ProtoEvents.NotifyParentRequest
+                  { ProtoEvents.notifyParentRequestAgentId = TL.fromStrict agentId,
+                    ProtoEvents.notifyParentRequestStatus = TL.fromStrict actualStatus,
+                    ProtoEvents.notifyParentRequestMessage = TL.fromStrict statusMsg
+                  })
+        case res of
+          Left err -> void $ suspendEffect_ @LogError (Log.ErrorRequest { Log.errorRequestMessage = TL.fromStrict ("Failed to notify completion to parent: " <> T.pack (show err)), Log.errorRequestFields = "" })
+          Right _ -> void $ suspendEffect_ @LogInfo (Log.InfoRequest { Log.infoRequestMessage = TL.fromStrict ("Completion notified for " <> agentId), Log.infoRequestFields = "" })
+      Nothing -> do
+        void $ suspendEffect_ @LogError (Log.ErrorRequest { Log.errorRequestMessage = "agent_id missing from hook input", Log.errorRequestFields = "" })
+    pure (allowResponse Nothing)
 
-      let actualStatus = fromMaybe "success" (hiExitStatus hookInput)
-      let statusMsg = case actualStatus of
-            "success" -> "Worker " <> agentId <> " completed successfully"
-            other -> "Worker " <> agentId <> " exited with status: " <> other
-
-      res <- try @SomeException (Events.notifyParent agentId actualStatus statusMsg)
-      case res of
-        Left exc -> logError_ ("notifyParent threw exception: " <> T.pack (show exc))
-        Right (Left err) -> logError_ ("Failed to notify completion to parent: " <> T.pack (show err))
-        Right (Right _) -> logInfo_ ("Completion notified for " <> agentId)
-    Nothing -> do
-      logError_ "agent_id missing from hook input"
-      pure ()
-
-  output (BSL.toStrict $ Aeson.encode $ allowResponse Nothing)
+  output (BSL.toStrict $ Aeson.encode result)
   pure 0
 
 -- | Wrap a handler with exception handling.

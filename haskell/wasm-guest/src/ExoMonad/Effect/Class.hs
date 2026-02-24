@@ -43,10 +43,6 @@ module ExoMonad.Effect.Class
   ( -- * Core Typeclass
     Effect (..),
 
-    -- * Running Effects
-    runEffect,
-    runEffect_,
-
     -- * Re-exports
     EffectError (..),
     EffectErrorKind (..),
@@ -55,7 +51,7 @@ where
 
 import Data.Kind (Type)
 import Data.Text.Lazy (Text)
-import ExoMonad.Guest.Effect (EffectError (..), EffectErrorKind (..), yieldEffect, yieldEffect_)
+import Effects.EffectError (EffectError (..), EffectErrorKind (..))
 import Proto3.Suite.Class (Message)
 
 -- | Typeclass for typed effects.
@@ -87,40 +83,3 @@ class Effect (e :: Type) where
   -- | The effect identifier (namespace.effect_name).
   -- Must match the Rust handler's namespace and effect name.
   effectId :: Text
-
--- | Run a typed effect.
---
--- This is the primary way to invoke effects with full type safety.
--- The effect ID is derived from the Effect instance.
---
--- @
--- result <- runEffect @GitGetBranch (GetBranchRequest ".")
--- case result of
---   Left err -> handleError err
---   Right resp -> use (getBranchResponseBranch resp)
--- @
-runEffect ::
-  forall e.
-  ( Effect e,
-    Message (Input e),
-    Message (Output e)
-  ) =>
-  Input e ->
-  IO (Either EffectError (Output e))
-runEffect input = yieldEffect (effectId @e) input
-
--- | Run a typed effect that returns no meaningful response.
---
--- Use this for fire-and-forget effects where you only care about success/failure.
---
--- @
--- result <- runEffect_ @LogInfo (InfoRequest "Starting process" Nothing)
--- @
-runEffect_ ::
-  forall e.
-  ( Effect e,
-    Message (Input e)
-  ) =>
-  Input e ->
-  IO (Either EffectError ())
-runEffect_ input = yieldEffect_ (effectId @e) input

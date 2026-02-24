@@ -18,18 +18,6 @@ module ExoMonad.Effects.Agent
     AgentCleanupMerged,
     AgentList,
 
-    -- * Smart Constructors
-    spawnAgent,
-    spawnBatch,
-    spawnGeminiTeammate,
-    spawnWorker,
-    spawnSubtree,
-    spawnLeafSubtree,
-    cleanupAgent,
-    cleanupBatch,
-    cleanupMerged,
-    listAgents,
-
     -- * Re-exported proto types
     module Effects.Agent,
   )
@@ -37,7 +25,7 @@ where
 
 import Effects.Agent
 import Effects.EffectError (EffectError)
-import ExoMonad.Effect.Class (Effect (..), runEffect)
+import ExoMonad.Effect.Class (Effect (..))
 
 -- ============================================================================
 -- Effect phantom types + instances
@@ -112,37 +100,3 @@ instance Effect AgentList where
   type Input AgentList = ListRequest
   type Output AgentList = ListResponse
   effectId = "agent.list"
-
--- ============================================================================
--- Smart constructors
--- ============================================================================
-
-spawnAgent :: SpawnRequest -> IO (Either EffectError SpawnResponse)
-spawnAgent = runEffect @AgentSpawn
-
-spawnBatch :: SpawnBatchRequest -> IO (Either EffectError SpawnBatchResponse)
-spawnBatch = runEffect @AgentSpawnBatch
-
-spawnGeminiTeammate :: SpawnGeminiTeammateRequest -> IO (Either EffectError SpawnGeminiTeammateResponse)
-spawnGeminiTeammate = runEffect @AgentSpawnGeminiTeammate
-
-spawnWorker :: SpawnWorkerRequest -> IO (Either EffectError SpawnWorkerResponse)
-spawnWorker = runEffect @AgentSpawnWorker
-
-spawnSubtree :: SpawnSubtreeRequest -> IO (Either EffectError SpawnSubtreeResponse)
-spawnSubtree = runEffect @AgentSpawnSubtree
-
-spawnLeafSubtree :: SpawnLeafSubtreeRequest -> IO (Either EffectError SpawnLeafSubtreeResponse)
-spawnLeafSubtree = runEffect @AgentSpawnLeafSubtree
-
-cleanupAgent :: CleanupRequest -> IO (Either EffectError CleanupResponse)
-cleanupAgent = runEffect @AgentCleanup
-
-cleanupBatch :: CleanupBatchRequest -> IO (Either EffectError CleanupBatchResponse)
-cleanupBatch = runEffect @AgentCleanupBatch
-
-cleanupMerged :: CleanupMergedRequest -> IO (Either EffectError CleanupMergedResponse)
-cleanupMerged = runEffect @AgentCleanupMerged
-
-listAgents :: ListRequest -> IO (Either EffectError ListResponse)
-listAgents = runEffect @AgentList

@@ -28,15 +28,6 @@ module ExoMonad.Effects.GitHub
     GitHubGetPullRequestReviewComments,
     GitHubCreatePullRequest,
 
-    -- * Smart Constructors
-    listIssues,
-    getIssue,
-    listPullRequests,
-    getPullRequest,
-    getPullRequestForBranch,
-    getPullRequestReviewComments,
-    createPullRequest,
-
     -- * Re-exported proto types
     module Effects.Github,
   )
@@ -44,7 +35,7 @@ where
 
 import Effects.EffectError (EffectError)
 import Effects.Github
-import ExoMonad.Effect.Class (Effect (..), runEffect)
+import ExoMonad.Effect.Class (Effect (..))
 
 -- ============================================================================
 -- Effect phantom types + instances
@@ -98,28 +89,3 @@ instance Effect GitHubCreatePullRequest where
   type Input GitHubCreatePullRequest = CreatePullRequestRequest
   type Output GitHubCreatePullRequest = CreatePullRequestResponse
   effectId = "github.create_pull_request"
-
--- ============================================================================
--- Smart constructors
--- ============================================================================
-
-listIssues :: ListIssuesRequest -> IO (Either EffectError ListIssuesResponse)
-listIssues = runEffect @GitHubListIssues
-
-getIssue :: GetIssueRequest -> IO (Either EffectError GetIssueResponse)
-getIssue = runEffect @GitHubGetIssue
-
-listPullRequests :: ListPullRequestsRequest -> IO (Either EffectError ListPullRequestsResponse)
-listPullRequests = runEffect @GitHubListPullRequests
-
-getPullRequest :: GetPullRequestRequest -> IO (Either EffectError GetPullRequestResponse)
-getPullRequest = runEffect @GitHubGetPullRequest
-
-getPullRequestForBranch :: GetPullRequestForBranchRequest -> IO (Either EffectError GetPullRequestForBranchResponse)
-getPullRequestForBranch = runEffect @GitHubGetPullRequestForBranch
-
-getPullRequestReviewComments :: GetPullRequestReviewCommentsRequest -> IO (Either EffectError GetPullRequestReviewCommentsResponse)
-getPullRequestReviewComments = runEffect @GitHubGetPullRequestReviewComments
-
-createPullRequest :: CreatePullRequestRequest -> IO (Either EffectError CreatePullRequestResponse)
-createPullRequest = runEffect @GitHubCreatePullRequest

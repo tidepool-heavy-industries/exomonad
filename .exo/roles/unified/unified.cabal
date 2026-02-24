@@ -49,4 +49,6 @@ executable wasm-guest-unified
     build-depends:
         base,
         wasm-guest:wasm-guest-internal,
-        exomonad-pdk
+        exomonad-pdk,
+        exomonad-proto,
+        proto3-runtime

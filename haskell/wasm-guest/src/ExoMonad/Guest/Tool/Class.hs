@@ -7,9 +7,6 @@ module ExoMonad.Guest.Tool.Class
   ( -- * Tool typeclass
     MCPTool (..),
 
-    -- * Dispatch typeclass
-    DispatchTools (..),
-
     -- * Tool definition (for serialization)
     ToolDefinition (..),
     toMCPFormat,
@@ -21,7 +18,6 @@ module ExoMonad.Guest.Tool.Class
     EffectRequest (..),
     successResult,
     errorResult,
-    liftEffect,
 
     -- * Coroutine suspension
     SuspendYield,
@@ -102,14 +98,6 @@ successResult v = MCPCallOutput True (Just v) Nothing
 errorResult :: Text -> MCPCallOutput
 errorResult msg = MCPCallOutput False Nothing (Just msg)
 
--- | Lift an effectful action that returns Either into MCPCallOutput.
-liftEffect :: (Show e) => IO (Either e a) -> (a -> Value) -> IO MCPCallOutput
-liftEffect action transform = do
-  result <- action
-  case result of
-    Left err -> pure $ errorResult (T.pack (show err))
-    Right resp -> pure $ successResult (transform resp)
-
 -- ============================================================================
 -- Coroutine Suspension
 -- ============================================================================
@@ -156,45 +144,8 @@ class MCPTool (t :: Type) where
   -- | JSON Schema for the input.
   toolSchema :: Value
 
-  -- | Handler that executes the tool (synchronous).
-  toolHandler :: ToolArgs t -> IO MCPCallOutput
-
   -- | Effectful handler that can suspend via coroutine yield.
-  -- Defaults to wrapping the synchronous toolHandler.
   toolHandlerEff :: ToolArgs t -> Eff ToolEffects MCPCallOutput
-  toolHandlerEff args = sendM (toolHandler @t args)
-
--- ============================================================================
--- DispatchTools Typeclass
--- ============================================================================
-
--- | Typeclass for dispatching to a list of tools.
---
--- Derived automatically from a type-level list of tools.
-class DispatchTools (tools :: [Type]) where
-  -- | Dispatch a tool call by name.
-  dispatch :: Text -> Value -> IO (WasmResult MCPCallOutput)
-
-  -- | Get all tool definitions for MCP discovery.
-  toolDefs :: [ToolDefinition]
-
--- Base case: empty list
-instance DispatchTools '[] where
-  dispatch name _ = pure $ Done $ errorResult $ "Unknown tool: " <> name
-  toolDefs = []
-
--- Inductive case: cons
-instance
-  (MCPTool t, FromJSON (ToolArgs t), DispatchTools ts) =>
-  DispatchTools (t ': ts)
-  where
-  dispatch name args
-    | name == toolName @t =
-        case Aeson.fromJSON args of
-          Aeson.Success a -> Done <$> toolHandler @t a
-          Aeson.Error e -> pure $ Done $ errorResult $ "Parse error for " <> name <> ": " <> T.pack e
-    | otherwise = dispatch @ts name args
-  toolDefs = mkToolDef @t : toolDefs @ts
 
 -- ============================================================================
 -- Type-level list append

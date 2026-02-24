@@ -7,19 +7,22 @@ module ExoMonad.Guest.Tools.FilePR
   )
 where
 
+import Control.Monad (void)
+import Control.Monad.Freer (Eff, sendM)
 import Data.Aeson (FromJSON, Value, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
+import Data.ByteString.Lazy qualified as BSL
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Effects.EffectError (EffectError (..))
 import Effects.FilePr qualified as FP
 import Effects.Log qualified as Log
-import ExoMonad.Effect.Class (runEffect, runEffect_)
 import ExoMonad.Effects.FilePR (FilePRFilePr)
-import ExoMonad.Effects.Log (LogError, LogInfo, emitStructuredEvent)
-import ExoMonad.Guest.Tool.Class
+import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
+import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
+import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import GHC.Generics (Generic)
 
 -- | File PR tool marker type.
@@ -70,7 +73,7 @@ instance MCPTool FilePR where
         ("body", "PR body/description"),
         ("base_branch", "Target branch. Auto-detected from dot-separated naming if omitted (main.foo.bar targets main.foo). Only set to override.")
       ]
-  toolHandler args = do
+  toolHandlerEff args = do
 
     let req =
           FP.FilePrRequest
@@ -80,14 +83,14 @@ instance MCPTool FilePR where
             }
 
     -- Log before calling host
-    _ <- runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = "FilePR: Calling file_pr effect", Log.infoRequestFields = ""})
+    void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = "FilePR: Calling file_pr effect", Log.infoRequestFields = ""})
 
-    result <- runEffect @ExoMonad.Effects.FilePR.FilePRFilePr req
+    result <- suspendEffect @FilePRFilePr req
 
     -- Log the result
     case result of
       Left err -> do
-        _ <- runEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("FilePR: effect failed: " <> T.pack (show err)), Log.errorRequestFields = ""})
+        void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("FilePR: effect failed: " <> T.pack (show err)), Log.errorRequestFields = ""})
         pure $ errorResult (T.pack (show err))
       Right resp -> do
         let output =
@@ -98,13 +101,17 @@ instance MCPTool FilePR where
                   fpoBaseBranch = TL.toStrict (FP.filePrResponseBaseBranch resp),
                   fpoCreated = FP.filePrResponseCreated resp
                 }
-        _ <- runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("FilePR: Success - PR #" <> T.pack (show $ fpoNumber output)), Log.infoRequestFields = ""})
-        emitStructuredEvent "pr.filed" $
-          object
-            [ "pr_number" .= fpoNumber output,
-              "pr_url" .= fpoUrl output,
-              "head_branch" .= fpoHeadBranch output,
-              "base_branch" .= fpoBaseBranch output,
-              "created" .= fpoCreated output
-            ]
+        void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("FilePR: Success - PR #" <> T.pack (show $ fpoNumber output)), Log.infoRequestFields = ""})
+        let eventPayload = BSL.toStrict $ Aeson.encode $ object
+              [ "pr_number" .= fpoNumber output,
+                "pr_url" .= fpoUrl output,
+                "head_branch" .= fpoHeadBranch output,
+                "base_branch" .= fpoBaseBranch output,
+                "created" .= fpoCreated output
+              ]
+        void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
+          { Log.emitEventRequestEventType = "pr.filed",
+            Log.emitEventRequestPayload = eventPayload,
+            Log.emitEventRequestTimestamp = 0
+          })
         pure $ successResult (Aeson.toJSON output)

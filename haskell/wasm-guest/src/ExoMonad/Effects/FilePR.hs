@@ -9,17 +9,13 @@ module ExoMonad.Effects.FilePR
   ( -- * Effect Types
     FilePRFilePr,
 
-    -- * Smart Constructors
-    filePR,
-
     -- * Re-exported proto types
     module Effects.FilePr,
   )
 where
 
-import Effects.EffectError (EffectError)
 import Effects.FilePr
-import ExoMonad.Effect.Class (Effect (..), runEffect)
+import ExoMonad.Effect.Class (Effect (..))
 
 -- ============================================================================
 -- Effect phantom types + instances
@@ -31,10 +27,3 @@ instance Effect FilePRFilePr where
   type Input FilePRFilePr = FilePrRequest
   type Output FilePRFilePr = FilePrResponse
   effectId = "file_pr.file_pr"
-
--- ============================================================================
--- Smart constructors
--- ============================================================================
-
-filePR :: FilePrRequest -> IO (Either EffectError FilePrResponse)
-filePR = runEffect @FilePRFilePr

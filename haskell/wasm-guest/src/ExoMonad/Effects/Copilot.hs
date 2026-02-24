@@ -9,17 +9,13 @@ module ExoMonad.Effects.Copilot
   ( -- * Effect Types
     CopilotWaitForReview,
 
-    -- * Smart Constructors
-    waitForCopilotReview,
-
     -- * Re-exported proto types
     module Effects.Copilot,
   )
 where
 
 import Effects.Copilot
-import Effects.EffectError (EffectError)
-import ExoMonad.Effect.Class (Effect (..), runEffect)
+import ExoMonad.Effect.Class (Effect (..))
 
 -- ============================================================================
 -- Effect phantom types + instances
@@ -31,10 +27,3 @@ instance Effect CopilotWaitForReview where
   type Input CopilotWaitForReview = WaitForCopilotReviewRequest
   type Output CopilotWaitForReview = WaitForCopilotReviewResponse
   effectId = "copilot.wait_for_copilot_review"
-
--- ============================================================================
--- Smart constructors
--- ============================================================================
-
-waitForCopilotReview :: WaitForCopilotReviewRequest -> IO (Either EffectError WaitForCopilotReviewResponse)
-waitForCopilotReview = runEffect @CopilotWaitForReview

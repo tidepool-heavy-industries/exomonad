@@ -11,13 +11,15 @@ module HttpDevHooks
 where
 
 import Control.Monad (void)
-import Control.Monad.Freer (Eff, send)
+import Control.Monad.Freer (Eff)
 import Data.Aeson qualified as Aeson
 import Data.Maybe (fromMaybe)
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Encoding qualified as TLE
-import ExoMonad.Effects.Log qualified as Log
+import Effects.Log qualified as Log
+import ExoMonad.Effects.Log (LogInfo)
 import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
+import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
 import ExoMonad.Guest.Types (HookInput (..), HookOutput, allowResponse, denyResponse, postToolUseResponse)
 import ExoMonad.Permissions (PermissionCheck (..), checkAgentPermissions)
 import ExoMonad.Types (HookConfig (..), HookEffects, defaultSessionStartHook)
@@ -31,8 +33,8 @@ httpDevHooks =
   HookConfig
     { preToolUse = permissionCascade,
       postToolUse = \_ -> pure (postToolUseResponse Nothing),
-      onStop = \_ -> send runStopHookChecks,
-      onSubagentStop = \_ -> send runStopHookChecks,
+      onStop = \_ -> runStopHookChecks,
+      onSubagentStop = \_ -> runStopHookChecks,
       onSessionStart = defaultSessionStartHook
     }
 
@@ -49,7 +51,7 @@ permissionCascade hookInput = do
   let tool = fromMaybe "" (hiToolName hookInput)
       args = fromMaybe (Aeson.Object mempty) (hiToolInput hookInput)
       argsJson = TLE.decodeUtf8 $ Aeson.encode args
-  send $ void $ Log.logInfo $ Log.InfoRequest
+  void $ suspendEffect_ @LogInfo $ Log.InfoRequest
     { Log.infoRequestMessage = "[BeforeTool] tool=" <> TL.fromStrict tool <> " input=" <> argsJson
     , Log.infoRequestFields = ""
     }

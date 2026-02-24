@@ -9,18 +9,21 @@ module ExoMonad.Guest.Tools.MergePR
   )
 where
 
+import Control.Monad (void)
+import Control.Monad.Freer (Eff, sendM)
 import Data.Aeson (FromJSON, Value, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
+import Data.ByteString.Lazy qualified as BSL
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Effects.Log qualified as Log
 import Effects.MergePr qualified as MP
-import ExoMonad.Effect.Class (runEffect, runEffect_)
-import ExoMonad.Effects.Log (LogError, LogInfo, emitStructuredEvent)
+import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
 import ExoMonad.Effects.MergePR (MergePRMergePr)
-import ExoMonad.Guest.Tool.Class
+import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
+import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import GHC.Generics (Generic)
 
 data MergePR
@@ -65,18 +68,18 @@ instance MCPTool MergePR where
         ("strategy", "Merge strategy: squash (default), merge, or rebase"),
         ("working_dir", "Working directory for git operations")
       ]
-  toolHandler args = do
+  toolHandlerEff args = do
     let req =
           MP.MergePrRequest
             { MP.mergePrRequestPrNumber = fromIntegral (mprPrNumber args),
               MP.mergePrRequestStrategy = maybe "" TL.fromStrict (mprStrategy args),
               MP.mergePrRequestWorkingDir = maybe "" TL.fromStrict (mprWorkingDir args)
             }
-    _ <- runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: Merging PR #" <> T.pack (show (mprPrNumber args))), Log.infoRequestFields = ""})
-    result <- runEffect @MergePRMergePr req
+    void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: Merging PR #" <> T.pack (show (mprPrNumber args))), Log.infoRequestFields = ""})
+    result <- suspendEffect @MergePRMergePr req
     case result of
       Left err -> do
-        _ <- runEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("MergePR: failed: " <> T.pack (show err)), Log.errorRequestFields = ""})
+        void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("MergePR: failed: " <> T.pack (show err)), Log.errorRequestFields = ""})
         pure $ errorResult (T.pack (show err))
       Right resp -> do
         let output =
@@ -85,12 +88,16 @@ instance MCPTool MergePR where
                   mpoMessage = TL.toStrict (MP.mergePrResponseMessage resp),
                   mpoGitFetched = MP.mergePrResponseGitFetched resp
                 }
-        _ <- runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: " <> mpoMessage output), Log.infoRequestFields = ""})
-        emitStructuredEvent "pr.merged" $
-          object
-            [ "pr_number" .= mprPrNumber args,
-              "success" .= mpoSuccess output
-            ]
+        void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: " <> mpoMessage output), Log.infoRequestFields = ""})
+        let eventPayload = BSL.toStrict $ Aeson.encode $ object
+              [ "pr_number" .= mprPrNumber args,
+                "success" .= mpoSuccess output
+              ]
+        void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
+          { Log.emitEventRequestEventType = "pr.merged",
+            Log.emitEventRequestPayload = eventPayload,
+            Log.emitEventRequestTimestamp = 0
+          })
         pure $ successResult $
           object
             [ "success" .= mpoSuccess output,
@@ -98,3 +105,4 @@ instance MCPTool MergePR where
               "git_fetched" .= mpoGitFetched output,
               "next" .= ("Verify build: cargo check --workspace. Especially important after parallel merges — changes may interact." :: Text)
             ]
+  

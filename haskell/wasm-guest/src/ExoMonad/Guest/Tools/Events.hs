@@ -8,14 +8,20 @@ module ExoMonad.Guest.Tools.Events
   )
 where
 
+import Control.Monad (void)
+import Control.Monad.Freer (Eff, sendM)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
+import Data.ByteString.Lazy qualified as BSL
 import Data.Text (Text)
 import Data.Text qualified as T
-import ExoMonad.Effects.Events qualified as Events
-import ExoMonad.Effects.Log (emitStructuredEvent)
-import ExoMonad.Guest.Tool.Class (MCPTool (..), liftEffect)
+import Data.Text.Lazy qualified as TL
+import Effects.Log qualified as Log
+import ExoMonad.Effects.Events qualified as ProtoEvents
+import ExoMonad.Effects.Log (LogEmitEvent)
+import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (JsonSchema (..), genericToolSchemaWith)
+import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import GHC.Generics (Generic)
 
 -- | Notify parent tool (for workers/subtrees to call on completion)
@@ -92,20 +98,33 @@ instance MCPTool NotifyParent where
         ("pr_number", "PR number if one was filed. Enables parent to immediately merge without searching."),
         ("tasks_completed", "Array of {what, how} pairs. 'what' = task description, 'how' = verification command that was run.")
       ]
-  toolHandler args = do
-    emitStructuredEvent "agent.completed" $
-      object
-        [ "status" .= npStatus args,
-          "message" .= npMessage args,
-          "pr_number" .= npPrNumber args,
-          "tasks_completed" .= npTasksCompleted args
-        ]
+  toolHandlerEff args = do
+    -- Emit event via suspend
+    let eventPayload = BSL.toStrict $ Aeson.encode $ object
+          [ "status" .= npStatus args,
+            "message" .= npMessage args,
+            "pr_number" .= npPrNumber args,
+            "tasks_completed" .= npTasksCompleted args
+          ]
+    void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
+      { Log.emitEventRequestEventType = "agent.completed",
+        Log.emitEventRequestPayload = eventPayload,
+        Log.emitEventRequestTimestamp = 0
+      })
+
     let richMessage = composeNotifyMessage args
     let statusText = case npStatus args of
           Success -> "success" :: Text
           Failure -> "failure"
-    liftEffect (Events.notifyParent "" statusText richMessage) $ \_ ->
-      object ["success" .= True]
+    result <- suspendEffect @ProtoEvents.EventsNotifyParent
+                (ProtoEvents.NotifyParentRequest
+                  { ProtoEvents.notifyParentRequestAgentId = "",
+                    ProtoEvents.notifyParentRequestStatus = TL.fromStrict statusText,
+                    ProtoEvents.notifyParentRequestMessage = TL.fromStrict richMessage
+                  })
+    case result of
+      Left err -> pure $ errorResult (T.pack (show err))
+      Right _ -> pure $ successResult $ object ["success" .= True]
 
 -- | Compose enriched notification message with PR number and task reports.
 composeNotifyMessage :: NotifyParentArgs -> Text

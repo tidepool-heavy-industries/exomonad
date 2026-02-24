@@ -17,6 +17,7 @@ module ExoMonad.Guest.Tools.Popup
 where
 
 import Control.Applicative ((<|>))
+import Control.Monad.Freer (Eff)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as BL
@@ -25,8 +26,9 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Effects.Popup qualified as PP
-import ExoMonad.Effects.Popup (showPopup)
+import ExoMonad.Effects.Popup (PopupShowPopup)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
+import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect)
 import GHC.Generics (Generic)
 
 -- ============================================================================
@@ -320,9 +322,9 @@ instance MCPTool Popup where
             ],
         "required" .= ([] :: [Text])
       ]
-  toolHandler args = do
+  toolHandlerEff args = do
     let request = toShowPopupRequest args
-    result <- showPopup request
+    result <- suspendEffect @PopupShowPopup request
     case result of
       Left err -> pure $ errorResult (T.pack (show err))
       Right resp ->
