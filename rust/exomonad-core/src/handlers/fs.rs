@@ -177,3 +177,93 @@ impl FilesystemEffects for FsHandler {
         Ok(DeleteFileResponse { deleted: true })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{AgentName, BirthBranch};
+    use crate::effects::{EffectContext, EffectHandler};
+    use tempfile::tempdir;
+
+    fn test_ctx() -> EffectContext {
+        EffectContext {
+            agent_name: AgentName::from("test"),
+            birth_branch: BirthBranch::from("main"),
+        }
+    }
+
+    #[test]
+    fn test_fs_handler_new() {
+        let dir = tempdir().unwrap();
+        let service = Arc::new(FileSystemService::new(dir.path().to_path_buf()));
+        let handler = FsHandler::new(service);
+        assert_eq!(handler.namespace(), "fs");
+    }
+
+    #[tokio::test]
+    async fn test_file_exists() {
+        let dir = tempdir().unwrap();
+        let service = Arc::new(FileSystemService::new(dir.path().to_path_buf()));
+        let handler = FsHandler::new(service);
+        let ctx = test_ctx();
+
+        let file_path = dir.path().join("exists.txt");
+        std::fs::write(&file_path, "hello").unwrap();
+
+        let req = FileExistsRequest {
+            path: file_path.to_string_lossy().to_string(),
+        };
+        let resp = handler.file_exists(req, &ctx).await.unwrap();
+        assert!(resp.exists);
+        assert!(resp.is_file);
+        assert!(!resp.is_directory);
+
+        let req_none = FileExistsRequest {
+            path: dir.path().join("none").to_string_lossy().to_string(),
+        };
+        let resp_none = handler.file_exists(req_none, &ctx).await.unwrap();
+        assert!(!resp_none.exists);
+    }
+
+    #[tokio::test]
+    async fn test_list_directory() {
+        let dir = tempdir().unwrap();
+        let service = Arc::new(FileSystemService::new(dir.path().to_path_buf()));
+        let handler = FsHandler::new(service);
+        let ctx = test_ctx();
+
+        std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+        std::fs::create_dir(dir.path().join("subdir")).unwrap();
+
+        let req = ListDirectoryRequest {
+            path: dir.path().to_string_lossy().to_string(),
+            include_hidden: false,
+            include_metadata: false,
+        };
+        let resp = handler.list_directory(req, &ctx).await.unwrap();
+        assert_eq!(resp.count, 2);
+        let names: std::collections::HashSet<_> =
+            resp.entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains("a.txt"));
+        assert!(names.contains("subdir"));
+    }
+
+    #[tokio::test]
+    async fn test_delete_file() {
+        let dir = tempdir().unwrap();
+        let service = Arc::new(FileSystemService::new(dir.path().to_path_buf()));
+        let handler = FsHandler::new(service);
+        let ctx = test_ctx();
+
+        let file_path = dir.path().join("delete_me.txt");
+        std::fs::write(&file_path, "bye").unwrap();
+
+        let req = DeleteFileRequest {
+            path: file_path.to_string_lossy().to_string(),
+            recursive: false,
+        };
+        let resp = handler.delete_file(req, &ctx).await.unwrap();
+        assert!(resp.deleted);
+        assert!(!file_path.exists());
+    }
+}

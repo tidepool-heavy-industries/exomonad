@@ -173,3 +173,46 @@ impl LogEffects for LogHandler {
         Ok(EmitEventResponse { event_id })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{AgentName, BirthBranch};
+    use crate::effects::EffectContext;
+
+    fn test_ctx() -> EffectContext {
+        EffectContext {
+            agent_name: AgentName::from("test"),
+            birth_branch: BirthBranch::from("main"),
+        }
+    }
+
+    #[test]
+    fn test_log_handler_new() {
+        let handler = LogHandler::new();
+        assert!(handler.event_log.is_none());
+    }
+
+    #[test]
+    fn test_log_handler_default() {
+        let handler = LogHandler::default();
+        assert!(handler.event_log.is_none());
+    }
+
+    #[test]
+    fn test_log_handler_namespace() {
+        let handler = LogHandler::new();
+        assert_eq!(handler.namespace(), "log");
+    }
+
+    #[test]
+    fn test_log_handler_with_event_log() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log_path = tmp.path().join("events.jsonl");
+        let event_log = Arc::new(EventLog::open(log_path).unwrap());
+        let handler = LogHandler::new().with_event_log(event_log.clone());
+
+        assert!(handler.event_log.is_some());
+        assert!(Arc::ptr_eq(handler.event_log.as_ref().unwrap(), &event_log));
+    }
+}

@@ -85,3 +85,63 @@ pub fn orchestration_handlers(
         Box::new(SessionHandler::new(claude_session_registry).with_team_registry(team_registry)),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::command::CommandExecutor;
+    use std::future::Future;
+    use std::pin::Pin;
+    use tempfile::tempdir;
+
+    struct MockExecutor;
+    impl CommandExecutor for MockExecutor {
+        fn exec<'a>(
+            &'a self,
+            _dir: &'a str,
+            _cmd: &'a [&'a str],
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + 'a>> {
+            Box::pin(async { Ok(String::new()) })
+        }
+    }
+
+    #[test]
+    fn test_core_handlers() {
+        let tmp = tempdir().unwrap();
+        let handlers = core_handlers(tmp.path().to_path_buf(), None);
+        assert_eq!(handlers.len(), 3);
+        let namespaces: Vec<_> = handlers.iter().map(|h| h.namespace()).collect();
+        assert!(namespaces.contains(&"log"));
+        assert!(namespaces.contains(&"kv"));
+        assert!(namespaces.contains(&"fs"));
+    }
+
+    #[test]
+    fn test_git_handlers_no_github() {
+        let tmp = tempdir().unwrap();
+        let git = Arc::new(GitService::new(Arc::new(MockExecutor)));
+        let git_wt = Arc::new(GitWorktreeService::new(tmp.path().to_path_buf()));
+
+        let handlers = git_handlers(git, None, git_wt);
+        assert_eq!(handlers.len(), 4);
+        let namespaces: Vec<_> = handlers.iter().map(|h| h.namespace()).collect();
+        assert!(namespaces.contains(&"git"));
+        assert!(namespaces.contains(&"file_pr"));
+        assert!(namespaces.contains(&"merge_pr"));
+        assert!(namespaces.contains(&"copilot"));
+        assert!(!namespaces.contains(&"github"));
+    }
+
+    #[tokio::test]
+    async fn test_git_handlers_with_github() {
+        let tmp = tempdir().unwrap();
+        let git = Arc::new(GitService::new(Arc::new(MockExecutor)));
+        let git_wt = Arc::new(GitWorktreeService::new(tmp.path().to_path_buf()));
+        let github = GitHubService::new("test-token".to_string()).unwrap();
+
+        let handlers = git_handlers(git, Some(github), git_wt);
+        assert_eq!(handlers.len(), 5);
+        let namespaces: Vec<_> = handlers.iter().map(|h| h.namespace()).collect();
+        assert!(namespaces.contains(&"github"));
+    }
+}

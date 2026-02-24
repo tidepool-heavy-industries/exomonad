@@ -92,3 +92,35 @@ impl CopilotEffects for CopilotHandler {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{AgentName, BirthBranch};
+    use crate::effects::EffectContext;
+
+    fn test_ctx() -> EffectContext {
+        EffectContext {
+            agent_name: AgentName::from("test"),
+            birth_branch: BirthBranch::from("main"),
+        }
+    }
+
+    #[test]
+    fn test_copilot_handler_new() {
+        let handler = CopilotHandler::new();
+        assert_eq!(handler.namespace(), "copilot");
+    }
+
+    #[test]
+    fn test_copilot_handler_default() {
+        let handler = CopilotHandler::default();
+        assert_eq!(handler.namespace(), "copilot");
+    }
+
+    #[test]
+    fn test_copilot_handler_namespace() {
+        let handler = CopilotHandler;
+        assert_eq!(handler.namespace(), "copilot");
+    }
+}
