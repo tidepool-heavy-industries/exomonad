@@ -15,11 +15,10 @@ import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Unique (hashUnique, newUnique)
-import ExoMonad.Guest.Tool.Class (MCPCallOutput, WasmResult)
 import System.IO.Unsafe (unsafePerformIO)
 
--- | A continuation takes a Value (result from effect) and returns the next step (WasmResult).
-type Continuation = Value -> IO (WasmResult MCPCallOutput)
+-- | A continuation takes a Value (result from effect) and returns the next step (WasmResult serialized to JSON).
+type Continuation = Value -> IO Value
 
 {-# NOINLINE continuationStore #-}
 continuationStore :: IORef (Map Text Continuation)

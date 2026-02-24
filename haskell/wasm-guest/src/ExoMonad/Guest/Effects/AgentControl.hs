@@ -37,7 +37,7 @@ import Data.Text qualified as T
 import Effects.Agent qualified as PA
 import ExoMonad.Effects.Agent qualified as Agent
 import ExoMonad.Guest.Proto (fromText, toText)
-import ExoMonad.Guest.Tool.Class (SuspendYield)
+import ExoMonad.Guest.Tool.Suspend.Types (SuspendYield)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect)
 import GHC.Generics (Generic)
 import Proto3.Suite.Types (Enumerated (..))

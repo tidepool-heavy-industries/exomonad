@@ -21,11 +21,13 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), WasmResult (..))
 import ExoMonad.Guest.Tool.Runtime (wrapHandler, resumeHandler, handleWorkerExit)
+import ExoMonad.Guest.Tool.Suspend (statusToWasmResult)
 import ExoMonad.Guest.Types (HookInput (..), HookEventType (..))
 import ExoMonad.PDK (input, output)
-import ExoMonad.Types (HookConfig (..))
+import ExoMonad.Types (HookConfig (..), HookEffects)
 import Foreign.C.Types (CInt (..))
 import Control.Monad.Freer (runM)
+import Control.Monad.Freer.Coroutine (runC)
 
 foreign export ccall handle_mcp_call :: IO CInt
 foreign export ccall handle_list_tools :: IO CInt
@@ -136,24 +138,28 @@ dispatchHook :: HookConfig -> HookInput -> IO CInt
 dispatchHook cfg hookInput =
   case hiHookEventName hookInput of
     SessionStart -> do
-      result <- runM $ onSessionStart cfg hookInput
+      status <- runM $ runC (onSessionStart cfg hookInput)
+      result <- statusToWasmResult status
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
     SessionEnd -> runStopHook (onStop cfg)
     Stop -> runStopHook (onStop cfg)
     SubagentStop -> runStopHook (onSubagentStop cfg)
     PreToolUse -> do
-      result <- runM $ preToolUse cfg hookInput
+      status <- runM $ runC (preToolUse cfg hookInput)
+      result <- statusToWasmResult status
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
     PostToolUse -> do
-      result <- runM $ postToolUse cfg hookInput
+      status <- runM $ runC (postToolUse cfg hookInput)
+      result <- statusToWasmResult status
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
     WorkerExit -> handleWorkerExit hookInput
   where
     runStopHook hook = do
-      result <- runM $ hook hookInput
+      status <- runM $ runC (hook hookInput)
+      result <- statusToWasmResult status
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
 

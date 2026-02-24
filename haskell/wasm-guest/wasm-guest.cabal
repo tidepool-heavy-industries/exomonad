@@ -59,6 +59,7 @@ library wasm-guest-internal
         ExoMonad.Guest.Tool.Record
         ExoMonad.Guest.Tool.Runtime
         ExoMonad.Guest.Tool.Suspend
+        ExoMonad.Guest.Tool.Suspend.Types
         ExoMonad.Guest.Tool.SuspendEffect
         ExoMonad.Guest.Continuations
         -- Tools

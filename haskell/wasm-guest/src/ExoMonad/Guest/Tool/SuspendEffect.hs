@@ -26,7 +26,7 @@ import Effects.EffectError (EffectError (..))
 import Effects.EffectError qualified as EE
 import Effects.Envelope (EffectResponse (..), EffectResponseResult (..))
 import ExoMonad.Effect.Class (Effect (..))
-import ExoMonad.Guest.Tool.Class (EffectRequest (..), SuspendYield, suspend)
+import ExoMonad.Guest.Tool.Suspend.Types (EffectRequest (..), SuspendYield, suspend)
 import Proto3.Suite.Class (Message, fromByteString, toLazyByteString)
 
 -- | Like runEffect, but yields via coroutine suspend instead of direct FFI.

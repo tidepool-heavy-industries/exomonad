@@ -18,8 +18,9 @@ module ExoMonad.Guest.Effects.FileSystem
     readFile,
     writeFile,
 
-    -- * Interpreter
+    -- * Interpreters
     runFileSystem,
+    runFileSystemSuspend,
 
     -- * Types
     ReadFileInput (..),
@@ -35,6 +36,8 @@ import Data.Text qualified as T
 import Effects.EffectError (EffectError)
 import ExoMonad.Effects.Fs qualified as Fs
 import ExoMonad.Guest.Proto (fromText, toText)
+import ExoMonad.Guest.Tool.Suspend.Types (SuspendYield)
+import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect)
 import GHC.Generics (Generic)
 import Prelude hiding (readFile, writeFile)
 
@@ -123,6 +126,45 @@ runFileSystem = interpret $ \case
               Fs.writeFileRequestAppend = False
             }
     result <- Fs.writeFile req
+    pure $ case result of
+      Left err -> Left (effectErrorToText err)
+      Right resp ->
+        Right
+          WriteFileOutput
+            { wfoBytesWritten = fromIntegral (Fs.writeFileResponseBytesWritten resp),
+              wfoPath = toText (Fs.writeFileResponsePath resp)
+            }
+
+-- | Interpret FileSystem via coroutine suspend (trampoline path).
+-- Effects dispatched async without holding the WASM plugin lock.
+runFileSystemSuspend :: (Member SuspendYield r) => Eff (FileSystem ': r) a -> Eff r a
+runFileSystemSuspend = interpret $ \case
+  ReadFileOp path maxBytes -> do
+    let req =
+          Fs.ReadFileRequest
+            { Fs.readFileRequestPath = fromText path,
+              Fs.readFileRequestMaxBytes = fromIntegral maxBytes,
+              Fs.readFileRequestOffset = 0
+            }
+    result <- suspendEffect @Fs.FsReadFile req
+    pure $ case result of
+      Left err -> Left (effectErrorToText err)
+      Right resp ->
+        Right
+          ReadFileOutput
+            { rfoContent = toText (Fs.readFileResponseContent resp),
+              rfoBytesRead = fromIntegral (Fs.readFileResponseBytesRead resp),
+              rfoTruncated = Fs.readFileResponseTruncated resp
+            }
+  WriteFileOp path content createParents -> do
+    let req =
+          Fs.WriteFileRequest
+            { Fs.writeFileRequestPath = fromText path,
+              Fs.writeFileRequestContent = fromText content,
+              Fs.writeFileRequestCreateParents = createParents,
+              Fs.writeFileRequestAppend = False
+            }
+    result <- suspendEffect @Fs.FsWriteFile req
     pure $ case result of
       Left err -> Left (effectErrorToText err)
       Right resp ->

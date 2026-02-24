@@ -22,13 +22,14 @@ import Data.Text (Text)
 import Data.Text.Lazy qualified as TL
 import ExoMonad.Effects.Log qualified as Log
 import ExoMonad.Effects.Session qualified as Session
+import ExoMonad.Guest.Tool.Suspend.Types (SuspendYield)
 import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), HookSpecificOutput (..), StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
 import GHC.Generics (Generic)
 
 -- | Effects available to hooks.
 -- Currently allows arbitrary IO via IO (required for Host Calls).
 -- Future versions may restrict this to specific effects (Git, GitHub, Log).
-type HookEffects = '[IO]
+type HookEffects = '[SuspendYield, IO]
 
 -- | Role configuration.
 -- Defines the role name, available tools, and lifecycle hooks.

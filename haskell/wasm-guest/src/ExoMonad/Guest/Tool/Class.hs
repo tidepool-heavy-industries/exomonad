@@ -34,12 +34,14 @@ module ExoMonad.Guest.Tool.Class
 where
 
 import Control.Monad.Freer (Eff, Member, sendM)
-import Control.Monad.Freer.Coroutine (Yield, yield)
 import Data.Aeson (FromJSON, ToJSON, Value, object, (.=))
 import Data.Aeson qualified as Aeson
 import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Text qualified as T
+import ExoMonad.Guest.Effects.AgentControl (AgentControl)
+import ExoMonad.Guest.Effects.FileSystem (FileSystem)
+import ExoMonad.Guest.Tool.Suspend.Types (EffectRequest (..), SuspendYield, suspend)
 import GHC.Generics (Generic)
 
 -- ============================================================================
@@ -112,30 +114,12 @@ liftEffect action transform = do
 -- Coroutine Suspension
 -- ============================================================================
 
--- | Yield type for tool handlers: yield an EffectRequest, receive a Value back.
-type SuspendYield = Yield EffectRequest Value
-
 -- | Effect row for tool handlers that can suspend.
-type ToolEffects = '[SuspendYield, IO]
-
--- | Suspend execution, yielding an effect request to the host.
--- Returns the result value when resumed.
-suspend :: (Member SuspendYield effs) => EffectRequest -> Eff effs Value
-suspend req = yield req id
+type ToolEffects = '[AgentControl, FileSystem, SuspendYield, IO]
 
 -- ============================================================================
 -- Async / Suspension Types
 -- ============================================================================
-
--- | Effect request for suspension.
-data EffectRequest = EffectRequest
-  { erType :: Text,
-    erPayload :: Value
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToJSON EffectRequest where
-  toJSON (EffectRequest t p) = object ["type" .= t, "payload" .= p]
 
 -- | Async result from WASM execution.
 data WasmResult a

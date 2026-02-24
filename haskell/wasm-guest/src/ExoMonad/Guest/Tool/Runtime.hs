@@ -17,7 +17,8 @@ where
 import Control.Exception (SomeException, try)
 import Control.Monad (unless, void)
 import Control.Monad.Freer (Eff, runM)
-import Data.Aeson (Value, (.=))
+import Control.Monad.Freer.Coroutine (runC)
+import Data.Aeson (ToJSON, Value, (.=))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (parseMaybe)
 import Data.ByteString (ByteString)
@@ -38,9 +39,10 @@ import ExoMonad.Guest.Proto (fromText)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), WasmResult (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
+import ExoMonad.Guest.Tool.Suspend (statusToWasmResult)
 import ExoMonad.Guest.Types (HookEventType (..), HookInput (..), HookOutput, MCPCallInput (..), Runtime (..), StopDecision (..), StopHookOutput (..), allowResponse)
 import ExoMonad.PDK (input, output)
-import ExoMonad.Types (HookConfig (..))
+import ExoMonad.Types (HookConfig (..), HookEffects)
 import Foreign.C.Types (CInt (..))
 import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName)
@@ -165,19 +167,21 @@ hookHandler config = do
         PostToolUse -> handlePreToolUse hookInput (postToolUse config)
         WorkerExit -> handleWorkerExit hookInput
   where
-    handleSessionStart :: HookInput -> (HookInput -> Eff '[IO] HookOutput) -> IO CInt
+    handleSessionStart :: HookInput -> (HookInput -> Eff HookEffects HookOutput) -> IO CInt
     handleSessionStart hookInput hook = do
-      result <- runM $ hook hookInput
+      status <- runM $ runC (hook hookInput)
+      result <- statusToWasmResult status
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
 
-    handlePreToolUse :: HookInput -> (HookInput -> Eff '[IO] HookOutput) -> IO CInt
+    handlePreToolUse :: HookInput -> (HookInput -> Eff HookEffects HookOutput) -> IO CInt
     handlePreToolUse hookInput hook = do
-      result <- runM $ hook hookInput
+      status <- runM $ runC (hook hookInput)
+      result <- statusToWasmResult status
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
 
-    handleStopHook :: HookInput -> (HookInput -> Eff '[IO] StopHookOutput) -> IO CInt
+    handleStopHook :: HookInput -> (HookInput -> Eff HookEffects StopHookOutput) -> IO CInt
     handleStopHook hookInput hook = do
       -- Extract agent ID from hook input or fallback to current working directory (e.g., "gh-453-gemini")
       cwd <- getCurrentDirectory
@@ -201,28 +205,32 @@ hookHandler config = do
       emitEvent_ event
 
       -- Run the hook from config (using Freer effects)
-      rawResult <- runM $ hook hookInput
+      status <- runM $ runC (hook hookInput)
+      result <- statusToWasmResult status
 
       -- Check if runtime is Gemini and override Block to Allow
       -- Fix for infinite loop: Gemini agents retry forever on block
       let isGemini = hiRuntime hookInput == Just Gemini
-      let (finalResult, overridden) =
-            if isGemini && decision rawResult == Block
-              then (rawResult {decision = Allow, reason = Nothing}, True)
-              else (rawResult, False)
+      let finalResult = case result of
+            Done rawResult ->
+              if isGemini && decision rawResult == Block
+                then Done (rawResult {decision = Allow, reason = Nothing})
+                else Done rawResult
+            Suspend k req -> Suspend k req
 
       -- Log the decision
-      case decision finalResult of
-        Allow ->
-          if overridden
-            then logInfo_ ("Stop hook BLOCKED by logic but overridden to ALLOW for Gemini agent: " <> agentId)
-            else logInfo_ ("Stop hook allowed for " <> agentId)
-        Block ->
-          case reason finalResult of
-            Just r ->
-              logInfo_ ("Stop hook blocked for " <> agentId <> ": " <> r)
-            Nothing ->
-              logInfo_ ("Stop hook blocked for " <> agentId)
+      case finalResult of
+        Done res ->
+          case decision res of
+            Allow -> logInfo_ ("Stop hook allowed for " <> agentId)
+            Block ->
+              case reason res of
+                Just r ->
+                  logInfo_ ("Stop hook blocked for " <> agentId <> ": " <> r)
+                Nothing ->
+                  logInfo_ ("Stop hook blocked for " <> agentId)
+        Suspend _ _ ->
+          logInfo_ ("Stop hook suspended for " <> agentId)
 
       -- Return the result to the hook caller
       output (BSL.toStrict $ Aeson.encode finalResult)
