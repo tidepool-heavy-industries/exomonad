@@ -46,3 +46,40 @@ impl MergePrEffects for MergePRHandler {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{AgentName, BirthBranch, PRNumber};
+    use crate::effects::{EffectContext, EffectHandler};
+    use std::path::PathBuf;
+
+    fn test_ctx() -> EffectContext {
+        EffectContext {
+            agent_name: AgentName::from("test"),
+            birth_branch: BirthBranch::from("main"),
+        }
+    }
+
+    #[test]
+    fn test_namespace() {
+        let _ctx = test_ctx();
+        let git_wt = Arc::new(GitWorktreeService::new(PathBuf::from(".")));
+        let handler = MergePRHandler::new(git_wt);
+        assert_eq!(handler.namespace(), "merge_pr");
+    }
+
+    #[test]
+    fn test_pr_number_conversion() {
+        let proto_pr_number: i64 = 123;
+        let pr_number = PRNumber::new(proto_pr_number as u64);
+        assert_eq!(pr_number.as_u64(), 123);
+    }
+
+    #[test]
+    fn test_pr_number_round_trip() {
+        let original: u64 = 456;
+        let pr_number = PRNumber::new(original);
+        assert_eq!(pr_number.as_u64(), original);
+    }
+}

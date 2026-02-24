@@ -308,3 +308,49 @@ fn convert_pr(pr: crate::services::github::PullRequest) -> PullRequest {
         updated_at: 0,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{AgentName, BirthBranch, FilterState};
+    use crate::effects::EffectContext;
+
+    fn test_ctx() -> EffectContext {
+        EffectContext {
+            agent_name: AgentName::from("test"),
+            birth_branch: BirthBranch::from("main"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_namespace() {
+        let _ctx = test_ctx();
+        let service = GitHubService::new("token".to_string()).unwrap();
+        let handler = GitHubHandler::new(service);
+        assert_eq!(handler.namespace(), "github");
+    }
+
+    #[test]
+    fn test_make_repo() {
+        let repo = make_repo("owner", "repo");
+        assert_eq!(repo.owner.as_str(), "owner");
+        assert_eq!(repo.name.as_str(), "repo");
+    }
+
+    #[test]
+    fn test_issue_state_to_filter() {
+        assert_eq!(
+            issue_state_to_filter(IssueState::Open),
+            Some(FilterState::Open)
+        );
+        assert_eq!(
+            issue_state_to_filter(IssueState::Closed),
+            Some(FilterState::Closed)
+        );
+        assert_eq!(
+            issue_state_to_filter(IssueState::All),
+            Some(FilterState::All)
+        );
+        assert_eq!(issue_state_to_filter(IssueState::Unspecified), None);
+    }
+}
