@@ -21,7 +21,7 @@ impl OllamaService {
     pub fn new(endpoint: Option<Url>) -> Self {
         match endpoint {
             Some(url) => {
-                let host = url.scheme().to_string() + "://" + url.host_str().unwrap();
+                let host = url.scheme().to_string() + "://" + url.host_str().unwrap_or("localhost");
                 let port = url.port().unwrap_or(11434);
                 Self {
                     client: Ollama::new(host, port),
@@ -73,7 +73,10 @@ impl ExternalService for OllamaService {
                     done: response.done,
                 })
             }
-            _ => panic!("Invalid request type for OllamaService"),
+            _ => Err(ServiceError::Api {
+                code: 400,
+                message: "Invalid request type for OllamaService".to_string(),
+            }),
         }
     }
 }
