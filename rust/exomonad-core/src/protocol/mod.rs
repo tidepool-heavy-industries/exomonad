@@ -87,3 +87,60 @@ pub enum HookEventType {
     /// Custom: Worker agent exit (sends completion note to parent)
     WorkerExit,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_runtime_default() {
+        assert_eq!(Runtime::default(), Runtime::Claude);
+    }
+
+    #[test]
+    fn test_runtime_claude_serialization() {
+        let val = Runtime::Claude;
+        let json = serde_json::to_string(&val).unwrap();
+        assert_eq!(json, "\"claude\"");
+    }
+
+    #[test]
+    fn test_runtime_gemini_serialization() {
+        let val = Runtime::Gemini;
+        let json = serde_json::to_string(&val).unwrap();
+        assert_eq!(json, "\"gemini\"");
+    }
+
+    #[test]
+    fn test_runtime_roundtrip() {
+        let val = Runtime::Gemini;
+        let json = serde_json::to_string(&val).unwrap();
+        let back: Runtime = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, val);
+    }
+
+    #[test]
+    fn test_runtime_display() {
+        assert_eq!(Runtime::Claude.to_string(), "claude");
+        assert_eq!(Runtime::Gemini.to_string(), "gemini");
+    }
+
+    #[test]
+    fn test_hook_event_type_pre_tool_use_serialization() {
+        let val = HookEventType::PreToolUse;
+        let json = serde_json::to_string(&val).unwrap();
+        assert_eq!(json, "\"pre-tool-use\"");
+    }
+
+    #[test]
+    fn test_hook_event_type_session_start_serialization() {
+        let val = HookEventType::SessionStart;
+        let json = serde_json::to_string(&val).unwrap();
+        assert_eq!(json, "\"session-start\"");
+    }
+
+    #[test]
+    fn test_hook_event_type_display() {
+        assert_eq!(HookEventType::PreToolUse.to_string(), "pre-tool-use");
+    }
+}

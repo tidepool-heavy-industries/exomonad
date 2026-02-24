@@ -38,3 +38,55 @@ pub struct LogPayload {
 pub trait HasLogService {
     fn log_service(&self) -> &LogService;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_log_level_info_serialization() {
+        let val = LogLevel::Info;
+        let json = serde_json::to_string(&val).unwrap();
+        assert_eq!(json, "\"info\"");
+    }
+
+    #[test]
+    fn test_log_level_error_serialization() {
+        let val = LogLevel::Error;
+        let json = serde_json::to_string(&val).unwrap();
+        assert_eq!(json, "\"error\"");
+    }
+
+    #[test]
+    fn test_log_level_roundtrip() {
+        let val = LogLevel::Warn;
+        let json = serde_json::to_string(&val).unwrap();
+        let back: LogLevel = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, LogLevel::Warn));
+    }
+
+    #[test]
+    fn test_log_payload_roundtrip_with_fields() {
+        let mut fields = HashMap::new();
+        fields.insert("key".to_string(), "value".to_string());
+        let val = LogPayload {
+            message: "test message".to_string(),
+            fields: Some(fields),
+        };
+        let json = serde_json::to_string(&val).unwrap();
+        let back: LogPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, val);
+    }
+
+    #[test]
+    fn test_log_payload_roundtrip_without_fields() {
+        let val = LogPayload {
+            message: "test message".to_string(),
+            fields: None,
+        };
+        let json = serde_json::to_string(&val).unwrap();
+        let back: LogPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, val);
+    }
+}
