@@ -240,4 +240,64 @@ mod tests {
         let err = EffectError::not_found("file/README.md");
         assert_eq!(err.to_string(), "Not found: file/README.md");
     }
+
+    #[test]
+    fn test_all_variants_serde_roundtrip() {
+        let variants = vec![
+            EffectError::not_found("resource"),
+            EffectError::invalid_input("bad input"),
+            EffectError::network_error("down"),
+            EffectError::permission_denied("no"),
+            EffectError::timeout("late"),
+            EffectError::custom("code", "msg"),
+            EffectError::custom_with_data("code", "msg", serde_json::json!({"foo": "bar"})),
+        ];
+
+        for err in variants {
+            let json = serde_json::to_string(&err).unwrap();
+            let de: EffectError = serde_json::from_str(&json).unwrap();
+            assert_eq!(err, de);
+        }
+    }
+
+    #[test]
+    fn test_result_ext_ok_passes_through() {
+        let res: Result<i32, &str> = Ok(42);
+        let ext = res.effect_err("test");
+        assert_eq!(ext, Ok(42));
+    }
+
+    #[test]
+    fn test_result_ext_err_converts() {
+        let res: Result<i32, &str> = Err("broke");
+        let ext = res.effect_err("git");
+        let expected = EffectError::Custom {
+            code: "git_error".to_string(),
+            message: "broke".to_string(),
+            data: None,
+        };
+        assert_eq!(ext, Err(expected));
+    }
+
+    #[test]
+    fn test_display_all_variants() {
+        assert_eq!(EffectError::not_found("r").to_string(), "Not found: r");
+        assert_eq!(EffectError::invalid_input("m").to_string(), "Invalid input: m");
+        assert_eq!(EffectError::network_error("m").to_string(), "Network error: m");
+        assert_eq!(EffectError::permission_denied("m").to_string(), "Permission denied: m");
+        assert_eq!(EffectError::timeout("m").to_string(), "Timeout: m");
+        assert_eq!(EffectError::custom("c", "m").to_string(), "[c] m");
+    }
+
+    #[test]
+    fn test_equality() {
+        let e1 = EffectError::not_found("a");
+        let e2 = EffectError::not_found("a");
+        let e3 = EffectError::not_found("b");
+        let e4 = EffectError::invalid_input("a");
+
+        assert_eq!(e1, e2);
+        assert_ne!(e1, e3);
+        assert_ne!(e1, e4);
+    }
 }
