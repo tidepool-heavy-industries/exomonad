@@ -20,8 +20,9 @@ module ExoMonad.Guest.Effects.AgentControl
     spawnLeafSubtree,
     spawnWorker,
 
-    -- * Interpreter
+    -- * Interpreters
     runAgentControl,
+    runAgentControlSuspend,
 
     -- * Types
     AgentType (..),
@@ -36,6 +37,8 @@ import Data.Text qualified as T
 import Effects.Agent qualified as PA
 import ExoMonad.Effects.Agent qualified as Agent
 import ExoMonad.Guest.Proto (fromText, toText)
+import ExoMonad.Guest.Tool.Class (SuspendYield)
+import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect)
 import GHC.Generics (Generic)
 import Proto3.Suite.Types (Enumerated (..))
 
@@ -145,6 +148,48 @@ runAgentControl = interpret $ \case
               PA.spawnWorkerRequestPrompt = fromText prompt
             }
     result <- Agent.spawnWorker req
+    pure $ case result of
+      Left err -> Left (T.pack (show err))
+      Right resp -> case PA.spawnWorkerResponseAgent resp of
+        Nothing -> Left "SpawnWorker succeeded but no agent info returned"
+        Just info -> Right (protoAgentInfoToSpawnResult info)
+
+-- | Interpret AgentControl via coroutine suspend (trampoline path).
+-- Effects dispatched async without holding the WASM plugin lock.
+runAgentControlSuspend :: (Member SuspendYield r) => Eff (AgentControl ': r) a -> Eff r a
+runAgentControlSuspend = interpret $ \case
+  SpawnSubtreeC task branchName parentSessionId -> do
+    let req =
+          PA.SpawnSubtreeRequest
+            { PA.spawnSubtreeRequestTask = fromText task,
+              PA.spawnSubtreeRequestBranchName = fromText branchName,
+              PA.spawnSubtreeRequestParentSessionId = fromText parentSessionId
+            }
+    result <- suspendEffect @Agent.AgentSpawnSubtree req
+    pure $ case result of
+      Left err -> Left (T.pack (show err))
+      Right resp -> case PA.spawnSubtreeResponseAgent resp of
+        Nothing -> Left "SpawnSubtree succeeded but no agent info returned"
+        Just info -> Right (protoAgentInfoToSpawnResult info)
+  SpawnLeafSubtreeC task branchName -> do
+    let req =
+          PA.SpawnLeafSubtreeRequest
+            { PA.spawnLeafSubtreeRequestTask = fromText task,
+              PA.spawnLeafSubtreeRequestBranchName = fromText branchName
+            }
+    result <- suspendEffect @Agent.AgentSpawnLeafSubtree req
+    pure $ case result of
+      Left err -> Left (T.pack (show err))
+      Right resp -> case PA.spawnLeafSubtreeResponseAgent resp of
+        Nothing -> Left "SpawnLeafSubtree succeeded but no agent info returned"
+        Just info -> Right (protoAgentInfoToSpawnResult info)
+  SpawnWorkerC name prompt -> do
+    let req =
+          PA.SpawnWorkerRequest
+            { PA.spawnWorkerRequestName = fromText name,
+              PA.spawnWorkerRequestPrompt = fromText prompt
+            }
+    result <- suspendEffect @Agent.AgentSpawnWorker req
     pure $ case result of
       Left err -> Left (T.pack (show err))
       Right resp -> case PA.spawnWorkerResponseAgent resp of
