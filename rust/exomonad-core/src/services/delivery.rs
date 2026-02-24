@@ -15,7 +15,6 @@ pub enum DeliveryResult {
 ///
 /// Tries Teams inbox delivery if a registry and agent key are provided.
 /// Falls back to Zellij input injection if Teams delivery fails or is not available.
-#[allow(clippy::too_many_arguments)]
 pub async fn deliver_to_agent(
     team_registry: Option<&TeamRegistry>,
     agent_key: &str,
@@ -23,7 +22,6 @@ pub async fn deliver_to_agent(
     from: &str,
     message: &str,
     summary: &str,
-    color: &str,
 ) -> DeliveryResult {
     if let Some(registry) = team_registry {
         if let Some(team_info) = registry.get(agent_key).await {
@@ -33,7 +31,6 @@ pub async fn deliver_to_agent(
                 from,
                 message,
                 summary,
-                color,
             ) {
                 Ok(()) => {
                     info!(
@@ -77,7 +74,7 @@ mod tests {
     #[tokio::test]
     async fn test_deliver_no_registry_returns_zellij() {
         let result = deliver_to_agent(
-            None, "agent-1", "tab-1", "test", "hello", "summary", "green",
+            None, "agent-1", "tab-1", "test", "hello", "summary",
         ).await;
         assert_eq!(result, DeliveryResult::Zellij);
     }

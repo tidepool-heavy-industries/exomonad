@@ -516,7 +516,6 @@ impl GitHubPoller {
                 "github-poller",
                 &agent_message,
                 &format!("GitHub event: {} on {}", status, branch),
-                "yellow",
             )
             .await;
         }

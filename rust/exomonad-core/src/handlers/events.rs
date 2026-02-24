@@ -254,7 +254,6 @@ impl EventEffects for EventHandler {
             &agent_id_str,
             &notification,
             &format!("Agent completion: {}", agent_id_str),
-            "green",
         )
         .await;
 

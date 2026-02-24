@@ -1,8 +1,7 @@
 //! Claude Teams inbox writer.
 //!
 //! Writes messages to `~/.claude/teams/{team_name}/inboxes/{recipient}.json`.
-//! Expects Claude Code to have created the team directories via TeamCreate.
-//! Returns an error if the inbox directory does not exist.
+//! Auto-creates the inboxes/ directory if it doesn't exist (CC lazily initializes it).
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -11,19 +10,20 @@ use tracing::{debug, info};
 
 /// Message format for Claude Teams inbox.
 /// Full file is a JSON array of these messages: `[ {msg1}, {msg2}, ... ]`.
+/// Format matches CC 2.1.39's native SendMessage output.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct TeamsMessage {
     pub from: String,
     pub text: String,
     pub summary: String,
     pub timestamp: String,
-    pub color: String,
     pub read: bool,
 }
 
 /// Write a message to a Claude Teams inbox file.
 ///
 /// Appends to the existing JSON array if the file exists, or creates a new array.
+/// Auto-creates the inboxes/ directory (CC lazily initializes it on first SendMessage).
 /// Writes atomically by writing to a temp file and renaming.
 pub fn write_to_inbox(
     team_name: &str,
@@ -31,13 +31,12 @@ pub fn write_to_inbox(
     from: &str,
     text: &str,
     summary: &str,
-    color: &str,
 ) -> std::io::Result<()> {
     let home = dirs::home_dir().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::NotFound, "HOME directory not found")
     })?;
 
-    write_to_inbox_at_base(&home, team_name, recipient, from, text, summary, color)
+    write_to_inbox_at_base(&home, team_name, recipient, from, text, summary)
 }
 
 /// Write a message to a Claude Teams inbox file at a specific base path.
@@ -48,7 +47,6 @@ fn write_to_inbox_at_base(
     from: &str,
     text: &str,
     summary: &str,
-    color: &str,
 ) -> std::io::Result<()> {
     let inbox_dir = base
         .join(".claude")
@@ -57,13 +55,8 @@ fn write_to_inbox_at_base(
         .join("inboxes");
 
     if !inbox_dir.exists() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!(
-                "Teams inbox directory does not exist: {}. Create the team with TeamCreate first.",
-                inbox_dir.display()
-            ),
-        ));
+        std::fs::create_dir_all(&inbox_dir)?;
+        info!(dir = %inbox_dir.display(), "Created Teams inbox directory");
     }
 
     let inbox_file = inbox_dir.join(format!("{}.json", recipient));
@@ -81,7 +74,6 @@ fn write_to_inbox_at_base(
         text: text.to_string(),
         summary: summary.to_string(),
         timestamp,
-        color: color.to_string(),
         read: false,
     };
     messages.push(new_message);
@@ -124,15 +116,19 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_teams_mailbox_missing_dir() {
+    fn test_teams_mailbox_auto_creates_inbox_dir() {
         let tmp = tempdir().unwrap();
         let base = tmp.path();
-        let result =
-            write_to_inbox_at_base(base, "no-team", "nobody", "agent", "msg", "sum", "blue");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
-        assert!(err.to_string().contains("TeamCreate"));
+
+        // Pre-create team dir but NOT inboxes/ (matches CC lazy init behavior)
+        let team_dir = base.join(".claude").join("teams").join("test-team");
+        std::fs::create_dir_all(&team_dir).unwrap();
+
+        let result = write_to_inbox_at_base(base, "test-team", "lead", "agent", "msg", "sum");
+        assert!(result.is_ok());
+
+        assert!(team_dir.join("inboxes").exists());
+        assert!(team_dir.join("inboxes").join("lead.json").exists());
     }
 
     #[test]
@@ -142,7 +138,7 @@ mod tests {
         let team_name = "test-team";
         let recipient = "test-recipient";
 
-        // Pre-create inbox directory (normally done by Claude Code's TeamCreate)
+        // Pre-create inbox directory
         let inbox_dir = base
             .join(".claude")
             .join("teams")
@@ -157,7 +153,6 @@ mod tests {
             "agent1",
             "Hello from agent1",
             "Message 1",
-            "blue",
         )?;
         write_to_inbox_at_base(
             base,
@@ -166,15 +161,9 @@ mod tests {
             "agent2",
             "Hello from agent2",
             "Message 2",
-            "green",
         )?;
 
-        let inbox_file = base
-            .join(".claude")
-            .join("teams")
-            .join(team_name)
-            .join("inboxes")
-            .join(format!("{}.json", recipient));
+        let inbox_file = inbox_dir.join(format!("{}.json", recipient));
 
         let content = std::fs::read_to_string(&inbox_file)?;
         let messages: Vec<TeamsMessage> = serde_json::from_str(&content).unwrap();
@@ -184,7 +173,7 @@ mod tests {
         assert_eq!(messages[0].text, "Hello from agent1");
         assert_eq!(messages[0].read, false);
         assert_eq!(messages[1].from, "agent2");
-        assert_eq!(messages[1].color, "green");
+        assert_eq!(messages[1].summary, "Message 2");
 
         Ok(())
     }
