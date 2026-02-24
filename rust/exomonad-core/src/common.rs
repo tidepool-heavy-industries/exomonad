@@ -129,3 +129,118 @@ impl<T> IntoFFIResult<T> for anyhow::Result<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::anyhow;
+
+    #[test]
+    fn test_into_ffi_result_ok() {
+        let res: anyhow::Result<String> = Ok("success".to_string());
+        let ffi_res = res.into_ffi_result();
+        assert_eq!(ffi_res, FFIResult::Success("success".to_string()));
+    }
+
+    #[test]
+    fn test_into_ffi_result_git_error() {
+        let err = CommandError::ExecutionFailed {
+            command: "git status".to_string(),
+            exit_code: Some(128),
+            stderr: "fatal: not a git repository".to_string(),
+            stdout: "".to_string(),
+        };
+        let res: anyhow::Result<()> = Err(anyhow!(err));
+        let ffi_res = res.into_ffi_result();
+
+        if let FFIResult::Error(ffi_err) = ffi_res {
+            assert_eq!(ffi_err.code, ErrorCode::GitError);
+            assert!(ffi_err.message.contains("git status"));
+            let context = ffi_err.context.unwrap();
+            assert_eq!(context.command, Some("git status".to_string()));
+            assert_eq!(context.exit_code, Some(128));
+        } else {
+            panic!("Expected FFIResult::Error");
+        }
+    }
+
+    #[test]
+    fn test_into_ffi_result_io_error() {
+        let err = CommandError::ExecutionFailed {
+            command: "ls /nonexistent".to_string(),
+            exit_code: Some(2),
+            stderr: "ls: cannot access '/nonexistent': No such file or directory".to_string(),
+            stdout: "".to_string(),
+        };
+        let res: anyhow::Result<()> = Err(anyhow!(err));
+        let ffi_res = res.into_ffi_result();
+
+        if let FFIResult::Error(ffi_err) = ffi_res {
+            assert_eq!(ffi_err.code, ErrorCode::IoError);
+            assert!(ffi_err.message.contains("ls /nonexistent"));
+        } else {
+            panic!("Expected FFIResult::Error");
+        }
+    }
+
+    #[test]
+    fn test_into_ffi_result_launch_failed() {
+        let err = CommandError::LaunchFailed {
+            command: "invalid-command".to_string(),
+            message: "No such file or directory".to_string(),
+        };
+        let res: anyhow::Result<()> = Err(anyhow!(err));
+        let ffi_res = res.into_ffi_result();
+
+        if let FFIResult::Error(ffi_err) = ffi_res {
+            assert_eq!(ffi_err.code, ErrorCode::IoError);
+            assert!(ffi_err.message.contains("Failed to launch command"));
+            assert_eq!(ffi_err.context.unwrap().command, Some("invalid-command".to_string()));
+        } else {
+            panic!("Expected FFIResult::Error");
+        }
+    }
+
+    #[test]
+    fn test_into_ffi_result_timeout_error() {
+        let err = TimeoutError {
+            message: "Operation timed out after 30s".to_string(),
+        };
+        let res: anyhow::Result<()> = Err(anyhow!(err));
+        let ffi_res = res.into_ffi_result();
+
+        if let FFIResult::Error(ffi_err) = ffi_res {
+            assert_eq!(ffi_err.code, ErrorCode::Timeout);
+            assert_eq!(ffi_err.message, "Operation timed out after 30s");
+            assert!(ffi_err.suggestion.is_some());
+        } else {
+            panic!("Expected FFIResult::Error");
+        }
+    }
+
+    #[test]
+    fn test_into_ffi_result_anyhow_timeout_string() {
+        let res: anyhow::Result<()> = Err(anyhow!("the connection timed out"));
+        let ffi_res = res.into_ffi_result();
+
+        if let FFIResult::Error(ffi_err) = ffi_res {
+            assert_eq!(ffi_err.code, ErrorCode::Timeout);
+            assert!(ffi_err.message.contains("timed out"));
+        } else {
+            panic!("Expected FFIResult::Error");
+        }
+    }
+
+    #[test]
+    fn test_into_ffi_result_generic_error() {
+        let res: anyhow::Result<()> = Err(anyhow!("something went wrong"));
+        let ffi_res = res.into_ffi_result();
+
+        if let FFIResult::Error(ffi_err) = ffi_res {
+            assert_eq!(ffi_err.code, ErrorCode::InternalError);
+            assert_eq!(ffi_err.message, "something went wrong");
+        } else {
+            panic!("Expected FFIResult::Error");
+        }
+    }
+}
