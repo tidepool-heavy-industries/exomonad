@@ -90,20 +90,21 @@ handle_mcp_call = wrapHandler $ do
         pure 0
 
 -- | List tools for a given role. Reads role from input JSON.
+-- Returns WasmResult (Done envelope) for consistency with all other exports.
 handle_list_tools :: IO CInt
 handle_list_tools = wrapHandler $ do
   inp <- input @ByteString
   case Aeson.eitherDecodeStrict inp of
     Left _ -> do
-      output (BSL.toStrict $ Aeson.encode ([] :: [Value]))
+      output (BSL.toStrict $ Aeson.encode (Done ([] :: [Value])))
       pure 0
     Right rai -> case lookupRole (ralRole rai) of
       Nothing -> do
-        output (BSL.toStrict $ Aeson.encode ([] :: [Value]))
+        output (BSL.toStrict $ Aeson.encode (Done ([] :: [Value])))
         pure 0
       Just roleCfg -> do
         let toolDefs = roleToolsMCP roleCfg
-        output (BSL.toStrict $ Aeson.encode toolDefs)
+        output (BSL.toStrict $ Aeson.encode (Done toolDefs))
         pure 0
 
 -- | Handle a hook call (PreToolUse, SessionEnd, SubagentStop) for a given role.

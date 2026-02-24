@@ -83,10 +83,11 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • Protocol types (hook, mcp, service)
 │   • Handlers: GitHandler, GitHubHandler, LogHandler, AgentHandler,
 │     FsHandler, PopupHandler, FilePRHandler, CopilotHandler
-│   • Services: GitService, GitHubService, AgentControlService, etc.
+│   • Services: GitService, GitHubService, AgentControlService, ZellijIpc, etc.
 │   • External service clients: Anthropic, GitHub, Ollama, OTLP
 │   • UI protocol types (lightweight, available without runtime feature)
 │   • Layout generation (KDL layouts for Zellij)
+│   • Direct Zellij IPC (Unix socket, no subprocess)
 │
 ├── exomonad-proto/  ← Proto-generated types (prost)
 │   • FFI boundary types
@@ -221,11 +222,14 @@ Proto field helpers in `handlers/mod.rs`: `non_empty(String) → Option<String>`
 | `events.*` | EventHandler | wait_for_event (internal), notify_event, notify_parent |
 | `merge_pr.*` | MergePRHandler | merge_pr (gh pr merge + git fetch) |
 
-**Zellij Integration:**
-- Uses declarative KDL layouts (not CLI flags)
-- Includes tab-bar and status-bar plugins (native UI)
-- Wraps command in shell (`sh -c "claude"`) for environment inheritance
-- Sets `close_on_exit true` for automatic cleanup
+**Zellij Integration (Direct IPC):**
+- All Zellij communication uses direct Unix Domain Socket writes via `ZellijIpc` (`services/zellij_ipc.rs`)
+- Sends `ClientToServerMsg::Action(...)` via `IpcSenderWithContext` to the session socket — no subprocess forking
+- Socket path: `ZELLIJ_SOCK_DIR/{session_name}` (from `zellij_utils::consts`)
+- KDL layouts parsed in-process via `Layout::from_kdl()` — no temp files
+- Plugin communication via `Action::CliPipe` (replaces `zellij pipe --plugin ...` subprocess)
+- Tab queries via `Action::QueryTabNames` with `ServerToClientMsg::Log` response reading
+- Dependencies: `zellij-utils` (IPC types, layout parsing), `interprocess` (Unix socket streams)
 
 ## Configuration
 
@@ -261,6 +265,7 @@ cargo test -p exomonad-proto            # Wire format compatibility tests
 | `runtime` feature flag | Plugin consumers get lightweight types without heavy deps |
 | High-level effects | `SpawnAgent` not `CreateWorktree + OpenTab` |
 | Local Zellij orchestration | Git worktrees + Zellij tabs, no Docker containers |
+| Direct Zellij IPC | Unix socket writes instead of forking 19MB `zellij` binary per call |
 | Extism runtime | Mature WASM runtime with host function support |
 | KDL layouts | Declarative tab creation with proper environment inheritance |
 | File-based unified WASM | Single WASM for all roles, loaded from disk, hot reload in serve mode |

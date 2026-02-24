@@ -110,11 +110,7 @@ fn yield_effect_impl(
     let envelope = EffectEnvelope::decode(input_bytes.as_slice())
         .map_err(|e| Error::msg(format!("Failed to decode EffectEnvelope: {}", e)))?;
 
-    tracing::debug!(
-        effect_type = %envelope.effect_type,
-        payload_bytes = envelope.payload.len(),
-        "yield_effect: dispatching"
-    );
+    eprintln!("[yield_effect] dispatching: {} ({} bytes payload)", envelope.effect_type, envelope.payload.len());
 
     // Clone Arc<EffectRegistry> and EffectContext out of the mutex, then drop the lock.
     // This prevents holding the UserData mutex across the async dispatch.

@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use super::git_worktree::GitWorktreeService;
 use super::github::{GitHubService, Repo};
@@ -389,6 +389,8 @@ pub struct AgentControlService {
     github: Option<GitHubService>,
     /// Zellij session name for event emission
     zellij_session: Option<String>,
+    /// Direct Zellij IPC client (replaces subprocess calls).
+    zellij_ipc: Option<super::zellij_ipc::ZellijIpc>,
     /// This agent's birth-branch (git identity). Root TL = "main".
     birth_branch: BirthBranch,
     /// MCP server port for per-agent endpoint URLs (set when running `exomonad serve`).
@@ -410,6 +412,7 @@ impl AgentControlService {
             worktree_base,
             github,
             zellij_session: None,
+            zellij_ipc: None,
             birth_branch: BirthBranch::root(),
             mcp_server_port: None,
             git_wt,
@@ -422,8 +425,9 @@ impl AgentControlService {
         self
     }
 
-    /// Set the Zellij session name for event emission.
+    /// Set the Zellij session name for event emission + direct IPC.
     pub fn with_zellij_session(mut self, session: String) -> Self {
+        self.zellij_ipc = Some(super::zellij_ipc::ZellijIpc::new(&session));
         self.zellij_session = Some(session);
         self
     }
@@ -467,6 +471,7 @@ impl AgentControlService {
             worktree_base: project_dir.join(".exo/worktrees"),
             github,
             zellij_session: None,
+            zellij_ipc: None,
             birth_branch: BirthBranch::root(),
             mcp_server_port: None,
             git_wt,
@@ -1518,16 +1523,13 @@ impl AgentControlService {
             .context("Not running inside a Zellij session (ZELLIJ_SESSION_NAME not set)")
     }
 
-    /// Build a `Command` for `zellij` with session targeting.
-    ///
-    /// Every zellij CLI invocation must target the correct session via
-    /// `ZELLIJ_SESSION_NAME`. Without it, commands can hang or target the wrong session.
-    fn zellij_cmd(&self) -> Command {
-        let mut cmd = Command::new("zellij");
-        if let Some(ref session) = self.zellij_session {
-            cmd.env("ZELLIJ_SESSION_NAME", session);
+    /// Get the direct IPC client, falling back to creating one from env.
+    fn ipc(&self) -> Result<super::zellij_ipc::ZellijIpc> {
+        if let Some(ref ipc) = self.zellij_ipc {
+            return Ok(ipc.clone());
         }
-        cmd
+        let session = self.check_zellij_env()?;
+        Ok(super::zellij_ipc::ZellijIpc::new(&session))
     }
 
     /// Clean up an existing worktree (if present) and create a fresh one.
@@ -1703,7 +1705,7 @@ impl AgentControlService {
         env_vars: HashMap<String, String>,
         fork_session_id: Option<&str>,
     ) -> Result<()> {
-        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating Zellij tab");
+        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating Zellij tab via direct IPC");
 
         let full_command =
             Self::build_agent_command(agent_type, prompt, fork_session_id, &env_vars, cwd);
@@ -1714,7 +1716,6 @@ impl AgentControlService {
         // Use login shell to ensure PATH is loaded (gemini, claude, etc.)
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
 
-        // Generate layout using zellij-gen library (includes zjstatus with Solarized Dark)
         let params = crate::layout::AgentTabParams {
             tab_name: name,
             pane_name: name,
@@ -1728,89 +1729,58 @@ impl AgentControlService {
         let layout_content = crate::layout::generate_agent_layout(&params)
             .context("Failed to generate Zellij layout")?;
 
-        // Write to temporary file (sanitize name for filename - no emoji/spaces)
-        let temp_dir = std::env::temp_dir();
-        let safe_filename: String = name
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        let layout_file = temp_dir.join(format!("zellij-tab-{}.kdl", safe_filename));
-        tokio::fs::write(&layout_file, &layout_content)
-            .await
-            .context("Failed to write temporary layout file")?;
+        let ipc = self.ipc()?;
+        let tab_name = name.to_string();
+        let layout_kdl = layout_content.clone();
 
-        info!(
-            layout_file = %layout_file.display(),
-            "Generated Zellij layout (preserved for inspection)"
-        );
+        // Direct IPC: parse KDL in-process and send NewTab action via socket.
+        // No temp file, no subprocess fork.
+        tokio::task::spawn_blocking(move || {
+            ipc.new_tab_with_layout(&layout_kdl, Some(&tab_name))
+        })
+        .await
+        .context("tokio task join error")?
+        .context("Failed to create Zellij tab via IPC")?;
 
-        // Create tab with layout - wait for zellij action to complete before deleting temp file
-        // Note: zellij action new-tab returns quickly after reading the layout,
-        // it doesn't wait for the spawned pane command to finish
-        let mut cmd = self.zellij_cmd();
-        cmd.args([
-            "action",
-            "new-tab",
-            "--layout",
-            layout_file
-                .to_str()
-                .ok_or_else(|| anyhow!("Invalid layout file path (utf8 error)"))?,
-        ]);
-        cmd.env("ZELLIJ", "0");
-        if self.zellij_session.is_none() {
-            warn!("No zellij_session configured - new-tab may create a new session!");
-        }
-        let output = cmd.output().await.context("Failed to run zellij")?;
-        debug!(
-            exit_code = %output.status,
-            "zellij action new-tab completed"
-        );
-
-        // Check if zellij command failed
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!(
-                "zellij new-tab failed with status: {} (stderr: {}, layout file was: {})",
-                output.status,
-                stderr,
-                layout_file.display()
-            ));
-        }
-
-        // Explicitly rename pane to ensure it matches display_name exactly
-        let _ = self.zellij_cmd()
-            .args(["action", "rename-pane", name])
-            .output()
-            .await;
+        // Rename pane via direct IPC
+        let ipc = self.ipc()?;
+        let pane_name = name.to_string();
+        let _ = tokio::task::spawn_blocking(move || ipc.rename_pane(&pane_name)).await;
 
         Ok(())
     }
 
     #[tracing::instrument(skip(self))]
     async fn get_zellij_tabs(&self) -> Result<Vec<String>> {
-        debug!("Querying Zellij tab names");
-        let output = timeout(ZELLIJ_TIMEOUT, self.zellij_cmd()
-            .args(["action", "query-tab-names"])
-            .output())
-            .await
-            .map_err(|_| anyhow!("zellij query-tab-names timed out after {}s", ZELLIJ_TIMEOUT.as_secs()))?
-            .context("Failed to execute zellij action query-tab-names")?;
+        debug!("Querying Zellij tab names via direct IPC");
+        let ipc = match self.ipc() {
+            Ok(ipc) => ipc,
+            Err(e) => {
+                warn!("Failed to get IPC client for query-tab-names: {}", e);
+                return Ok(Vec::new());
+            }
+        };
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // If zellij is not running or other error, return empty list instead of failing
-            warn!(stderr = %stderr, "zellij query-tab-names failed, assuming no tabs");
-            return Ok(Vec::new());
+        let result = timeout(
+            ZELLIJ_TIMEOUT,
+            tokio::task::spawn_blocking(move || ipc.query_tab_names()),
+        )
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "zellij query-tab-names timed out after {}s",
+                ZELLIJ_TIMEOUT.as_secs()
+            )
+        })?
+        .context("tokio task join error")?;
+
+        match result {
+            Ok(tabs) => Ok(tabs),
+            Err(e) => {
+                warn!("zellij query-tab-names IPC failed, assuming no tabs: {}", e);
+                Ok(Vec::new())
+            }
         }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(stdout.lines().map(|s| s.to_string()).collect())
     }
 
     /// Check if a Zellij tab with the given display name exists.
@@ -1823,15 +1793,15 @@ impl AgentControlService {
     }
 
     async fn close_zellij_tab(&self, name: &str) -> Result<()> {
-        info!(name, "Running zellij action close-tab");
+        info!(name, "Closing Zellij tab via direct IPC");
 
-        let result = timeout(ZELLIJ_TIMEOUT, async {
-            self.zellij_cmd()
-                .args(["action", "close-tab", "--tab-name", name])
-                .output()
-                .await
-                .context("Failed to execute zellij")
-        })
+        let ipc = self.ipc()?;
+        let tab_name = name.to_string();
+
+        timeout(
+            ZELLIJ_TIMEOUT,
+            tokio::task::spawn_blocking(move || ipc.close_tab(&tab_name)),
+        )
         .await
         .map_err(|_| {
             anyhow::Error::new(TimeoutError {
@@ -1840,16 +1810,11 @@ impl AgentControlService {
                     ZELLIJ_TIMEOUT.as_secs()
                 ),
             })
-        })??;
+        })?
+        .context("tokio task join error")?
+        .context("zellij close-tab IPC failed")?;
 
-        if !result.status.success() {
-            let stderr = String::from_utf8_lossy(&result.stderr);
-            warn!(stderr = %stderr, exit_code = ?result.status.code(), "zellij close-tab failed");
-            return Err(anyhow!("zellij close-tab failed: {}", stderr));
-        } else {
-            info!(exit_code = ?result.status.code(), "zellij close-tab successful");
-        }
-
+        info!(name, "zellij close-tab successful");
         Ok(())
     }
 
@@ -1860,7 +1825,7 @@ impl AgentControlService {
     /// Create a new Zellij pane in the current tab (for workers).
     ///
     /// Unlike `new_zellij_tab` which creates a full tab with KDL layout,
-    /// this creates a lightweight pane in the current tab using `zellij action new-pane`.
+    /// this creates a lightweight pane via direct IPC.
     async fn new_zellij_pane(
         &self,
         name: &str,
@@ -1870,55 +1835,33 @@ impl AgentControlService {
         env_vars: HashMap<String, String>,
         tab_name: Option<&str>,
     ) -> Result<()> {
-        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, tab = ?tab_name, "Creating Zellij pane");
+        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, tab = ?tab_name, "Creating Zellij pane via direct IPC");
 
         if let Some(tn) = tab_name {
             debug!(tab = %tn, "Switching to tab before spawning pane");
-            let _ = self.zellij_cmd()
-                .args(["action", "go-to-tab-name", tn])
-                .output()
-                .await;
+            let ipc = self.ipc()?;
+            let tab = tn.to_string();
+            let _ = tokio::task::spawn_blocking(move || ipc.go_to_tab_name(&tab)).await;
         }
 
         let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd);
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
 
-        let output = self.zellij_cmd()
-            .args([
-                "action",
-                "new-pane",
-                "--name",
-                name,
-                "--cwd",
-                &cwd.display().to_string(),
-                "--",
-                &shell,
-                "-l",
-                "-c",
-                &full_command,
-            ])
-            .output()
-            .await
-            .context("Failed to run zellij")?;
+        let ipc = self.ipc()?;
+        let pane_name = name.to_string();
+        let pane_cwd = cwd.to_path_buf();
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            error!(
-                name,
-                exit_code = output.status.code(),
-                stderr = %stderr,
-                stdout = %stdout,
-                "zellij action new-pane failed"
-            );
-            anyhow::bail!("zellij action new-pane failed: {}", stderr);
-        }
+        tokio::task::spawn_blocking(move || {
+            ipc.new_pane(&pane_name, &pane_cwd, &shell, &full_command)
+        })
+        .await
+        .context("tokio task join error")?
+        .context("zellij new-pane IPC failed")?;
 
-        // Explicitly rename pane to ensure it's visible in the UI
-        let _ = self.zellij_cmd()
-            .args(["action", "rename-pane", name])
-            .output()
-            .await;
+        // Rename pane via direct IPC
+        let ipc = self.ipc()?;
+        let rename_target = name.to_string();
+        let _ = tokio::task::spawn_blocking(move || ipc.rename_pane(&rename_target)).await;
 
         info!(name, "Successfully created Zellij pane");
         Ok(())

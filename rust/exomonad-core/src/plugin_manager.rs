@@ -229,42 +229,12 @@ impl PluginManager {
             .unwrap_or_else(|_| "unknown".to_string())
     }
 
-    /// Call a WASM guest function with typed input/output marshalling.
+    /// Call a WASM guest function with trampoline support for suspend/resume.
     ///
-    /// Input is serialized to JSON, passed to the WASM function, and the
-    /// result is deserialized from JSON.
-    ///
-    /// Uses spawn_blocking because Extism Plugin is not Send.
+    /// All WASM exports return `WasmResult<O>` (Done | Suspend). On Suspend,
+    /// the effect is dispatched asynchronously (lock released), then the WASM
+    /// `resume` function is called with the result. Loops until Done.
     pub async fn call<I, O>(&self, function: &str, input: &I) -> Result<O>
-    where
-        I: Serialize + Send + Sync + 'static,
-        O: for<'de> Deserialize<'de> + Send + 'static,
-    {
-        let plugin_lock = self.plugin.clone();
-        let function_name = function.to_string();
-        let input_data = serde_json::to_vec(input)?;
-
-        let result_bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
-            let mut plugin = plugin_lock
-                .write()
-                .map_err(|e| anyhow::anyhow!("Plugin lock poisoned: {}", e))?;
-            plugin.call::<&[u8], Vec<u8>>(&function_name, &input_data)
-        })
-        .await??;
-
-        if result_bytes.is_empty() {
-            let null: O = serde_json::from_str("null")?;
-            return Ok(null);
-        }
-
-        let output: O = serde_json::from_slice(&result_bytes)?;
-        Ok(output)
-    }
-
-    /// Call a WASM guest function with trampoline support for async effects.
-    ///
-    /// Releases the plugin lock during async effect execution.
-    pub async fn call_async<I, O>(&self, function: &str, input: &I) -> Result<O>
     where
         I: Serialize + Send + Sync + 'static,
         O: for<'de> Deserialize<'de> + Send + 'static,
@@ -272,17 +242,23 @@ impl PluginManager {
         let mut current_input = serde_json::to_vec(input)?;
         let mut current_function = function.to_string();
 
+        let mut round = 0u32;
         loop {
+            round += 1;
             // Acquire lock, call WASM, release lock
             let wasm_result: WasmResult<O> = {
                 let plugin_lock = self.plugin.clone();
                 let func = current_function.clone();
                 let data = current_input.clone();
+                let r = round;
                 let result_bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+                    eprintln!("[trampoline] round={r} func={func} calling WASM ({} bytes input)", data.len());
                     let mut plugin = plugin_lock
                         .write()
                         .map_err(|e| anyhow::anyhow!("Plugin lock poisoned: {}", e))?;
-                    plugin.call::<&[u8], Vec<u8>>(&func, &data)
+                    let result = plugin.call::<&[u8], Vec<u8>>(&func, &data);
+                    eprintln!("[trampoline] round={r} func={func} WASM returned ({} bytes)", result.as_ref().map(|v| v.len()).unwrap_or(0));
+                    result
                 })
                 .await??;
 

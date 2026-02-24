@@ -23,6 +23,7 @@ pub mod synthetic_members;
 pub mod team_registry;
 pub mod teams_mailbox;
 pub mod zellij_events;
+pub mod zellij_ipc;
 
 pub use self::agent_control::{
     resolve_parent_tab_name, AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult,

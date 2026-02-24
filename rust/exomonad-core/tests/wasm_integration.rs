@@ -1,17 +1,21 @@
-//! End-to-end integration tests: Rust host ↔ Haskell WASM plugin via yield_effect.
+//! End-to-end integration tests: Rust host ↔ Haskell WASM plugin via trampoline.
 //!
 //! Loads the actual compiled WASM binary, registers mock effect handlers,
 //! and verifies the full protobuf encoding/decoding pipeline:
 //!
 //! ```text
-//! WASM guest → yield_effect → EffectRegistry → mock handler → EffectResponse → WASM guest
+//! WASM guest → yield_effect / suspend → EffectRegistry → mock handler → EffectResponse → WASM guest
 //! ```
+//!
+//! All WASM exports return `WasmResult<O>` (Done | Suspend envelope).
+//! `PluginManager::call` (trampoline) is the single dispatch path.
 //!
 //! Requires: `just wasm-all` to build the WASM binary first.
 
 use async_trait::async_trait;
 use exomonad_core::{EffectError, EffectHandler, EffectResult, RuntimeBuilder};
 use prost::Message;
+use serial_test::serial;
 use serde_json::{json, Value};
 
 // ============================================================================
@@ -35,17 +39,59 @@ async fn build_test_runtime() -> exomonad_core::Runtime {
         .with_effect_handler(MockLogHandler)
         .with_effect_handler(MockAgentHandler)
         .with_effect_handler(MockFsHandler)
+        .with_effect_handler(MockFilePRHandler)
+        .with_effect_handler(MockMergePRHandler)
+        .with_effect_handler(MockPopupHandler)
+        .with_effect_handler(MockEventsHandler)
+        .with_effect_handler(MockSessionHandler)
+        .with_effect_handler(MockKvHandler)
+        .with_effect_handler(MockGitHubHandler)
+        .with_effect_handler(MockCopilotHandler)
         .with_wasm_bytes(wasm_bytes)
         .build()
         .await
         .expect("Failed to build runtime with WASM plugin")
 }
 
+/// Helper: call a tool and return the MCPCallOutput JSON.
+async fn call_tool(
+    runtime: &exomonad_core::Runtime,
+    role: &str,
+    tool_name: &str,
+    tool_args: Value,
+) -> Value {
+    let input = json!({
+        "role": role,
+        "toolName": tool_name,
+        "toolArgs": tool_args
+    });
+    runtime
+        .plugin_manager()
+        .call("handle_mcp_call", &input)
+        .await
+        .expect(&format!("handle_mcp_call failed for {tool_name}"))
+}
+
+/// Helper: assert a tool call succeeded.
+fn assert_tool_success(output: &Value, tool_name: &str) {
+    assert_eq!(
+        output["success"], true,
+        "{tool_name} should succeed: {output:#}"
+    );
+}
+
+/// Helper: assert a tool call failed.
+fn assert_tool_error(output: &Value, tool_name: &str) {
+    assert_eq!(
+        output["success"], false,
+        "{tool_name} should fail: {output:#}"
+    );
+}
+
 // ============================================================================
 // Mock Effect Handlers
 // ============================================================================
 
-/// Returns known protobuf responses for git effects.
 struct MockGitHandler;
 
 #[async_trait]
@@ -119,7 +165,6 @@ impl EffectHandler for MockGitHandler {
     }
 }
 
-/// Accepts all log effects, returns success.
 struct MockLogHandler;
 
 #[async_trait]
@@ -149,7 +194,6 @@ impl EffectHandler for MockLogHandler {
     }
 }
 
-/// Returns mock agent spawn responses.
 struct MockAgentHandler;
 
 #[async_trait]
@@ -172,7 +216,7 @@ impl EffectHandler for MockAgentHandler {
                     id: "test-subtree-claude".into(),
                     issue: String::new(),
                     worktree_path: "/tmp/test-worktree".into(),
-                    branch_name: "main/test-subtree".into(),
+                    branch_name: "main.test-subtree".into(),
                     agent_type: 1,
                     role: 1,
                     status: 1,
@@ -180,24 +224,41 @@ impl EffectHandler for MockAgentHandler {
                     error: String::new(),
                     pr_number: 0,
                     pr_url: String::new(),
-                    topology: 1, // WORKTREE_PER_AGENT
+                    topology: 1,
                 };
                 Ok(SpawnSubtreeResponse { agent: Some(agent) }.encode_to_vec())
+            }
+            "agent.spawn_leaf_subtree" => {
+                let agent = AgentInfo {
+                    id: "test-leaf-gemini".into(),
+                    issue: String::new(),
+                    worktree_path: "/tmp/test-leaf-worktree".into(),
+                    branch_name: "main.test-leaf".into(),
+                    agent_type: 2,
+                    role: 2,
+                    status: 1,
+                    zellij_tab: "test-leaf".into(),
+                    error: String::new(),
+                    pr_number: 0,
+                    pr_url: String::new(),
+                    topology: 1,
+                };
+                Ok(SpawnLeafSubtreeResponse { agent: Some(agent) }.encode_to_vec())
             }
             "agent.spawn_worker" => {
                 let agent = AgentInfo {
                     id: "test-worker-gemini".into(),
                     issue: String::new(),
-                    worktree_path: String::new(), // Shared dir
+                    worktree_path: String::new(),
                     branch_name: String::new(),
-                    agent_type: 2, // GEMINI
+                    agent_type: 2,
                     role: 0,
                     status: 1,
                     zellij_tab: "test-worker".into(),
                     error: String::new(),
                     pr_number: 0,
                     pr_url: String::new(),
-                    topology: 2, // SHARED_DIR
+                    topology: 2,
                 };
                 Ok(SpawnWorkerResponse { agent: Some(agent) }.encode_to_vec())
             }
@@ -212,7 +273,6 @@ impl EffectHandler for MockAgentHandler {
     }
 }
 
-/// Returns mock filesystem responses.
 struct MockFsHandler;
 
 #[async_trait]
@@ -242,13 +302,279 @@ impl EffectHandler for MockFsHandler {
     }
 }
 
+struct MockFilePRHandler;
+
+#[async_trait]
+impl EffectHandler for MockFilePRHandler {
+    fn namespace(&self) -> &str {
+        "file_pr"
+    }
+
+    async fn handle(
+        &self,
+        effect_type: &str,
+        _payload: &[u8],
+        _ctx: &exomonad_core::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        use exomonad_proto::effects::file_pr::*;
+
+        match effect_type {
+            "file_pr.file_pr" => Ok(FilePrResponse {
+                pr_url: "https://github.com/test/test/pull/42".into(),
+                pr_number: 42,
+                head_branch: "mock-main".into(),
+                base_branch: "main".into(),
+                created: true,
+            }
+            .encode_to_vec()),
+            _ => Err(EffectError::not_found(format!(
+                "mock_file_pr/{effect_type}"
+            ))),
+        }
+    }
+}
+
+struct MockMergePRHandler;
+
+#[async_trait]
+impl EffectHandler for MockMergePRHandler {
+    fn namespace(&self) -> &str {
+        "merge_pr"
+    }
+
+    async fn handle(
+        &self,
+        effect_type: &str,
+        _payload: &[u8],
+        _ctx: &exomonad_core::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        use exomonad_proto::effects::merge_pr::*;
+
+        match effect_type {
+            "merge_pr.merge_pr" => Ok(MergePrResponse {
+                success: true,
+                message: "Merged PR #42".into(),
+                git_fetched: true,
+            }
+            .encode_to_vec()),
+            _ => Err(EffectError::not_found(format!(
+                "mock_merge_pr/{effect_type}"
+            ))),
+        }
+    }
+}
+
+struct MockPopupHandler;
+
+#[async_trait]
+impl EffectHandler for MockPopupHandler {
+    fn namespace(&self) -> &str {
+        "popup"
+    }
+
+    async fn handle(
+        &self,
+        effect_type: &str,
+        _payload: &[u8],
+        _ctx: &exomonad_core::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        use exomonad_proto::effects::popup::*;
+
+        match effect_type {
+            "popup.show_popup" => Ok(ShowPopupResponse {
+                button: "submit".into(),
+                values: b"{}".to_vec(),
+            }
+            .encode_to_vec()),
+            _ => Err(EffectError::not_found(format!(
+                "mock_popup/{effect_type}"
+            ))),
+        }
+    }
+}
+
+struct MockEventsHandler;
+
+#[async_trait]
+impl EffectHandler for MockEventsHandler {
+    fn namespace(&self) -> &str {
+        "events"
+    }
+
+    async fn handle(
+        &self,
+        effect_type: &str,
+        _payload: &[u8],
+        _ctx: &exomonad_core::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        use exomonad_proto::effects::events::*;
+
+        match effect_type {
+            "events.notify_parent" => {
+                Ok(NotifyParentResponse { ack: true }.encode_to_vec())
+            }
+            "events.notify_event" => {
+                Ok(NotifyEventResponse { success: true }.encode_to_vec())
+            }
+            _ => Err(EffectError::not_found(format!(
+                "mock_events/{effect_type}"
+            ))),
+        }
+    }
+}
+
+struct MockSessionHandler;
+
+#[async_trait]
+impl EffectHandler for MockSessionHandler {
+    fn namespace(&self) -> &str {
+        "session"
+    }
+
+    async fn handle(
+        &self,
+        effect_type: &str,
+        _payload: &[u8],
+        _ctx: &exomonad_core::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        use exomonad_proto::effects::session::*;
+
+        match effect_type {
+            "session.register_claude_id" => {
+                Ok(RegisterClaudeSessionResponse { success: true }.encode_to_vec())
+            }
+            "session.register_team" => {
+                Ok(RegisterTeamResponse { success: true }.encode_to_vec())
+            }
+            _ => Err(EffectError::not_found(format!(
+                "mock_session/{effect_type}"
+            ))),
+        }
+    }
+}
+
+struct MockKvHandler;
+
+#[async_trait]
+impl EffectHandler for MockKvHandler {
+    fn namespace(&self) -> &str {
+        "kv"
+    }
+
+    async fn handle(
+        &self,
+        effect_type: &str,
+        _payload: &[u8],
+        _ctx: &exomonad_core::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        use exomonad_proto::effects::kv::*;
+
+        match effect_type {
+            "kv.get" => Ok(GetResponse {
+                found: false,
+                value: String::new(),
+            }
+            .encode_to_vec()),
+            "kv.set" => Ok(SetResponse { success: true }.encode_to_vec()),
+            _ => Err(EffectError::not_found(format!("mock_kv/{effect_type}"))),
+        }
+    }
+}
+
+struct MockGitHubHandler;
+
+#[async_trait]
+impl EffectHandler for MockGitHubHandler {
+    fn namespace(&self) -> &str {
+        "github"
+    }
+
+    async fn handle(
+        &self,
+        effect_type: &str,
+        _payload: &[u8],
+        _ctx: &exomonad_core::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        use exomonad_proto::effects::github::*;
+
+        match effect_type {
+            "github.list_issues" => {
+                Ok(ListIssuesResponse { issues: vec![] }.encode_to_vec())
+            }
+            "github.get_issue" => Ok(GetIssueResponse {
+                issue: None,
+                comments: vec![],
+            }
+            .encode_to_vec()),
+            "github.list_pull_requests" => {
+                Ok(ListPullRequestsResponse {
+                    pull_requests: vec![],
+                }
+                .encode_to_vec())
+            }
+            "github.get_pull_request" => Ok(GetPullRequestResponse {
+                pull_request: None,
+                reviews: vec![],
+            }
+            .encode_to_vec()),
+            "github.get_pull_request_for_branch" => {
+                Ok(GetPullRequestForBranchResponse {
+                    pull_request: None,
+                    found: false,
+                }
+                .encode_to_vec())
+            }
+            "github.create_pull_request" => Ok(CreatePullRequestResponse {
+                pull_request: None,
+                url: "https://github.com/test/test/pull/99".into(),
+            }
+            .encode_to_vec()),
+            "github.get_pull_request_review_comments" => {
+                Ok(GetPullRequestReviewCommentsResponse { comments: vec![] }.encode_to_vec())
+            }
+            _ => Err(EffectError::not_found(format!(
+                "mock_github/{effect_type}"
+            ))),
+        }
+    }
+}
+
+struct MockCopilotHandler;
+
+#[async_trait]
+impl EffectHandler for MockCopilotHandler {
+    fn namespace(&self) -> &str {
+        "copilot"
+    }
+
+    async fn handle(
+        &self,
+        effect_type: &str,
+        _payload: &[u8],
+        _ctx: &exomonad_core::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        use exomonad_proto::effects::copilot::*;
+
+        match effect_type {
+            "copilot.wait_for_copilot_review" => Ok(WaitForCopilotReviewResponse {
+                status: "found".into(),
+                comments: vec![],
+            }
+            .encode_to_vec()),
+            _ => Err(EffectError::not_found(format!(
+                "mock_copilot/{effect_type}"
+            ))),
+        }
+    }
+}
+
 // ============================================================================
-// Tests
+// Tool Listing Tests (per role)
 // ============================================================================
 
-/// Baseline: WASM loads and returns tool definitions (no effects triggered).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn wasm_list_tools_returns_definitions() {
+#[serial]
+async fn wasm_tl_tools_include_spawn_and_merge() {
     let runtime = build_test_runtime().await;
 
     let tools: Vec<Value> = runtime
@@ -257,84 +583,264 @@ async fn wasm_list_tools_returns_definitions() {
         .await
         .expect("handle_list_tools failed");
 
-    assert!(!tools.is_empty(), "Expected at least one tool definition");
+    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
 
-    let tool_names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-
-    // The tl role exposes spawn + popup + messaging + coordination tools
-    assert!(
-        tool_names.contains(&"spawn_subtree"),
-        "Missing spawn_subtree in {tool_names:?}"
-    );
-    assert!(
-        tool_names.contains(&"spawn_workers"),
-        "Missing spawn_workers in {tool_names:?}"
-    );
+    for expected in [
+        "spawn_subtree",
+        "spawn_leaf_subtree",
+        "spawn_workers",
+        "merge_pr",
+        "file_pr",
+        "notify_parent",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "TL role missing tool '{expected}'. Got: {names:?}"
+        );
+    }
 }
 
-/// spawn_subtree roundtrip: tool → agent.spawn_subtree effect → mock response.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn wasm_spawn_subtree_roundtrip() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("exomonad_core=debug")
-        .with_test_writer()
-        .try_init();
-
+#[serial]
+async fn wasm_dev_tools_include_file_pr() {
     let runtime = build_test_runtime().await;
 
-    let input = json!({
-        "role": "tl",
-        "toolName": "spawn_subtree",
-        "toolArgs": {
-            "task": "Implement feature X",
-            "branch_name": "feature-x"
-        }
-    });
-
-    let output: Value = runtime
+    let tools: Vec<Value> = runtime
         .plugin_manager()
-        .call("handle_mcp_call", &input)
+        .call("handle_list_tools", &json!({"role": "dev"}))
         .await
-        .expect("handle_mcp_call failed for spawn_subtree");
+        .expect("handle_list_tools failed for dev");
 
-    assert_eq!(
-        output["result"]["success"], true,
-        "spawn_subtree should succeed with mock handler: {output:#}"
+    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+
+    assert!(
+        names.contains(&"file_pr"),
+        "Dev role missing file_pr. Got: {names:?}"
+    );
+    assert!(
+        names.contains(&"notify_parent"),
+        "Dev role missing notify_parent. Got: {names:?}"
+    );
+
+    // Dev should NOT have spawn or merge tools
+    assert!(
+        !names.contains(&"spawn_subtree"),
+        "Dev role should not have spawn_subtree"
+    );
+    assert!(
+        !names.contains(&"merge_pr"),
+        "Dev role should not have merge_pr"
     );
 }
 
-/// spawn_workers roundtrip: tool → agent.spawn_worker effect → mock response.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_worker_tools_include_notify_parent() {
+    let runtime = build_test_runtime().await;
+
+    let tools: Vec<Value> = runtime
+        .plugin_manager()
+        .call("handle_list_tools", &json!({"role": "worker"}))
+        .await
+        .expect("handle_list_tools failed for worker");
+
+    let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+
+    assert!(
+        names.contains(&"notify_parent"),
+        "Worker role missing notify_parent. Got: {names:?}"
+    );
+
+    // Worker should have minimal tools
+    assert!(
+        !names.contains(&"spawn_subtree"),
+        "Worker should not have spawn_subtree"
+    );
+    assert!(
+        !names.contains(&"file_pr"),
+        "Worker should not have file_pr"
+    );
+}
+
+// ============================================================================
+// Tool Roundtrip Tests (multi-effect trampoline)
+// ============================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_spawn_subtree_roundtrip() {
+    let runtime = build_test_runtime().await;
+
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "spawn_subtree",
+        json!({
+            "task": "Implement feature X",
+            "branch_name": "feature-x"
+        }),
+    )
+    .await;
+
+    assert_tool_success(&output, "spawn_subtree");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_spawn_leaf_subtree_roundtrip() {
+    let runtime = build_test_runtime().await;
+
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "spawn_leaf_subtree",
+        json!({
+            "task": "Implement the Rust handler",
+            "branch_name": "rust-handler"
+        }),
+    )
+    .await;
+
+    assert_tool_success(&output, "spawn_leaf_subtree");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
 async fn wasm_spawn_workers_roundtrip() {
     let runtime = build_test_runtime().await;
 
-    let input = json!({
-        "role": "tl",
-        "toolName": "spawn_workers",
-        "toolArgs": {
-            "specs": [
-                {
-                    "name": "rust-impl",
-                    "task": "Implement the Rust side of feature X"
-                }
-            ]
-        }
-    });
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "spawn_workers",
+        json!({
+            "specs": [{
+                "name": "rust-impl",
+                "task": "Implement the Rust side"
+            }]
+        }),
+    )
+    .await;
 
-    let output: Value = runtime
-        .plugin_manager()
-        .call("handle_mcp_call", &input)
-        .await
-        .expect("handle_mcp_call failed for spawn_workers");
-
-    assert_eq!(
-        output["result"]["success"], true,
-        "spawn_workers should succeed with mock handler: {output:#}"
-    );
+    assert_tool_success(&output, "spawn_workers");
 }
 
-/// Verify that effect handler errors propagate as tool errors.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_file_pr_roundtrip() {
+    let runtime = build_test_runtime().await;
+
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "file_pr",
+        json!({
+            "title": "Add feature X",
+            "body": "Implements feature X as specified"
+        }),
+    )
+    .await;
+
+    assert_tool_success(&output, "file_pr");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_merge_pr_roundtrip() {
+    let runtime = build_test_runtime().await;
+
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "merge_pr",
+        json!({
+            "pr_number": 42
+        }),
+    )
+    .await;
+
+    assert_tool_success(&output, "merge_pr");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_notify_parent_roundtrip() {
+    let runtime = build_test_runtime().await;
+
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "notify_parent",
+        json!({
+            "status": "success",
+            "message": "All tasks completed"
+        }),
+    )
+    .await;
+
+    assert_tool_success(&output, "notify_parent");
+}
+
+// ============================================================================
+// Argument Validation Tests
+// ============================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_tool_missing_required_field() {
+    let runtime = build_test_runtime().await;
+
+    // spawn_subtree requires "task"
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "spawn_subtree",
+        json!({}),
+    )
+    .await;
+
+    assert_tool_error(&output, "spawn_subtree (missing task)");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_tool_unknown_name_returns_error() {
+    let runtime = build_test_runtime().await;
+
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "nonexistent_tool_xyz",
+        json!({}),
+    )
+    .await;
+
+    assert_tool_error(&output, "nonexistent tool");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_tool_wrong_role_returns_error() {
+    let runtime = build_test_runtime().await;
+
+    // Dev role should not have spawn_subtree
+    let output = call_tool(
+        &runtime,
+        "dev",
+        "spawn_subtree",
+        json!({"task": "test", "branch_name": "test"}),
+    )
+    .await;
+
+    assert_tool_error(&output, "spawn_subtree as dev");
+}
+
+// ============================================================================
+// Error Propagation Tests
+// ============================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
 async fn wasm_unhandled_effect_returns_error() {
     // Build runtime with only log handler — agent effects will fail
     let wasm_bytes = wasm_binary_bytes();
@@ -345,24 +851,188 @@ async fn wasm_unhandled_effect_returns_error() {
         .await
         .expect("Failed to build runtime");
 
-    let input = json!({
-        "role": "tl",
-        "toolName": "spawn_subtree",
-        "toolArgs": {
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "spawn_subtree",
+        json!({
             "task": "test",
             "branch_name": "test-branch"
+        }),
+    )
+    .await;
+
+    assert_tool_error(&output, "spawn_subtree without agent handler");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_effect_handler_error_propagates() {
+    /// Handler that always returns an error.
+    struct FailingAgentHandler;
+
+    #[async_trait]
+    impl EffectHandler for FailingAgentHandler {
+        fn namespace(&self) -> &str {
+            "agent"
         }
+
+        async fn handle(
+            &self,
+            _effect_type: &str,
+            _payload: &[u8],
+            _ctx: &exomonad_core::effects::EffectContext,
+        ) -> EffectResult<Vec<u8>> {
+            Err(EffectError::custom(
+                "spawn_failed",
+                "Zellij session not found",
+            ))
+        }
+    }
+
+    let wasm_bytes = wasm_binary_bytes();
+    let runtime = RuntimeBuilder::new()
+        .with_effect_handler(MockGitHandler)
+        .with_effect_handler(MockLogHandler)
+        .with_effect_handler(FailingAgentHandler)
+        .with_effect_handler(MockFsHandler)
+        .with_wasm_bytes(wasm_bytes)
+        .build()
+        .await
+        .expect("Failed to build runtime");
+
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "spawn_subtree",
+        json!({
+            "task": "test",
+            "branch_name": "test-branch"
+        }),
+    )
+    .await;
+
+    assert_tool_error(&output, "spawn_subtree with failing handler");
+
+    // Verify the error message propagated
+    let error_msg = output["error"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        error_msg.contains("spawn_failed") || error_msg.contains("Zellij session"),
+        "Error message should contain handler error info, got: {error_msg}"
+    );
+}
+
+// ============================================================================
+// Hook Tests
+// ============================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_hook_session_start() {
+    let runtime = build_test_runtime().await;
+
+    let hook_input = json!({
+        "role": "tl",
+        "session_id": "test-session-123",
+        "hook_event_name": "SessionStart"
     });
 
     let output: Value = runtime
         .plugin_manager()
-        .call("handle_mcp_call", &input)
+        .call("handle_pre_tool_use", &hook_input)
         .await
-        .expect("handle_mcp_call should return output even on effect error");
+        .expect("SessionStart hook failed");
 
-    // The tool should report failure (agent handler not registered)
-    assert_eq!(
-        output["result"]["success"], false,
-        "spawn_subtree should fail without agent handler: {output:#}"
+    // SessionStart should return a valid hook response
+    assert!(
+        output.is_object(),
+        "SessionStart should return an object: {output:#}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_hook_pre_tool_use_allow() {
+    let runtime = build_test_runtime().await;
+
+    let hook_input = json!({
+        "role": "tl",
+        "session_id": "test-session",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Write"
+    });
+
+    let output: Value = runtime
+        .plugin_manager()
+        .call("handle_pre_tool_use", &hook_input)
+        .await
+        .expect("PreToolUse hook failed");
+
+    // Default behavior should allow tool use
+    assert!(
+        output.is_object(),
+        "PreToolUse should return an object: {output:#}"
+    );
+}
+
+// ============================================================================
+// Multi-Suspend Verification
+// ============================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_tool_multiple_suspends() {
+    // spawn_subtree yields multiple effects:
+    // 1. log.info (logging)
+    // 2. git.get_branch or git.get_repo_info
+    // 3. agent.spawn_subtree
+    // 4. log.emit_event
+    // Each suspend/resume cycle goes through the trampoline.
+    let runtime = build_test_runtime().await;
+
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "spawn_subtree",
+        json!({
+            "task": "Multi-suspend test",
+            "branch_name": "multi-suspend"
+        }),
+    )
+    .await;
+
+    assert_tool_success(&output, "spawn_subtree (multi-suspend)");
+
+    // The result should contain agent info from the mock handler
+    let result = &output["result"];
+    assert!(
+        result.is_object() || result.is_string(),
+        "spawn_subtree result should contain agent info: {output:#}"
+    );
+}
+
+/// Test if sending a long task text to spawn_subtree causes a hang.
+/// spawn_leaf_subtree hangs — this checks if the issue is text length vs P.render.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_spawn_subtree_long_text() {
+    let runtime = build_test_runtime().await;
+
+    // Simulate roughly the same amount of text as P.render + P.leafProfile produces
+    let long_task = "A".repeat(600);
+
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "spawn_subtree",
+        json!({
+            "task": long_task,
+            "branch_name": "long-text-test"
+        }),
+    )
+    .await;
+
+    assert_tool_success(&output, "spawn_subtree (long text)");
 }
