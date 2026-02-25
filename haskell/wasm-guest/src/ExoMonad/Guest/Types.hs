@@ -100,7 +100,8 @@ data HookInput = HookInput
     -- | TL session ID for event routing, injected by server from hook query params.
     hiExomonadSessionId :: Maybe Text,
     hiExitStatus :: Maybe Text,
-    hiRuntime :: Maybe Runtime
+    hiRuntime :: Maybe Runtime,
+    hiCwd :: Maybe Text
   }
   deriving (Show, Generic)
 
@@ -120,6 +121,7 @@ instance FromJSON HookInput where
       <*> v .:? "exomonad_session_id"
       <*> v .:? "exit_status"
       <*> v .:? "runtime"
+      <*> v .:? "cwd"
 
 -- | Output from a hook handler.
 data HookOutput = HookOutput
