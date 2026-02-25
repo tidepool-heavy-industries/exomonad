@@ -9,6 +9,7 @@ description:
     write files, copy files, create symlinks) in a testable, IO-blind way.
 license:            BSD-3-Clause
 author:             Inanna Malick
+maintainer:         Inanna Malick
 build-type:         Simple
 
 common warnings

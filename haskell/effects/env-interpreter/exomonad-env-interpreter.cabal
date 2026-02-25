@@ -5,6 +5,7 @@ synopsis:           Env effect interpreter for ExoMonad
 license:            BSD-3-Clause
 author:             Inanna Malick
 category:           Control
+maintainer:         Inanna Malick
 build-type:         Simple
 
 library

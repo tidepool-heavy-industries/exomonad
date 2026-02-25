@@ -5,6 +5,7 @@ synopsis:           Git effect interpreter - CLI client
 description:        Implements Git effect by calling git CLI commands.
 license:            BSD-3-Clause
 author:             Inanna Malick
+maintainer:         Inanna Malick
 build-type:         Simple
 
 common warnings

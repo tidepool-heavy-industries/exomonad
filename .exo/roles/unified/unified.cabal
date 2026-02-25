@@ -1,6 +1,9 @@
 cabal-version: 3.4
 name: unified
 version: 0.1.0.0
+license:            BSD-3-Clause
+author:             Inanna Malick
+maintainer:         Inanna Malick
 build-type: Simple
 
 common shared

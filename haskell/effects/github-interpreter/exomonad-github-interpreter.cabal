@@ -9,6 +9,7 @@ description:
     for context construction in agent templates.
 license:            BSD-3-Clause
 author:             Inanna Malick
+maintainer:         Inanna Malick
 build-type:         Simple
 
 common warnings

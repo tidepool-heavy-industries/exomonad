@@ -20,10 +20,10 @@ description:
     * Reimplementations of several common Haskell monad transformers as effects.
     * Core components for defining your own Effects.
 
-author: Allele Dev, Ixcom Core Team, Alexis King, and other contributors
-maintainer: Alexis King <lexi.lambda@gmail.com>
+author:             Inanna Malick
+maintainer:         Inanna Malick
 copyright: 2016 Allele Dev; 2017 Ixperta Solutions s.r.o.; 2017 Alexis King
-license: BSD-3-Clause
+license:            BSD-3-Clause
 license-file: LICENSE
 homepage: https://github.com/lexi-lambda/freer-simple
 bug-reports: https://github.com/lexi-lambda/freer-simple/issues

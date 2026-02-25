@@ -6,6 +6,7 @@ description:        Socket-based implementation of LLMComplete effect for Anthro
                     Supports Anthropic with type-level provider switch.
 license:            BSD-3-Clause
 author:             Inanna Malick
+maintainer:         Inanna Malick
 build-type:         Simple
 
 common defaults

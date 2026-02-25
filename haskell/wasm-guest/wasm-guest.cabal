@@ -4,6 +4,7 @@ version:            0.1.0.0
 synopsis:           Haskell WASM Guest for ExoMonad
 license:            BSD-3-Clause
 author:             Inanna Malick
+maintainer:         Inanna Malick
 build-type:         Simple
 
 common shared

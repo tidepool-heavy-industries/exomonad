@@ -14,9 +14,9 @@ description:
   See <https://hackage.haskell.org/package/proto3-suite/docs/Proto3-Suite-Tutorial.html the `Proto3.Suite.Tutorial` module>
   for more details.
   .
-license:             Apache-2.0
-author:              Arista Networks <opensource@awakesecurity.com>
-maintainer:          Arista Networks <opensource@awakesecurity.com>
+license:            BSD-3-Clause
+author:             Inanna Malick
+maintainer:         Inanna Malick
 copyright:           2017-2020 Awake Security, 2021-2025 Arista Networks
 category:            Codec
 build-type:          Simple

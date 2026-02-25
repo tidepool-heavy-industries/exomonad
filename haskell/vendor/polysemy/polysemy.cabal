@@ -12,10 +12,10 @@ description:    Please see the README on GitHub at <https://github.com/polysemy-
 category:       Language
 homepage:       https://github.com/polysemy-research/polysemy#readme
 bug-reports:    https://github.com/polysemy-research/polysemy/issues
-author:         Sandy Maguire
-maintainer:     https://funprog.zulipchat.com/#narrow/stream/216942-Polysemy
+author:             Inanna Malick
+maintainer:         Inanna Malick
 copyright:      2019-2023 The Polysemy Lounge
-license:        BSD3
+license:            BSD-3-Clause
 license-file:   LICENSE
 build-type:     Simple
 extra-source-files:

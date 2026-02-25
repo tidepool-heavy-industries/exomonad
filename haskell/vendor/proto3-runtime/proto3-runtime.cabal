@@ -10,8 +10,10 @@ description:
   instances). The DotProto AST types are stub definitions that satisfy
   the Message typeclass without pulling in heavy dependencies.
 
+author:             Inanna Malick
+maintainer:         Inanna Malick
 build-type: Simple
-license: Apache-2.0
+license:            BSD-3-Clause
 license-file: proto3-suite-0.9.4/LICENSE
 
 library

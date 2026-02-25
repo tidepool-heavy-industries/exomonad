@@ -13,8 +13,10 @@ description:
   To regenerate:
     just proto-gen
 
+author:             Inanna Malick
+maintainer:         Inanna Malick
 build-type: Simple
-license: BSD-3-Clause
+license:            BSD-3-Clause
 license-file: ../../LICENSE
 
 library

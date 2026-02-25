@@ -5,6 +5,7 @@ synopsis:           Unix socket client for ExoMonad effects
 license:            BSD-3-Clause
 author:             Inanna Malick
 category:           Network
+maintainer:         Inanna Malick
 build-type:         Simple
 
 library

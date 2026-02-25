@@ -8,9 +8,10 @@ description:
   Arbitrary instances to generate synthetic edge contexts and heuristic
   scoring to produce ground-truth rubrics.
 
-license:       BSD-3-Clause
-author:        Inanna Malick
+license:            BSD-3-Clause
+author:             Inanna Malick
 category:      Development
+maintainer:         Inanna Malick
 build-type:    Simple
 
 common warnings

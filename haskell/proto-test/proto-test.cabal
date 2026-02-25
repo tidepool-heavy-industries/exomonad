@@ -6,8 +6,10 @@ description:
   Verifies that proto3-suite (Haskell) and prost (Rust) produce
   compatible protobuf binary encodings for the effect system types.
   Uses known-good hex bytes from Rust test suite as reference.
+author:             Inanna Malick
+maintainer:         Inanna Malick
 build-type: Simple
-license: BSD-3-Clause
+license:            BSD-3-Clause
 license-file: ../../LICENSE
 
 executable proto-test

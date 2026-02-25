@@ -2,9 +2,9 @@ cabal-version:      3.4
 name:               exomonad-pdk
 version:            0.1.0.0
 synopsis:           Vendored Extism PDK for ExoMonad
-license:            MIT
-author:             ExoMonad Team
-maintainer:         maintainers@exomonad.io
+license:            BSD-3-Clause
+author:             Inanna Malick
+maintainer:         Inanna Malick
 build-type:         Simple
 
 library

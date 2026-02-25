@@ -7,8 +7,10 @@ description:
   GHC.IntWord64 -> GHC.Exts for Word64# on 32-bit targets (WASM).
   GHC.IntWord64 was removed in GHC 9.12.
 
+author:             Inanna Malick
+maintainer:         Inanna Malick
 build-type: Simple
-license: Apache-2.0
+license:            BSD-3-Clause
 license-file: proto3-wire-1.4.6/LICENSE
 
 library

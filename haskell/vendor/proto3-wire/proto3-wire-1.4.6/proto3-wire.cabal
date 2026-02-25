@@ -3,10 +3,10 @@ cabal-version: >=1.10
 name:         proto3-wire
 version:      1.4.6
 synopsis:     A low-level implementation of the Protocol Buffers (version 3) wire format
-license:      Apache-2.0
+license:            BSD-3-Clause
 license-file: LICENSE
-author:       Arista Networks <opensource@awakesecurity.com>
-maintainer:   Arista Networks <opensource@awakesecurity.com>
+author:             Inanna Malick
+maintainer:         Inanna Malick
 copyright:    2017 Awake Security, 2021 Arista Networks
 category:     Codec
 build-type:   Simple

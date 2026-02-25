@@ -10,6 +10,7 @@ description:
     Claude Code sessions to work in parallel without conflicts.
 license:            BSD-3-Clause
 author:             Inanna Malick
+maintainer:         Inanna Malick
 build-type:         Simple
 
 common warnings

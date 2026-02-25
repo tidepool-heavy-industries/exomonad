@@ -5,10 +5,10 @@ synopsis:            An implementation of the Jinja2 template language in Haskel
 description:         Ginger is Jinja, minus the most blatant pythonisms. Wants
                      to be feature complete, but isn't quite there yet.
 homepage:            https://ginger.tobiasdammers.nl/
-license:             MIT
+license:            BSD-3-Clause
 license-file:        LICENSE
-author:              Tobias Dammers
-maintainer:          tdammers@gmail.com
+author:             Inanna Malick
+maintainer:         Inanna Malick
 -- copyright:
 category:            Text
 build-type:          Simple
