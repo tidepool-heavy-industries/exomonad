@@ -19,6 +19,7 @@ module ExoMonad.Guest.Effects.AgentControl
     spawnSubtree,
     spawnLeafSubtree,
     spawnWorker,
+    spawnAcp,
 
     -- * Interpreters
     runAgentControlSuspend,
@@ -97,6 +98,7 @@ data AgentControl a where
   SpawnSubtreeC :: Text -> Text -> Text -> Bool -> AgentControl (Either Text SpawnResult)
   SpawnLeafSubtreeC :: Text -> Text -> AgentControl (Either Text SpawnResult)
   SpawnWorkerC :: Text -> Text -> AgentControl (Either Text SpawnResult)
+  SpawnAcpC :: Text -> Text -> AgentControl (Either Text SpawnResult)
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
 spawnSubtree :: (Member AgentControl r) => Text -> Text -> Text -> Bool -> Eff r (Either Text SpawnResult)
@@ -107,6 +109,9 @@ spawnLeafSubtree task branchName = send (SpawnLeafSubtreeC task branchName)
 
 spawnWorker :: (Member AgentControl r) => Text -> Text -> Eff r (Either Text SpawnResult)
 spawnWorker name prompt = send (SpawnWorkerC name prompt)
+
+spawnAcp :: (Member AgentControl r) => Text -> Text -> Eff r (Either Text SpawnResult)
+spawnAcp name prompt = send (SpawnAcpC name prompt)
 
 -- ============================================================================
 -- Interpreter (uses yield_effect via Effect typeclass)
@@ -153,6 +158,18 @@ runAgentControlSuspend = interpret $ \case
       Left err -> Left (T.pack (show err))
       Right resp -> case PA.spawnWorkerResponseAgent resp of
         Nothing -> Left "SpawnWorker succeeded but no agent info returned"
+        Just info -> Right (protoAgentInfoToSpawnResult info)
+  SpawnAcpC name prompt -> do
+    let req =
+          PA.SpawnAcpRequest
+            { PA.spawnAcpRequestName = fromText name,
+              PA.spawnAcpRequestPrompt = fromText prompt
+            }
+    result <- suspendEffect @Agent.AgentSpawnAcp req
+    pure $ case result of
+      Left err -> Left (T.pack (show err))
+      Right resp -> case PA.spawnAcpResponseAgent resp of
+        Nothing -> Left "SpawnAcp succeeded but no agent info returned"
         Just info -> Right (protoAgentInfoToSpawnResult info)
 
 -- ============================================================================
