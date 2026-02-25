@@ -97,7 +97,7 @@ instance ToJSON SpawnResult where
 data AgentControl a where
   SpawnSubtreeC :: Text -> Text -> Text -> Bool -> Maybe Text -> Maybe AgentType -> AgentControl (Either Text SpawnResult)
   SpawnLeafSubtreeC :: Text -> Text -> Maybe Text -> Maybe AgentType -> AgentControl (Either Text SpawnResult)
-  SpawnWorkerC :: Text -> Text -> AgentControl (Either Text SpawnResult)
+  SpawnWorkerC :: Text -> Text -> Maybe Text -> Maybe AgentType -> Maybe Text -> AgentControl (Either Text SpawnResult)
   SpawnAcpC :: Text -> Text -> AgentControl (Either Text SpawnResult)
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
@@ -107,8 +107,8 @@ spawnSubtree task branchName parentSessionId forkSession role agentType = send (
 spawnLeafSubtree :: (Member AgentControl r) => Text -> Text -> Maybe Text -> Maybe AgentType -> Eff r (Either Text SpawnResult)
 spawnLeafSubtree task branchName role agentType = send (SpawnLeafSubtreeC task branchName role agentType)
 
-spawnWorker :: (Member AgentControl r) => Text -> Text -> Eff r (Either Text SpawnResult)
-spawnWorker name prompt = send (SpawnWorkerC name prompt)
+spawnWorker :: (Member AgentControl r) => Text -> Text -> Maybe Text -> Maybe AgentType -> Maybe Text -> Eff r (Either Text SpawnResult)
+spawnWorker name prompt role agentType workingDir = send (SpawnWorkerC name prompt role agentType workingDir)
 
 spawnAcp :: (Member AgentControl r) => Text -> Text -> Eff r (Either Text SpawnResult)
 spawnAcp name prompt = send (SpawnAcpC name prompt)
@@ -151,11 +151,14 @@ runAgentControlSuspend = interpret $ \case
       Right resp -> case PA.spawnLeafSubtreeResponseAgent resp of
         Nothing -> Left "SpawnLeafSubtree succeeded but no agent info returned"
         Just info -> Right (protoAgentInfoToSpawnResult info)
-  SpawnWorkerC name prompt -> do
+  SpawnWorkerC name prompt role agentType workingDir -> do
     let req =
           PA.SpawnWorkerRequest
             { PA.spawnWorkerRequestName = fromText name,
-              PA.spawnWorkerRequestPrompt = fromText prompt
+              PA.spawnWorkerRequestPrompt = fromText prompt,
+              PA.spawnWorkerRequestRole = fromText (maybe "" id role),
+              PA.spawnWorkerRequestAgentType = Enumerated (Right (maybe PA.AgentTypeAGENT_TYPE_UNSPECIFIED toProtoAgentType agentType)),
+              PA.spawnWorkerRequestWorkingDir = fromText (maybe "" id workingDir)
             }
     result <- suspendEffect @Agent.AgentSpawnWorker req
     pure $ case result of

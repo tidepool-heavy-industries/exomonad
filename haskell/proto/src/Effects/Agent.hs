@@ -1939,7 +1939,10 @@ instance (HsJSONPB.FromJSON ListResponse) where
   parseJSON = HsJSONPB.parseJSONPB
 data SpawnWorkerRequest
   = SpawnWorkerRequest {spawnWorkerRequestName :: Hs.Text,
-                        spawnWorkerRequestPrompt :: Hs.Text}
+                        spawnWorkerRequestPrompt :: Hs.Text,
+                        spawnWorkerRequestRole :: Hs.Text,
+                        spawnWorkerRequestAgentType :: (HsProtobuf.Enumerated Effects.Agent.AgentType),
+                        spawnWorkerRequestWorkingDir :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData SpawnWorkerRequest)
 instance (HsProtobuf.Named SpawnWorkerRequest) where
@@ -1949,16 +1952,30 @@ instance (HsProtobuf.Message SpawnWorkerRequest) where
   encodeMessage
     _
     SpawnWorkerRequest {spawnWorkerRequestName,
-                        spawnWorkerRequestPrompt}
+                        spawnWorkerRequestPrompt, spawnWorkerRequestRole,
+                        spawnWorkerRequestAgentType, spawnWorkerRequestWorkingDir}
     = Hs.mappend
+        (Hs.mappend
+           (Hs.mappend
+              (Hs.mappend
+                 (HsProtobuf.encodeMessageField
+                    (HsProtobuf.FieldNumber 1)
+                    ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                       spawnWorkerRequestName))
+                 (HsProtobuf.encodeMessageField
+                    (HsProtobuf.FieldNumber 2)
+                    ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                       spawnWorkerRequestPrompt)))
+              (HsProtobuf.encodeMessageField
+                 (HsProtobuf.FieldNumber 3)
+                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                    spawnWorkerRequestRole)))
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 4) spawnWorkerRequestAgentType))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 1)
+           (HsProtobuf.FieldNumber 5)
            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              spawnWorkerRequestName))
-        (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 2)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              spawnWorkerRequestPrompt))
+              spawnWorkerRequestWorkingDir))
   decodeMessage _
     = Hs.pure SpawnWorkerRequest
         <*>
@@ -1969,6 +1986,17 @@ instance (HsProtobuf.Message SpawnWorkerRequest) where
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)))
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 4)
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 5)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -1977,16 +2005,37 @@ instance (HsProtobuf.Message SpawnWorkerRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 2)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "prompt") [] ""]
+         (HsProtobufAST.Single "prompt") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 3)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "role") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 4)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "AgentType")))
+         (HsProtobufAST.Single "agent_type") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 5)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "working_dir") [] ""]
 instance (HsJSONPB.ToJSONPB SpawnWorkerRequest) where
-  toJSONPB (SpawnWorkerRequest f1 f2)
+  toJSONPB (SpawnWorkerRequest f1 f2 f3 f4 f5)
     = HsJSONPB.object
         ["name" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
-         "prompt" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
-  toEncodingPB (SpawnWorkerRequest f1 f2)
+         "prompt" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
+         "role" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
+         "agent_type" .= f4,
+         "working_dir"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f5)]
+  toEncodingPB (SpawnWorkerRequest f1 f2 f3 f4 f5)
     = HsJSONPB.pairs
         ["name" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
-         "prompt" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+         "prompt" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
+         "role" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
+         "agent_type" .= f4,
+         "working_dir"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f5)]
 instance (HsJSONPB.FromJSONPB SpawnWorkerRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -1998,7 +2047,14 @@ instance (HsJSONPB.FromJSONPB SpawnWorkerRequest) where
                      (obj .: "name"))
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "prompt")))
+                     (obj .: "prompt"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "role"))
+                <*> obj .: "agent_type"
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "working_dir")))
 instance (HsJSONPB.ToJSON SpawnWorkerRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding

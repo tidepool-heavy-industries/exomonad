@@ -236,6 +236,9 @@ message SpawnWorkerRequest {
   string name = 1;
   // Implementation instructions for the agent.
   string prompt = 2;
+  string role = 3;              // Optional role override (default: "worker")
+  AgentType agent_type = 4;     // Optional agent type override (default: Gemini)
+  string working_dir = 5;       // Optional subdirectory to run in (relative to parent worktree)
 }
 
 message SpawnWorkerResponse {

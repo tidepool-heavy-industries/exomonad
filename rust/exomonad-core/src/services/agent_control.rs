@@ -253,6 +253,12 @@ pub struct SpawnWorkerOptions {
     pub name: String,
     /// Implementation instructions
     pub prompt: String,
+    /// Optional role override.
+    pub role: Option<String>,
+    /// Optional agent type override.
+    pub agent_type: Option<AgentType>,
+    /// Optional subdirectory to run in (relative to parent worktree)
+    pub working_dir: Option<String>,
 }
 
 /// Options for spawning a subtree agent (isolated worktree).
@@ -882,8 +888,10 @@ impl AgentControlService {
 
             // Sanitize name for internal use
             let slug = slugify(&options.name);
-            let internal_name = format!("{}-gemini", slug);
-            let display_name = format!("{} {}", AgentType::Gemini.emoji(), slug);
+            let agent_type = options.agent_type.unwrap_or(AgentType::Gemini);
+            let agent_suffix = agent_type.suffix();
+            let internal_name = format!("{}-{}", slug, agent_suffix);
+            let display_name = format!("{} {}", agent_type.emoji(), slug);
 
             // Idempotency: check if agent config dir already exists (workers are panes, not tabs)
             let agent_config_dir = self.project_dir
@@ -897,7 +905,7 @@ impl AgentControlService {
                     agent_dir: PathBuf::new(),
                     tab_name: internal_name,
                     issue_title: options.name.clone(),
-                    agent_type: AgentType::Gemini,
+                    agent_type,
                 });
             }
 
@@ -910,9 +918,10 @@ impl AgentControlService {
             // Workers don't have worktrees, so git-based resolution fails. This file is the fallback.
             let parent_bb = self.effective_birth_branch(Some(&ctx.birth_branch));
             fs::write(agent_config_dir.join(".birth_branch"), parent_bb.as_str()).await?;
+            let role = options.role.as_deref().unwrap_or("worker");
             let mcp_url = format!(
-                "http://localhost:{}/agents/worker/{}/mcp",
-                mcp_port, internal_name
+                "http://localhost:{}/agents/{}/{}/mcp",
+                mcp_port, role, internal_name
             );
             let settings = Self::generate_gemini_settings(&mcp_url);
             fs::write(&settings_path, serde_json::to_string_pretty(&settings)?).await?;
@@ -930,13 +939,18 @@ impl AgentControlService {
             // Resolve caller's context (tab and worktree) from its context.
             let caller_tab = resolve_own_tab_name(ctx);
             let caller_worktree = resolve_agent_working_dir(ctx);
-            let absolute_worktree = self.project_dir.join(caller_worktree);
+            let working_dir = if let Some(ref sub) = options.working_dir {
+                caller_worktree.join(sub)
+            } else {
+                caller_worktree
+            };
+            let absolute_worktree = self.project_dir.join(working_dir);
 
-            // Spawn pane in caller's tab, cwd = caller's worktree
+            // Spawn pane in caller's tab, cwd = effective worktree
             self.new_zellij_pane(
                 &display_name,
                 &absolute_worktree,
-                AgentType::Gemini,
+                agent_type,
                 Some(&options.prompt),
                 env_vars,
                 Some(&caller_tab),
@@ -957,7 +971,7 @@ impl AgentControlService {
                 agent_dir: PathBuf::new(),
                 tab_name: internal_name,
                 issue_title: options.name.clone(),
-                agent_type: AgentType::Gemini,
+                agent_type,
             })
         })
         .await
@@ -2328,6 +2342,17 @@ mod tests {
     }
 
     #[test]
+    fn test_mcp_config_dynamic_role() {
+        let config =
+            AgentControlService::generate_mcp_config("test-worker", 7432, AgentType::Gemini, "custom-role");
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(
+            parsed["mcpServers"]["exomonad"]["httpUrl"],
+            "http://localhost:7432/agents/custom-role/test-worker/mcp"
+        );
+    }
+
+    #[test]
     fn test_gemini_settings_schema_compliance() {
         let settings = AgentControlService::generate_gemini_settings("http://example.com/mcp");
 
@@ -2382,5 +2407,28 @@ mod tests {
             command_hook.get("args").is_none(),
             "args should not be present when using command string"
         );
+    }
+
+    #[test]
+    fn test_resolve_worker_working_dir_with_subdir() {
+        use crate::effects::EffectContext;
+        use crate::domain::{BirthBranch, AgentName};
+
+        let ctx = EffectContext {
+            birth_branch: BirthBranch::from("main.feature"),
+            agent_name: AgentName::from("feature-claude"),
+        };
+
+        let caller_worktree = resolve_agent_working_dir(&ctx);
+        assert_eq!(caller_worktree, PathBuf::from(".exo/worktrees/feature/"));
+
+        let working_dir_opt = Some("rust".to_string());
+        let working_dir = if let Some(ref sub) = working_dir_opt {
+            caller_worktree.join(sub)
+        } else {
+            caller_worktree
+        };
+
+        assert_eq!(working_dir, PathBuf::from(".exo/worktrees/feature/rust"));
     }
 }
