@@ -730,13 +730,6 @@ mod proptest_tests {
         }
 
         #[test]
-        fn test_hook_envelope_exit_code_range(exit_code in any::<i32>()) {
-            let env = HookEnvelope { stdout: "{}".into(), exit_code };
-            // Simple property: exit code is preserved
-            prop_assert_eq!(env.exit_code, exit_code);
-        }
-
-        #[test]
         fn test_claude_pre_tool_use_output_roundtrip(
             continue_ in any::<bool>(),
             stop_reason in prop::option::weighted(0.5, any::<String>()),
