@@ -1,6 +1,7 @@
 //! Configuration discovery from .exo/config.toml and config.local.toml
 
 use anyhow::{Context, Result};
+use exomonad_core::services::AgentType;
 use exomonad_core::Role;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -32,6 +33,9 @@ pub struct RawConfig {
 
     /// WASM directory override (default: ~/.exo/wasm/).
     pub wasm_dir: Option<PathBuf>,
+
+    /// Agent type for the root (TL) tab.
+    pub root_agent_type: Option<AgentType>,
 }
 
 /// Final resolved configuration.
@@ -49,6 +53,8 @@ pub struct Config {
     pub shell_command: Option<String>,
     /// Resolved WASM directory.
     pub wasm_dir: PathBuf,
+    /// Agent type for the root (TL) tab.
+    pub root_agent_type: AgentType,
 }
 
 impl Config {
@@ -144,6 +150,12 @@ impl Config {
             })
             .unwrap_or_else(global_wasm_dir);
 
+        // Resolve root_agent_type: global > local > default (Claude)
+        let root_agent_type = global_raw
+            .root_agent_type
+            .or(local_raw.root_agent_type)
+            .unwrap_or(AgentType::Claude);
+
         Ok(Self {
             project_dir,
             role,
@@ -152,6 +164,7 @@ impl Config {
             worktree_base,
             shell_command,
             wasm_dir,
+            root_agent_type,
         })
     }
 
@@ -177,6 +190,7 @@ impl Default for Config {
             worktree_base: PathBuf::from(".exo/worktrees"),
             shell_command: None,
             wasm_dir: global_wasm_dir(),
+            root_agent_type: AgentType::Claude,
         }
     }
 }
@@ -252,6 +266,16 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.project_dir, PathBuf::from("."));
         assert_eq!(config.role, Role::TL);
+        assert_eq!(config.root_agent_type, AgentType::Claude);
+    }
+
+    #[test]
+    fn test_raw_config_parse_root_agent_type() {
+        let content = r#"
+            root_agent_type = "gemini"
+        "#;
+        let raw: RawConfig = toml::from_str(content).unwrap();
+        assert_eq!(raw.root_agent_type, Some(AgentType::Gemini));
     }
 
     #[test]
