@@ -1069,6 +1069,7 @@ async fn main() -> Result<()> {
                 claude_session_registry,
                 team_registry.clone(),
                 acp_registry.clone(),
+                event_log.clone(),
             );
             builder = builder.with_handlers(orch_handlers);
             let rt = builder.build().await.context("Failed to build runtime")?;

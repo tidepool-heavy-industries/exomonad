@@ -4,6 +4,8 @@
 
 use crate::effects::{dispatch_events_effect, EffectHandler, EffectResult, EventEffects};
 use crate::services::acp_registry::AcpRegistry;
+use crate::services::delivery::DeliveryResult;
+use crate::services::event_log::EventLog;
 use crate::services::team_registry::TeamRegistry;
 use crate::services::EventQueue;
 use async_trait::async_trait;
@@ -29,6 +31,7 @@ pub struct EventHandler {
     team_registry: Option<Arc<TeamRegistry>>,
     /// ACP connection registry for prompt-based delivery.
     acp_registry: Option<Arc<AcpRegistry>>,
+    event_log: Option<Arc<EventLog>>,
 }
 
 impl EventHandler {
@@ -46,6 +49,7 @@ impl EventHandler {
             notified_agents: std::sync::Mutex::new(std::collections::HashSet::new()),
             team_registry: None,
             acp_registry: None,
+            event_log: None,
         }
     }
 
@@ -56,6 +60,11 @@ impl EventHandler {
 
     pub fn with_acp_registry(mut self, registry: Arc<AcpRegistry>) -> Self {
         self.acp_registry = Some(registry);
+        self
+    }
+
+    pub fn with_event_log(mut self, log: Arc<EventLog>) -> Self {
+        self.event_log = Some(log);
         self
     }
 }
@@ -212,6 +221,18 @@ impl EventEffects for EventHandler {
             "notify_parent: routing completion to parent"
         );
 
+        if let Some(ref log) = self.event_log {
+            let _ = log.append(
+                "agent.notify_parent",
+                &agent_id_str,
+                &serde_json::json!({
+                    "parent": &parent_session_id,
+                    "status": &req.status,
+                    "message": &req.message,
+                }),
+            );
+        }
+
         let event = Event {
             event_id: 0, // Assigned by EventQueue
             event_type: Some(event::EventType::WorkerComplete(WorkerComplete {
@@ -256,7 +277,7 @@ impl EventEffects for EventHandler {
         };
         let tab_name = crate::services::agent_control::resolve_parent_tab_name(ctx);
 
-        crate::services::delivery::deliver_to_agent(
+        let delivery_result = crate::services::delivery::deliver_to_agent(
             self.team_registry.as_deref(),
             self.acp_registry.as_deref(),
             &parent_key,
@@ -266,6 +287,23 @@ impl EventEffects for EventHandler {
             &format!("Agent completion: {}", agent_id_str),
         )
         .await;
+
+        if let Some(ref log) = self.event_log {
+            let delivery_method = match delivery_result {
+                DeliveryResult::Teams => "teams_inbox",
+                DeliveryResult::Acp => "acp",
+                DeliveryResult::Zellij => "zellij_stdin",
+                DeliveryResult::Failed => "failed",
+            };
+            let _ = log.append(
+                "agent.message_delivered",
+                &agent_id_str,
+                &serde_json::json!({
+                    "parent": &parent_session_id,
+                    "method": delivery_method,
+                }),
+            );
+        }
 
         Ok(NotifyParentResponse { ack: true })
     }

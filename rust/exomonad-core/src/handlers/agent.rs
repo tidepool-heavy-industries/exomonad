@@ -14,6 +14,7 @@ use crate::services::agent_control::{
     SpawnGeminiTeammateOptions, SpawnOptions, SpawnSubtreeOptions, SpawnWorkerOptions,
 };
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
+use crate::services::event_log::EventLog;
 use crate::{GithubOwner, GithubRepo, IssueNumber};
 use async_trait::async_trait;
 use exomonad_proto::effects::agent::*;
@@ -28,6 +29,7 @@ pub struct AgentHandler {
     service: Arc<AgentControlService>,
     claude_session_registry: Option<Arc<ClaudeSessionRegistry>>,
     acp_registry: Option<Arc<AcpRegistry>>,
+    event_log: Option<Arc<EventLog>>,
 }
 
 impl AgentHandler {
@@ -36,6 +38,7 @@ impl AgentHandler {
             service,
             claude_session_registry: None,
             acp_registry: None,
+            event_log: None,
         }
     }
 
@@ -46,6 +49,11 @@ impl AgentHandler {
 
     pub fn with_acp_registry(mut self, reg: Arc<AcpRegistry>) -> Self {
         self.acp_registry = Some(reg);
+        self
+    }
+
+    pub fn with_event_log(mut self, log: Arc<EventLog>) -> Self {
+        self.event_log = Some(log);
         self
     }
 }
@@ -210,8 +218,24 @@ impl AgentEffects for AgentHandler {
             .await
             .effect_err("agent")?;
 
+        let agent_info = worker_result_to_proto(&req.name, &result);
+
+        if let Some(ref log) = self.event_log {
+            let _ = log.append(
+                "agent.spawned",
+                &ctx.agent_name.to_string(),
+                &serde_json::json!({
+                    "child_agent": &agent_info.id,
+                    "agent_type": &agent_info.agent_type,
+                    "branch": &agent_info.branch_name,
+                    "worktree": &agent_info.worktree_path,
+                    "spawn_type": "worker",
+                }),
+            );
+        }
+
         Ok(SpawnWorkerResponse {
-            agent: Some(worker_result_to_proto(&req.name, &result)),
+            agent: Some(agent_info),
         })
     }
 
@@ -276,8 +300,24 @@ impl AgentEffects for AgentHandler {
             .await
             .effect_err("agent")?;
 
+        let agent_info = subtree_result_to_proto(&req.branch_name, &result);
+
+        if let Some(ref log) = self.event_log {
+            let _ = log.append(
+                "agent.spawned",
+                &ctx.agent_name.to_string(),
+                &serde_json::json!({
+                    "child_agent": &agent_info.id,
+                    "agent_type": &agent_info.agent_type,
+                    "branch": &agent_info.branch_name,
+                    "worktree": &agent_info.worktree_path,
+                    "spawn_type": "subtree",
+                }),
+            );
+        }
+
         Ok(SpawnSubtreeResponse {
-            agent: Some(subtree_result_to_proto(&req.branch_name, &result)),
+            agent: Some(agent_info),
         })
     }
 
@@ -309,8 +349,24 @@ impl AgentEffects for AgentHandler {
             .await
             .effect_err("agent")?;
 
+        let agent_info = leaf_subtree_result_to_proto(&req.branch_name, &result);
+
+        if let Some(ref log) = self.event_log {
+            let _ = log.append(
+                "agent.spawned",
+                &ctx.agent_name.to_string(),
+                &serde_json::json!({
+                    "child_agent": &agent_info.id,
+                    "agent_type": &agent_info.agent_type,
+                    "branch": &agent_info.branch_name,
+                    "worktree": &agent_info.worktree_path,
+                    "spawn_type": "leaf_subtree",
+                }),
+            );
+        }
+
         Ok(SpawnLeafSubtreeResponse {
-            agent: Some(leaf_subtree_result_to_proto(&req.branch_name, &result)),
+            agent: Some(agent_info),
         })
     }
 
@@ -386,21 +442,37 @@ impl AgentEffects for AgentHandler {
 
         info!(agent = %agent_name, "ACP agent spawned and registered");
 
+        let agent_info = exomonad_proto::effects::agent::AgentInfo {
+            id: agent_name.clone(),
+            issue: String::new(),
+            worktree_path: String::new(),
+            branch_name: String::new(),
+            agent_type: AgentType::Gemini as i32,
+            role: 0,
+            status: AgentStatus::Running as i32,
+            zellij_tab: String::new(),
+            error: String::new(),
+            pr_number: 0,
+            pr_url: String::new(),
+            topology: exomonad_proto::effects::agent::WorkspaceTopology::SharedDir as i32,
+        };
+
+        if let Some(ref log) = self.event_log {
+            let _ = log.append(
+                "agent.spawned",
+                &ctx.agent_name.to_string(),
+                &serde_json::json!({
+                    "child_agent": &agent_info.id,
+                    "agent_type": &agent_info.agent_type,
+                    "branch": &agent_info.branch_name,
+                    "worktree": &agent_info.worktree_path,
+                    "spawn_type": "acp",
+                }),
+            );
+        }
+
         Ok(SpawnAcpResponse {
-            agent: Some(exomonad_proto::effects::agent::AgentInfo {
-                id: agent_name.clone(),
-                issue: String::new(),
-                worktree_path: String::new(),
-                branch_name: String::new(),
-                agent_type: AgentType::Gemini as i32,
-                role: 0,
-                status: AgentStatus::Running as i32,
-                zellij_tab: String::new(),
-                error: String::new(),
-                pr_number: 0,
-                pr_url: String::new(),
-                topology: exomonad_proto::effects::agent::WorkspaceTopology::SharedDir as i32,
-            }),
+            agent: Some(agent_info),
         })
     }
 
