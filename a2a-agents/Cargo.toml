@@ -1,0 +1,70 @@
+[package]
+name = "a2a-agents"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Emil Lindfors <emil@lindfors.no>"]
+description = "Example agent implementations for the A2A Protocol"
+license = "MIT"
+
+[dependencies]
+a2a-rs = { path = "../a2a-rs", features = ["full"] }
+a2a-client = { path = "../a2a-client" }
+
+# Core dependencies
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
+uuid = { version = "1.4", features = ["v4", "serde"] }
+bon = "2.3"
+dotenvy = "0.15.7"
+
+# Async foundation
+tokio = { version = "1.32", features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "sync", "time"] }
+async-trait = "0.1"
+
+# Command line interface
+clap = { version = "4.4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Required dependencies
+lazy_static = "1.4"  # Used for static request ID storage in message_handler
+regex = "1.10"  # Used for text parsing in improved handler
+
+# AI integration (OpenAI-compatible API)
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
+
+# Frontend dependencies
+axum = { version = "0.7", features = ["multipart"] }
+askama = "0.12"
+askama_axum = "0.4"
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+base64 = "0.22"
+futures = "0.3"
+anyhow = "1.0"
+
+[features]
+default = ["reimbursement-agent", "sqlx"]
+reimbursement-agent = []
+sqlx = ["a2a-rs/sqlx-storage"]
+auth = ["a2a-rs/auth"]
+# Future agent types can be added as features
+# document-agent = ["dep:reqwest"]
+# research-agent = ["dep:reqwest"]
+
+
+[[bin]]
+name = "reimbursement_demo"
+path = "bin/reimbursement_demo.rs"
+required-features = ["reimbursement-agent"]
+
+[[example]]
+name = "test_handler"
+path = "examples/test_handler.rs"
+required-features = ["reimbursement-agent"]
+
+
