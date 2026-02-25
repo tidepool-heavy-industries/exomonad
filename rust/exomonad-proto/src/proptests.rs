@@ -5,8 +5,8 @@ use crate::effects::{
     PermissionDenied, Timeout,
 };
 use crate::ffi::{self, ErrorCode, ErrorContext, FfiError, FfiResult};
-use prost::Message;
 use proptest::prelude::*;
+use prost::Message;
 
 // ============================================================================
 // Strategies for Common types
