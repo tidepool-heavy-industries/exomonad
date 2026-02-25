@@ -69,7 +69,7 @@ async fn call_tool(
         .plugin_manager()
         .call("handle_mcp_call", &input)
         .await
-        .expect(&format!("handle_mcp_call failed for {tool_name}"))
+        .unwrap_or_else(|e| panic!("handle_mcp_call failed for {tool_name}: {e}"))
 }
 
 /// Helper: assert a tool call succeeded.

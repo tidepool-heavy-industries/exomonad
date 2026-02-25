@@ -288,15 +288,6 @@ fn format_parent_notification(agent_id: &str, status: &str, message: &str) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{AgentName, BirthBranch};
-    use crate::effects::EffectContext;
-
-    fn test_ctx() -> EffectContext {
-        EffectContext {
-            agent_name: AgentName::from("test"),
-            birth_branch: BirthBranch::from("main"),
-        }
-    }
 
     #[test]
     fn test_format_parent_notification_success() {

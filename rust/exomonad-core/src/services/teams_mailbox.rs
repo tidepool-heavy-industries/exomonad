@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].from, "agent1");
         assert_eq!(messages[0].text, "Hello from agent1");
-        assert_eq!(messages[0].read, false);
+        assert!(!messages[0].read);
         assert_eq!(messages[1].from, "agent2");
         assert_eq!(messages[1].summary, "Message 2");
 
