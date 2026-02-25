@@ -39,7 +39,8 @@ data SpawnSubtreeArgs = SpawnSubtreeArgs
     ssForkSession :: Maybe Bool,
     ssPermissionMode :: Maybe Text,
     ssAllowedTools :: Maybe [Text],
-    ssDisallowedTools :: Maybe [Text]
+    ssDisallowedTools :: Maybe [Text],
+    ssSecureMode :: Maybe Bool
   }
   deriving (Show, Eq, Generic)
 
@@ -52,6 +53,7 @@ instance FromJSON SpawnSubtreeArgs where
       <*> v .:? "permission_mode"
       <*> v .:? "allowed_tools"
       <*> v .:? "disallowed_tools"
+      <*> v .:? "secure_mode"
 
 instance MCPTool SpawnSubtree where
   type ToolArgs SpawnSubtree = SpawnSubtreeArgs
@@ -64,7 +66,8 @@ instance MCPTool SpawnSubtree where
         ("fork_session", "Whether to fork the parent's conversation context into the child (default: false). Set true to inherit context, but may fail if the session is stale or compacted."),
         ("permission_mode", "Permission mode for Claude (e.g., 'plan', 'default'). Omit for --dangerously-skip-permissions."),
         ("allowed_tools", "Tool patterns to allow (e.g., ['Read', 'Grep']). Omit for no restriction."),
-        ("disallowed_tools", "Tool patterns to disallow (e.g., ['Bash']). Omit for no restriction.")
+        ("disallowed_tools", "Tool patterns to disallow (e.g., ['Bash']). Omit for no restriction."),
+        ("secure_mode", "Enable secure isolated execution mode.")
       ]
   toolHandlerEff args = do
     let forkSession = maybe False id (ssForkSession args)
@@ -73,7 +76,7 @@ instance MCPTool SpawnSubtree where
             AC.allowedTools = maybe [] id (ssAllowedTools args),
             AC.disallowedTools = maybe [] id (ssDisallowedTools args)
           }
-    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) "" forkSession Nothing Nothing perms
+    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) "" forkSession Nothing Nothing perms (ssSecureMode args)
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
@@ -100,7 +103,8 @@ data SpawnLeafSubtreeArgs = SpawnLeafSubtreeArgs
     slsBranchName :: Text,
     slsPermissionMode :: Maybe Text,
     slsAllowedTools :: Maybe [Text],
-    slsDisallowedTools :: Maybe [Text]
+    slsDisallowedTools :: Maybe [Text],
+    slsSecureMode :: Maybe Bool
   }
   deriving (Show, Eq, Generic)
 
@@ -112,6 +116,7 @@ instance FromJSON SpawnLeafSubtreeArgs where
       <*> v .:? "permission_mode"
       <*> v .:? "allowed_tools"
       <*> v .:? "disallowed_tools"
+      <*> v .:? "secure_mode"
 
 instance MCPTool SpawnLeafSubtree where
   type ToolArgs SpawnLeafSubtree = SpawnLeafSubtreeArgs
@@ -123,7 +128,8 @@ instance MCPTool SpawnLeafSubtree where
         ("branch_name", "Branch name suffix (will be prefixed with current branch)"),
         ("permission_mode", "Permission mode for the agent. Omit for --dangerously-skip-permissions."),
         ("allowed_tools", "Tool patterns to allow. Omit for no restriction."),
-        ("disallowed_tools", "Tool patterns to disallow. Omit for no restriction.")
+        ("disallowed_tools", "Tool patterns to disallow. Omit for no restriction."),
+        ("secure_mode", "Enable secure isolated execution mode.")
       ]
   toolHandlerEff args = do
     -- WASM32 BUG WORKAROUND: Prompt's derived Semigroup (<>) hangs when
@@ -135,7 +141,7 @@ instance MCPTool SpawnLeafSubtree where
             AC.allowedTools = maybe [] id (slsAllowedTools args),
             AC.disallowedTools = maybe [] id (slsDisallowedTools args)
           }
-    result <- AC.spawnLeafSubtree renderedTask (slsBranchName args) Nothing Nothing perms
+    result <- AC.spawnLeafSubtree renderedTask (slsBranchName args) Nothing Nothing perms (slsSecureMode args)
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
