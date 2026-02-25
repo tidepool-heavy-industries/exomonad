@@ -550,7 +550,11 @@ impl AgentControlService {
             let internal_name = format!("gh-{}-{}-{}", issue_id, slug, agent_suffix);
 
             // Determine base branch
-            let base = options.base_branch.as_ref().map(|b| b.as_str()).unwrap_or("main");
+            let base = options
+                .base_branch
+                .as_ref()
+                .map(|b| b.as_str())
+                .unwrap_or("main");
             let branch_name = if base == "main" {
                 format!("gh-{}/{}-{}", issue_id, slug, agent_suffix)
             } else {
@@ -560,7 +564,8 @@ impl AgentControlService {
             // Create worktree
             let worktree_path = self.worktree_base.join(&internal_name);
 
-            self.create_worktree_checked(&worktree_path, &branch_name, base).await?;
+            self.create_worktree_checked(&worktree_path, &branch_name, base)
+                .await?;
 
             // Use worktree path as agent_dir
             let agent_dir = worktree_path;
@@ -570,8 +575,13 @@ impl AgentControlService {
                 AgentType::Claude => "tl",
                 AgentType::Gemini => "dev",
             };
-            self.write_agent_mcp_config(&effective_project_dir, &agent_dir, options.agent_type, role)
-                .await?;
+            self.write_agent_mcp_config(
+                &effective_project_dir,
+                &agent_dir,
+                options.agent_type,
+                role,
+            )
+            .await?;
 
             // Build initial prompt
             let issue_url = format!(
@@ -595,7 +605,10 @@ impl AgentControlService {
             // Zellij display name (emoji + short format)
             let display_name = options.agent_type.display_name(&issue_id, &slug);
 
-            let env_vars = self.common_spawn_env(&internal_name, self.effective_birth_branch(Some(caller_bb)).as_ref());
+            let env_vars = self.common_spawn_env(
+                &internal_name,
+                self.effective_birth_branch(Some(caller_bb)).as_ref(),
+            );
 
             // Open Zellij tab with cwd = worktree_path
             self.new_zellij_tab(
@@ -733,13 +746,22 @@ impl AgentControlService {
             let branch_name = format!("{}.{}", base_branch, slug);
             let worktree_path = self.worktree_base.join(&internal_name);
 
-            self.create_worktree_checked(&worktree_path, &branch_name, &base_branch).await?;
+            self.create_worktree_checked(&worktree_path, &branch_name, &base_branch)
+                .await?;
 
-            let mut env_vars = self.common_spawn_env(&internal_name, self.effective_birth_branch(Some(caller_bb)).as_ref());
+            let mut env_vars = self.common_spawn_env(
+                &internal_name,
+                self.effective_birth_branch(Some(caller_bb)).as_ref(),
+            );
 
             // Write per-agent MCP config into the worktree
-            self.write_agent_mcp_config(&effective_project_dir, &worktree_path, options.agent_type, "dev")
-                .await?;
+            self.write_agent_mcp_config(
+                &effective_project_dir,
+                &worktree_path,
+                options.agent_type,
+                "dev",
+            )
+            .await?;
 
             // For Gemini agents, point at worktree settings via env var
             if options.agent_type == AgentType::Gemini {
@@ -770,7 +792,10 @@ impl AgentControlService {
         })
         .await
         .map_err(|_| {
-            let msg = format!("spawn_gemini_teammate timed out after {}s", SPAWN_TIMEOUT.as_secs());
+            let msg = format!(
+                "spawn_gemini_teammate timed out after {}s",
+                SPAWN_TIMEOUT.as_secs()
+            );
             warn!(name = %options.name, error = %msg, "spawn_gemini_teammate timed out");
             anyhow::Error::new(TimeoutError { message: msg })
         })??;
@@ -1593,11 +1618,7 @@ impl AgentControlService {
     }
 
     /// Build the common env vars shared by all spawn functions.
-    fn common_spawn_env(
-        &self,
-        internal_name: &str,
-        session_id: &str,
-    ) -> HashMap<String, String> {
+    fn common_spawn_env(&self, internal_name: &str, session_id: &str) -> HashMap<String, String> {
         let mut env_vars = HashMap::new();
         env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.to_string());
         env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session_id.to_string());
@@ -1735,12 +1756,10 @@ impl AgentControlService {
 
         // Direct IPC: parse KDL in-process and send NewTab action via socket.
         // No temp file, no subprocess fork.
-        tokio::task::spawn_blocking(move || {
-            ipc.new_tab_with_layout(&layout_kdl, Some(&tab_name))
-        })
-        .await
-        .context("tokio task join error")?
-        .context("Failed to create Zellij tab via IPC")?;
+        tokio::task::spawn_blocking(move || ipc.new_tab_with_layout(&layout_kdl, Some(&tab_name)))
+            .await
+            .context("tokio task join error")?
+            .context("Failed to create Zellij tab via IPC")?;
 
         // Rename pane via direct IPC
         let ipc = self.ipc()?;

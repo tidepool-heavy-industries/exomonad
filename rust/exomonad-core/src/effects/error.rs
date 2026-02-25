@@ -282,9 +282,18 @@ mod tests {
     #[test]
     fn test_display_all_variants() {
         assert_eq!(EffectError::not_found("r").to_string(), "Not found: r");
-        assert_eq!(EffectError::invalid_input("m").to_string(), "Invalid input: m");
-        assert_eq!(EffectError::network_error("m").to_string(), "Network error: m");
-        assert_eq!(EffectError::permission_denied("m").to_string(), "Permission denied: m");
+        assert_eq!(
+            EffectError::invalid_input("m").to_string(),
+            "Invalid input: m"
+        );
+        assert_eq!(
+            EffectError::network_error("m").to_string(),
+            "Network error: m"
+        );
+        assert_eq!(
+            EffectError::permission_denied("m").to_string(),
+            "Permission denied: m"
+        );
         assert_eq!(EffectError::timeout("m").to_string(), "Timeout: m");
         assert_eq!(EffectError::custom("c", "m").to_string(), "[c] m");
     }

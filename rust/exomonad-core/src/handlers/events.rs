@@ -307,7 +307,10 @@ mod tests {
     #[test]
     fn test_format_parent_notification_success_empty() {
         let msg = format_parent_notification("agent-1", "success", "");
-        assert_eq!(msg, "[CHILD COMPLETE: agent-1] Task completed successfully.");
+        assert_eq!(
+            msg,
+            "[CHILD COMPLETE: agent-1] Task completed successfully."
+        );
     }
 
     #[test]

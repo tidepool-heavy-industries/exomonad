@@ -152,7 +152,10 @@ mod tests {
         assert!(resp.success);
 
         let registered = registry.get("test").await.unwrap();
-        assert_eq!(registered.to_string(), "7343ced0-1d95-450a-8ae5-976fe94421f0");
+        assert_eq!(
+            registered.to_string(),
+            "7343ced0-1d95-450a-8ae5-976fe94421f0"
+        );
     }
 
     #[tokio::test]
@@ -185,7 +188,7 @@ mod tests {
         let registry = Arc::new(ClaudeSessionRegistry::new());
         let team_registry = Arc::new(TeamRegistry::new());
         let handler = SessionHandler::new(registry).with_team_registry(team_registry.clone());
-        
+
         let ctx = EffectContext {
             agent_name: AgentName::from("foo-claude"),
             birth_branch: BirthBranch::from("main"),
@@ -208,7 +211,7 @@ mod tests {
     async fn test_register_claude_id_slug_variant() {
         let registry = Arc::new(ClaudeSessionRegistry::new());
         let handler = SessionHandler::new(registry.clone());
-        
+
         let ctx = EffectContext {
             agent_name: AgentName::from("foo-claude"),
             birth_branch: BirthBranch::from("main"),
