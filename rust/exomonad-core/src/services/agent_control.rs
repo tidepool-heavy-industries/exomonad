@@ -289,6 +289,9 @@ pub struct SpawnSubtreeOptions {
     /// Secure mode for agent isolation.
     #[serde(default)]
     pub secure_mode: bool,
+    /// Specific absolute paths outside the worktree that the agent is allowed to read.
+    #[serde(default)]
+    pub allowed_read_paths: Vec<String>,
 }
 
 /// Result of spawning an agent.
@@ -1058,6 +1061,12 @@ impl AgentControlService {
             if options.secure_mode {
                 env_vars.remove("EXOMONAD_SESSION_ID");
                 env_vars.insert("EXOMONAD_SECURE_MODE".to_string(), "1".to_string());
+                if !options.allowed_read_paths.is_empty() {
+                    env_vars.insert(
+                        "EXOMONAD_SECURE_ALLOWED_PATHS".to_string(),
+                        options.allowed_read_paths.join(":"),
+                    );
+                }
             }
             // Enable Claude Code Agent Teams for native inter-agent messaging
             env_vars.insert(
@@ -1203,6 +1212,12 @@ impl AgentControlService {
             if options.secure_mode {
                 env_vars.remove("EXOMONAD_SESSION_ID");
                 env_vars.insert("EXOMONAD_SECURE_MODE".to_string(), "1".to_string());
+                if !options.allowed_read_paths.is_empty() {
+                    env_vars.insert(
+                        "EXOMONAD_SECURE_ALLOWED_PATHS".to_string(),
+                        options.allowed_read_paths.join(":"),
+                    );
+                }
             }
 
             // Write .gemini/settings.json in worktree root

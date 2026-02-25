@@ -40,7 +40,8 @@ data SpawnSubtreeArgs = SpawnSubtreeArgs
     ssPermissionMode :: Maybe Text,
     ssAllowedTools :: Maybe [Text],
     ssDisallowedTools :: Maybe [Text],
-    ssSecureMode :: Maybe Bool
+    ssSecureMode :: Maybe Bool,
+    ssAllowedReadPaths :: Maybe [Text]
   }
   deriving (Show, Eq, Generic)
 
@@ -54,6 +55,7 @@ instance FromJSON SpawnSubtreeArgs where
       <*> v .:? "allowed_tools"
       <*> v .:? "disallowed_tools"
       <*> v .:? "secure_mode"
+      <*> v .:? "allowed_read_paths"
 
 instance MCPTool SpawnSubtree where
   type ToolArgs SpawnSubtree = SpawnSubtreeArgs
@@ -76,7 +78,7 @@ instance MCPTool SpawnSubtree where
             AC.allowedTools = maybe [] id (ssAllowedTools args),
             AC.disallowedTools = maybe [] id (ssDisallowedTools args)
           }
-    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) "" forkSession Nothing Nothing perms (ssSecureMode args)
+    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) "" forkSession Nothing Nothing perms (ssSecureMode args) (ssAllowedReadPaths args)
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
@@ -104,7 +106,8 @@ data SpawnLeafSubtreeArgs = SpawnLeafSubtreeArgs
     slsPermissionMode :: Maybe Text,
     slsAllowedTools :: Maybe [Text],
     slsDisallowedTools :: Maybe [Text],
-    slsSecureMode :: Maybe Bool
+    slsSecureMode :: Maybe Bool,
+    slsAllowedReadPaths :: Maybe [Text]
   }
   deriving (Show, Eq, Generic)
 
@@ -117,6 +120,7 @@ instance FromJSON SpawnLeafSubtreeArgs where
       <*> v .:? "allowed_tools"
       <*> v .:? "disallowed_tools"
       <*> v .:? "secure_mode"
+      <*> v .:? "allowed_read_paths"
 
 instance MCPTool SpawnLeafSubtree where
   type ToolArgs SpawnLeafSubtree = SpawnLeafSubtreeArgs
@@ -141,7 +145,7 @@ instance MCPTool SpawnLeafSubtree where
             AC.allowedTools = maybe [] id (slsAllowedTools args),
             AC.disallowedTools = maybe [] id (slsDisallowedTools args)
           }
-    result <- AC.spawnLeafSubtree renderedTask (slsBranchName args) Nothing Nothing perms (slsSecureMode args)
+    result <- AC.spawnLeafSubtree renderedTask (slsBranchName args) Nothing Nothing perms (slsSecureMode args) (slsAllowedReadPaths args)
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do

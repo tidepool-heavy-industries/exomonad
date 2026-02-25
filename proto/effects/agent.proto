@@ -272,6 +272,8 @@ message SpawnSubtreeRequest {
   repeated string disallowed_tools = 9;
   // Secure mode for agent isolation.
   bool secure_mode = 10;
+  // Specific absolute paths outside the worktree that the agent is allowed to read.
+  repeated string allowed_read_paths = 11;
 }
 
 message SpawnSubtreeResponse {
@@ -297,6 +299,8 @@ message SpawnLeafSubtreeRequest {
   repeated string disallowed_tools = 7;
   // Secure mode for agent isolation.
   bool secure_mode = 8;
+  // Specific absolute paths outside the worktree that the agent is allowed to read.
+  repeated string allowed_read_paths = 9;
 }
 
 message SpawnLeafSubtreeResponse {
