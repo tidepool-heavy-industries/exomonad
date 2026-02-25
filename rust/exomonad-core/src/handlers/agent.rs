@@ -8,6 +8,7 @@ use crate::effects::{
 };
 
 use super::non_empty;
+use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::{
     AgentControlService, AgentInfo, AgentType as ServiceAgentType, SpawnGeminiTeammateOptions,
     SpawnOptions, SpawnSubtreeOptions, SpawnWorkerOptions,
@@ -26,6 +27,7 @@ use tracing::{info, warn};
 pub struct AgentHandler {
     service: Arc<AgentControlService>,
     claude_session_registry: Option<Arc<ClaudeSessionRegistry>>,
+    acp_registry: Option<Arc<AcpRegistry>>,
 }
 
 impl AgentHandler {
@@ -33,11 +35,17 @@ impl AgentHandler {
         Self {
             service,
             claude_session_registry: None,
+            acp_registry: None,
         }
     }
 
     pub fn with_claude_session_registry(mut self, reg: Arc<ClaudeSessionRegistry>) -> Self {
         self.claude_session_registry = Some(reg);
+        self
+    }
+
+    pub fn with_acp_registry(mut self, reg: Arc<AcpRegistry>) -> Self {
+        self.acp_registry = Some(reg);
         self
     }
 }
@@ -264,6 +272,88 @@ impl AgentEffects for AgentHandler {
 
         Ok(SpawnLeafSubtreeResponse {
             agent: Some(leaf_subtree_result_to_proto(&req.branch_name, &result)),
+        })
+    }
+
+    async fn spawn_acp(
+        &self,
+        req: SpawnAcpRequest,
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<SpawnAcpResponse> {
+        let registry = self.acp_registry.as_ref().ok_or_else(|| {
+            EffectError::custom("agent_error", "ACP registry not configured")
+        })?;
+
+        // Resolve working directory from context
+        let working_dir = crate::services::agent_control::resolve_agent_working_dir(ctx);
+
+        // Generate MCP settings for the agent
+        let mcp_port = self.service.mcp_server_port().ok_or_else(|| {
+            EffectError::custom("agent_error", "MCP server port not set")
+        })?;
+        let agent_name = &req.name;
+        let mcp_url = format!(
+            "http://localhost:{}/agents/worker/{}/mcp",
+            mcp_port, agent_name
+        );
+        let settings_json = AgentControlService::generate_gemini_settings(&mcp_url);
+
+        // Write settings to agent config dir
+        let agent_dir = working_dir.join(format!(".exo/agents/{}", agent_name));
+        tokio::fs::create_dir_all(&agent_dir)
+            .await
+            .effect_err("agent")?;
+        let settings_path = agent_dir.join("settings.json");
+        tokio::fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&settings_json).effect_err("agent")?,
+        )
+        .await
+        .effect_err("agent")?;
+
+        info!(
+            agent = %agent_name,
+            settings = %settings_path.display(),
+            "Wrote ACP agent settings"
+        );
+
+        let env_vars = vec![
+            (
+                "GEMINI_CLI_SYSTEM_SETTINGS_PATH".into(),
+                settings_path.to_string_lossy().into_owned(),
+            ),
+            ("EXOMONAD_AGENT_ID".into(), agent_name.clone()),
+        ];
+
+        let conn = crate::services::acp_registry::connect_and_prompt(
+            agent_name.clone(),
+            "gemini",
+            &working_dir,
+            &req.prompt,
+            env_vars,
+        )
+        .await
+        .effect_err("agent")?;
+
+        registry.register(agent_name.clone(), conn).await;
+
+        info!(agent = %agent_name, "ACP agent spawned and registered");
+
+        Ok(SpawnAcpResponse {
+            agent: Some(exomonad_proto::effects::agent::AgentInfo {
+                id: agent_name.clone(),
+                issue: String::new(),
+                worktree_path: String::new(),
+                branch_name: String::new(),
+                agent_type: AgentType::Gemini as i32,
+                role: 0,
+                status: AgentStatus::Running as i32,
+                zellij_tab: String::new(),
+                error: String::new(),
+                pr_number: 0,
+                pr_url: String::new(),
+                topology: exomonad_proto::effects::agent::WorkspaceTopology::SharedDir as i32,
+            }),
         })
     }
 

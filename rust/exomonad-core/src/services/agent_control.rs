@@ -464,6 +464,11 @@ impl AgentControlService {
         self
     }
 
+    /// Get the MCP server port.
+    pub fn mcp_server_port(&self) -> Option<u16> {
+        self.mcp_server_port
+    }
+
     /// Create from environment (loads secrets from ~/.exo/secrets).
     pub fn from_env() -> Result<Self> {
         let project_dir = std::env::current_dir().context("Failed to get current directory")?;

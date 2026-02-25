@@ -77,7 +77,8 @@ pub fn orchestration_handlers(
     vec![
         Box::new(
             AgentHandler::new(agent_control)
-                .with_claude_session_registry(claude_session_registry.clone()),
+                .with_claude_session_registry(claude_session_registry.clone())
+                .with_acp_registry(acp_registry.clone()),
         ),
         Box::new(PopupHandler::new(zellij_session)),
         Box::new(
