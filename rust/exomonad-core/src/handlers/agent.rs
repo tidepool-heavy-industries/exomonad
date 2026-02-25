@@ -292,6 +292,7 @@ impl AgentEffects for AgentHandler {
                 req.allowed_tools.clone(),
                 req.disallowed_tools.clone(),
             ),
+            secure_mode: req.secure_mode,
         };
 
         let result = self
@@ -341,6 +342,7 @@ impl AgentEffects for AgentHandler {
                 req.allowed_tools.clone(),
                 req.disallowed_tools.clone(),
             ),
+            secure_mode: req.secure_mode,
         };
 
         let result = self

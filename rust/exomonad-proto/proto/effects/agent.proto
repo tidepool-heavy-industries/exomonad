@@ -270,6 +270,8 @@ message SpawnSubtreeRequest {
   repeated string allowed_tools = 8;
   // Tool patterns to disallow (e.g., "Bash"). Empty = no restriction.
   repeated string disallowed_tools = 9;
+  // Secure mode for agent isolation.
+  bool secure_mode = 10;
 }
 
 message SpawnSubtreeResponse {
@@ -293,6 +295,8 @@ message SpawnLeafSubtreeRequest {
   repeated string allowed_tools = 6;
   // Tool patterns to disallow. Empty = no restriction.
   repeated string disallowed_tools = 7;
+  // Secure mode for agent isolation.
+  bool secure_mode = 8;
 }
 
 message SpawnLeafSubtreeResponse {
