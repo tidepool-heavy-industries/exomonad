@@ -5,8 +5,8 @@
 //! - `request_permission`: auto-approves all tool calls
 
 use agent_client_protocol::{
-    RequestPermissionRequest, RequestPermissionResponse,
-    SessionNotification,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionNotification,
 };
 
 /// ACP client that auto-approves permissions and forwards notifications.
@@ -20,15 +20,25 @@ pub struct ExoMonadAcpClient {
 impl agent_client_protocol::Client for ExoMonadAcpClient {
     async fn request_permission(
         &self,
-        _args: RequestPermissionRequest,
+        args: RequestPermissionRequest,
     ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-        todo!("Auto-approve all permission requests")
+        tracing::info!(agent = %self.agent_id, "Auto-approving permission request");
+        let outcome = if let Some(first_option) = args.options.first() {
+            RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                first_option.option_id.clone(),
+            ))
+        } else {
+            tracing::warn!(agent = %self.agent_id, "No permission options, cancelling");
+            RequestPermissionOutcome::Cancelled
+        };
+        Ok(RequestPermissionResponse::new(outcome))
     }
 
     async fn session_notification(
         &self,
-        _args: SessionNotification,
+        args: SessionNotification,
     ) -> agent_client_protocol::Result<()> {
-        todo!("Forward notification to TL via Teams inbox")
+        tracing::debug!(agent = %self.agent_id, update = ?args.update, "ACP session notification");
+        Ok(())
     }
 }
