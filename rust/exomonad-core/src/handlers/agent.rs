@@ -240,6 +240,12 @@ impl AgentEffects for AgentHandler {
             task: req.task.clone(),
             branch_name: req.branch_name.clone(),
             parent_session_id,
+            role: non_empty(req.role.clone()),
+            agent_type: if req.agent_type == AgentType::Unspecified as i32 {
+                None
+            } else {
+                Some(convert_agent_type(req.agent_type()))
+            },
         };
 
         let result = self
@@ -262,6 +268,12 @@ impl AgentEffects for AgentHandler {
             task: req.task.clone(),
             branch_name: req.branch_name.clone(),
             parent_session_id: None,
+            role: non_empty(req.role.clone()),
+            agent_type: if req.agent_type == AgentType::Unspecified as i32 {
+                None
+            } else {
+                Some(convert_agent_type(req.agent_type()))
+            },
         };
 
         let result = self
@@ -514,10 +526,10 @@ fn subtree_result_to_proto(
         issue: String::new(),
         worktree_path: result.agent_dir.display().to_string(),
         branch_name: branch_name.to_string(),
-        agent_type: AgentType::Claude as i32,
+        agent_type: service_agent_type_to_proto(result.agent_type),
         role: 0,
         status: AgentStatus::Running as i32,
-        zellij_tab: ServiceAgentType::Claude.tab_display_name(branch_name),
+        zellij_tab: result.agent_type.tab_display_name(branch_name),
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),

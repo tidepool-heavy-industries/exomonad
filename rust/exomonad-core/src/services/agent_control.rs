@@ -264,6 +264,10 @@ pub struct SpawnSubtreeOptions {
     pub branch_name: String,
     /// Parent Claude session ID for --resume --fork-session context inheritance.
     pub parent_session_id: Option<ClaudeSessionUuid>,
+    /// Optional role override.
+    pub role: Option<String>,
+    /// Optional agent type override.
+    pub agent_type: Option<AgentType>,
 }
 
 /// Result of spawning an agent.
@@ -992,8 +996,10 @@ impl AgentControlService {
 
             // Sanitize branch name for internal use
             let slug = slugify(&options.branch_name);
-            let internal_name = format!("{}-claude", slug);
-            let display_name = format!("{} {}", AgentType::Claude.emoji(), slug);
+            let agent_type = options.agent_type.unwrap_or(AgentType::Claude);
+            let agent_suffix = agent_type.suffix();
+            let internal_name = format!("{}-{}", slug, agent_suffix);
+            let display_name = format!("{} {}", agent_type.emoji(), slug);
 
             // Idempotency check: if Zellij tab is alive, return existing info
             let tab_alive = self.is_zellij_tab_alive(&display_name).await;
@@ -1003,7 +1009,7 @@ impl AgentControlService {
                     agent_dir: PathBuf::new(),
                     tab_name: internal_name,
                     issue_title: options.branch_name.clone(),
-                    agent_type: AgentType::Claude,
+                    agent_type,
                 });
             }
 
@@ -1030,7 +1036,8 @@ impl AgentControlService {
             );
 
             // Write .mcp.json in worktree root
-            self.write_agent_mcp_config(effective_project_dir, &worktree_path, AgentType::Claude, "tl")
+            let role = options.role.as_deref().unwrap_or("tl");
+            self.write_agent_mcp_config(effective_project_dir, &worktree_path, agent_type, role)
                 .await?;
 
             // Write .claude/settings.local.json with hooks (SessionStart registers UUID for --fork-session)
@@ -1131,8 +1138,10 @@ impl AgentControlService {
 
             // Sanitize branch name
             let slug = slugify(&options.branch_name);
-            let internal_name = format!("{}-gemini", slug); // gemini suffix
-            let display_name = format!("{} {}", AgentType::Gemini.emoji(), slug);
+            let agent_type = options.agent_type.unwrap_or(AgentType::Gemini);
+            let agent_suffix = agent_type.suffix();
+            let internal_name = format!("{}-{}", slug, agent_suffix);
+            let display_name = format!("{} {}", agent_type.emoji(), slug);
 
             // Idempotency check
             let tab_alive = self.is_zellij_tab_alive(&display_name).await;
@@ -1142,7 +1151,7 @@ impl AgentControlService {
                     agent_dir: PathBuf::new(),
                     tab_name: internal_name,
                     issue_title: options.branch_name.clone(),
-                    agent_type: AgentType::Gemini,
+                    agent_type,
                 });
             }
 
@@ -1158,7 +1167,8 @@ impl AgentControlService {
             let mut env_vars = self.common_spawn_env(&internal_name, &branch_name);
 
             // Write .gemini/settings.json in worktree root
-            self.write_agent_mcp_config(effective_project_dir, &worktree_path, AgentType::Gemini, "dev")
+            let role = options.role.as_deref().unwrap_or("dev");
+            self.write_agent_mcp_config(effective_project_dir, &worktree_path, agent_type, role)
                 .await?;
 
             // Set GEMINI_CLI_SYSTEM_SETTINGS_PATH

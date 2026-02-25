@@ -2070,7 +2070,9 @@ data SpawnSubtreeRequest
   = SpawnSubtreeRequest {spawnSubtreeRequestTask :: Hs.Text,
                          spawnSubtreeRequestBranchName :: Hs.Text,
                          spawnSubtreeRequestParentSessionId :: Hs.Text,
-                         spawnSubtreeRequestForkSession :: Hs.Bool}
+                         spawnSubtreeRequestForkSession :: Hs.Bool,
+                         spawnSubtreeRequestRole :: Hs.Text,
+                         spawnSubtreeRequestAgentType :: (HsProtobuf.Enumerated Effects.Agent.AgentType)}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData SpawnSubtreeRequest)
 instance (HsProtobuf.Named SpawnSubtreeRequest) where
@@ -2081,24 +2083,33 @@ instance (HsProtobuf.Message SpawnSubtreeRequest) where
     _
     SpawnSubtreeRequest {spawnSubtreeRequestTask,
                          spawnSubtreeRequestBranchName, spawnSubtreeRequestParentSessionId,
-                         spawnSubtreeRequestForkSession}
+                         spawnSubtreeRequestForkSession, spawnSubtreeRequestRole,
+                         spawnSubtreeRequestAgentType}
     = Hs.mappend
         (Hs.mappend
            (Hs.mappend
+              (Hs.mappend
+                 (Hs.mappend
+                    (HsProtobuf.encodeMessageField
+                       (HsProtobuf.FieldNumber 1)
+                       ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                          spawnSubtreeRequestTask))
+                    (HsProtobuf.encodeMessageField
+                       (HsProtobuf.FieldNumber 2)
+                       ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                          spawnSubtreeRequestBranchName)))
+                 (HsProtobuf.encodeMessageField
+                    (HsProtobuf.FieldNumber 3)
+                    ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                       spawnSubtreeRequestParentSessionId)))
               (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 1)
-                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                    spawnSubtreeRequestTask))
-              (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 2)
-                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                    spawnSubtreeRequestBranchName)))
+                 (HsProtobuf.FieldNumber 4) spawnSubtreeRequestForkSession))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 3)
+              (HsProtobuf.FieldNumber 5)
               ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                 spawnSubtreeRequestParentSessionId)))
+                 spawnSubtreeRequestRole)))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 4) spawnSubtreeRequestForkSession)
+           (HsProtobuf.FieldNumber 6) spawnSubtreeRequestAgentType)
   decodeMessage _
     = Hs.pure SpawnSubtreeRequest
         <*>
@@ -2116,6 +2127,13 @@ instance (HsProtobuf.Message SpawnSubtreeRequest) where
         <*>
           HsProtobuf.at
             HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 4)
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 5)))
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 6)
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -2131,24 +2149,37 @@ instance (HsProtobuf.Message SpawnSubtreeRequest) where
          (HsProtobufAST.Single "parent_session_id") [] "",
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 4) (HsProtobufAST.Prim HsProtobufAST.Bool)
-         (HsProtobufAST.Single "fork_session") [] ""]
+         (HsProtobufAST.Single "fork_session") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 5)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "role") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 6)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "AgentType")))
+         (HsProtobufAST.Single "agent_type") [] ""]
 instance (HsJSONPB.ToJSONPB SpawnSubtreeRequest) where
-  toJSONPB (SpawnSubtreeRequest f1 f2 f3 f4)
+  toJSONPB (SpawnSubtreeRequest f1 f2 f3 f4 f5 f6)
     = HsJSONPB.object
         ["task" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "branch_name"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "parent_session_id"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
-         "fork_session" .= f4]
-  toEncodingPB (SpawnSubtreeRequest f1 f2 f3 f4)
+         "fork_session" .= f4,
+         "role" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f5),
+         "agent_type" .= f6]
+  toEncodingPB (SpawnSubtreeRequest f1 f2 f3 f4 f5 f6)
     = HsJSONPB.pairs
         ["task" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "branch_name"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "parent_session_id"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
-         "fork_session" .= f4]
+         "fork_session" .= f4,
+         "role" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f5),
+         "agent_type" .= f6]
 instance (HsJSONPB.FromJSONPB SpawnSubtreeRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -2164,7 +2195,11 @@ instance (HsJSONPB.FromJSONPB SpawnSubtreeRequest) where
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
                      (obj .: "parent_session_id"))
-                <*> obj .: "fork_session")
+                <*> obj .: "fork_session"
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "role"))
+                <*> obj .: "agent_type")
 instance (HsJSONPB.ToJSON SpawnSubtreeRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
@@ -2234,7 +2269,9 @@ instance (HsJSONPB.FromJSON SpawnSubtreeResponse) where
   parseJSON = HsJSONPB.parseJSONPB
 data SpawnLeafSubtreeRequest
   = SpawnLeafSubtreeRequest {spawnLeafSubtreeRequestTask :: Hs.Text,
-                             spawnLeafSubtreeRequestBranchName :: Hs.Text}
+                             spawnLeafSubtreeRequestBranchName :: Hs.Text,
+                             spawnLeafSubtreeRequestRole :: Hs.Text,
+                             spawnLeafSubtreeRequestAgentType :: (HsProtobuf.Enumerated Effects.Agent.AgentType)}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData SpawnLeafSubtreeRequest)
 instance (HsProtobuf.Named SpawnLeafSubtreeRequest) where
@@ -2244,16 +2281,25 @@ instance (HsProtobuf.Message SpawnLeafSubtreeRequest) where
   encodeMessage
     _
     SpawnLeafSubtreeRequest {spawnLeafSubtreeRequestTask,
-                             spawnLeafSubtreeRequestBranchName}
+                             spawnLeafSubtreeRequestBranchName, spawnLeafSubtreeRequestRole,
+                             spawnLeafSubtreeRequestAgentType}
     = Hs.mappend
-        (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 1)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              spawnLeafSubtreeRequestTask))
-        (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 2)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              spawnLeafSubtreeRequestBranchName))
+        (Hs.mappend
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 1)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 spawnLeafSubtreeRequestTask))
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 2)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 spawnLeafSubtreeRequestBranchName)))
+        (Hs.mappend
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 3)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 spawnLeafSubtreeRequestRole))
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 4) spawnLeafSubtreeRequestAgentType))
   decodeMessage _
     = Hs.pure SpawnLeafSubtreeRequest
         <*>
@@ -2264,6 +2310,13 @@ instance (HsProtobuf.Message SpawnLeafSubtreeRequest) where
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)))
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 4)
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -2272,18 +2325,31 @@ instance (HsProtobuf.Message SpawnLeafSubtreeRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 2)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "branch_name") [] ""]
+         (HsProtobufAST.Single "branch_name") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 3)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "role") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 4)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "AgentType")))
+         (HsProtobufAST.Single "agent_type") [] ""]
 instance (HsJSONPB.ToJSONPB SpawnLeafSubtreeRequest) where
-  toJSONPB (SpawnLeafSubtreeRequest f1 f2)
+  toJSONPB (SpawnLeafSubtreeRequest f1 f2 f3 f4)
     = HsJSONPB.object
         ["task" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "branch_name"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
-  toEncodingPB (SpawnLeafSubtreeRequest f1 f2)
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
+         "role" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
+         "agent_type" .= f4]
+  toEncodingPB (SpawnLeafSubtreeRequest f1 f2 f3 f4)
     = HsJSONPB.pairs
         ["task" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "branch_name"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
+         "role" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
+         "agent_type" .= f4]
 instance (HsJSONPB.FromJSONPB SpawnLeafSubtreeRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -2295,7 +2361,11 @@ instance (HsJSONPB.FromJSONPB SpawnLeafSubtreeRequest) where
                      (obj .: "task"))
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "branch_name")))
+                     (obj .: "branch_name"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "role"))
+                <*> obj .: "agent_type")
 instance (HsJSONPB.ToJSON SpawnLeafSubtreeRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
