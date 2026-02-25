@@ -33,7 +33,8 @@ data SpawnSubtree
 
 data SpawnSubtreeArgs = SpawnSubtreeArgs
   { ssTask :: Text,
-    ssBranchName :: Text
+    ssBranchName :: Text,
+    ssForkSession :: Maybe Bool
   }
   deriving (Show, Eq, Generic)
 
@@ -42,6 +43,7 @@ instance FromJSON SpawnSubtreeArgs where
     SpawnSubtreeArgs
       <$> v .: "task"
       <*> v .: "branch_name"
+      <*> v .:? "fork_session"
 
 instance MCPTool SpawnSubtree where
   type ToolArgs SpawnSubtree = SpawnSubtreeArgs
@@ -50,10 +52,12 @@ instance MCPTool SpawnSubtree where
   toolSchema =
     genericToolSchemaWith @SpawnSubtreeArgs
       [ ("task", "Description of the sub-problem to solve"),
-        ("branch_name", "Branch name suffix (will be prefixed with current branch)")
+        ("branch_name", "Branch name suffix (will be prefixed with current branch)"),
+        ("fork_session", "Whether to fork the parent's conversation context into the child (default: false). Set true to inherit context, but may fail if the session is stale or compacted.")
       ]
   toolHandlerEff args = do
-    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) ""
+    let forkSession = maybe False id (ssForkSession args)
+    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) "" forkSession
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do

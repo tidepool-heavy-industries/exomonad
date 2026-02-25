@@ -2069,7 +2069,8 @@ instance (HsJSONPB.FromJSON SpawnWorkerResponse) where
 data SpawnSubtreeRequest
   = SpawnSubtreeRequest {spawnSubtreeRequestTask :: Hs.Text,
                          spawnSubtreeRequestBranchName :: Hs.Text,
-                         spawnSubtreeRequestParentSessionId :: Hs.Text}
+                         spawnSubtreeRequestParentSessionId :: Hs.Text,
+                         spawnSubtreeRequestForkSession :: Hs.Bool}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData SpawnSubtreeRequest)
 instance (HsProtobuf.Named SpawnSubtreeRequest) where
@@ -2079,21 +2080,25 @@ instance (HsProtobuf.Message SpawnSubtreeRequest) where
   encodeMessage
     _
     SpawnSubtreeRequest {spawnSubtreeRequestTask,
-                         spawnSubtreeRequestBranchName, spawnSubtreeRequestParentSessionId}
+                         spawnSubtreeRequestBranchName, spawnSubtreeRequestParentSessionId,
+                         spawnSubtreeRequestForkSession}
     = Hs.mappend
         (Hs.mappend
+           (Hs.mappend
+              (HsProtobuf.encodeMessageField
+                 (HsProtobuf.FieldNumber 1)
+                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                    spawnSubtreeRequestTask))
+              (HsProtobuf.encodeMessageField
+                 (HsProtobuf.FieldNumber 2)
+                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                    spawnSubtreeRequestBranchName)))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 1)
+              (HsProtobuf.FieldNumber 3)
               ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                 spawnSubtreeRequestTask))
-           (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 2)
-              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                 spawnSubtreeRequestBranchName)))
+                 spawnSubtreeRequestParentSessionId)))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 3)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              spawnSubtreeRequestParentSessionId))
+           (HsProtobuf.FieldNumber 4) spawnSubtreeRequestForkSession)
   decodeMessage _
     = Hs.pure SpawnSubtreeRequest
         <*>
@@ -2108,6 +2113,9 @@ instance (HsProtobuf.Message SpawnSubtreeRequest) where
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)))
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 4)
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -2120,22 +2128,27 @@ instance (HsProtobuf.Message SpawnSubtreeRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 3)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "parent_session_id") [] ""]
+         (HsProtobufAST.Single "parent_session_id") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 4) (HsProtobufAST.Prim HsProtobufAST.Bool)
+         (HsProtobufAST.Single "fork_session") [] ""]
 instance (HsJSONPB.ToJSONPB SpawnSubtreeRequest) where
-  toJSONPB (SpawnSubtreeRequest f1 f2 f3)
+  toJSONPB (SpawnSubtreeRequest f1 f2 f3 f4)
     = HsJSONPB.object
         ["task" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "branch_name"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "parent_session_id"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
-  toEncodingPB (SpawnSubtreeRequest f1 f2 f3)
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
+         "fork_session" .= f4]
+  toEncodingPB (SpawnSubtreeRequest f1 f2 f3 f4)
     = HsJSONPB.pairs
         ["task" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "branch_name"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "parent_session_id"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
+         "fork_session" .= f4]
 instance (HsJSONPB.FromJSONPB SpawnSubtreeRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -2150,7 +2163,8 @@ instance (HsJSONPB.FromJSONPB SpawnSubtreeRequest) where
                      (obj .: "branch_name"))
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "parent_session_id")))
+                     (obj .: "parent_session_id"))
+                <*> obj .: "fork_session")
 instance (HsJSONPB.ToJSON SpawnSubtreeRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding

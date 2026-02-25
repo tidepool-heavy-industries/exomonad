@@ -94,13 +94,13 @@ instance ToJSON SpawnResult where
 
 -- | Agent control effect for spawning agents.
 data AgentControl a where
-  SpawnSubtreeC :: Text -> Text -> Text -> AgentControl (Either Text SpawnResult)
+  SpawnSubtreeC :: Text -> Text -> Text -> Bool -> AgentControl (Either Text SpawnResult)
   SpawnLeafSubtreeC :: Text -> Text -> AgentControl (Either Text SpawnResult)
   SpawnWorkerC :: Text -> Text -> AgentControl (Either Text SpawnResult)
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
-spawnSubtree :: (Member AgentControl r) => Text -> Text -> Text -> Eff r (Either Text SpawnResult)
-spawnSubtree task branchName parentSessionId = send (SpawnSubtreeC task branchName parentSessionId)
+spawnSubtree :: (Member AgentControl r) => Text -> Text -> Text -> Bool -> Eff r (Either Text SpawnResult)
+spawnSubtree task branchName parentSessionId forkSession = send (SpawnSubtreeC task branchName parentSessionId forkSession)
 
 spawnLeafSubtree :: (Member AgentControl r) => Text -> Text -> Eff r (Either Text SpawnResult)
 spawnLeafSubtree task branchName = send (SpawnLeafSubtreeC task branchName)
@@ -116,12 +116,13 @@ spawnWorker name prompt = send (SpawnWorkerC name prompt)
 -- Effects dispatched async without holding the WASM plugin lock.
 runAgentControlSuspend :: (Member SuspendYield r) => Eff (AgentControl ': r) a -> Eff r a
 runAgentControlSuspend = interpret $ \case
-  SpawnSubtreeC task branchName parentSessionId -> do
+  SpawnSubtreeC task branchName parentSessionId forkSession -> do
     let req =
           PA.SpawnSubtreeRequest
             { PA.spawnSubtreeRequestTask = fromText task,
               PA.spawnSubtreeRequestBranchName = fromText branchName,
-              PA.spawnSubtreeRequestParentSessionId = fromText parentSessionId
+              PA.spawnSubtreeRequestParentSessionId = fromText parentSessionId,
+              PA.spawnSubtreeRequestForkSession = forkSession
             }
     result <- suspendEffect @Agent.AgentSpawnSubtree req
     pure $ case result of

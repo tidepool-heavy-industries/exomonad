@@ -253,6 +253,9 @@ message SpawnSubtreeRequest {
   string branch_name = 2;
   // Parent Claude session ID for --resume --fork-session context inheritance.
   string parent_session_id = 3;
+  // Whether to fork the parent's Claude session context into the child.
+  // Default false — child starts fresh. Set true to inherit conversation context.
+  bool fork_session = 4;
 }
 
 message SpawnSubtreeResponse {
