@@ -211,6 +211,7 @@ This is **native Claude Code Teams integration**. Messages from child agents arr
 | Feature | Status |
 |---------|--------|
 | **Teams inbox delivery** | **Live.** `notify_parent` → Teams inbox → native `<teammate-message>` in parent conversation. Full E2E verified. |
+| **ACP messaging** (Gemini agents) | **Built.** Structured JSON-RPC messaging via Agent Client Protocol. `AcpRegistry` manages connections, `connect_and_prompt()` establishes ACP sessions. Delivery priority: Teams inbox → ACP prompt → Zellij STDIN. Vendor SDK patched for Send safety. |
 | **Event router** (Zellij STDIN fallback) | Built. Fallback path: `notify_parent` → `inject_input` into parent pane via Zellij plugin pipe. |
 | **GitHub poller** (PR status → events) | Built. Background service polls PR/CI status and injects notifications into agent panes. |
 | **Event log** (JSONL structured events) | Built. `.exo/events.jsonl` — append-only JSONL. Query with `duckdb -c "SELECT * FROM read_json_auto('.exo/events.jsonl')"` or `jq`. Events: `agent.spawned`, `agent.completed`, `pr.filed`, `pr.merged`, `copilot.review`, `ci.status_changed`. |

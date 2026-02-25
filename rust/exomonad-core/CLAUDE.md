@@ -31,6 +31,20 @@ Without `runtime`: only `ui_protocol` module available. Used by `exomonad-plugin
 | `EffectError` | Common error type for all effects with protobuf mapping |
 | `PluginManager` | Manages WASM guest calls and host function dispatch via Extism |
 | `RuntimeBuilder` | Fluent API for assembling handlers and loading WASM |
+| `AcpRegistry` | Registry of active ACP connections to Gemini agents |
+| `AcpConnection` | Wraps `ClientSideConnection` + agent_id + session_id |
+
+## ACP Integration
+
+Agent Client Protocol (ACP) provides structured JSON-RPC messaging to Gemini agents, replacing fragile Zellij STDIN injection.
+
+**Key files:**
+- `services/acp_registry.rs` — `AcpRegistry` (connection store) + `connect_and_prompt()` (spawn + handshake + first prompt)
+- `services/acp_client.rs` — `ExoMonadAcpClient` (implements ACP `Client` trait: auto-approve permissions, log notifications)
+
+**Delivery priority** (in `services/delivery.rs`): Teams inbox → ACP prompt → Zellij STDIN injection.
+
+**Vendor patches:** `vendor/acp-rust-sdk/` has Send patches (Rc→Arc, LocalBoxFuture→BoxFuture, async_trait(?Send)→async_trait) to work with tokio's multi-threaded runtime.
 
 ## Related Documentation
 

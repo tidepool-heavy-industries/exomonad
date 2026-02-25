@@ -1,4 +1,5 @@
 use crate::domain::PRNumber;
+use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::AgentType;
 use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
@@ -23,6 +24,7 @@ pub struct GitHubPoller {
     state: Arc<Mutex<HashMap<PRNumber, PRState>>>,
     repo_info: Arc<Mutex<Option<(String, String)>>>, // (owner, name)
     team_registry: Option<Arc<TeamRegistry>>,
+    acp_registry: Option<Arc<AcpRegistry>>,
 }
 
 /// A Copilot review comment with optional file context.
@@ -56,11 +58,17 @@ impl GitHubPoller {
             state: Arc::new(Mutex::new(HashMap::new())),
             repo_info: Arc::new(Mutex::new(None)),
             team_registry: None,
+            acp_registry: None,
         }
     }
 
     pub fn with_team_registry(mut self, registry: Arc<TeamRegistry>) -> Self {
         self.team_registry = Some(registry);
+        self
+    }
+
+    pub fn with_acp_registry(mut self, registry: Arc<AcpRegistry>) -> Self {
+        self.acp_registry = Some(registry);
         self
     }
 
@@ -511,6 +519,7 @@ impl GitHubPoller {
 
             crate::services::delivery::deliver_to_agent(
                 self.team_registry.as_deref(),
+                self.acp_registry.as_deref(),
                 branch,
                 &tab_name,
                 "github-poller",
