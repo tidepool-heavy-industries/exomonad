@@ -236,6 +236,12 @@ message SpawnWorkerRequest {
   string name = 1;
   // Implementation instructions for the agent.
   string prompt = 2;
+  // Permission mode for the agent. Empty = --dangerously-skip-permissions.
+  string permission_mode = 3;
+  // Tool patterns to allow. Empty = no restriction.
+  repeated string allowed_tools = 4;
+  // Tool patterns to disallow. Empty = no restriction.
+  repeated string disallowed_tools = 5;
 }
 
 message SpawnWorkerResponse {
@@ -258,6 +264,12 @@ message SpawnSubtreeRequest {
   bool fork_session = 4;
   string role = 5;        // Optional role override (default: "tl")
   AgentType agent_type = 6; // Optional agent type override
+  // Permission mode for Claude (e.g., "plan", "default"). Empty = --dangerously-skip-permissions.
+  string permission_mode = 7;
+  // Tool patterns to allow (e.g., "Read", "Grep"). Empty = no restriction.
+  repeated string allowed_tools = 8;
+  // Tool patterns to disallow (e.g., "Bash"). Empty = no restriction.
+  repeated string disallowed_tools = 9;
 }
 
 message SpawnSubtreeResponse {
@@ -275,6 +287,12 @@ message SpawnLeafSubtreeRequest {
   string branch_name = 2;
   string role = 3;        // Optional role override (default: "dev")
   AgentType agent_type = 4; // Optional agent type override
+  // Permission mode for the agent. Empty = --dangerously-skip-permissions.
+  string permission_mode = 5;
+  // Tool patterns to allow. Empty = no restriction.
+  repeated string allowed_tools = 6;
+  // Tool patterns to disallow. Empty = no restriction.
+  repeated string disallowed_tools = 7;
 }
 
 message SpawnLeafSubtreeResponse {
@@ -290,6 +308,12 @@ message SpawnAcpRequest {
   string name = 1;
   // Initial prompt/instructions for the agent.
   string prompt = 2;
+  // Permission mode for the agent. Empty = --dangerously-skip-permissions.
+  string permission_mode = 3;
+  // Tool patterns to allow. Empty = no restriction.
+  repeated string allowed_tools = 4;
+  // Tool patterns to disallow. Empty = no restriction.
+  repeated string disallowed_tools = 5;
 }
 
 message SpawnAcpResponse {

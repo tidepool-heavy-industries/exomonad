@@ -246,6 +246,17 @@ pub struct SpawnGeminiTeammateOptions {
     pub base_branch: Option<BirthBranch>,
 }
 
+/// Claude-specific spawn flags for permission control.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ClaudeSpawnFlags {
+    /// Permission mode (e.g., "plan", "default"). None = --dangerously-skip-permissions.
+    pub permission_mode: Option<String>,
+    /// Tool patterns to allow (e.g., "Read", "Grep").
+    pub allowed_tools: Vec<String>,
+    /// Tool patterns to disallow (e.g., "Bash").
+    pub disallowed_tools: Vec<String>,
+}
+
 /// Options for spawning a worker agent in the current worktree (no branch/worktree).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnWorkerOptions {
@@ -253,6 +264,9 @@ pub struct SpawnWorkerOptions {
     pub name: String,
     /// Implementation instructions
     pub prompt: String,
+    /// Claude-specific permission flags (ignored for Gemini).
+    #[serde(default)]
+    pub claude_flags: ClaudeSpawnFlags,
 }
 
 /// Options for spawning a subtree agent (isolated worktree).
@@ -268,6 +282,9 @@ pub struct SpawnSubtreeOptions {
     pub role: Option<String>,
     /// Optional agent type override.
     pub agent_type: Option<AgentType>,
+    /// Claude-specific permission flags (ignored for Gemini).
+    #[serde(default)]
+    pub claude_flags: ClaudeSpawnFlags,
 }
 
 /// Result of spawning an agent.
@@ -940,6 +957,7 @@ impl AgentControlService {
                 Some(&options.prompt),
                 env_vars,
                 Some(&caller_tab),
+                Some(&options.claude_flags),
             )
             .await?;
 
@@ -1095,6 +1113,7 @@ impl AgentControlService {
                 Some(&task_with_context),
                 env_vars,
                 fork_id,
+                Some(&options.claude_flags),
             )
             .await?;
 
@@ -1679,7 +1698,7 @@ impl AgentControlService {
         prompt: Option<&str>,
         env_vars: HashMap<String, String>,
     ) -> Result<()> {
-        self.new_zellij_tab_inner(name, cwd, agent_type, prompt, env_vars, None)
+        self.new_zellij_tab_inner(name, cwd, agent_type, prompt, env_vars, None, None)
             .await
     }
 
@@ -1693,31 +1712,56 @@ impl AgentControlService {
         fork_session_id: Option<&str>,
         env_vars: &HashMap<String, String>,
         cwd: &Path,
+        claude_flags: Option<&ClaudeSpawnFlags>,
     ) -> String {
         let cmd = agent_type.command();
-        let skip_perms = match agent_type {
-            AgentType::Claude => " --dangerously-skip-permissions",
-            AgentType::Gemini => "",
+
+        // Build permission flags for Claude agents
+        let perms_flags = match agent_type {
+            AgentType::Claude => {
+                let mut flags = String::new();
+                let mode = claude_flags.and_then(|f| f.permission_mode.as_deref());
+                match mode {
+                    Some(m) => {
+                        flags.push_str(" --permission-mode ");
+                        flags.push_str(m);
+                    }
+                    None => flags.push_str(" --dangerously-skip-permissions"),
+                }
+                if let Some(f) = claude_flags {
+                    for tool in &f.allowed_tools {
+                        flags.push_str(" --allowedTools ");
+                        flags.push_str(&shell_escape::escape(tool.into()));
+                    }
+                    for tool in &f.disallowed_tools {
+                        flags.push_str(" --disallowedTools ");
+                        flags.push_str(&shell_escape::escape(tool.into()));
+                    }
+                }
+                flags
+            }
+            AgentType::Gemini => String::new(),
         };
+
         let agent_command = match (prompt, fork_session_id) {
             (Some(p), Some(session_id)) => {
                 let escaped_prompt = Self::escape_for_shell_command(p);
                 let escaped_session = Self::escape_for_shell_command(session_id);
                 format!(
                     "{}{} --resume {} --fork-session {}",
-                    cmd, skip_perms, escaped_session, escaped_prompt
+                    cmd, perms_flags, escaped_session, escaped_prompt
                 )
             }
             (Some(p), None) => {
                 let escaped_prompt = Self::escape_for_shell_command(p);
                 let flag = agent_type.prompt_flag();
                 if flag.is_empty() {
-                    format!("{}{} {}", cmd, skip_perms, escaped_prompt)
+                    format!("{}{} {}", cmd, perms_flags, escaped_prompt)
                 } else {
-                    format!("{}{} {} {}", cmd, skip_perms, flag, escaped_prompt)
+                    format!("{}{} {} {}", cmd, perms_flags, flag, escaped_prompt)
                 }
             }
-            _ => format!("{}{}", cmd, skip_perms),
+            _ => format!("{}{}", cmd, perms_flags),
         };
 
         // Prepend env vars
@@ -1742,7 +1786,7 @@ impl AgentControlService {
         }
     }
 
-    #[tracing::instrument(skip(self, prompt, env_vars, fork_session_id))]
+    #[tracing::instrument(skip(self, prompt, env_vars, fork_session_id, claude_flags))]
     async fn new_zellij_tab_inner(
         &self,
         name: &str,
@@ -1751,11 +1795,12 @@ impl AgentControlService {
         prompt: Option<&str>,
         env_vars: HashMap<String, String>,
         fork_session_id: Option<&str>,
+        claude_flags: Option<&ClaudeSpawnFlags>,
     ) -> Result<()> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating Zellij tab via direct IPC");
 
         let full_command =
-            Self::build_agent_command(agent_type, prompt, fork_session_id, &env_vars, cwd);
+            Self::build_agent_command(agent_type, prompt, fork_session_id, &env_vars, cwd, claude_flags);
 
         // Escape the command for KDL string literal (escape backslashes, quotes, newlines)
         let kdl_escaped_command = Self::escape_for_kdl(&full_command);
@@ -1879,6 +1924,7 @@ impl AgentControlService {
         prompt: Option<&str>,
         env_vars: HashMap<String, String>,
         tab_name: Option<&str>,
+        claude_flags: Option<&ClaudeSpawnFlags>,
     ) -> Result<()> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, tab = ?tab_name, "Creating Zellij pane via direct IPC");
 
@@ -1889,7 +1935,7 @@ impl AgentControlService {
             let _ = tokio::task::spawn_blocking(move || ipc.go_to_tab_name(&tab)).await;
         }
 
-        let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd);
+        let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd, claude_flags);
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
 
         let ipc = self.ipc()?;

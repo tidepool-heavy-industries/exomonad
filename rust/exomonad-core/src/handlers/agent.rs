@@ -10,8 +10,8 @@ use crate::effects::{
 use super::non_empty;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::{
-    AgentControlService, AgentInfo, AgentType as ServiceAgentType, SpawnGeminiTeammateOptions,
-    SpawnOptions, SpawnSubtreeOptions, SpawnWorkerOptions,
+    AgentControlService, AgentInfo, AgentType as ServiceAgentType, ClaudeSpawnFlags,
+    SpawnGeminiTeammateOptions, SpawnOptions, SpawnSubtreeOptions, SpawnWorkerOptions,
 };
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
 use crate::{GithubOwner, GithubRepo, IssueNumber};
@@ -63,6 +63,18 @@ impl EffectHandler for AgentHandler {
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<Vec<u8>> {
         dispatch_agent_effect(self, effect_type, payload, ctx).await
+    }
+}
+
+fn claude_spawn_flags(
+    permission_mode: String,
+    allowed_tools: Vec<String>,
+    disallowed_tools: Vec<String>,
+) -> ClaudeSpawnFlags {
+    ClaudeSpawnFlags {
+        permission_mode: non_empty(permission_mode),
+        allowed_tools,
+        disallowed_tools,
     }
 }
 
@@ -185,6 +197,11 @@ impl AgentEffects for AgentHandler {
         let options = SpawnWorkerOptions {
             name: req.name.clone(),
             prompt: req.prompt.clone(),
+            claude_flags: claude_spawn_flags(
+                req.permission_mode.clone(),
+                req.allowed_tools.clone(),
+                req.disallowed_tools.clone(),
+            ),
         };
 
         let result = self
@@ -246,6 +263,11 @@ impl AgentEffects for AgentHandler {
             } else {
                 Some(convert_agent_type(req.agent_type()))
             },
+            claude_flags: claude_spawn_flags(
+                req.permission_mode.clone(),
+                req.allowed_tools.clone(),
+                req.disallowed_tools.clone(),
+            ),
         };
 
         let result = self
@@ -274,6 +296,11 @@ impl AgentEffects for AgentHandler {
             } else {
                 Some(convert_agent_type(req.agent_type()))
             },
+            claude_flags: claude_spawn_flags(
+                req.permission_mode.clone(),
+                req.allowed_tools.clone(),
+                req.disallowed_tools.clone(),
+            ),
         };
 
         let result = self

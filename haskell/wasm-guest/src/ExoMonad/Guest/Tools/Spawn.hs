@@ -36,7 +36,10 @@ data SpawnSubtree
 data SpawnSubtreeArgs = SpawnSubtreeArgs
   { ssTask :: Text,
     ssBranchName :: Text,
-    ssForkSession :: Maybe Bool
+    ssForkSession :: Maybe Bool,
+    ssPermissionMode :: Maybe Text,
+    ssAllowedTools :: Maybe [Text],
+    ssDisallowedTools :: Maybe [Text]
   }
   deriving (Show, Eq, Generic)
 
@@ -46,20 +49,31 @@ instance FromJSON SpawnSubtreeArgs where
       <$> v .: "task"
       <*> v .: "branch_name"
       <*> v .:? "fork_session"
+      <*> v .:? "permission_mode"
+      <*> v .:? "allowed_tools"
+      <*> v .:? "disallowed_tools"
 
 instance MCPTool SpawnSubtree where
   type ToolArgs SpawnSubtree = SpawnSubtreeArgs
   toolName = "spawn_subtree"
-  toolDescription = "Fork a Claude agent into its own worktree and Zellij tab. The child gets TL role (can spawn its own children). After spawning, return immediately — you will be notified via [CHILD COMPLETE] when it finishes. Do not poll or wait."
+  toolDescription = "Fork a Claude agent into its own worktree and Zellij tab. The child gets TL role (can spawn its own children). After spawning, return immediately — you will be notified via [CHILD COMPLETE] when it finishes. Do not poll or wait. Prefer spawn_leaf_subtree or spawn_workers for implementation work — Gemini agents are highly capable implementers and cost 10-30x less."
   toolSchema =
     genericToolSchemaWith @SpawnSubtreeArgs
       [ ("task", "Description of the sub-problem to solve"),
         ("branch_name", "Branch name suffix (will be prefixed with current branch)"),
-        ("fork_session", "Whether to fork the parent's conversation context into the child (default: false). Set true to inherit context, but may fail if the session is stale or compacted.")
+        ("fork_session", "Whether to fork the parent's conversation context into the child (default: false). Set true to inherit context, but may fail if the session is stale or compacted."),
+        ("permission_mode", "Permission mode for Claude (e.g., 'plan', 'default'). Omit for --dangerously-skip-permissions."),
+        ("allowed_tools", "Tool patterns to allow (e.g., ['Read', 'Grep']). Omit for no restriction."),
+        ("disallowed_tools", "Tool patterns to disallow (e.g., ['Bash']). Omit for no restriction.")
       ]
   toolHandlerEff args = do
     let forkSession = maybe False id (ssForkSession args)
-    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) "" forkSession Nothing Nothing
+        perms = AC.PermissionFlags
+          { AC.permMode = ssPermissionMode args,
+            AC.allowedTools = maybe [] id (ssAllowedTools args),
+            AC.disallowedTools = maybe [] id (ssDisallowedTools args)
+          }
+    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) "" forkSession Nothing Nothing perms
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
@@ -83,7 +97,10 @@ data SpawnLeafSubtree
 
 data SpawnLeafSubtreeArgs = SpawnLeafSubtreeArgs
   { slsTask :: Text,
-    slsBranchName :: Text
+    slsBranchName :: Text,
+    slsPermissionMode :: Maybe Text,
+    slsAllowedTools :: Maybe [Text],
+    slsDisallowedTools :: Maybe [Text]
   }
   deriving (Show, Eq, Generic)
 
@@ -92,22 +109,33 @@ instance FromJSON SpawnLeafSubtreeArgs where
     SpawnLeafSubtreeArgs
       <$> v .: "task"
       <*> v .: "branch_name"
+      <*> v .:? "permission_mode"
+      <*> v .:? "allowed_tools"
+      <*> v .:? "disallowed_tools"
 
 instance MCPTool SpawnLeafSubtree where
   type ToolArgs SpawnLeafSubtree = SpawnLeafSubtreeArgs
   toolName = "spawn_leaf_subtree"
-  toolDescription = "Fork a Gemini agent into its own worktree and Zellij tab. Gets dev role (files PR, cannot spawn children). After spawning, return immediately — you will be notified via [CHILD COMPLETE] when it finishes."
+  toolDescription = "Fork a Gemini agent into its own worktree and Zellij tab. Gets dev role (files PR, cannot spawn children). Gemini is a capable implementer — give it acceptance criteria and file paths, not line-by-line instructions. After spawning, return immediately — you will be notified via [CHILD COMPLETE] when it finishes."
   toolSchema =
     genericToolSchemaWith @SpawnLeafSubtreeArgs
       [ ("task", "Description of the sub-problem to solve"),
-        ("branch_name", "Branch name suffix (will be prefixed with current branch)")
+        ("branch_name", "Branch name suffix (will be prefixed with current branch)"),
+        ("permission_mode", "Permission mode for the agent. Omit for --dangerously-skip-permissions."),
+        ("allowed_tools", "Tool patterns to allow. Omit for no restriction."),
+        ("disallowed_tools", "Tool patterns to disallow. Omit for no restriction.")
       ]
   toolHandlerEff args = do
     -- WASM32 BUG WORKAROUND: Prompt's derived Semigroup (<>) hangs when
     -- evaluated inside the freer-simple coroutine context on GHC WASM32.
     -- Build prompts as raw Text instead of using the Prompt builder.
     let renderedTask = slsTask args <> "\n\n" <> leafProfileText
-    result <- AC.spawnLeafSubtree renderedTask (slsBranchName args) Nothing Nothing
+        perms = AC.PermissionFlags
+          { AC.permMode = slsPermissionMode args,
+            AC.allowedTools = maybe [] id (slsAllowedTools args),
+            AC.disallowedTools = maybe [] id (slsDisallowedTools args)
+          }
+    result <- AC.spawnLeafSubtree renderedTask (slsBranchName args) Nothing Nothing perms
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
@@ -141,7 +169,10 @@ data WorkerSpec = WorkerSpec
     wsPrompt :: Maybe Text,
     wsProfiles :: Maybe [Text],
     wsContextFiles :: Maybe [Text],
-    wsVerifyTemplates :: Maybe [Text]
+    wsVerifyTemplates :: Maybe [Text],
+    wsPermissionMode :: Maybe Text,
+    wsAllowedTools :: Maybe [Text],
+    wsDisallowedTools :: Maybe [Text]
   }
   deriving (Show, Eq, Generic)
 
@@ -159,7 +190,10 @@ instance JsonSchema WorkerSpec where
         ("prompt", "Raw prompt (escape hatch). If provided, all other fields except name are ignored."),
         ("profiles", "Template profiles to include (e.g., 'general', 'haskell', 'rust')"),
         ("context_files", "Paths to files to include in context"),
-        ("verify_templates", "Verification script templates")
+        ("verify_templates", "Verification script templates"),
+        ("permission_mode", "Permission mode for the agent. Omit for --dangerously-skip-permissions."),
+        ("allowed_tools", "Tool patterns to allow. Omit for no restriction."),
+        ("disallowed_tools", "Tool patterns to disallow. Omit for no restriction.")
       ]
 
 instance FromJSON WorkerSpec where
@@ -177,6 +211,9 @@ instance FromJSON WorkerSpec where
       <*> v .:? "profiles"
       <*> v .:? "context_files"
       <*> v .:? "verify_templates"
+      <*> v .:? "permission_mode"
+      <*> v .:? "allowed_tools"
+      <*> v .:? "disallowed_tools"
 
 data SpawnWorkersArgs = SpawnWorkersArgs
   { swsSpecs :: [WorkerSpec]
@@ -190,7 +227,7 @@ instance FromJSON SpawnWorkersArgs where
 instance MCPTool SpawnWorkers where
   type ToolArgs SpawnWorkers = SpawnWorkersArgs
   toolName = "spawn_workers"
-  toolDescription = "Spawn multiple Gemini worker agents in one call. Like Claude Code teammates but using Gemini — each gets a Zellij pane in YOUR tab, working in YOUR directory on YOUR branch (ephemeral, no isolation, no PR). Workers call notify_parent when done, which delivers a message to your conversation. After spawning, return immediately — do not poll or wait."
+  toolDescription = "Spawn multiple Gemini worker agents in one call. Gemini agents are capable implementers — give them acceptance criteria, key file paths, and anti-patterns, not step-by-step code. Each gets a Zellij pane in YOUR tab, working in YOUR directory on YOUR branch (ephemeral, no isolation, no PR). Workers call notify_parent when done, which delivers a message to your conversation. After spawning, return immediately — do not poll or wait."
   toolSchema =
     genericToolSchemaWith @SpawnWorkersArgs
       [ ("specs", "Array of worker specifications")
@@ -201,7 +238,12 @@ instance MCPTool SpawnWorkers where
       let prompt = case wsPrompt spec of
             Just p -> p
             Nothing -> renderWorkerPrompt spec
-      r <- AC.spawnWorker (wsName spec) prompt
+          perms = AC.PermissionFlags
+            { AC.permMode = wsPermissionMode spec,
+              AC.allowedTools = maybe [] id (wsAllowedTools spec),
+              AC.disallowedTools = maybe [] id (wsDisallowedTools spec)
+            }
+      r <- AC.spawnWorker (wsName spec) prompt perms
       case r of
         Right _ -> do
           let eventPayload = BSL.toStrict $ Aeson.encode $ object
@@ -232,7 +274,10 @@ data SpawnAcp
 
 data SpawnAcpArgs = SpawnAcpArgs
   { saName :: Text,
-    saPrompt :: Text
+    saPrompt :: Text,
+    saPermissionMode :: Maybe Text,
+    saAllowedTools :: Maybe [Text],
+    saDisallowedTools :: Maybe [Text]
   }
   deriving (Show, Eq, Generic)
 
@@ -241,19 +286,30 @@ instance FromJSON SpawnAcpArgs where
     SpawnAcpArgs
       <$> v .: "name"
       <*> v .: "prompt"
+      <*> v .:? "permission_mode"
+      <*> v .:? "allowed_tools"
+      <*> v .:? "disallowed_tools"
 
 instance MCPTool SpawnAcp where
   type ToolArgs SpawnAcp = SpawnAcpArgs
   toolName = "spawn_acp"
-  toolDescription = "Spawn a Gemini agent via ACP (experimental). Runs headless — no Zellij tab. Agent has MCP tools and communicates via structured protocol."
+  toolDescription = "Spawn a Gemini agent via ACP (experimental). Runs headless — no Zellij tab. Gemini is a capable implementer — write specs, not code. Agent has MCP tools and communicates via structured protocol."
   toolSchema =
     genericToolSchemaWith @SpawnAcpArgs
       [ ("name", "Human-readable name for the agent"),
-        ("prompt", "Initial prompt/instructions for the agent")
+        ("prompt", "Initial prompt/instructions for the agent"),
+        ("permission_mode", "Permission mode for the agent. Omit for --dangerously-skip-permissions."),
+        ("allowed_tools", "Tool patterns to allow. Omit for no restriction."),
+        ("disallowed_tools", "Tool patterns to disallow. Omit for no restriction.")
       ]
   toolHandlerEff args = do
     let renderedPrompt = saPrompt args <> "\n\n" <> workerProfileText
-    result <- AC.spawnAcp (saName args) renderedPrompt
+        perms = AC.PermissionFlags
+          { AC.permMode = saPermissionMode args,
+            AC.allowedTools = maybe [] id (saAllowedTools args),
+            AC.disallowedTools = maybe [] id (saDisallowedTools args)
+          }
+    result <- AC.spawnAcp (saName args) renderedPrompt perms
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
