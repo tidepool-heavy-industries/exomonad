@@ -983,3 +983,173 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+// ============================================================================
+// Property Tests
+// ============================================================================
+
+#[cfg(test)]
+mod proptest_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn test_session_id_roundtrip(s in ".+") {
+            let id = SessionId::try_from(s.clone()).unwrap();
+            prop_assert_eq!(id.to_string(), s);
+            let back = SessionId::try_from(id.to_string()).unwrap();
+            prop_assert_eq!(id, back);
+        }
+
+        #[test]
+        fn test_tool_name_roundtrip(s in ".+") {
+            let name = ToolName::try_from(s.clone()).unwrap();
+            prop_assert_eq!(name.to_string(), s);
+            let back = ToolName::try_from(name.to_string()).unwrap();
+            prop_assert_eq!(name, back);
+        }
+
+        #[test]
+        fn test_github_owner_roundtrip(s in ".+") {
+            let owner = GithubOwner::try_from(s.clone()).unwrap();
+            prop_assert_eq!(owner.to_string(), s);
+            let back = GithubOwner::try_from(owner.to_string()).unwrap();
+            prop_assert_eq!(owner, back);
+        }
+
+        #[test]
+        fn test_github_repo_roundtrip(s in ".+") {
+            let repo = GithubRepo::try_from(s.clone()).unwrap();
+            prop_assert_eq!(repo.to_string(), s);
+            let back = GithubRepo::try_from(repo.to_string()).unwrap();
+            prop_assert_eq!(repo, back);
+        }
+
+        #[test]
+        fn test_branch_name_roundtrip(s in ".+") {
+            let name = BranchName::try_from(s.clone()).unwrap();
+            prop_assert_eq!(name.to_string(), s);
+            let back = BranchName::try_from(name.to_string()).unwrap();
+            prop_assert_eq!(name, back);
+        }
+
+        #[test]
+        fn test_revision_roundtrip(s in ".+") {
+            let rev = Revision::try_from(s.clone()).unwrap();
+            prop_assert_eq!(rev.to_string(), s);
+            let back = Revision::try_from(rev.to_string()).unwrap();
+            prop_assert_eq!(rev, back);
+        }
+
+        #[test]
+        fn test_birth_branch_roundtrip(s in ".+") {
+            let bb = BirthBranch::try_from(s.clone()).unwrap();
+            prop_assert_eq!(bb.to_string(), s);
+            let back = BirthBranch::try_from(bb.to_string()).unwrap();
+            prop_assert_eq!(bb, back);
+        }
+
+        #[test]
+        fn test_agent_name_roundtrip(s in ".+") {
+            let name = AgentName::try_from(s.clone()).unwrap();
+            prop_assert_eq!(name.to_string(), s);
+            let back = AgentName::try_from(name.to_string()).unwrap();
+            prop_assert_eq!(name, back);
+        }
+
+        #[test]
+        fn test_birth_branch_hierarchy(slugs in prop::collection::vec("[a-z0-9-]+", 1..5)) {
+            let mut current = BirthBranch::root();
+            let mut expected_depth = 0;
+
+            for slug in slugs {
+                let child = current.child(&slug);
+                prop_assert_eq!(child.parent().unwrap(), current);
+                current = child;
+                expected_depth += 1;
+                prop_assert_eq!(current.depth(), expected_depth);
+            }
+        }
+
+        #[test]
+        fn test_issue_number_roundtrip(n in 1u64..u64::MAX) {
+            let num = IssueNumber::try_from(n).unwrap();
+            prop_assert_eq!(num.as_u64(), n);
+            prop_assert_eq!(num.to_string(), n.to_string());
+
+            let from_str = IssueNumber::try_from(n.to_string()).unwrap();
+            prop_assert_eq!(num, from_str);
+        }
+
+        #[test]
+        fn test_pr_number_roundtrip(n in 1u64..u64::MAX) {
+            let pr = PRNumber::try_from(n).unwrap();
+            prop_assert_eq!(pr.as_u64(), n);
+            prop_assert_eq!(pr.to_string(), n.to_string());
+
+            let back: PRNumber = PRNumber::new(n);
+            prop_assert_eq!(pr, back);
+        }
+
+        #[test]
+        fn test_tool_permission_roundtrip(p in any_tool_permission()) {
+            let s = p.to_string();
+            let back = ToolPermission::try_from(s).unwrap();
+            prop_assert_eq!(p, back);
+        }
+
+        #[test]
+        fn test_role_roundtrip(r in any_role()) {
+            let s = r.to_string();
+            let back = Role::try_from(s).unwrap();
+            prop_assert_eq!(r, back);
+        }
+
+        #[test]
+        fn test_agent_type_properties(at in any_agent_type(), slug in "[a-z0-9-]+") {
+            let tab_name = at.tab_display_name(&slug);
+            prop_assert!(!tab_name.is_empty());
+            prop_assert!(tab_name.contains(&slug));
+            prop_assert!(tab_name.contains(at.emoji()));
+        }
+
+        #[test]
+        fn test_string_newtypes_as_ref(s in ".+") {
+            let id = SessionId::try_from(s.clone()).unwrap();
+            prop_assert_eq!(id.as_ref(), s.as_str());
+            prop_assert_eq!(id.as_str(), s.as_str());
+
+            let name = AgentName::try_from(s.clone()).unwrap();
+            prop_assert_eq!(name.as_ref(), s.as_str());
+            prop_assert_eq!(name.as_str(), s.as_str());
+            
+            let branch = BranchName::try_from(s.clone()).unwrap();
+            prop_assert_eq!(branch.as_ref(), s.as_str());
+            prop_assert_eq!(branch.as_str(), s.as_str());
+        }
+    }
+
+    fn any_tool_permission() -> impl Strategy<Value = ToolPermission> {
+        prop_oneof![
+            Just(ToolPermission::Allow),
+            Just(ToolPermission::Deny),
+            Just(ToolPermission::Ask),
+        ]
+    }
+
+    fn any_role() -> impl Strategy<Value = Role> {
+        prop_oneof![
+            Just(Role::Dev),
+            Just(Role::TL),
+            Just(Role::Worker),
+        ]
+    }
+
+    fn any_agent_type() -> impl Strategy<Value = crate::services::agent_control::AgentType> {
+        prop_oneof![
+            Just(crate::services::agent_control::AgentType::Claude),
+            Just(crate::services::agent_control::AgentType::Gemini),
+        ]
+    }
+}
