@@ -67,3 +67,6 @@ pub mod effects {
 
 // Re-export common types at crate root for convenience
 pub use ffi::{ErrorCode, ErrorContext, FfiError, FfiResult};
+
+#[cfg(test)]
+mod proptests;

@@ -110,7 +110,11 @@ fn yield_effect_impl(
     let envelope = EffectEnvelope::decode(input_bytes.as_slice())
         .map_err(|e| Error::msg(format!("Failed to decode EffectEnvelope: {}", e)))?;
 
-    eprintln!("[yield_effect] dispatching: {} ({} bytes payload)", envelope.effect_type, envelope.payload.len());
+    eprintln!(
+        "[yield_effect] dispatching: {} ({} bytes payload)",
+        envelope.effect_type,
+        envelope.payload.len()
+    );
 
     // Clone Arc<EffectRegistry> and EffectContext out of the mutex, then drop the lock.
     // This prevents holding the UserData mutex across the async dispatch.
@@ -120,11 +124,8 @@ fn yield_effect_impl(
         (guard.registry.clone(), guard.ctx.clone())
     };
 
-    let result = block_on(registry.dispatch(
-        &envelope.effect_type,
-        &envelope.payload,
-        &effect_ctx,
-    ))?;
+    let result =
+        block_on(registry.dispatch(&envelope.effect_type, &envelope.payload, &effect_ctx))?;
 
     match &result {
         Ok(payload) => tracing::debug!(

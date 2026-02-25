@@ -252,12 +252,18 @@ impl PluginManager {
                 let data = current_input.clone();
                 let r = round;
                 let result_bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
-                    eprintln!("[trampoline] round={r} func={func} calling WASM ({} bytes input)", data.len());
+                    eprintln!(
+                        "[trampoline] round={r} func={func} calling WASM ({} bytes input)",
+                        data.len()
+                    );
                     let mut plugin = plugin_lock
                         .write()
                         .map_err(|e| anyhow::anyhow!("Plugin lock poisoned: {}", e))?;
                     let result = plugin.call::<&[u8], Vec<u8>>(&func, &data);
-                    eprintln!("[trampoline] round={r} func={func} WASM returned ({} bytes)", result.as_ref().map(|v| v.len()).unwrap_or(0));
+                    eprintln!(
+                        "[trampoline] round={r} func={func} WASM returned ({} bytes)",
+                        result.as_ref().map(|v| v.len()).unwrap_or(0)
+                    );
                     result
                 })
                 .await??;
@@ -290,8 +296,8 @@ impl PluginManager {
 
                     // Dispatch effect — wrap result as EffectResponse protobuf
                     // (same wire format as yield_effect) so WASM can handle errors gracefully
-                    use exomonad_proto::effects::EffectResponse;
                     use exomonad_proto::effects::error::effect_response::Result as ResponseResult;
+                    use exomonad_proto::effects::EffectResponse;
                     use prost::Message as ProstMessage;
 
                     let dispatch_result = self

@@ -63,8 +63,10 @@ mod tests {
     #[tokio::test]
     async fn test_register_overwrites() {
         let reg = ClaudeSessionRegistry::new();
-        reg.register("root", ClaudeSessionUuid::from("uuid-1")).await;
-        reg.register("root", ClaudeSessionUuid::from("uuid-2")).await;
+        reg.register("root", ClaudeSessionUuid::from("uuid-1"))
+            .await;
+        reg.register("root", ClaudeSessionUuid::from("uuid-2"))
+            .await;
         let result = reg.get("root").await;
         assert_eq!(result, Some(ClaudeSessionUuid::from("uuid-2")));
     }

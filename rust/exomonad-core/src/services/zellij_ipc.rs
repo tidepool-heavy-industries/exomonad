@@ -62,13 +62,12 @@ impl ZellijIpc {
             "[ZellijIpc] Sending action"
         );
 
-        let stream = LocalSocketStream::connect(self.socket_path.as_path())
-            .with_context(|| {
-                format!(
-                    "Failed to connect to Zellij socket at {}",
-                    self.socket_path.display()
-                )
-            })?;
+        let stream = LocalSocketStream::connect(self.socket_path.as_path()).with_context(|| {
+            format!(
+                "Failed to connect to Zellij socket at {}",
+                self.socket_path.display()
+            )
+        })?;
 
         // ClientToServerMsg::Action(Action, Option<u32>, Option<ClientId>)
         let msg = ClientToServerMsg::Action(action, None, None);
@@ -82,13 +81,12 @@ impl ZellijIpc {
 
     /// Send an action and read responses until `UnblockInputThread` or `Exit`.
     fn send_action_with_response(&self, action: Action) -> Result<Vec<ServerToClientMsg>> {
-        let stream = LocalSocketStream::connect(self.socket_path.as_path())
-            .with_context(|| {
-                format!(
-                    "Failed to connect to Zellij socket at {}",
-                    self.socket_path.display()
-                )
-            })?;
+        let stream = LocalSocketStream::connect(self.socket_path.as_path()).with_context(|| {
+            format!(
+                "Failed to connect to Zellij socket at {}",
+                self.socket_path.display()
+            )
+        })?;
 
         let msg = ClientToServerMsg::Action(action, None, None);
         let mut sender = IpcSenderWithContext::new(stream);
@@ -259,7 +257,10 @@ impl ZellijIpc {
             }
         }
 
-        debug!(count = tab_names.len(), "[ZellijIpc] query_tab_names result");
+        debug!(
+            count = tab_names.len(),
+            "[ZellijIpc] query_tab_names result"
+        );
         Ok(tab_names)
     }
 

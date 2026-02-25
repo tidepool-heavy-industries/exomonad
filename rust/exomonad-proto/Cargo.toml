@@ -23,5 +23,8 @@ prost = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+[dev-dependencies]
+proptest = "1"
+
 [build-dependencies]
 prost-build = "0.14"

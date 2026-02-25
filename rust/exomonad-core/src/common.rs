@@ -195,7 +195,10 @@ mod tests {
         if let FFIResult::Error(ffi_err) = ffi_res {
             assert_eq!(ffi_err.code, ErrorCode::IoError);
             assert!(ffi_err.message.contains("Failed to launch command"));
-            assert_eq!(ffi_err.context.unwrap().command, Some("invalid-command".to_string()));
+            assert_eq!(
+                ffi_err.context.unwrap().command,
+                Some("invalid-command".to_string())
+            );
         } else {
             panic!("Expected FFIResult::Error");
         }
