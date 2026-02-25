@@ -783,3 +783,64 @@ mod tests {
         assert!(!obj.contains_key("merged_at"));
     }
 }
+
+#[cfg(test)]
+mod proptest_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_github_owner() -> impl Strategy<Value = GithubOwner> {
+        "[a-zA-Z0-9-]+".prop_map(|s| GithubOwner::try_from(s).unwrap())
+    }
+
+    fn arb_github_repo() -> impl Strategy<Value = GithubRepo> {
+        "[a-zA-Z0-9-_.]+".prop_map(|s| GithubRepo::try_from(s).unwrap())
+    }
+
+    proptest! {
+        #[test]
+        fn test_github_get_issue_request_roundtrip_proptest(
+            owner in arb_github_owner(),
+            repo in arb_github_repo(),
+            number in any::<u32>(),
+            include_comments in any::<bool>()
+        ) {
+            let req = ServiceRequest::GitHubGetIssue {
+                owner,
+                repo,
+                number,
+                include_comments,
+            };
+            let json = serde_json::to_string(&req).unwrap();
+            let back: ServiceRequest = serde_json::from_str(&json).unwrap();
+            match (req, back) {
+                (ServiceRequest::GitHubGetIssue { owner: o1, repo: r1, number: n1, include_comments: i1 },
+                 ServiceRequest::GitHubGetIssue { owner: o2, repo: r2, number: n2, include_comments: i2 }) => {
+                    prop_assert_eq!(o1, o2);
+                    prop_assert_eq!(r1, r2);
+                    prop_assert_eq!(n1, n2);
+                    prop_assert_eq!(i1, i2);
+                },
+                _ => prop_assert!(false, "Wrong variant"),
+            }
+        }
+
+        #[test]
+        fn test_error_response_roundtrip_proptest(
+            code in any::<i32>(),
+            message in any::<String>()
+        ) {
+            let resp = ServiceResponse::Error { code, message };
+            let json = serde_json::to_string(&resp).unwrap();
+            let back: ServiceResponse = serde_json::from_str(&json).unwrap();
+            match (resp, back) {
+                (ServiceResponse::Error { code: c1, message: m1 },
+                 ServiceResponse::Error { code: c2, message: m2 }) => {
+                    prop_assert_eq!(c1, c2);
+                    prop_assert_eq!(m1, m2);
+                },
+                _ => prop_assert!(false, "Wrong variant"),
+            }
+        }
+    }
+}
