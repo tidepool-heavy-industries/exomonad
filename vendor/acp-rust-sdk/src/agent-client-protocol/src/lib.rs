@@ -1,4 +1,4 @@
-use futures::{AsyncRead, AsyncWrite, future::LocalBoxFuture};
+use futures::{AsyncRead, AsyncWrite, future::BoxFuture};
 use rpc::RpcConnection;
 
 mod agent;
@@ -52,10 +52,10 @@ impl ClientSideConnection {
     ///
     /// See protocol docs: [Communication Model](https://agentclientprotocol.com/protocol/overview#communication-model)
     pub fn new(
-        client: impl MessageHandler<ClientSide> + 'static,
-        outgoing_bytes: impl Unpin + AsyncWrite,
-        incoming_bytes: impl Unpin + AsyncRead,
-        spawn: impl Fn(LocalBoxFuture<'static, ()>) + 'static,
+        client: impl MessageHandler<ClientSide> + Send + Sync + 'static,
+        outgoing_bytes: impl Unpin + AsyncWrite + Send,
+        incoming_bytes: impl Unpin + AsyncRead + Send,
+        spawn: impl Fn(BoxFuture<'static, ()>) + Send + Sync + 'static,
     ) -> (Self, impl Future<Output = Result<()>>) {
         let (conn, io_task) = RpcConnection::new(client, outgoing_bytes, incoming_bytes, spawn);
         (Self { conn }, io_task)
@@ -74,7 +74,7 @@ impl ClientSideConnection {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Agent for ClientSideConnection {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         self.conn
@@ -294,7 +294,7 @@ impl Side for ClientSide {
     }
 }
 
-impl<T: Client> MessageHandler<ClientSide> for T {
+impl<T: Client + Send + Sync> MessageHandler<ClientSide> for T {
     async fn handle_request(&self, request: AgentRequest) -> Result<ClientResponse> {
         match request {
             AgentRequest::RequestPermissionRequest(args) => {
@@ -388,10 +388,10 @@ impl AgentSideConnection {
     ///
     /// See protocol docs: [Communication Model](https://agentclientprotocol.com/protocol/overview#communication-model)
     pub fn new(
-        agent: impl MessageHandler<AgentSide> + 'static,
-        outgoing_bytes: impl Unpin + AsyncWrite,
-        incoming_bytes: impl Unpin + AsyncRead,
-        spawn: impl Fn(LocalBoxFuture<'static, ()>) + 'static,
+        agent: impl MessageHandler<AgentSide> + Send + Sync + 'static,
+        outgoing_bytes: impl Unpin + AsyncWrite + Send,
+        incoming_bytes: impl Unpin + AsyncRead + Send,
+        spawn: impl Fn(BoxFuture<'static, ()>) + Send + Sync + 'static,
     ) -> (Self, impl Future<Output = Result<()>>) {
         let (conn, io_task) = RpcConnection::new(agent, outgoing_bytes, incoming_bytes, spawn);
         (Self { conn }, io_task)
@@ -410,7 +410,7 @@ impl AgentSideConnection {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Client for AgentSideConnection {
     async fn request_permission(
         &self,
@@ -614,7 +614,7 @@ impl Side for AgentSide {
     }
 }
 
-impl<T: Agent> MessageHandler<AgentSide> for T {
+impl<T: Agent + Send + Sync> MessageHandler<AgentSide> for T {
     async fn handle_request(&self, request: ClientRequest) -> Result<AgentResponse> {
         match request {
             ClientRequest::InitializeRequest(args) => {

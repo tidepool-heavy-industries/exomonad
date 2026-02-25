@@ -1,4 +1,4 @@
-use std::{rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 use agent_client_protocol_schema::{
     AuthenticateRequest, AuthenticateResponse, CancelNotification, Error, ExtNotification,
@@ -21,7 +21,7 @@ use serde_json::value::RawValue;
 ///
 /// Agents are programs that use generative AI to autonomously modify code. They handle
 /// requests from clients and execute tasks using language models and tools.
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 pub trait Agent {
     /// Establishes the connection with a client and negotiates protocol capabilities.
     ///
@@ -207,67 +207,8 @@ pub trait Agent {
     }
 }
 
-#[async_trait::async_trait(?Send)]
-impl<T: Agent> Agent for Rc<T> {
-    async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
-        self.as_ref().initialize(args).await
-    }
-    async fn authenticate(&self, args: AuthenticateRequest) -> Result<AuthenticateResponse> {
-        self.as_ref().authenticate(args).await
-    }
-    async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
-        self.as_ref().new_session(args).await
-    }
-    async fn load_session(&self, args: LoadSessionRequest) -> Result<LoadSessionResponse> {
-        self.as_ref().load_session(args).await
-    }
-    async fn set_session_mode(
-        &self,
-        args: SetSessionModeRequest,
-    ) -> Result<SetSessionModeResponse> {
-        self.as_ref().set_session_mode(args).await
-    }
-    async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
-        self.as_ref().prompt(args).await
-    }
-    async fn cancel(&self, args: CancelNotification) -> Result<()> {
-        self.as_ref().cancel(args).await
-    }
-    #[cfg(feature = "unstable_session_model")]
-    async fn set_session_model(
-        &self,
-        args: SetSessionModelRequest,
-    ) -> Result<SetSessionModelResponse> {
-        self.as_ref().set_session_model(args).await
-    }
-    async fn set_session_config_option(
-        &self,
-        args: SetSessionConfigOptionRequest,
-    ) -> Result<SetSessionConfigOptionResponse> {
-        self.as_ref().set_session_config_option(args).await
-    }
-    #[cfg(feature = "unstable_session_list")]
-    async fn list_sessions(&self, args: ListSessionsRequest) -> Result<ListSessionsResponse> {
-        self.as_ref().list_sessions(args).await
-    }
-    #[cfg(feature = "unstable_session_fork")]
-    async fn fork_session(&self, args: ForkSessionRequest) -> Result<ForkSessionResponse> {
-        self.as_ref().fork_session(args).await
-    }
-    #[cfg(feature = "unstable_session_resume")]
-    async fn resume_session(&self, args: ResumeSessionRequest) -> Result<ResumeSessionResponse> {
-        self.as_ref().resume_session(args).await
-    }
-    async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
-        self.as_ref().ext_method(args).await
-    }
-    async fn ext_notification(&self, args: ExtNotification) -> Result<()> {
-        self.as_ref().ext_notification(args).await
-    }
-}
-
-#[async_trait::async_trait(?Send)]
-impl<T: Agent> Agent for Arc<T> {
+#[async_trait::async_trait]
+impl<T: Agent + Send + Sync> Agent for Arc<T> {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         self.as_ref().initialize(args).await
     }
