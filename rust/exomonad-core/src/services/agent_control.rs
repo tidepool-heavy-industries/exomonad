@@ -21,6 +21,7 @@ use tracing::{debug, info, warn};
 use super::git_worktree::GitWorktreeService;
 use super::github::{GitHubService, Repo};
 use super::zellij_events;
+use super::acp_registry::AcpRegistry;
 use std::sync::Arc;
 
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
@@ -397,6 +398,8 @@ pub struct AgentControlService {
     mcp_server_port: Option<u16>,
     /// Git worktree service
     git_wt: Arc<GitWorktreeService>,
+    /// ACP connection registry for Gemini agents.
+    pub acp_registry: Option<Arc<AcpRegistry>>,
 }
 
 impl AgentControlService {
@@ -416,12 +419,19 @@ impl AgentControlService {
             birth_branch: BirthBranch::root(),
             mcp_server_port: None,
             git_wt,
+            acp_registry: None,
         }
     }
 
     /// Set the worktree base directory.
     pub fn with_worktree_base(mut self, base: PathBuf) -> Self {
         self.worktree_base = base;
+        self
+    }
+
+    /// Set the ACP registry.
+    pub fn with_acp_registry(mut self, registry: Arc<AcpRegistry>) -> Self {
+        self.acp_registry = Some(registry);
         self
     }
 
@@ -475,6 +485,7 @@ impl AgentControlService {
             birth_branch: BirthBranch::root(),
             mcp_server_port: None,
             git_wt,
+            acp_registry: None,
         })
     }
 
