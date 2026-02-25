@@ -73,19 +73,26 @@ pub fn orchestration_handlers(
     claude_session_registry: Arc<ClaudeSessionRegistry>,
     team_registry: Arc<TeamRegistry>,
     acp_registry: Arc<AcpRegistry>,
+    event_log: Option<Arc<EventLog>>,
 ) -> Vec<Box<dyn EffectHandler>> {
+    let mut agent_handler = AgentHandler::new(agent_control)
+        .with_claude_session_registry(claude_session_registry.clone())
+        .with_acp_registry(acp_registry.clone());
+    if let Some(ref log) = event_log {
+        agent_handler = agent_handler.with_event_log(log.clone());
+    }
+
+    let mut event_handler = EventHandler::new(event_queue, remote_port, event_queue_scope)
+        .with_team_registry(team_registry.clone())
+        .with_acp_registry(acp_registry.clone());
+    if let Some(ref log) = event_log {
+        event_handler = event_handler.with_event_log(log.clone());
+    }
+
     vec![
-        Box::new(
-            AgentHandler::new(agent_control)
-                .with_claude_session_registry(claude_session_registry.clone())
-                .with_acp_registry(acp_registry.clone()),
-        ),
+        Box::new(agent_handler),
         Box::new(PopupHandler::new(zellij_session)),
-        Box::new(
-            EventHandler::new(event_queue, remote_port, event_queue_scope)
-                .with_team_registry(team_registry.clone())
-                .with_acp_registry(acp_registry.clone()),
-        ),
+        Box::new(event_handler),
         Box::new(SessionHandler::new(claude_session_registry).with_team_registry(team_registry)),
     ]
 }
