@@ -7,6 +7,8 @@ module ExoMonad.Guest.Tools.Spawn
     SpawnLeafSubtreeArgs (..),
     SpawnWorkersArgs (..),
     WorkerSpec (..),
+    SpawnAcp,
+    SpawnAcpArgs (..),
   )
 where
 
@@ -221,6 +223,51 @@ instance MCPTool SpawnWorkers where
           [ "spawned" .= map Aeson.toJSON successes,
             "errors" .= map Aeson.String errs
           ]
+
+-- ============================================================================
+-- SpawnAcp (single ACP agent)
+-- ============================================================================
+
+data SpawnAcp
+
+data SpawnAcpArgs = SpawnAcpArgs
+  { saName :: Text,
+    saPrompt :: Text
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON SpawnAcpArgs where
+  parseJSON = withObject "SpawnAcpArgs" $ \v ->
+    SpawnAcpArgs
+      <$> v .: "name"
+      <*> v .: "prompt"
+
+instance MCPTool SpawnAcp where
+  type ToolArgs SpawnAcp = SpawnAcpArgs
+  toolName = "spawn_acp"
+  toolDescription = "Spawn a Gemini agent via ACP (experimental). Runs headless — no Zellij tab. Agent has MCP tools and communicates via structured protocol."
+  toolSchema =
+    genericToolSchemaWith @SpawnAcpArgs
+      [ ("name", "Human-readable name for the agent"),
+        ("prompt", "Initial prompt/instructions for the agent")
+      ]
+  toolHandlerEff args = do
+    let renderedPrompt = saPrompt args <> "\n\n" <> workerProfileText
+    result <- AC.spawnAcp (saName args) renderedPrompt
+    case result of
+      Left err -> pure $ errorResult err
+      Right spawnResult -> do
+        let eventPayload = BSL.toStrict $ Aeson.encode $ object
+              [ "slug" .= saName args,
+                "agent_type" .= ("gemini-acp" :: Text),
+                "task_summary" .= saName args
+              ]
+        void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
+          { Log.emitEventRequestEventType = "agent.spawned",
+            Log.emitEventRequestPayload = eventPayload,
+            Log.emitEventRequestTimestamp = 0
+          })
+        pure $ successResult $ Aeson.toJSON spawnResult
 
 -- ============================================================================
 -- Raw Text prompt builders (WASM32 workaround)

@@ -278,6 +278,21 @@ message SpawnLeafSubtreeResponse {
 }
 
 // ============================================================================
+// SpawnAcp - Spawn a Gemini agent via ACP (headless, no Zellij)
+// ============================================================================
+
+message SpawnAcpRequest {
+  // Human-readable name for the agent.
+  string name = 1;
+  // Initial prompt/instructions for the agent.
+  string prompt = 2;
+}
+
+message SpawnAcpResponse {
+  AgentInfo agent = 1;
+}
+
+// ============================================================================
 // Service definition
 // ============================================================================
 
@@ -288,6 +303,7 @@ service AgentEffects {
   rpc SpawnWorker(SpawnWorkerRequest) returns (SpawnWorkerResponse);
   rpc SpawnSubtree(SpawnSubtreeRequest) returns (SpawnSubtreeResponse);
   rpc SpawnLeafSubtree(SpawnLeafSubtreeRequest) returns (SpawnLeafSubtreeResponse);
+  rpc SpawnAcp(SpawnAcpRequest) returns (SpawnAcpResponse);
   rpc Cleanup(CleanupRequest) returns (CleanupResponse);
   rpc CleanupBatch(CleanupBatchRequest) returns (CleanupBatchResponse);
   rpc CleanupMerged(CleanupMergedRequest) returns (CleanupMergedResponse);
