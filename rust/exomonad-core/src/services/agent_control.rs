@@ -2342,6 +2342,17 @@ mod tests {
     }
 
     #[test]
+    fn test_mcp_config_dynamic_role() {
+        let config =
+            AgentControlService::generate_mcp_config("test-worker", 7432, AgentType::Gemini, "custom-role");
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(
+            parsed["mcpServers"]["exomonad"]["httpUrl"],
+            "http://localhost:7432/agents/custom-role/test-worker/mcp"
+        );
+    }
+
+    #[test]
     fn test_gemini_settings_schema_compliance() {
         let settings = AgentControlService::generate_gemini_settings("http://example.com/mcp");
 
@@ -2396,5 +2407,28 @@ mod tests {
             command_hook.get("args").is_none(),
             "args should not be present when using command string"
         );
+    }
+
+    #[test]
+    fn test_resolve_worker_working_dir_with_subdir() {
+        use crate::effects::EffectContext;
+        use crate::domain::{BirthBranch, AgentName};
+
+        let ctx = EffectContext {
+            birth_branch: BirthBranch::from("main.feature"),
+            agent_name: AgentName::from("feature-claude"),
+        };
+
+        let caller_worktree = resolve_agent_working_dir(&ctx);
+        assert_eq!(caller_worktree, PathBuf::from(".exo/worktrees/feature/"));
+
+        let working_dir_opt = Some("rust".to_string());
+        let working_dir = if let Some(ref sub) = working_dir_opt {
+            caller_worktree.join(sub)
+        } else {
+            caller_worktree
+        };
+
+        assert_eq!(working_dir, PathBuf::from(".exo/worktrees/feature/rust"));
     }
 }
