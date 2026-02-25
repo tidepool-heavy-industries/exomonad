@@ -636,7 +636,7 @@ async fn wasm_worker_tools_include_notify_parent() {
     // Worker should have minimal tools
     assert!(
         !names.contains(&"spawn_subtree"),
-        "Worker should not have spawn_subtree"
+        "Worker should not have_spawn_subtree"
     );
     assert!(
         !names.contains(&"file_pr"),

@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn test_copilot_handler_new() {
-        let handler = CopilotHandler::new();
+        let handler = CopilotHandler;
         assert_eq!(handler.namespace(), "copilot");
     }
 
