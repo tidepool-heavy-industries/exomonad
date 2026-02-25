@@ -15,7 +15,7 @@ use exomonad_core::mcp::server::McpServer;
 use exomonad_core::protocol::{Runtime as HookRuntime, ServiceRequest};
 use exomonad_core::services::external::otel::OtelService;
 use exomonad_core::services::external::ExternalService;
-use exomonad_core::services::{git, zellij_events};
+use exomonad_core::services::{git, zellij_events, AgentType};
 use std::time::{Duration, Instant};
 
 use axum::response::IntoResponse;
@@ -644,7 +644,8 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
 
     // 3. Start TL tab
     eprintln!("Server healthy, starting TL tab...");
-    let tl_layout_path = generate_tl_tab_layout(port, config.shell_command.as_deref())?;
+    let tl_layout_path =
+        generate_tl_tab_layout(port, config.shell_command.as_deref(), config.root_agent_type)?;
     let status = std::process::Command::new("zellij")
         .env("ZELLIJ_SESSION_NAME", &session)
         .args(["action", "new-tab", "--layout"])
@@ -754,13 +755,22 @@ fn generate_server_layout(port: u16, shell_command: Option<&str>) -> Result<std:
 }
 
 /// Generate a TL-only Zellij layout for a new tab.
-fn generate_tl_tab_layout(_port: u16, shell_command: Option<&str>) -> Result<std::path::PathBuf> {
+fn generate_tl_tab_layout(
+    _port: u16,
+    shell_command: Option<&str>,
+    root_agent_type: AgentType,
+) -> Result<std::path::PathBuf> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let cwd = std::env::current_dir()?;
 
+    let base_command = match root_agent_type {
+        AgentType::Claude => "claude --dangerously-skip-permissions --resume",
+        AgentType::Gemini => "gemini --prompt-interactive",
+    };
+
     let tl_command = match shell_command {
-        Some(sc) => format!("{} -c 'claude --dangerously-skip-permissions --resume'", sc),
-        None => "claude --dangerously-skip-permissions --resume".to_string(),
+        Some(sc) => format!("{} -c '{}'", sc, base_command),
+        None => base_command.to_string(),
     };
 
     let params = exomonad_core::layout::AgentTabParams {

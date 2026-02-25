@@ -29,8 +29,8 @@ pub mod zellij_ipc;
 
 pub use self::acp_registry::AcpRegistry;
 pub use self::agent_control::{
-    resolve_parent_tab_name, AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult,
-    SpawnOptions, SpawnResult,
+    resolve_parent_tab_name, AgentControlService, AgentInfo, AgentType, BatchCleanupResult,
+    BatchSpawnResult, SpawnOptions, SpawnResult,
 };
 pub use self::event_log::EventLog;
 pub use self::event_queue::EventQueue;
