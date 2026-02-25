@@ -337,6 +337,14 @@ impl AgentEffects for AgentHandler {
 
         registry.register(agent_name.clone(), conn).await;
 
+        // Register as synthetic team member for Teams inbox delivery
+        let team_name = format!("exo-{}", ctx.birth_branch);
+        if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
+            &team_name, agent_name, "gemini-acp",
+        ) {
+            warn!(agent = %agent_name, team = %team_name, error = %e, "Failed to register synthetic team member (non-fatal)");
+        }
+
         info!(agent = %agent_name, "ACP agent spawned and registered");
 
         Ok(SpawnAcpResponse {
