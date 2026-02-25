@@ -60,6 +60,7 @@ pub async fn deliver_to_agent(
                 .conn
                 .prompt(PromptRequest::new(
                     conn.session_id.clone(),
+                    // ACP prompt content can be multiple messages, but we deliver one-at-a-time here.
                     vec![message.into()],
                 ))
                 .await

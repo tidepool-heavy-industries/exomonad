@@ -22,7 +22,7 @@ impl agent_client_protocol::Client for ExoMonadAcpClient {
         &self,
         args: RequestPermissionRequest,
     ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-        tracing::info!(agent = %self.agent_id, "Auto-approving permission request");
+        tracing::info!(agent = %self.agent_id, request = ?args, "Auto-approving permission request");
         let outcome = if let Some(first_option) = args.options.first() {
             RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
                 first_option.option_id.clone(),

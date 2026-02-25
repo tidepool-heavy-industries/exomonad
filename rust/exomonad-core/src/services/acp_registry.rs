@@ -25,6 +25,8 @@ pub struct AcpConnection {
     pub session_id: agent_client_protocol::SessionId,
     /// The underlying ACP connection for sending prompts.
     pub conn: agent_client_protocol::ClientSideConnection,
+    /// Task handle for the ACP I/O loop.
+    pub io_handle: tokio::task::JoinHandle<()>,
 }
 
 /// Registry of active ACP connections, keyed by agent name.
@@ -64,6 +66,8 @@ impl AcpRegistry {
 ///
 /// Returns the AcpConnection (with session_id and connection) for registry storage.
 /// The caller is responsible for registering it in the AcpRegistry.
+///
+/// * `gemini_command`: Name or path of the Gemini CLI binary (e.g., "gemini").
 pub async fn connect_and_prompt(
     agent_id: String,
     gemini_command: &str,
@@ -104,7 +108,7 @@ pub async fn connect_and_prompt(
     );
 
     // Spawn the I/O task
-    tokio::spawn(async move {
+    let io_handle = tokio::spawn(async move {
         if let Err(e) = io_task.await {
             tracing::warn!(error = %e, "ACP I/O task ended with error");
         }
@@ -143,5 +147,6 @@ pub async fn connect_and_prompt(
         agent_id,
         session_id,
         conn,
+        io_handle,
     })
 }
