@@ -1121,7 +1121,7 @@ mod proptest_tests {
             let name = AgentName::try_from(s.clone()).unwrap();
             prop_assert_eq!(name.as_ref(), s.as_str());
             prop_assert_eq!(name.as_str(), s.as_str());
-            
+
             let branch = BranchName::try_from(s.clone()).unwrap();
             prop_assert_eq!(branch.as_ref(), s.as_str());
             prop_assert_eq!(branch.as_str(), s.as_str());
@@ -1137,11 +1137,7 @@ mod proptest_tests {
     }
 
     fn any_role() -> impl Strategy<Value = Role> {
-        prop_oneof![
-            Just(Role::Dev),
-            Just(Role::TL),
-            Just(Role::Worker),
-        ]
+        prop_oneof![Just(Role::Dev), Just(Role::TL), Just(Role::Worker),]
     }
 
     fn any_agent_type() -> impl Strategy<Value = crate::services::agent_control::AgentType> {
