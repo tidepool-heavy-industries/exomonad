@@ -182,17 +182,20 @@ Spawn heterogeneous agent teams as a recursive tree:
 
 ### Coordination
 
-Push-based parallel worker coordination via Zellij STDIN injection:
+Push-based parallel worker coordination via **Claude Code Teams inbox**:
 
 1. TL spawns workers and **returns** (no blocking wait)
 2. Each worker gets `EXOMONAD_SESSION_ID` env var (parent's birth-branch)
-3. When worker exits, session-end hook calls `notify_parent`
-4. Server resolves parent tab from caller identity, injects `[CHILD COMPLETE: agent-id] message` into parent's Zellij pane
-5. TL sees the injected text as a new user message and wakes up
+3. When worker completes, it calls `notify_parent`
+4. Server resolves parent agent from caller identity, writes to the parent's Teams inbox (`~/.claude/teams/{name}/inboxes/{inbox}.json`)
+5. Claude Code's InboxPoller detects the new message and delivers it as a native `<teammate-message>` in the parent's conversation
+6. TL sees the message and wakes up — no polling, no Zellij hacks
 
-The TL does not poll or block. It finishes its turn after spawning, and gets poked by the system when children complete. This is true push notification via `inject_input` through the Zellij plugin pipe.
+This is **native Claude Code Teams integration**. Messages from child agents arrive exactly like messages from Claude Code teammates — structured, attributed, and delivered through the official inbox mechanism. The TL doesn't poll, doesn't block, and doesn't parse raw text. It gets a proper teammate notification.
 
-**Ink paste problem:** The injected Enter keypress must be deferred by ~100ms after the text injection. React Ink (used by Claude Code and Gemini CLI) treats multi-byte stdin writes arriving in the same event loop tick as clipboard paste events, bypassing `key.return` detection. The Zellij plugin uses `set_timeout(0.1)` + `Timer` to send the CR byte (0x0D) as a separate write, ensuring Ink processes it as an isolated keypress and fires `onSubmit`. See `rust/exomonad-plugin/CLAUDE.md` for full details.
+**Pipeline:** `notify_parent` → server resolves parent via `TeamRegistry` → `teams_mailbox::write_to_inbox()` → CC InboxPoller → `<teammate-message>` delivered to parent conversation.
+
+**Fallback:** If Teams inbox delivery fails (no team registered, inbox write error), falls back to Zellij STDIN injection via the plugin pipe. The Ink paste problem applies to the fallback path only — see `rust/exomonad-plugin/CLAUDE.md` for details.
 
 ### PR Workflow
 
@@ -207,7 +210,8 @@ The TL does not poll or block. It finishes its turn after spawning, and gets pok
 
 | Feature | Status |
 |---------|--------|
-| **Event router** (Zellij STDIN injection) | Built. `notify_parent` → `inject_input` into parent pane via Zellij plugin pipe. |
+| **Teams inbox delivery** | **Live.** `notify_parent` → Teams inbox → native `<teammate-message>` in parent conversation. Full E2E verified. |
+| **Event router** (Zellij STDIN fallback) | Built. Fallback path: `notify_parent` → `inject_input` into parent pane via Zellij plugin pipe. |
 | **GitHub poller** (PR status → events) | Built. Background service polls PR/CI status and injects notifications into agent panes. |
 | **Event log** (JSONL structured events) | Built. `.exo/events.jsonl` — append-only JSONL. Query with `duckdb -c "SELECT * FROM read_json_auto('.exo/events.jsonl')"` or `jq`. Events: `agent.spawned`, `agent.completed`, `pr.filed`, `pr.merged`, `copilot.review`, `ci.status_changed`. |
 

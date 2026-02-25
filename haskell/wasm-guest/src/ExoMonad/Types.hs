@@ -19,6 +19,7 @@ import Data.Aeson qualified as Aeson
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KM
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import ExoMonad.Effects.Log (LogError, LogInfo)
 import ExoMonad.Effects.Log qualified as Log
@@ -93,6 +94,13 @@ teamRegistrationPostToolUse :: HookInput -> Eff HookEffects HookOutput
 teamRegistrationPostToolUse hookInput =
   case hiToolName hookInput of
     Just "TeamCreate" -> do
+      -- Log raw response for debugging team registration
+      void $ suspendEffect_ @Log.LogInfo
+        (Log.InfoRequest
+          { Log.infoRequestMessage = TL.fromStrict $
+              "[PostToolUse] TeamCreate tool_response: " <> T.pack (show (hiToolResponse hookInput)),
+            Log.infoRequestFields = ""
+          })
       case extractTeamName (hiToolResponse hookInput) of
         Just teamName -> do
           let inboxName = "team-lead"
@@ -127,7 +135,10 @@ teamRegistrationPostToolUse hookInput =
 -- TeamCreate returns: {"team_name": "...", "team_file_path": "...", "lead_agent_id": "..."}
 extractTeamName :: Maybe Aeson.Value -> Maybe Text
 extractTeamName (Just (Aeson.Object obj)) =
+  -- Try "team_name" first (documented), then "name" (config.json format)
   case KM.lookup (Key.fromText "team_name") obj of
     Just (Aeson.String name) -> Just name
-    _ -> Nothing
+    _ -> case KM.lookup (Key.fromText "name") obj of
+      Just (Aeson.String name) -> Just name
+      _ -> Nothing
 extractTeamName _ = Nothing

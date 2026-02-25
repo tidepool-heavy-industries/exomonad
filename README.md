@@ -7,7 +7,7 @@ ExoMonad lets you spawn and manage teams of LLM agents (Claude + Gemini) directl
 ## Key Features
 - **Heterogeneous Agents**: Deploy Claude (Opus/3.5 Sonnet) for high-level architecture and Gemini (1.5 Flash/Pro) for fast, focused implementation.
 - **Git Worktree Isolation**: Every agent gets its own directory and branch. No merge conflicts while work is in progress.
-- **Push Notifications**: Agents notify you via the Claude Teams inbox when they complete. No polling or context switching required.
+- **Native Teams Inbox Delivery**: Child agents notify the parent via Claude Code's Teams inbox. Completion messages arrive as native `<teammate-message>` events — structured, attributed, and delivered through the official Claude Code inbox mechanism. No polling, no stdin hacks, no context switching.
 - **Haskell WASM DSL**: Agent logic and tool definitions are written in Haskell and compiled to WASM. Hot reload by editing a tool and running your next command.
 - **Template System**: Reuse verified patterns and anti-patterns across worker specs to save up to 89% on orchestration tokens.
 
@@ -27,7 +27,7 @@ spawn_workers agents=[
 1. Two new Zellij panes open immediately.
 2. Each worker starts implementing its assigned task in isolation.
 3. You continue working in your main tab.
-4. When a worker finishes, it files a PR and notifies you directly in your Claude conversation via the Teams inbox.
+4. When a worker finishes, it calls `notify_parent` — the message lands in your Claude conversation as a native teammate notification via the Teams inbox.
 
 ## Install
 
