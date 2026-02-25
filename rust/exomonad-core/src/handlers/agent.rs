@@ -491,17 +491,8 @@ fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::Ag
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{AgentName, BirthBranch};
-    use crate::effects::EffectContext;
     use crate::services::git_worktree::GitWorktreeService;
     use std::path::PathBuf;
-
-    fn test_ctx() -> EffectContext {
-        EffectContext {
-            agent_name: AgentName::from("test"),
-            birth_branch: BirthBranch::from("main"),
-        }
-    }
 
     fn test_handler() -> AgentHandler {
         let dir = PathBuf::from(".");
@@ -512,7 +503,6 @@ mod tests {
 
     #[test]
     fn test_namespace() {
-        let _ctx = test_ctx();
         let handler = test_handler();
         assert_eq!(handler.namespace(), "agent");
     }
