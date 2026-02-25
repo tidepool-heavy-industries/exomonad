@@ -57,6 +57,10 @@ emitEvent eventType toolName hookInput = do
 securePreToolUse :: HookInput -> Eff HookEffects HookOutput
 securePreToolUse hookInput = do
   envVal <- sendM $ lookupEnv "EXOMONAD_SECURE_MODE"
+  allowedPathsEnv <- sendM $ lookupEnv "EXOMONAD_SECURE_ALLOWED_PATHS"
+  let allowedPaths = case allowedPathsEnv of
+        Nothing -> []
+        Just paths -> T.splitOn ":" (T.pack paths)
   case envVal of
     Nothing -> pure (allowResponse Nothing)
     Just _ -> do
@@ -84,9 +88,13 @@ securePreToolUse hookInput = do
                     then do
                       emitEvent "security.access.allowed" tool hookInput
                       pure (allowResponse Nothing)
-                    else do
-                      emitEvent "security.access.denied" tool hookInput
-                      pure (denyResponse ("Access denied: Path escapes current working directory (" <> cwd <> ")"))
+                    else if tool `elem` ["Read", "Glob", "Grep"] && path `elem` allowedPaths
+                      then do
+                        emitEvent "security.access.allowed" (tool <> " (allowed_read_path)") hookInput
+                        pure (allowResponse Nothing)
+                      else do
+                        emitEvent "security.access.denied" tool hookInput
+                        pure (denyResponse ("Access denied: Path escapes current working directory (" <> cwd <> ")"))
             else if tool == "Bash"
               then do
                 emitEvent "security.access.warning" tool hookInput

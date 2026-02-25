@@ -293,6 +293,7 @@ impl AgentEffects for AgentHandler {
                 req.disallowed_tools.clone(),
             ),
             secure_mode: req.secure_mode,
+            allowed_read_paths: req.allowed_read_paths.clone(),
         };
 
         let result = self
@@ -343,6 +344,7 @@ impl AgentEffects for AgentHandler {
                 req.disallowed_tools.clone(),
             ),
             secure_mode: req.secure_mode,
+            allowed_read_paths: req.allowed_read_paths.clone(),
         };
 
         let result = self
