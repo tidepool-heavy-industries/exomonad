@@ -1475,6 +1475,7 @@ dependencies = [
 name = "exomonad-proto"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "prost 0.14.3",
  "prost-build 0.14.3",
  "serde",
