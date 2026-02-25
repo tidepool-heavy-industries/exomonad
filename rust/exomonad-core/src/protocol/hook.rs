@@ -735,5 +735,27 @@ mod proptest_tests {
             // Simple property: exit code is preserved
             prop_assert_eq!(env.exit_code, exit_code);
         }
+
+        #[test]
+        fn test_claude_pre_tool_use_output_roundtrip(
+            continue_ in any::<bool>(),
+            stop_reason in prop::option::weighted(0.5, any::<String>()),
+            suppress_output in prop::option::weighted(0.5, any::<bool>()),
+            system_message in prop::option::weighted(0.5, any::<String>())
+        ) {
+            let output = ClaudePreToolUseOutput {
+                continue_,
+                stop_reason,
+                suppress_output,
+                system_message,
+                hook_specific_output: None, // Testing base fields first
+            };
+            let json = serde_json::to_string(&output).unwrap();
+            let back: ClaudePreToolUseOutput = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(back.continue_, output.continue_);
+            prop_assert_eq!(back.stop_reason, output.stop_reason);
+            prop_assert_eq!(back.suppress_output, output.suppress_output);
+            prop_assert_eq!(back.system_message, output.system_message);
+        }
     }
 }

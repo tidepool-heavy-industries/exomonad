@@ -826,6 +826,36 @@ mod proptest_tests {
         }
 
         #[test]
+        fn test_github_create_issue_request_roundtrip_proptest(
+            owner in arb_github_owner(),
+            repo in arb_github_repo(),
+            title in any::<String>(),
+            body in any::<String>(),
+            labels in prop::collection::vec(any::<String>(), 0..5)
+        ) {
+            let req = ServiceRequest::GitHubCreateIssue {
+                owner,
+                repo,
+                title,
+                body,
+                labels,
+            };
+            let json = serde_json::to_string(&req).unwrap();
+            let back: ServiceRequest = serde_json::from_str(&json).unwrap();
+            match (req, back) {
+                (ServiceRequest::GitHubCreateIssue { owner: o1, repo: r1, title: t1, body: b1, labels: l1 },
+                 ServiceRequest::GitHubCreateIssue { owner: o2, repo: r2, title: t2, body: b2, labels: l2 }) => {
+                    prop_assert_eq!(o1, o2);
+                    prop_assert_eq!(r1, r2);
+                    prop_assert_eq!(t1, t2);
+                    prop_assert_eq!(b1, b2);
+                    prop_assert_eq!(l1, l2);
+                },
+                _ => prop_assert!(false, "Wrong variant"),
+            }
+        }
+
+        #[test]
         fn test_error_response_roundtrip_proptest(
             code in any::<i32>(),
             message in any::<String>()
