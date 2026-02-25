@@ -36,6 +36,9 @@ pub struct RawConfig {
 
     /// Agent type for the root (TL) tab.
     pub root_agent_type: Option<AgentType>,
+
+    /// Optional flake reference to use when building WASM plugin via nix.
+    pub flake_ref: Option<String>,
 }
 
 /// Final resolved configuration.
@@ -55,6 +58,8 @@ pub struct Config {
     pub wasm_dir: PathBuf,
     /// Agent type for the root (TL) tab.
     pub root_agent_type: AgentType,
+    /// Flake reference to use when building WASM plugin via nix.
+    pub flake_ref: Option<String>,
 }
 
 impl Config {
@@ -156,6 +161,9 @@ impl Config {
             .or(local_raw.root_agent_type)
             .unwrap_or(AgentType::Claude);
 
+        // Resolve flake_ref: local > global > fallback to None
+        let flake_ref = local_raw.flake_ref.or(global_raw.flake_ref);
+
         Ok(Self {
             project_dir,
             role,
@@ -165,6 +173,7 @@ impl Config {
             shell_command,
             wasm_dir,
             root_agent_type,
+            flake_ref,
         })
     }
 
@@ -191,6 +200,7 @@ impl Default for Config {
             shell_command: None,
             wasm_dir: global_wasm_dir(),
             root_agent_type: AgentType::Claude,
+            flake_ref: None,
         }
     }
 }

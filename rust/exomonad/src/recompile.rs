@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use std::path::Path;
 
 /// Build WASM for a role via nix and copy artifact to `.exo/wasm/`.
-pub async fn run_recompile(role: &str, project_dir: &Path) -> Result<()> {
+pub async fn run_recompile(role: &str, project_dir: &Path, flake_ref: Option<&str>) -> Result<()> {
     // Preflight: check nix is available
     let nix_check = std::process::Command::new("nix").arg("--version").output();
     match nix_check {
@@ -14,12 +14,16 @@ pub async fn run_recompile(role: &str, project_dir: &Path) -> Result<()> {
         }
     }
 
+    let flake_ref_str = flake_ref.unwrap_or(".");
+    tracing::info!("Using flake ref: {}", flake_ref_str);
     println!("Building WASM for role '{role}'...");
+
+    let nix_flake_arg = format!("{}#wasm", flake_ref_str);
 
     let status = std::process::Command::new("nix")
         .args([
             "develop",
-            ".#wasm",
+            &nix_flake_arg,
             "-c",
             "wasm32-wasi-cabal",
             "build",

@@ -934,7 +934,12 @@ async fn main() -> Result<()> {
             } else {
                 std::env::current_dir()?.join(&config.project_dir)
             };
-            return exomonad::recompile::run_recompile(role_str, &project_dir).await;
+            return exomonad::recompile::run_recompile(
+                role_str,
+                &project_dir,
+                config.flake_ref.as_deref(),
+            )
+            .await;
         }
 
         Commands::Serve { port } => {
