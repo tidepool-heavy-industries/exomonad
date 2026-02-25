@@ -13,17 +13,12 @@ use exomonad_proto::effects::copilot::*;
 ///
 /// Handles all effects in the `copilot.*` namespace by delegating to
 /// the generated `dispatch_copilot_effect` function.
+#[derive(Default)]
 pub struct CopilotHandler;
 
 impl CopilotHandler {
     pub fn new() -> Self {
         Self
-    }
-}
-
-impl Default for CopilotHandler {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -96,25 +91,10 @@ impl CopilotEffects for CopilotHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{AgentName, BirthBranch};
-    use crate::effects::EffectContext;
-
-    fn test_ctx() -> EffectContext {
-        EffectContext {
-            agent_name: AgentName::from("test"),
-            birth_branch: BirthBranch::from("main"),
-        }
-    }
 
     #[test]
     fn test_copilot_handler_new() {
         let handler = CopilotHandler::new();
-        assert_eq!(handler.namespace(), "copilot");
-    }
-
-    #[test]
-    fn test_copilot_handler_default() {
-        let handler = CopilotHandler::default();
         assert_eq!(handler.namespace(), "copilot");
     }
 

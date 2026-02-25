@@ -611,3 +611,144 @@ mod tests {
         assert_eq!(input.stop_hook_active, Some(true));
     }
 }
+
+#[cfg(test)]
+mod proptest_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_session_id() -> impl Strategy<Value = SessionId> {
+        "[a-zA-Z0-9]+".prop_map(|s| SessionId::try_from(s).unwrap())
+    }
+
+    fn arb_tool_name() -> impl Strategy<Value = ToolName> {
+        "[a-zA-Z0-9_]+".prop_map(|s| ToolName::try_from(s).unwrap())
+    }
+
+    fn arb_runtime() -> impl Strategy<Value = Runtime> {
+        prop_oneof![Just(Runtime::Claude), Just(Runtime::Gemini)]
+    }
+
+    fn arb_permission_mode() -> impl Strategy<Value = PermissionMode> {
+        prop_oneof![
+            Just(PermissionMode::Default),
+            Just(PermissionMode::Plan),
+            Just(PermissionMode::AcceptEdits),
+            Just(PermissionMode::DontAsk),
+            Just(PermissionMode::BypassPermissions),
+        ]
+    }
+
+    fn arb_json_value() -> impl Strategy<Value = Value> {
+        prop_oneof![
+            any::<bool>().prop_map(Value::Bool),
+            any::<String>().prop_map(Value::String),
+        ]
+    }
+
+    fn arb_hook_input() -> impl Strategy<Value = HookInput> {
+        (
+            (
+                arb_session_id(),
+                any::<String>(),
+                any::<String>(),
+                arb_permission_mode(),
+                any::<String>(),
+                prop::option::weighted(0.5, arb_runtime()),
+                prop::option::weighted(0.5, arb_tool_name()),
+                prop::option::weighted(0.5, arb_json_value()),
+                prop::option::weighted(0.5, any::<String>()),
+                prop::option::weighted(0.5, arb_json_value()),
+            ),
+            (
+                prop::option::weighted(0.5, any::<String>()),
+                prop::option::weighted(0.5, any::<String>()),
+                prop::option::weighted(0.5, any::<String>()),
+                prop::option::weighted(0.5, any::<bool>()),
+            ),
+        )
+            .prop_map(
+                |(
+                    (
+                        session_id,
+                        transcript_path,
+                        cwd,
+                        permission_mode,
+                        hook_event_name,
+                        runtime,
+                        tool_name,
+                        tool_input,
+                        tool_use_id,
+                        tool_response,
+                    ),
+                    (prompt, message, notification_type, stop_hook_active),
+                )| {
+                    HookInput {
+                        session_id,
+                        transcript_path,
+                        cwd,
+                        permission_mode,
+                        hook_event_name,
+                        runtime,
+                        tool_name,
+                        tool_input,
+                        tool_use_id,
+                        tool_response,
+                        prompt,
+                        message,
+                        notification_type,
+                        stop_hook_active,
+                        trigger: None,
+                        custom_instructions: None,
+                        source: None,
+                        reason: None,
+                        prompt_response: None,
+                        timestamp: None,
+                    }
+                },
+            )
+    }
+
+    proptest! {
+        #[test]
+        fn test_hook_input_roundtrip(input in arb_hook_input()) {
+            let json = serde_json::to_string(&input).unwrap();
+            let back: HookInput = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(back, input);
+        }
+
+        #[test]
+        fn test_hook_envelope_roundtrip(
+            stdout in any::<String>(),
+            exit_code in any::<i32>()
+        ) {
+            let env = HookEnvelope { stdout, exit_code };
+            let json = serde_json::to_string(&env).unwrap();
+            let back: HookEnvelope = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(back.stdout, env.stdout);
+            prop_assert_eq!(back.exit_code, env.exit_code);
+        }
+
+        #[test]
+        fn test_claude_pre_tool_use_output_roundtrip(
+            continue_ in any::<bool>(),
+            stop_reason in prop::option::weighted(0.5, any::<String>()),
+            suppress_output in prop::option::weighted(0.5, any::<bool>()),
+            system_message in prop::option::weighted(0.5, any::<String>())
+        ) {
+            let output = ClaudePreToolUseOutput {
+                continue_,
+                stop_reason,
+                suppress_output,
+                system_message,
+                hook_specific_output: None, // Testing base fields first
+            };
+            let json = serde_json::to_string(&output).unwrap();
+            let back: ClaudePreToolUseOutput = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(back.continue_, output.continue_);
+            prop_assert_eq!(back.stop_reason, output.stop_reason);
+            prop_assert_eq!(back.suppress_output, output.suppress_output);
+            prop_assert_eq!(back.system_message, output.system_message);
+        }
+    }
+}

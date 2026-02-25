@@ -144,3 +144,43 @@ mod tests {
         assert_eq!(HookEventType::PreToolUse.to_string(), "pre-tool-use");
     }
 }
+
+#[cfg(test)]
+mod proptest_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn test_runtime_roundtrip_proptest(val in prop_oneof![
+            Just(Runtime::Claude),
+            Just(Runtime::Gemini),
+        ]) {
+            let json = serde_json::to_string(&val).unwrap();
+            let back: Runtime = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(back, val);
+        }
+
+        #[test]
+        fn test_hook_event_type_roundtrip_proptest(val in prop_oneof![
+            Just(HookEventType::PreToolUse),
+            Just(HookEventType::PostToolUse),
+            Just(HookEventType::Notification),
+            Just(HookEventType::Stop),
+            Just(HookEventType::SubagentStart),
+            Just(HookEventType::SubagentStop),
+            Just(HookEventType::PreCompact),
+            Just(HookEventType::SessionStart),
+            Just(HookEventType::SessionEnd),
+            Just(HookEventType::PermissionRequest),
+            Just(HookEventType::UserPromptSubmit),
+            Just(HookEventType::AfterAgent),
+            Just(HookEventType::BeforeTool),
+            Just(HookEventType::WorkerExit),
+        ]) {
+            let json = serde_json::to_string(&val).unwrap();
+            let back: HookEventType = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(back, val);
+        }
+    }
+}

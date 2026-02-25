@@ -177,15 +177,7 @@ impl LogEffects for LogHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{AgentName, BirthBranch};
-    use crate::effects::EffectContext;
-
-    fn test_ctx() -> EffectContext {
-        EffectContext {
-            agent_name: AgentName::from("test"),
-            birth_branch: BirthBranch::from("main"),
-        }
-    }
+    use std::sync::Arc;
 
     #[test]
     fn test_log_handler_new() {

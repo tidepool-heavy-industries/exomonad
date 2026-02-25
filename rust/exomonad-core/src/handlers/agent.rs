@@ -339,52 +339,6 @@ impl AgentEffects for AgentHandler {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::{AgentName, BirthBranch};
-    use crate::effects::EffectContext;
-    use crate::services::git_worktree::GitWorktreeService;
-    use std::path::PathBuf;
-
-    fn test_ctx() -> EffectContext {
-        EffectContext {
-            agent_name: AgentName::from("test"),
-            birth_branch: BirthBranch::from("main"),
-        }
-    }
-
-    fn test_handler() -> AgentHandler {
-        let dir = PathBuf::from(".");
-        let git_wt = Arc::new(GitWorktreeService::new(dir.clone()));
-        let service = Arc::new(AgentControlService::new(dir, None, git_wt));
-        AgentHandler::new(service)
-    }
-
-    #[test]
-    fn test_namespace() {
-        let _ctx = test_ctx();
-        let handler = test_handler();
-        assert_eq!(handler.namespace(), "agent");
-    }
-
-    #[test]
-    fn test_convert_agent_type() {
-        assert_eq!(
-            convert_agent_type(AgentType::Claude),
-            ServiceAgentType::Claude
-        );
-        assert_eq!(
-            convert_agent_type(AgentType::Gemini),
-            ServiceAgentType::Gemini
-        );
-        assert_eq!(
-            convert_agent_type(AgentType::Unspecified),
-            ServiceAgentType::Gemini
-        );
-    }
-}
-
 fn spawn_result_to_proto(
     issue: &str,
     result: &crate::services::agent_control::SpawnResult,
@@ -531,5 +485,51 @@ fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::Ag
         pr_number: info.pr.as_ref().map(|p| p.number as i32).unwrap_or(0),
         pr_url: info.pr.as_ref().map(|p| p.url.clone()).unwrap_or_default(),
         topology: info.topology.to_proto(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{AgentName, BirthBranch};
+    use crate::effects::EffectContext;
+    use crate::services::git_worktree::GitWorktreeService;
+    use std::path::PathBuf;
+
+    fn test_ctx() -> EffectContext {
+        EffectContext {
+            agent_name: AgentName::from("test"),
+            birth_branch: BirthBranch::from("main"),
+        }
+    }
+
+    fn test_handler() -> AgentHandler {
+        let dir = PathBuf::from(".");
+        let git_wt = Arc::new(GitWorktreeService::new(dir.clone()));
+        let service = Arc::new(AgentControlService::new(dir, None, git_wt));
+        AgentHandler::new(service)
+    }
+
+    #[test]
+    fn test_namespace() {
+        let _ctx = test_ctx();
+        let handler = test_handler();
+        assert_eq!(handler.namespace(), "agent");
+    }
+
+    #[test]
+    fn test_convert_agent_type() {
+        assert_eq!(
+            convert_agent_type(AgentType::Claude),
+            ServiceAgentType::Claude
+        );
+        assert_eq!(
+            convert_agent_type(AgentType::Gemini),
+            ServiceAgentType::Gemini
+        );
+        assert_eq!(
+            convert_agent_type(AgentType::Unspecified),
+            ServiceAgentType::Gemini
+        );
     }
 }

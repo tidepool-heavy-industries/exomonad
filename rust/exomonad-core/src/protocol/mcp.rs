@@ -48,3 +48,52 @@ mod tests {
         assert_eq!(back.name.as_str(), "spawn_subtree");
     }
 }
+
+#[cfg(test)]
+mod proptest_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_tool_name() -> impl Strategy<Value = ToolName> {
+        "[a-zA-Z0-9_]+".prop_map(|s| ToolName::try_from(s).unwrap())
+    }
+
+    fn arb_json_value() -> impl Strategy<Value = Value> {
+        prop_oneof![
+            any::<bool>().prop_map(Value::Bool),
+            any::<String>().prop_map(Value::String),
+        ]
+    }
+
+    proptest! {
+        #[test]
+        fn test_tool_definition_roundtrip(
+            name in arb_tool_name(),
+            description in any::<String>(),
+            input_schema in arb_json_value()
+        ) {
+            let td = ToolDefinition { name, description, input_schema };
+            let json = serde_json::to_string(&td).unwrap();
+            let back: ToolDefinition = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(back.name, td.name);
+            prop_assert_eq!(back.description, td.description);
+            prop_assert_eq!(back.input_schema, td.input_schema);
+        }
+
+        #[test]
+        fn test_mcp_error_roundtrip(
+            code in any::<i32>(),
+            message in any::<String>(),
+            details in prop::option::weighted(0.5, arb_json_value()),
+            suggestion in prop::option::weighted(0.5, any::<String>())
+        ) {
+            let err = McpError { code, message, details, suggestion };
+            let json = serde_json::to_string(&err).unwrap();
+            let back: McpError = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(back.code, err.code);
+            prop_assert_eq!(back.message, err.message);
+            prop_assert_eq!(back.details, err.details);
+            prop_assert_eq!(back.suggestion, err.suggestion);
+        }
+    }
+}
