@@ -3,6 +3,7 @@
 //! Uses proto-generated types from `exomonad_proto::effects::events`.
 
 use crate::effects::{dispatch_events_effect, EffectHandler, EffectResult, EventEffects};
+use crate::services::acp_registry::AcpRegistry;
 use crate::services::team_registry::TeamRegistry;
 use crate::services::EventQueue;
 use async_trait::async_trait;
@@ -26,6 +27,8 @@ pub struct EventHandler {
     notified_agents: std::sync::Mutex<std::collections::HashSet<String>>,
     /// Claude Teams registry for inbox-based delivery.
     team_registry: Option<Arc<TeamRegistry>>,
+    /// ACP connection registry for prompt-based delivery.
+    acp_registry: Option<Arc<AcpRegistry>>,
 }
 
 impl EventHandler {
@@ -42,11 +45,17 @@ impl EventHandler {
             client: reqwest::Client::new(),
             notified_agents: std::sync::Mutex::new(std::collections::HashSet::new()),
             team_registry: None,
+            acp_registry: None,
         }
     }
 
     pub fn with_team_registry(mut self, registry: Arc<TeamRegistry>) -> Self {
         self.team_registry = Some(registry);
+        self
+    }
+
+    pub fn with_acp_registry(mut self, registry: Arc<AcpRegistry>) -> Self {
+        self.acp_registry = Some(registry);
         self
     }
 }
@@ -249,6 +258,7 @@ impl EventEffects for EventHandler {
 
         crate::services::delivery::deliver_to_agent(
             self.team_registry.as_deref(),
+            self.acp_registry.as_deref(),
             &parent_key,
             &tab_name,
             &agent_id_str,

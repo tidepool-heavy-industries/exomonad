@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::effects::EffectHandler;
+use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::AgentControlService;
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
 use crate::services::event_log::EventLog;
@@ -71,6 +72,7 @@ pub fn orchestration_handlers(
     event_queue_scope: Option<String>,
     claude_session_registry: Arc<ClaudeSessionRegistry>,
     team_registry: Arc<TeamRegistry>,
+    acp_registry: Arc<AcpRegistry>,
 ) -> Vec<Box<dyn EffectHandler>> {
     vec![
         Box::new(
@@ -80,7 +82,8 @@ pub fn orchestration_handlers(
         Box::new(PopupHandler::new(zellij_session)),
         Box::new(
             EventHandler::new(event_queue, remote_port, event_queue_scope)
-                .with_team_registry(team_registry.clone()),
+                .with_team_registry(team_registry.clone())
+                .with_acp_registry(acp_registry.clone()),
         ),
         Box::new(SessionHandler::new(claude_session_registry).with_team_registry(team_registry)),
     ]
