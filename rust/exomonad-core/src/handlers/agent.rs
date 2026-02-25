@@ -17,7 +17,7 @@ use crate::{GithubOwner, GithubRepo, IssueNumber};
 use async_trait::async_trait;
 use exomonad_proto::effects::agent::*;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Agent effect handler.
 ///
@@ -195,27 +195,13 @@ impl AgentEffects for AgentHandler {
         req: SpawnSubtreeRequest,
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<SpawnSubtreeResponse> {
-        // Look up Claude session UUID from registry (overrides whatever WASM sent)
-        let parent_session_id = if let Some(ref registry) = self.claude_session_registry {
-            let key = if ctx.agent_name.as_str().is_empty() {
-                crate::domain::AgentName::from("root")
-            } else {
-                ctx.agent_name.clone()
-            };
-            let claude_uuid = registry.get(key.as_str()).await;
+        // fork-session disabled by default — stale/compacted session IDs cause
+        // "No conversation found" errors in the child. Opt-in via parent_session_id field.
+        let parent_session_id = if !req.parent_session_id.is_empty() {
             info!(
-                key = %key,
-                claude_uuid = ?claude_uuid,
-                "Looked up Claude session UUID for spawn_subtree"
+                session_id = %req.parent_session_id,
+                "Using explicit parent_session_id for fork-session"
             );
-            if claude_uuid.is_none() {
-                warn!(
-                    key = %key,
-                    "No Claude session UUID registered — child will start without --fork-session context. Ensure SessionStart hook is configured."
-                );
-            }
-            claude_uuid.map(|s| ClaudeSessionUuid::from(s.as_str()))
-        } else if !req.parent_session_id.is_empty() {
             Some(ClaudeSessionUuid::from(req.parent_session_id.as_str()))
         } else {
             None
