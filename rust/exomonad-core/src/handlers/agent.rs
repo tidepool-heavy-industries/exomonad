@@ -185,6 +185,13 @@ impl AgentEffects for AgentHandler {
         let options = SpawnWorkerOptions {
             name: req.name.clone(),
             prompt: req.prompt.clone(),
+            role: non_empty(req.role.clone()),
+            agent_type: if req.agent_type == AgentType::Unspecified as i32 {
+                None
+            } else {
+                Some(convert_agent_type(req.agent_type()))
+            },
+            working_dir: non_empty(req.working_dir.clone()),
         };
 
         let result = self
@@ -504,10 +511,10 @@ fn worker_result_to_proto(
         issue: String::new(),
         worktree_path: String::new(),
         branch_name: String::new(),
-        agent_type: AgentType::Gemini as i32,
+        agent_type: service_agent_type_to_proto(result.agent_type),
         role: 0,
         status: AgentStatus::Running as i32,
-        zellij_tab: ServiceAgentType::Gemini.tab_display_name(name),
+        zellij_tab: result.agent_type.tab_display_name(name),
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),

@@ -201,7 +201,7 @@ instance MCPTool SpawnWorkers where
       let prompt = case wsPrompt spec of
             Just p -> p
             Nothing -> renderWorkerPrompt spec
-      r <- AC.spawnWorker (wsName spec) prompt
+      r <- AC.spawnWorker (wsName spec) prompt Nothing Nothing Nothing
       case r of
         Right _ -> do
           let eventPayload = BSL.toStrict $ Aeson.encode $ object
