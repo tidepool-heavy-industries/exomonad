@@ -1061,14 +1061,12 @@ mod proptest_tests {
         #[test]
         fn test_birth_branch_hierarchy(slugs in prop::collection::vec("[a-z0-9-]+", 1..5)) {
             let mut current = BirthBranch::root();
-            let mut expected_depth = 0;
 
-            for slug in slugs {
+            for (i, slug) in slugs.into_iter().enumerate() {
                 let child = current.child(&slug);
                 prop_assert_eq!(child.parent().unwrap(), current);
                 current = child;
-                expected_depth += 1;
-                prop_assert_eq!(current.depth(), expected_depth);
+                prop_assert_eq!(current.depth(), i + 1);
             }
         }
 
