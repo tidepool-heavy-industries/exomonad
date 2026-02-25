@@ -59,7 +59,7 @@ instance MCPTool SpawnSubtree where
       ]
   toolHandlerEff args = do
     let forkSession = maybe False id (ssForkSession args)
-    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) "" forkSession
+    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) "" forkSession Nothing Nothing
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
@@ -107,7 +107,7 @@ instance MCPTool SpawnLeafSubtree where
     -- evaluated inside the freer-simple coroutine context on GHC WASM32.
     -- Build prompts as raw Text instead of using the Prompt builder.
     let renderedTask = slsTask args <> "\n\n" <> leafProfileText
-    result <- AC.spawnLeafSubtree renderedTask (slsBranchName args)
+    result <- AC.spawnLeafSubtree renderedTask (slsBranchName args) Nothing Nothing
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
