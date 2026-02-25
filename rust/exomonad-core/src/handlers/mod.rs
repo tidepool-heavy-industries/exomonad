@@ -128,7 +128,10 @@ mod tests {
 
     #[test]
     fn test_working_dir_or_default_path() {
-        assert_eq!(working_dir_or_default("/some/path".to_string()), "/some/path");
+        assert_eq!(
+            working_dir_or_default("/some/path".to_string()),
+            "/some/path"
+        );
     }
 
     #[test]
@@ -138,6 +141,9 @@ mod tests {
 
     #[test]
     fn test_working_dir_path_or_default_path() {
-        assert_eq!(working_dir_path_or_default("/some/path"), PathBuf::from("/some/path"));
+        assert_eq!(
+            working_dir_path_or_default("/some/path"),
+            PathBuf::from("/some/path")
+        );
     }
 }

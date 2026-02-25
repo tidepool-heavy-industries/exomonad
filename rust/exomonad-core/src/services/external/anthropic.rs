@@ -110,10 +110,13 @@ impl ExternalService for AnthropicService {
             system,
             thinking,
         };
-        let url = self.base_url.join("/v1/messages").map_err(|e| ServiceError::Api {
-            code: 500,
-            message: format!("URL join failed: {}", e),
-        })?;
+        let url = self
+            .base_url
+            .join("/v1/messages")
+            .map_err(|e| ServiceError::Api {
+                code: 500,
+                message: format!("URL join failed: {}", e),
+            })?;
         let mut attempts = 0;
         let max_attempts = 3;
         let mut backoff = Duration::from_millis(500);

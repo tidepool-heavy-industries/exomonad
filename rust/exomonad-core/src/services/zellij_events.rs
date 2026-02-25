@@ -81,9 +81,10 @@ pub fn inject_input(tab_name: &str, text: &str) {
     let pipe_name = transport::INJECT_INPUT_PIPE.to_string();
 
     tokio::spawn(async move {
-        let result =
-            tokio::task::spawn_blocking(move || ipc.pipe_to_plugin(&plugin_path, &pipe_name, &payload))
-                .await;
+        let result = tokio::task::spawn_blocking(move || {
+            ipc.pipe_to_plugin(&plugin_path, &pipe_name, &payload)
+        })
+        .await;
 
         match result {
             Ok(Ok(())) => {}

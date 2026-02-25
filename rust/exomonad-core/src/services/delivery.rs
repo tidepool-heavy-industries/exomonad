@@ -73,9 +73,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deliver_no_registry_returns_zellij() {
-        let result = deliver_to_agent(
-            None, "agent-1", "tab-1", "test", "hello", "summary",
-        ).await;
+        let result = deliver_to_agent(None, "agent-1", "tab-1", "test", "hello", "summary").await;
         assert_eq!(result, DeliveryResult::Zellij);
     }
 }

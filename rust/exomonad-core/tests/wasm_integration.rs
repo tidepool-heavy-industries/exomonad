@@ -15,8 +15,8 @@
 use async_trait::async_trait;
 use exomonad_core::{EffectError, EffectHandler, EffectResult, RuntimeBuilder};
 use prost::Message;
-use serial_test::serial;
 use serde_json::{json, Value};
+use serial_test::serial;
 
 // ============================================================================
 // Test Infrastructure
@@ -386,9 +386,7 @@ impl EffectHandler for MockPopupHandler {
                 values: b"{}".to_vec(),
             }
             .encode_to_vec()),
-            _ => Err(EffectError::not_found(format!(
-                "mock_popup/{effect_type}"
-            ))),
+            _ => Err(EffectError::not_found(format!("mock_popup/{effect_type}"))),
         }
     }
 }
@@ -410,15 +408,9 @@ impl EffectHandler for MockEventsHandler {
         use exomonad_proto::effects::events::*;
 
         match effect_type {
-            "events.notify_parent" => {
-                Ok(NotifyParentResponse { ack: true }.encode_to_vec())
-            }
-            "events.notify_event" => {
-                Ok(NotifyEventResponse { success: true }.encode_to_vec())
-            }
-            _ => Err(EffectError::not_found(format!(
-                "mock_events/{effect_type}"
-            ))),
+            "events.notify_parent" => Ok(NotifyParentResponse { ack: true }.encode_to_vec()),
+            "events.notify_event" => Ok(NotifyEventResponse { success: true }.encode_to_vec()),
+            _ => Err(EffectError::not_found(format!("mock_events/{effect_type}"))),
         }
     }
 }
@@ -443,9 +435,7 @@ impl EffectHandler for MockSessionHandler {
             "session.register_claude_id" => {
                 Ok(RegisterClaudeSessionResponse { success: true }.encode_to_vec())
             }
-            "session.register_team" => {
-                Ok(RegisterTeamResponse { success: true }.encode_to_vec())
-            }
+            "session.register_team" => Ok(RegisterTeamResponse { success: true }.encode_to_vec()),
             _ => Err(EffectError::not_found(format!(
                 "mock_session/{effect_type}"
             ))),
@@ -498,32 +488,26 @@ impl EffectHandler for MockGitHubHandler {
         use exomonad_proto::effects::github::*;
 
         match effect_type {
-            "github.list_issues" => {
-                Ok(ListIssuesResponse { issues: vec![] }.encode_to_vec())
-            }
+            "github.list_issues" => Ok(ListIssuesResponse { issues: vec![] }.encode_to_vec()),
             "github.get_issue" => Ok(GetIssueResponse {
                 issue: None,
                 comments: vec![],
             }
             .encode_to_vec()),
-            "github.list_pull_requests" => {
-                Ok(ListPullRequestsResponse {
-                    pull_requests: vec![],
-                }
-                .encode_to_vec())
+            "github.list_pull_requests" => Ok(ListPullRequestsResponse {
+                pull_requests: vec![],
             }
+            .encode_to_vec()),
             "github.get_pull_request" => Ok(GetPullRequestResponse {
                 pull_request: None,
                 reviews: vec![],
             }
             .encode_to_vec()),
-            "github.get_pull_request_for_branch" => {
-                Ok(GetPullRequestForBranchResponse {
-                    pull_request: None,
-                    found: false,
-                }
-                .encode_to_vec())
+            "github.get_pull_request_for_branch" => Ok(GetPullRequestForBranchResponse {
+                pull_request: None,
+                found: false,
             }
+            .encode_to_vec()),
             "github.create_pull_request" => Ok(CreatePullRequestResponse {
                 pull_request: None,
                 url: "https://github.com/test/test/pull/99".into(),
@@ -532,9 +516,7 @@ impl EffectHandler for MockGitHubHandler {
             "github.get_pull_request_review_comments" => {
                 Ok(GetPullRequestReviewCommentsResponse { comments: vec![] }.encode_to_vec())
             }
-            _ => Err(EffectError::not_found(format!(
-                "mock_github/{effect_type}"
-            ))),
+            _ => Err(EffectError::not_found(format!("mock_github/{effect_type}"))),
         }
     }
 }
@@ -791,13 +773,7 @@ async fn wasm_tool_missing_required_field() {
     let runtime = build_test_runtime().await;
 
     // spawn_subtree requires "task"
-    let output = call_tool(
-        &runtime,
-        "tl",
-        "spawn_subtree",
-        json!({}),
-    )
-    .await;
+    let output = call_tool(&runtime, "tl", "spawn_subtree", json!({})).await;
 
     assert_tool_error(&output, "spawn_subtree (missing task)");
 }
@@ -807,13 +783,7 @@ async fn wasm_tool_missing_required_field() {
 async fn wasm_tool_unknown_name_returns_error() {
     let runtime = build_test_runtime().await;
 
-    let output = call_tool(
-        &runtime,
-        "tl",
-        "nonexistent_tool_xyz",
-        json!({}),
-    )
-    .await;
+    let output = call_tool(&runtime, "tl", "nonexistent_tool_xyz", json!({})).await;
 
     assert_tool_error(&output, "nonexistent tool");
 }
@@ -915,9 +885,7 @@ async fn wasm_effect_handler_error_propagates() {
     assert_tool_error(&output, "spawn_subtree with failing handler");
 
     // Verify the error message propagated
-    let error_msg = output["error"]
-        .as_str()
-        .unwrap_or_default();
+    let error_msg = output["error"].as_str().unwrap_or_default();
     assert!(
         error_msg.contains("spawn_failed") || error_msg.contains("Zellij session"),
         "Error message should contain handler error info, got: {error_msg}"
