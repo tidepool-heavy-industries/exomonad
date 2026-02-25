@@ -289,7 +289,7 @@ All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/To
 | `file_pr` | tl, dev | Create/update PR (auto-detects base branch from naming) |
 | `merge_pr` | tl | Merge child PR (gh merge + git fetch) |
 | `popup` | ~~tl~~ | **Disabled.** Blocks WASM plugin lock for entire duration. Suspend/resume fix pending. |
-| `notify_parent` | all | Signal completion to parent. Auto-routed, injects into parent pane |
+| `notify_parent` | all | Signal completion to parent. Auto-routed via Teams inbox (primary) or Zellij STDIN (fallback) |
 
 **Note**: Git operations (`git status`, `git log`, etc.) and GitHub operations (`gh pr list`, etc.) use the Bash tool with `git` and `gh` commands, not MCP tools.
 
@@ -455,7 +455,7 @@ Claude (Opus) decomposes and dispatches. Gemini implements. Copilot reviews. The
 
 ### Fire-and-Forget Execution
 
-The TL's workflow is: **decompose → spec → spawn → move on**. The TL does not wait, poll, review intermediate output, or re-spec. It spawns all leaves it can, then idles until `[CHILD COMPLETE]` notifications arrive.
+The TL's workflow is: **decompose → spec → spawn → move on**. The TL does not wait, poll, review intermediate output, or re-spec. It spawns all leaves it can, then idles until completion notifications arrive.
 
 **Convergence is leaf + Copilot, not TL:**
 1. TL writes spec, spawns leaf (Gemini), returns immediately
@@ -463,7 +463,7 @@ The TL's workflow is: **decompose → spec → spawn → move on**. The TL does 
 3. GitHub poller detects Copilot review comments → injects into leaf's pane
 4. Leaf reads Copilot feedback, fixes, pushes
 5. Copilot re-reviews; loop repeats until clean
-6. Leaf calls `notify_parent` with status `success` → TL gets `[CHILD COMPLETE]` notification
+6. Leaf calls `notify_parent` with status `success` → TL gets a `<teammate-message>` via Teams inbox (or `[CHILD COMPLETE]` via Zellij fallback if no team is active)
 7. TL merges the PR
 
 **`notify_parent` means DONE** — not "I filed a PR." The leaf owns its quality. The TL only sees finished, review-clean work.
@@ -509,8 +509,9 @@ Spawn multiple leaves when tasks are independent (no file conflicts, no ordering
 ### When TL Gets Notified
 
 The TL is idle between spawning and receiving notifications. It wakes up for:
-- `[CHILD COMPLETE: agent-id]` — leaf finished successfully. TL reviews the PR diff, merges, and verifies the merged result builds cleanly. This matters especially when multiple leaves land in parallel — their changes may interact.
-- `[CHILD FAILED: agent-id]` — leaf exhausted retries. TL re-decomposes or escalates.
+- **`<teammate-message>`** (Teams inbox, primary) — leaf finished successfully. Delivered as a native Claude Code teammate notification. TL reviews the PR diff, merges, and verifies the merged result builds cleanly. This matters especially when multiple leaves land in parallel — their changes may interact.
+- **`[CHILD COMPLETE: agent-id]`** (Zellij STDIN, fallback) — same as above, used when no team is active. Raw text injected into the TL's pane.
+- **`[CHILD FAILED: agent-id]`** — leaf exhausted retries. TL re-decomposes or escalates.
 - GitHub poller notifications (CI status, PR merge conflicts).
 
 The TL does NOT wake up for intermediate progress, Copilot comments, or partial results. The convergence loop (leaf + Copilot) runs without TL involvement.

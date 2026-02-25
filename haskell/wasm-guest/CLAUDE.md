@@ -21,7 +21,7 @@ The guest exports MCP tools that agents can call. These are defined in `ExoMonad
 
 ### Events Tools (`ExoMonad.Guest.Tools.Events`)
 
-- **`notify_parent`**: Used by worker/subtree agents to signal completion to their parent. Routes to parent via server, injects notification into parent's Zellij pane. Available as a bare field in both TL and dev roles.
+- **`notify_parent`**: Used by worker/subtree agents to signal completion to their parent. Routes to parent via server — delivers as a native `<teammate-message>` through Claude Code's Teams inbox when a team is active, falls back to Zellij STDIN injection otherwise. Available as a bare field in both TL and dev roles.
 
 ### Spawn Tools (`ExoMonad.Guest.Tools.Spawn`)
 
