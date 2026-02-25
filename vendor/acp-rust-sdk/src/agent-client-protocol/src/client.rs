@@ -1,4 +1,4 @@
-use std::{rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 use agent_client_protocol_schema::{
     CreateTerminalRequest, CreateTerminalResponse, Error, ExtNotification, ExtRequest, ExtResponse,
@@ -15,7 +15,7 @@ use serde_json::value::RawValue;
 /// Clients are typically code editors (IDEs, text editors) that provide the interface
 /// between users and AI agents. They manage the environment, handle user interactions,
 /// and control access to resources.
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 pub trait Client {
     /// Requests permission from the user for a tool call operation.
     ///
@@ -170,57 +170,8 @@ pub trait Client {
     }
 }
 
-#[async_trait::async_trait(?Send)]
-impl<T: Client> Client for Rc<T> {
-    async fn request_permission(
-        &self,
-        args: RequestPermissionRequest,
-    ) -> Result<RequestPermissionResponse> {
-        self.as_ref().request_permission(args).await
-    }
-    async fn write_text_file(&self, args: WriteTextFileRequest) -> Result<WriteTextFileResponse> {
-        self.as_ref().write_text_file(args).await
-    }
-    async fn read_text_file(&self, args: ReadTextFileRequest) -> Result<ReadTextFileResponse> {
-        self.as_ref().read_text_file(args).await
-    }
-    async fn session_notification(&self, args: SessionNotification) -> Result<()> {
-        self.as_ref().session_notification(args).await
-    }
-    async fn create_terminal(&self, args: CreateTerminalRequest) -> Result<CreateTerminalResponse> {
-        self.as_ref().create_terminal(args).await
-    }
-    async fn terminal_output(&self, args: TerminalOutputRequest) -> Result<TerminalOutputResponse> {
-        self.as_ref().terminal_output(args).await
-    }
-    async fn release_terminal(
-        &self,
-        args: ReleaseTerminalRequest,
-    ) -> Result<ReleaseTerminalResponse> {
-        self.as_ref().release_terminal(args).await
-    }
-    async fn wait_for_terminal_exit(
-        &self,
-        args: WaitForTerminalExitRequest,
-    ) -> Result<WaitForTerminalExitResponse> {
-        self.as_ref().wait_for_terminal_exit(args).await
-    }
-    async fn kill_terminal_command(
-        &self,
-        args: KillTerminalCommandRequest,
-    ) -> Result<KillTerminalCommandResponse> {
-        self.as_ref().kill_terminal_command(args).await
-    }
-    async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
-        self.as_ref().ext_method(args).await
-    }
-    async fn ext_notification(&self, args: ExtNotification) -> Result<()> {
-        self.as_ref().ext_notification(args).await
-    }
-}
-
-#[async_trait::async_trait(?Send)]
-impl<T: Client> Client for Arc<T> {
+#[async_trait::async_trait]
+impl<T: Client + Send + Sync> Client for Arc<T> {
     async fn request_permission(
         &self,
         args: RequestPermissionRequest,

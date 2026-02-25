@@ -1,3 +1,5 @@
+pub mod acp_client;
+pub mod acp_registry;
 pub mod agent_control;
 pub mod claude_session_registry;
 pub mod command;
@@ -25,6 +27,7 @@ pub mod teams_mailbox;
 pub mod zellij_events;
 pub mod zellij_ipc;
 
+pub use self::acp_registry::AcpRegistry;
 pub use self::agent_control::{
     resolve_parent_tab_name, AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult,
     SpawnOptions, SpawnResult,

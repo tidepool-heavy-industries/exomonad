@@ -1,7 +1,6 @@
 use std::{
     any::Any,
     collections::HashMap,
-    rc::Rc,
     sync::{
         Arc, Mutex,
         atomic::{AtomicI64, Ordering},
@@ -19,7 +18,7 @@ use futures::{
         mpsc::{self, UnboundedReceiver, UnboundedSender},
         oneshot,
     },
-    future::LocalBoxFuture,
+    future::BoxFuture,
     io::BufReader,
     select_biased,
 };
@@ -44,17 +43,23 @@ struct PendingResponse {
 
 impl<Local, Remote> RpcConnection<Local, Remote>
 where
-    Local: Side + 'static,
-    Remote: Side + 'static,
+    Local: Side + Send + Sync + 'static,
+    Remote: Side + Send + Sync + 'static,
+    Local::InRequest: Send,
+    Local::InNotification: Send,
+    Local::OutResponse: Send,
+    Remote::InRequest: Send,
+    Remote::InNotification: Send,
+    Remote::OutResponse: Send,
 {
     pub(crate) fn new<Handler>(
         handler: Handler,
-        outgoing_bytes: impl Unpin + AsyncWrite,
-        incoming_bytes: impl Unpin + AsyncRead,
-        spawn: impl Fn(LocalBoxFuture<'static, ()>) + 'static,
+        outgoing_bytes: impl Unpin + AsyncWrite + Send,
+        incoming_bytes: impl Unpin + AsyncRead + Send,
+        spawn: impl Fn(BoxFuture<'static, ()>) + Send + Sync + 'static,
     ) -> (Self, impl futures::Future<Output = Result<()>>)
     where
-        Handler: MessageHandler<Local> + 'static,
+        Handler: MessageHandler<Local> + Send + Sync + 'static,
     {
         let (incoming_tx, incoming_rx) = mpsc::unbounded();
         let (outgoing_tx, outgoing_rx) = mpsc::unbounded();
@@ -252,14 +257,14 @@ where
         Ok(())
     }
 
-    fn handle_incoming<Handler: MessageHandler<Local> + 'static>(
+    fn handle_incoming<Handler: MessageHandler<Local> + Send + Sync + 'static>(
         outgoing_tx: UnboundedSender<OutgoingMessage<Local, Remote>>,
         mut incoming_rx: UnboundedReceiver<IncomingMessage<Local>>,
         handler: Handler,
-        spawn: impl Fn(LocalBoxFuture<'static, ()>) + 'static,
+        spawn: impl Fn(BoxFuture<'static, ()>) + Send + Sync + 'static,
     ) {
-        let spawn = Rc::new(spawn);
-        let handler = Rc::new(handler);
+        let spawn = Arc::new(spawn);
+        let handler = Arc::new(handler);
         spawn({
             let spawn = spawn.clone();
             async move {
@@ -277,7 +282,7 @@ where
                                         )))
                                         .ok();
                                 }
-                                .boxed_local(),
+                                .boxed(),
                             );
                         }
                         IncomingMessage::Notification { notification } => {
@@ -290,13 +295,13 @@ where
                                         log::error!("failed to handle notification: {err:?}");
                                     }
                                 }
-                                .boxed_local(),
+                                .boxed(),
                             );
                         }
                     }
                 }
             }
-            .boxed_local()
+            .boxed()
         });
     }
 }
@@ -325,10 +330,10 @@ pub trait MessageHandler<Local: Side> {
     fn handle_request(
         &self,
         request: Local::InRequest,
-    ) -> impl Future<Output = Result<Local::OutResponse>>;
+    ) -> impl Future<Output = Result<Local::OutResponse>> + Send;
 
     fn handle_notification(
         &self,
         notification: Local::InNotification,
-    ) -> impl Future<Output = Result<()>>;
+    ) -> impl Future<Output = Result<()>> + Send;
 }
