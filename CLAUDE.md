@@ -176,6 +176,10 @@ Spawn heterogeneous agent teams as a recursive tree:
 - **`spawn_leaf_subtree`** — Fork a Gemini agent into its own git worktree + Zellij tab. Gets dev role, files PR when done.
 - **`spawn_workers`** — Spawn multiple Gemini agents as Zellij panes in the parent's directory. Ephemeral (no branch, no worktree). Config in `.exo/agents/{name}/`.
 
+**Standalone repo mode:** Both `spawn_subtree` and `spawn_leaf_subtree` accept `standalone_repo: true`. Instead of a git worktree (which shares `.git` with the parent), this creates a fresh `git init` repo. Claude's native project discovery treats the local `.git` as the boundary — the agent cannot traverse into the parent repository. Use this for information segmentation (e.g., enterprise customers with proprietary root-level IP).
+
+**Permissions:** `spawn_subtree` accepts optional `permissions` (Claude-only, not available on Gemini spawns). The Haskell DSL (`ClaudePermissions` with `ToolPattern` sum type) renders to Claude Code's native `permissions.allow`/`permissions.deny` format in `settings.local.json`. Combine with `--permission-mode dontAsk` for deny-by-default allowlisting.
+
 **Branch naming:** `{parent_branch}.{slug}` (dot separator). PRs target parent branch, not main — merged via recursive fold up the tree.
 
 **Identity:** Birth-branch as session ID (immutable, deterministic). Root TL = "root". Filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/` to discover agents.
@@ -284,8 +288,8 @@ All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/To
 
 | Tool | Role | Description |
 |------|------|-------------|
-| `spawn_subtree` | tl | Fork Claude agent into worktree + Zellij tab (TL role, can spawn children) |
-| `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree + Zellij tab (dev role, files PR) |
+| `spawn_subtree` | tl | Fork Claude agent into worktree or standalone repo + Zellij tab (TL role, can spawn children). Supports `permissions` and `standalone_repo`. |
+| `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree or standalone repo + Zellij tab (dev role, files PR). Supports `standalone_repo`. |
 | `spawn_workers` | tl | Spawn Gemini agents as Zellij panes (ephemeral, no worktree) |
 | `file_pr` | tl, dev | Create/update PR (auto-detects base branch from naming) |
 | `merge_pr` | tl | Merge child PR (gh merge + git fetch) |

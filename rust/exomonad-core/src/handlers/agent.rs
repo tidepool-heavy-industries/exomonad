@@ -298,8 +298,7 @@ impl AgentEffects for AgentHandler {
                 allow: p.allow,
                 deny: p.deny,
             }),
-            // TODO: wire from req.standalone_repo once proto is merged
-            standalone_repo: false,
+            standalone_repo: req.standalone_repo,
         };
 
         let result = self
@@ -351,8 +350,7 @@ impl AgentEffects for AgentHandler {
             ),
             working_dir: None,
             permissions: None,
-            // TODO: wire from req.standalone_repo once proto is merged
-            standalone_repo: false,
+            standalone_repo: req.standalone_repo,
         };
 
         let result = self
