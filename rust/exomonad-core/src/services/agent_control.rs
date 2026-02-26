@@ -487,6 +487,27 @@ impl AgentControlService {
             .unwrap_or_else(|| self.birth_branch.clone())
     }
 
+    /// Initialize a standalone git repo at the given path.
+    /// Creates the directory and runs `git init`, providing a .git boundary
+    /// that prevents Claude's project discovery from traversing into the parent.
+    async fn init_standalone_repo(&self, path: &Path) -> Result<()> {
+        tokio::fs::create_dir_all(path).await?;
+        let output = tokio::process::Command::new("git")
+            .args(["init"])
+            .current_dir(path)
+            .output()
+            .await?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "git init failed at {}: {}",
+                path.display(),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        tracing::info!("Initialized standalone repo at {}", path.display());
+        Ok(())
+    }
+
     /// Set the MCP server port for per-agent endpoint URL generation.
     pub fn with_mcp_server_port(mut self, port: u16) -> Self {
         self.mcp_server_port = Some(port);
@@ -1049,7 +1070,9 @@ impl AgentControlService {
             let child_birth = effective_birth.child(&slug);
             let branch_name = child_birth.to_string();
 
-            // Resolve working directory
+            // Path resolution: working_dir overrides the default worktree location.
+            // standalone_repo: git init (fresh .git boundary) instead of git worktree add.
+            // These are orthogonal: working_dir controls WHERE, standalone_repo controls HOW.
             let (worktree_path, is_custom_dir) = if let Some(ref custom_dir) = options.working_dir {
                 (custom_dir.clone(), true)
             } else {
@@ -1057,18 +1080,7 @@ impl AgentControlService {
             };
 
             if options.standalone_repo {
-                tokio::fs::create_dir_all(&worktree_path).await?;
-                let status = tokio::process::Command::new("git")
-                    .args(["init"])
-                    .current_dir(&worktree_path)
-                    .output()
-                    .await?;
-                if !status.status.success() {
-                    return Err(anyhow!("Failed to initialize standalone git repo at {}: {}", 
-                        worktree_path.display(), 
-                        String::from_utf8_lossy(&status.stderr)));
-                }
-                tracing::info!("Initialized standalone repo at {}", worktree_path.display());
+                self.init_standalone_repo(&worktree_path).await?;
             } else if !is_custom_dir {
                 self.create_worktree_checked(&worktree_path, &branch_name, current_branch).await?;
             }
@@ -1208,6 +1220,9 @@ impl AgentControlService {
             let branch_name = child_birth.to_string();
 
             // Resolve working directory
+            // Path resolution: working_dir overrides the default worktree location.
+            // standalone_repo: git init (fresh .git boundary) instead of git worktree add.
+            // These are orthogonal: working_dir controls WHERE, standalone_repo controls HOW.
             let (worktree_path, is_custom_dir) = if let Some(ref custom_dir) = options.working_dir {
                 (custom_dir.clone(), true)
             } else {
@@ -1215,18 +1230,7 @@ impl AgentControlService {
             };
 
             if options.standalone_repo {
-                tokio::fs::create_dir_all(&worktree_path).await?;
-                let status = tokio::process::Command::new("git")
-                    .args(["init"])
-                    .current_dir(&worktree_path)
-                    .output()
-                    .await?;
-                if !status.status.success() {
-                    return Err(anyhow!("Failed to initialize standalone git repo at {}: {}", 
-                        worktree_path.display(), 
-                        String::from_utf8_lossy(&status.stderr)));
-                }
-                tracing::info!("Initialized standalone repo at {}", worktree_path.display());
+                self.init_standalone_repo(&worktree_path).await?;
             } else if !is_custom_dir {
                 self.create_worktree_checked(&worktree_path, &branch_name, &current_branch).await?;
             }
