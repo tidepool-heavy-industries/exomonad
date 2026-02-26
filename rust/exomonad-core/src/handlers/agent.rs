@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::{
     AgentControlService, AgentInfo, AgentType as ServiceAgentType, ClaudeSpawnFlags,
-    SpawnGeminiTeammateOptions, SpawnOptions, SpawnSubtreeOptions, SpawnWorkerOptions,
+    SpawnGeminiTeammateOptions, SpawnLeafOptions, SpawnOptions, SpawnSubtreeOptions, SpawnWorkerOptions,
 };
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
 use crate::services::event_log::EventLog;
@@ -334,10 +334,9 @@ impl AgentEffects for AgentHandler {
         req: SpawnLeafSubtreeRequest,
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<SpawnLeafSubtreeResponse> {
-        let options = SpawnSubtreeOptions {
+        let options = SpawnLeafOptions {
             task: req.task.clone(),
             branch_name: req.branch_name.clone(),
-            parent_session_id: None,
             role: non_empty(req.role.clone()),
             agent_type: if req.agent_type == AgentType::Unspecified as i32 {
                 None
@@ -349,8 +348,6 @@ impl AgentEffects for AgentHandler {
                 req.allowed_tools.clone(),
                 req.disallowed_tools.clone(),
             ),
-            working_dir: None,
-            permissions: None,
             standalone_repo: req.standalone_repo,
         };
 
