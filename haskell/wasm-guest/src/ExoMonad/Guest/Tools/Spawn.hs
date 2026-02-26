@@ -25,6 +25,7 @@ import ExoMonad.Guest.Effects.AgentControl qualified as AC
 import ExoMonad.Guest.Tool.Class
 import ExoMonad.Guest.Tool.Schema (JsonSchema (..), genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
+import ExoMonad.Guest.Types.Permissions
 import GHC.Generics (Generic)
 
 -- ============================================================================
@@ -41,7 +42,9 @@ data SpawnSubtreeArgs = SpawnSubtreeArgs
     ssAllowedTools :: Maybe [Text],
     ssDisallowedTools :: Maybe [Text],
     ssSecureMode :: Maybe Bool,
-    ssAllowedReadPaths :: Maybe [Text]
+    ssAllowedReadPaths :: Maybe [Text],
+    ssWorkingDir :: Maybe Text,
+    ssPermissions :: Maybe ClaudePermissions
   }
   deriving (Show, Eq, Generic)
 
@@ -56,6 +59,8 @@ instance FromJSON SpawnSubtreeArgs where
       <*> v .:? "disallowed_tools"
       <*> v .:? "secure_mode"
       <*> v .:? "allowed_read_paths"
+      <*> v .:? "working_dir"
+      <*> v .:? "permissions"
 
 instance MCPTool SpawnSubtree where
   type ToolArgs SpawnSubtree = SpawnSubtreeArgs
@@ -69,7 +74,9 @@ instance MCPTool SpawnSubtree where
         ("permission_mode", "Permission mode for Claude (e.g., 'plan', 'default'). Omit for --dangerously-skip-permissions."),
         ("allowed_tools", "Tool patterns to allow (e.g., ['Read', 'Grep']). Omit for no restriction."),
         ("disallowed_tools", "Tool patterns to disallow (e.g., ['Bash']). Omit for no restriction."),
-        ("secure_mode", "Enable secure isolated execution mode.")
+        ("secure_mode", "Enable secure isolated execution mode."),
+        ("working_dir", "Working directory for the agent (relative to worktree root)."),
+        ("permissions", "Explicit permission rules (object with 'allow' and 'deny' arrays of strings).")
       ]
   toolHandlerEff args = do
     let forkSession = maybe False id (ssForkSession args)
@@ -78,7 +85,7 @@ instance MCPTool SpawnSubtree where
             AC.allowedTools = maybe [] id (ssAllowedTools args),
             AC.disallowedTools = maybe [] id (ssDisallowedTools args)
           }
-    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) "" forkSession Nothing Nothing perms (ssSecureMode args) (ssAllowedReadPaths args)
+    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) "" forkSession Nothing Nothing perms (ssSecureMode args) (ssAllowedReadPaths args) (ssWorkingDir args) (ssPermissions args)
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
