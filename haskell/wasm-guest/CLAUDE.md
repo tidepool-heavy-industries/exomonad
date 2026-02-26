@@ -25,9 +25,35 @@ The guest exports MCP tools that agents can call. These are defined in `ExoMonad
 
 ### Spawn Tools (`ExoMonad.Guest.Tools.Spawn`)
 
-- **`spawn_subtree`**: Fork a Claude agent in a new git worktree + Zellij tab (TL role, can further decompose).
-- **`spawn_leaf_subtree`**: Fork a Gemini agent in a new git worktree + Zellij tab (dev role, isolated, files PR).
+- **`spawn_subtree`**: Fork a Claude agent in a new git worktree + Zellij tab (TL role, can further decompose). Supports `permissions` and `standalone_repo: true`.
+- **`spawn_leaf_subtree`**: Fork a Gemini agent in a new git worktree + Zellij tab (dev role, isolated, files PR). Supports `standalone_repo: true`.
 - **`spawn_workers`**: Spawn ephemeral Gemini agents as panes in the parent directory (no branch, no worktree).
+
+**Standalone repo mode**: Both `spawn_subtree` and `spawn_leaf_subtree` accept `standalone_repo: true`. This creates a fresh `git init` repo instead of a worktree, providing stronger filesystem isolation for the subagent.
+
+### Defining MCP Tools (`ExoMonad.Guest.Tool.Class`)
+
+MCP tools are defined by implementing the `MCPTool` typeclass for a specific type.
+
+```haskell
+class (FromJSON (Args t), ToJSON (Result t)) => MCPTool t where
+  type Args t :: Type
+  type Result t :: Type
+  toolName :: Text
+  toolDescription :: Text
+  toolSchema :: Aeson.Object  -- JSON Schema as an Object (Aeson.KeyMap Value)
+  handleCall :: Args t -> Eff es (Result t)
+```
+
+Tool schemas are typically derived using `genericToolSchema` from `ExoMonad.Guest.Tool.Schema`.
+
+### Permissions (`ExoMonad.Guest.Types.Permissions`)
+
+Claude-only permissions system using the `ClaudePermissions` DSL.
+
+- **`ToolPattern`**: DSL for defining tool allow/deny patterns (e.g., `bash`, `gh`, `read_file`).
+- **`ClaudePermissions`**: Record of allowed/denied tools and paths.
+- **`renderPermissions`**: Renders to Claude Code's native `settings.local.json` format.
 
 ### Prompt Builder (`ExoMonad.Guest.Prompt`)
 
