@@ -31,6 +31,8 @@ module ExoMonad.Guest.Effects.AgentControl
     defaultPermFlags,
     SpawnSubtreeConfig (..),
     SpawnLeafSubtreeConfig (..),
+    SpawnWorkerConfig (..),
+    SpawnAcpConfig (..),
   )
 where
 
@@ -137,12 +139,26 @@ data SpawnLeafSubtreeConfig = SpawnLeafSubtreeConfig
   }
   deriving (Show, Eq, Generic)
 
+-- | Configuration for spawning a Gemini worker agent.
+data SpawnWorkerConfig = SpawnWorkerConfig
+  { swcName :: Text,
+    swcPrompt :: Text,
+    swcPerms :: PermissionFlags
+  } deriving (Show, Eq, Generic)
+
+-- | Configuration for spawning an ACP agent.
+data SpawnAcpConfig = SpawnAcpConfig
+  { sacName :: Text,
+    sacPrompt :: Text,
+    sacPerms :: PermissionFlags
+  } deriving (Show, Eq, Generic)
+
 -- | Agent control effect for spawning agents.
 data AgentControl a where
   SpawnSubtreeC :: SpawnSubtreeConfig -> AgentControl (Either Text SpawnResult)
   SpawnLeafSubtreeC :: SpawnLeafSubtreeConfig -> AgentControl (Either Text SpawnResult)
-  SpawnWorkerC :: Text -> Text -> PermissionFlags -> AgentControl (Either Text SpawnResult)
-  SpawnAcpC :: Text -> Text -> PermissionFlags -> AgentControl (Either Text SpawnResult)
+  SpawnWorkerC :: SpawnWorkerConfig -> AgentControl (Either Text SpawnResult)
+  SpawnAcpC :: SpawnAcpConfig -> AgentControl (Either Text SpawnResult)
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
 spawnSubtree :: (Member AgentControl r) => SpawnSubtreeConfig -> Eff r (Either Text SpawnResult)
@@ -151,11 +167,11 @@ spawnSubtree cfg = send (SpawnSubtreeC cfg)
 spawnLeafSubtree :: (Member AgentControl r) => SpawnLeafSubtreeConfig -> Eff r (Either Text SpawnResult)
 spawnLeafSubtree cfg = send (SpawnLeafSubtreeC cfg)
 
-spawnWorker :: (Member AgentControl r) => Text -> Text -> PermissionFlags -> Eff r (Either Text SpawnResult)
-spawnWorker name prompt perms = send (SpawnWorkerC name prompt perms)
+spawnWorker :: (Member AgentControl r) => SpawnWorkerConfig -> Eff r (Either Text SpawnResult)
+spawnWorker cfg = send (SpawnWorkerC cfg)
 
-spawnAcp :: (Member AgentControl r) => Text -> Text -> PermissionFlags -> Eff r (Either Text SpawnResult)
-spawnAcp name prompt perms = send (SpawnAcpC name prompt perms)
+spawnAcp :: (Member AgentControl r) => SpawnAcpConfig -> Eff r (Either Text SpawnResult)
+spawnAcp cfg = send (SpawnAcpC cfg)
 
 -- ============================================================================
 -- Interpreter (uses yield_effect via Effect typeclass)
@@ -205,14 +221,14 @@ runAgentControlSuspend = interpret $ \case
       Right resp -> case PA.spawnLeafSubtreeResponseAgent resp of
         Nothing -> Left "SpawnLeafSubtree succeeded but no agent info returned"
         Just info -> Right (protoAgentInfoToSpawnResult info)
-  SpawnWorkerC name prompt perms -> do
+  SpawnWorkerC cfg -> do
     let req =
           PA.SpawnWorkerRequest
-            { PA.spawnWorkerRequestName = fromText name,
-              PA.spawnWorkerRequestPrompt = fromText prompt,
-              PA.spawnWorkerRequestPermissionMode = fromText (fromMaybe "" (permMode perms)),
-              PA.spawnWorkerRequestAllowedTools = V.fromList (map fromText (allowedTools perms)),
-              PA.spawnWorkerRequestDisallowedTools = V.fromList (map fromText (disallowedTools perms))
+            { PA.spawnWorkerRequestName = fromText (swcName cfg),
+              PA.spawnWorkerRequestPrompt = fromText (swcPrompt cfg),
+              PA.spawnWorkerRequestPermissionMode = fromText (fromMaybe "" (permMode (swcPerms cfg))),
+              PA.spawnWorkerRequestAllowedTools = V.fromList (map fromText (allowedTools (swcPerms cfg))),
+              PA.spawnWorkerRequestDisallowedTools = V.fromList (map fromText (disallowedTools (swcPerms cfg)))
             }
     result <- suspendEffect @Agent.AgentSpawnWorker req
     pure $ case result of
@@ -220,14 +236,14 @@ runAgentControlSuspend = interpret $ \case
       Right resp -> case PA.spawnWorkerResponseAgent resp of
         Nothing -> Left "SpawnWorker succeeded but no agent info returned"
         Just info -> Right (protoAgentInfoToSpawnResult info)
-  SpawnAcpC name prompt perms -> do
+  SpawnAcpC cfg -> do
     let req =
           PA.SpawnAcpRequest
-            { PA.spawnAcpRequestName = fromText name,
-              PA.spawnAcpRequestPrompt = fromText prompt,
-              PA.spawnAcpRequestPermissionMode = fromText (fromMaybe "" (permMode perms)),
-              PA.spawnAcpRequestAllowedTools = V.fromList (map fromText (allowedTools perms)),
-              PA.spawnAcpRequestDisallowedTools = V.fromList (map fromText (disallowedTools perms))
+            { PA.spawnAcpRequestName = fromText (sacName cfg),
+              PA.spawnAcpRequestPrompt = fromText (sacPrompt cfg),
+              PA.spawnAcpRequestPermissionMode = fromText (fromMaybe "" (permMode (sacPerms cfg))),
+              PA.spawnAcpRequestAllowedTools = V.fromList (map fromText (allowedTools (sacPerms cfg))),
+              PA.spawnAcpRequestDisallowedTools = V.fromList (map fromText (disallowedTools (sacPerms cfg)))
             }
     result <- suspendEffect @Agent.AgentSpawnAcp req
     pure $ case result of

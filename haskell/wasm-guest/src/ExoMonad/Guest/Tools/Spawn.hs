@@ -278,7 +278,12 @@ instance MCPTool SpawnWorkers where
               AC.allowedTools = maybe [] id (wsAllowedTools spec),
               AC.disallowedTools = maybe [] id (wsDisallowedTools spec)
             }
-      r <- AC.spawnWorker (wsName spec) prompt perms
+          cfg = AC.SpawnWorkerConfig
+            { AC.swcName = wsName spec,
+              AC.swcPrompt = prompt,
+              AC.swcPerms = perms
+            }
+      r <- AC.spawnWorker cfg
       case r of
         Right _ -> do
           let eventPayload = BSL.toStrict $ Aeson.encode $ object
@@ -344,8 +349,14 @@ instance MCPTool SpawnAcp where
             AC.allowedTools = maybe [] id (saAllowedTools args),
             AC.disallowedTools = maybe [] id (saDisallowedTools args)
           }
-    result <- AC.spawnAcp (saName args) renderedPrompt perms
+        cfg = AC.SpawnAcpConfig
+          { AC.sacName = saName args,
+            AC.sacPrompt = renderedPrompt,
+            AC.sacPerms = perms
+          }
+    result <- AC.spawnAcp cfg
     case result of
+        
       Left err -> pure $ errorResult err
       Right spawnResult -> do
         let eventPayload = BSL.toStrict $ Aeson.encode $ object
