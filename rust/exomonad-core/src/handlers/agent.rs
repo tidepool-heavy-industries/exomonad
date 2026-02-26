@@ -293,8 +293,6 @@ impl AgentEffects for AgentHandler {
                 req.allowed_tools.clone(),
                 req.disallowed_tools.clone(),
             ),
-            secure_mode: req.secure_mode,
-            allowed_read_paths: req.allowed_read_paths.clone(),
             working_dir: non_empty(req.working_dir).map(PathBuf::from),
             permissions: req.permissions.map(|p| AgentPermissions {
                 allow: p.allow,
@@ -349,8 +347,6 @@ impl AgentEffects for AgentHandler {
                 req.allowed_tools.clone(),
                 req.disallowed_tools.clone(),
             ),
-            secure_mode: req.secure_mode,
-            allowed_read_paths: req.allowed_read_paths.clone(),
             working_dir: None,
             permissions: None,
         };
