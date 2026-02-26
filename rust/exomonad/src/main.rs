@@ -769,7 +769,7 @@ fn generate_tl_tab_layout(
 
     let base_command = match root_agent_type {
         AgentType::Claude => "claude --dangerously-skip-permissions --resume",
-        AgentType::Gemini => "gemini --prompt-interactive",
+        AgentType::Gemini => "gemini",
     };
 
     let tl_command = match shell_command {
