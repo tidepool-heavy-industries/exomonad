@@ -297,6 +297,7 @@ impl AgentEffects for AgentHandler {
             permissions: req.permissions.map(|p| AgentPermissions {
                 allow: p.allow,
                 deny: p.deny,
+                default_mode: None,
             }),
             standalone_repo: req.standalone_repo,
         };
