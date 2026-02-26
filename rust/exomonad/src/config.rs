@@ -50,6 +50,9 @@ pub struct RawConfig {
     /// Extra MCP servers to include in agent settings (e.g. metacog).
     #[serde(default)]
     pub extra_mcp_servers: std::collections::HashMap<String, McpServerConfig>,
+
+    /// Initial prompt for the root agent (used with `gemini --prompt-interactive`).
+    pub initial_prompt: Option<String>,
 }
 
 /// Final resolved configuration.
@@ -73,6 +76,8 @@ pub struct Config {
     pub flake_ref: Option<String>,
     /// Extra MCP servers to include in agent settings.
     pub extra_mcp_servers: std::collections::HashMap<String, McpServerConfig>,
+    /// Initial prompt for the root agent.
+    pub initial_prompt: Option<String>,
 }
 
 impl Config {
@@ -181,6 +186,9 @@ impl Config {
         let mut extra_mcp_servers = global_raw.extra_mcp_servers;
         extra_mcp_servers.extend(local_raw.extra_mcp_servers);
 
+        // Resolve initial_prompt: local > global
+        let initial_prompt = local_raw.initial_prompt.or(global_raw.initial_prompt);
+
         Ok(Self {
             project_dir,
             role,
@@ -192,6 +200,7 @@ impl Config {
             root_agent_type,
             flake_ref,
             extra_mcp_servers,
+            initial_prompt,
         })
     }
 
@@ -220,6 +229,7 @@ impl Default for Config {
             root_agent_type: AgentType::Claude,
             flake_ref: None,
             extra_mcp_servers: std::collections::HashMap::new(),
+            initial_prompt: None,
         }
     }
 }
