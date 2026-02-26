@@ -111,17 +111,17 @@ defaultPermFlags = PermissionFlags Nothing [] []
 
 -- | Agent control effect for spawning agents.
 data AgentControl a where
-  SpawnSubtreeC :: Text -> Text -> Text -> Bool -> Maybe Text -> Maybe AgentType -> PermissionFlags -> Maybe Text -> Maybe ClaudePermissions -> AgentControl (Either Text SpawnResult)
-  SpawnLeafSubtreeC :: Text -> Text -> Maybe Text -> Maybe AgentType -> PermissionFlags -> AgentControl (Either Text SpawnResult)
+  SpawnSubtreeC :: Text -> Text -> Text -> Bool -> Maybe Text -> Maybe AgentType -> PermissionFlags -> Maybe Text -> Maybe ClaudePermissions -> Bool -> AgentControl (Either Text SpawnResult)
+  SpawnLeafSubtreeC :: Text -> Text -> Maybe Text -> Maybe AgentType -> PermissionFlags -> Bool -> AgentControl (Either Text SpawnResult)
   SpawnWorkerC :: Text -> Text -> PermissionFlags -> AgentControl (Either Text SpawnResult)
   SpawnAcpC :: Text -> Text -> PermissionFlags -> AgentControl (Either Text SpawnResult)
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
-spawnSubtree :: (Member AgentControl r) => Text -> Text -> Text -> Bool -> Maybe Text -> Maybe AgentType -> PermissionFlags -> Maybe Text -> Maybe ClaudePermissions -> Eff r (Either Text SpawnResult)
-spawnSubtree task branchName parentSessionId forkSession role agentType perms workingDir permissions = send (SpawnSubtreeC task branchName parentSessionId forkSession role agentType perms workingDir permissions)
+spawnSubtree :: (Member AgentControl r) => Text -> Text -> Text -> Bool -> Maybe Text -> Maybe AgentType -> PermissionFlags -> Maybe Text -> Maybe ClaudePermissions -> Bool -> Eff r (Either Text SpawnResult)
+spawnSubtree task branchName parentSessionId forkSession role agentType perms workingDir permissions standaloneRepo = send (SpawnSubtreeC task branchName parentSessionId forkSession role agentType perms workingDir permissions standaloneRepo)
 
-spawnLeafSubtree :: (Member AgentControl r) => Text -> Text -> Maybe Text -> Maybe AgentType -> PermissionFlags -> Eff r (Either Text SpawnResult)
-spawnLeafSubtree task branchName role agentType perms = send (SpawnLeafSubtreeC task branchName role agentType perms)
+spawnLeafSubtree :: (Member AgentControl r) => Text -> Text -> Maybe Text -> Maybe AgentType -> PermissionFlags -> Bool -> Eff r (Either Text SpawnResult)
+spawnLeafSubtree task branchName role agentType perms standaloneRepo = send (SpawnLeafSubtreeC task branchName role agentType perms standaloneRepo)
 
 spawnWorker :: (Member AgentControl r) => Text -> Text -> PermissionFlags -> Eff r (Either Text SpawnResult)
 spawnWorker name prompt perms = send (SpawnWorkerC name prompt perms)
@@ -137,7 +137,7 @@ spawnAcp name prompt perms = send (SpawnAcpC name prompt perms)
 -- Effects dispatched async without holding the WASM plugin lock.
 runAgentControlSuspend :: (Member SuspendYield r) => Eff (AgentControl ': r) a -> Eff r a
 runAgentControlSuspend = interpret $ \case
-  SpawnSubtreeC task branchName parentSessionId forkSession role agentType perms workingDir permissions -> do
+  SpawnSubtreeC task branchName parentSessionId forkSession role agentType perms workingDir permissions standaloneRepo -> do
     let req =
           PA.SpawnSubtreeRequest
             { PA.spawnSubtreeRequestTask = fromText task,
@@ -150,7 +150,8 @@ runAgentControlSuspend = interpret $ \case
               PA.spawnSubtreeRequestAllowedTools = V.fromList (map fromText (allowedTools perms)),
               PA.spawnSubtreeRequestDisallowedTools = V.fromList (map fromText (disallowedTools perms)),
               PA.spawnSubtreeRequestWorkingDir = fromText (maybe "" id workingDir),
-              PA.spawnSubtreeRequestPermissions = fmap permissionsToProto permissions
+              PA.spawnSubtreeRequestPermissions = fmap permissionsToProto permissions,
+              PA.spawnSubtreeRequestStandaloneRepo = standaloneRepo
             }
     result <- suspendEffect @Agent.AgentSpawnSubtree req
     pure $ case result of
@@ -158,7 +159,7 @@ runAgentControlSuspend = interpret $ \case
       Right resp -> case PA.spawnSubtreeResponseAgent resp of
         Nothing -> Left "SpawnSubtree succeeded but no agent info returned"
         Just info -> Right (protoAgentInfoToSpawnResult info)
-  SpawnLeafSubtreeC task branchName role agentType perms -> do
+  SpawnLeafSubtreeC task branchName role agentType perms standaloneRepo -> do
     let req =
           PA.SpawnLeafSubtreeRequest
             { PA.spawnLeafSubtreeRequestTask = fromText task,
@@ -167,7 +168,8 @@ runAgentControlSuspend = interpret $ \case
               PA.spawnLeafSubtreeRequestAgentType = Enumerated (Right (maybe PA.AgentTypeAGENT_TYPE_UNSPECIFIED toProtoAgentType agentType)),
               PA.spawnLeafSubtreeRequestPermissionMode = fromText (maybe "" id (permMode perms)),
               PA.spawnLeafSubtreeRequestAllowedTools = V.fromList (map fromText (allowedTools perms)),
-              PA.spawnLeafSubtreeRequestDisallowedTools = V.fromList (map fromText (disallowedTools perms))
+              PA.spawnLeafSubtreeRequestDisallowedTools = V.fromList (map fromText (disallowedTools perms)),
+              PA.spawnLeafSubtreeRequestStandaloneRepo = standaloneRepo
             }
     result <- suspendEffect @Agent.AgentSpawnLeafSubtree req
     pure $ case result of

@@ -42,7 +42,8 @@ data SpawnSubtreeArgs = SpawnSubtreeArgs
     ssAllowedTools :: Maybe [Text],
     ssDisallowedTools :: Maybe [Text],
     ssWorkingDir :: Maybe Text,
-    ssPermissions :: Maybe ClaudePermissions
+    ssPermissions :: Maybe ClaudePermissions,
+    ssStandaloneRepo :: Maybe Bool
   }
   deriving (Show, Eq, Generic)
 
@@ -57,6 +58,7 @@ instance FromJSON SpawnSubtreeArgs where
       <*> v .:? "disallowed_tools"
       <*> v .:? "working_dir"
       <*> v .:? "permissions"
+      <*> v .:? "standalone_repo"
 
 instance MCPTool SpawnSubtree where
   type ToolArgs SpawnSubtree = SpawnSubtreeArgs
@@ -71,16 +73,18 @@ instance MCPTool SpawnSubtree where
         ("allowed_tools", "Tool patterns to allow (e.g., ['Read', 'Grep']). Omit for no restriction."),
         ("disallowed_tools", "Tool patterns to disallow (e.g., ['Bash']). Omit for no restriction."),
         ("working_dir", "Working directory for the agent (relative to worktree root)."),
-        ("permissions", "Explicit permission rules (object with 'allow' and 'deny' arrays of strings).")
+        ("permissions", "Explicit permission rules (object with 'allow' and 'deny' arrays of strings)."),
+        ("standalone_repo", "When true, creates a standalone git repo instead of a worktree for information isolation.")
       ]
   toolHandlerEff args = do
     let forkSession = maybe False id (ssForkSession args)
+        standaloneRepo = maybe False id (ssStandaloneRepo args)
         perms = AC.PermissionFlags
           { AC.permMode = ssPermissionMode args,
             AC.allowedTools = maybe [] id (ssAllowedTools args),
             AC.disallowedTools = maybe [] id (ssDisallowedTools args)
           }
-    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) "" forkSession Nothing Nothing perms (ssWorkingDir args) (ssPermissions args)
+    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) "" forkSession Nothing Nothing perms (ssWorkingDir args) (ssPermissions args) standaloneRepo
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
@@ -107,7 +111,8 @@ data SpawnLeafSubtreeArgs = SpawnLeafSubtreeArgs
     slsBranchName :: Text,
     slsPermissionMode :: Maybe Text,
     slsAllowedTools :: Maybe [Text],
-    slsDisallowedTools :: Maybe [Text]
+    slsDisallowedTools :: Maybe [Text],
+    slsStandaloneRepo :: Maybe Bool
   }
   deriving (Show, Eq, Generic)
 
@@ -119,6 +124,7 @@ instance FromJSON SpawnLeafSubtreeArgs where
       <*> v .:? "permission_mode"
       <*> v .:? "allowed_tools"
       <*> v .:? "disallowed_tools"
+      <*> v .:? "standalone_repo"
 
 instance MCPTool SpawnLeafSubtree where
   type ToolArgs SpawnLeafSubtree = SpawnLeafSubtreeArgs
@@ -130,19 +136,21 @@ instance MCPTool SpawnLeafSubtree where
         ("branch_name", "Branch name suffix (will be prefixed with current branch)"),
         ("permission_mode", "Permission mode for the agent. Omit for --dangerously-skip-permissions."),
         ("allowed_tools", "Tool patterns to allow. Omit for no restriction."),
-        ("disallowed_tools", "Tool patterns to disallow. Omit for no restriction.")
+        ("disallowed_tools", "Tool patterns to disallow. Omit for no restriction."),
+        ("standalone_repo", "When true, creates a standalone git repo instead of a worktree for information isolation.")
       ]
   toolHandlerEff args = do
     -- WASM32 BUG WORKAROUND: Prompt's derived Semigroup (<>) hangs when
     -- evaluated inside the freer-simple coroutine context on GHC WASM32.
     -- Build prompts as raw Text instead of using the Prompt builder.
     let renderedTask = slsTask args <> "\n\n" <> leafProfileText
+        standaloneRepo = maybe False id (slsStandaloneRepo args)
         perms = AC.PermissionFlags
           { AC.permMode = slsPermissionMode args,
             AC.allowedTools = maybe [] id (slsAllowedTools args),
             AC.disallowedTools = maybe [] id (slsDisallowedTools args)
           }
-    result <- AC.spawnLeafSubtree renderedTask (slsBranchName args) Nothing Nothing perms
+    result <- AC.spawnLeafSubtree renderedTask (slsBranchName args) Nothing Nothing perms standaloneRepo
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
