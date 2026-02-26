@@ -103,6 +103,7 @@ library wasm-guest-internal
         ExoMonad.Effects.KV
         -- Types
         ExoMonad.Guest.Types
+        ExoMonad.Guest.Types.Permissions
         ExoMonad.Types
         -- Permissions
         ExoMonad.Permissions
