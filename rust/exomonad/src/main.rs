@@ -620,7 +620,11 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
     eprintln!("Creating session: {}", session);
 
     // 1. Start server tab
-    let server_layout_path = generate_server_layout(port, config.shell_command.as_deref())?;
+    // Server tab runs the binary directly (no shell_command wrapper).
+    // shell_command (e.g. "nix develop") is only for the interactive TL tab.
+    // Wrapping the server in nix develop adds 15-30s startup on macOS,
+    // causing the health check to timeout.
+    let server_layout_path = generate_server_layout(port, None)?;
 
     eprintln!("Starting server...");
     // Create zellij session with server layout in background (fork, don't attach).
@@ -706,7 +710,7 @@ async fn wait_for_server(port: u16) -> Result<()> {
         .build()?;
     let url = format!("http://127.0.0.1:{}/health", port);
     let start = Instant::now();
-    let timeout = Duration::from_secs(15);
+    let timeout = Duration::from_secs(30);
 
     eprintln!("Waiting for server health...");
     while start.elapsed() < timeout {
@@ -721,7 +725,7 @@ async fn wait_for_server(port: u16) -> Result<()> {
     }
 
     Err(anyhow::anyhow!(
-        "Server failed to start within 15s. Check the Server tab for errors."
+        "Server failed to start within 30s. Check the Server tab for errors."
     ))
 }
 
