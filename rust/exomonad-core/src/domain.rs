@@ -607,6 +607,19 @@ impl fmt::Display for AbsolutePath {
 }
 
 // ============================================================================
+// Agent Permissions
+// ============================================================================
+
+/// Permissions for an agent.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentPermissions {
+    /// Tool patterns to allow.
+    pub allow: Vec<String>,
+    /// Tool patterns to deny.
+    pub deny: Vec<String>,
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

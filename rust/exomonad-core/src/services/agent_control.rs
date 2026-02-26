@@ -6,7 +6,7 @@
 //! - ListAgents: Discover from Zellij tabs (source of truth for running agents)
 
 use crate::common::TimeoutError;
-use crate::domain::{AgentName, BirthBranch, ClaudeSessionUuid, ItemState};
+use crate::domain::{AgentName, BirthBranch, ClaudeSessionUuid, ItemState, AgentPermissions};
 use crate::ffi::FFIBoundary;
 use crate::{GithubOwner, GithubRepo, IssueNumber};
 use anyhow::{anyhow, Context, Result};
@@ -294,6 +294,10 @@ pub struct SpawnSubtreeOptions {
     /// Specific absolute paths outside the worktree that the agent is allowed to read.
     #[serde(default)]
     pub allowed_read_paths: Vec<String>,
+    /// Optional working directory. If Some, worktree creation is skipped.
+    pub working_dir: Option<PathBuf>,
+    /// Optional agent permissions.
+    pub permissions: Option<AgentPermissions>,
 }
 
 /// Result of spawning an agent.
@@ -1050,10 +1054,16 @@ impl AgentControlService {
             let child_birth = effective_birth.child(&slug);
             let branch_name = child_birth.to_string();
 
-            // Worktree location: {worktree_base}/{slug}
-            let worktree_path = self.worktree_base.join(&slug);
+            // Resolve working directory
+            let (worktree_path, is_custom_dir) = if let Some(ref custom_dir) = options.working_dir {
+                (custom_dir.clone(), true)
+            } else {
+                (self.worktree_base.join(&slug), false)
+            };
 
-            self.create_worktree_checked(&worktree_path, &branch_name, current_branch).await?;
+            if !is_custom_dir {
+                self.create_worktree_checked(&worktree_path, &branch_name, current_branch).await?;
+            }
 
             if options.secure_mode {
                 scrub_worktree(&worktree_path, None, &slug).await?;
@@ -1083,7 +1093,7 @@ impl AgentControlService {
 
             // Write .claude/settings.local.json with hooks (SessionStart registers UUID for --fork-session)
             let binary_path = crate::util::find_exomonad_binary();
-            crate::hooks::HookConfig::write_persistent(&worktree_path, &binary_path)
+            crate::hooks::HookConfig::write_persistent(&worktree_path, &binary_path, options.permissions.as_ref())
                 .map_err(|e| anyhow!("Failed to write hook config in worktree: {}", e))?;
             info!(worktree = %worktree_path.display(), "Wrote hook configuration for spawned Claude agent");
 
@@ -1202,9 +1212,17 @@ impl AgentControlService {
 
             let child_birth = effective_birth.child(&slug);
             let branch_name = child_birth.to_string();
-            let worktree_path = self.worktree_base.join(&slug);
 
-            self.create_worktree_checked(&worktree_path, &branch_name, &current_branch).await?;
+            // Resolve working directory
+            let (worktree_path, is_custom_dir) = if let Some(ref custom_dir) = options.working_dir {
+                (custom_dir.clone(), true)
+            } else {
+                (self.worktree_base.join(&slug), false)
+            };
+
+            if !is_custom_dir {
+                self.create_worktree_checked(&worktree_path, &branch_name, &current_branch).await?;
+            }
 
             if options.secure_mode {
                 scrub_worktree(&worktree_path, None, &slug).await?;
