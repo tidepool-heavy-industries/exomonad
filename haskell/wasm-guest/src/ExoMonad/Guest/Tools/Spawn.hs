@@ -84,7 +84,19 @@ instance MCPTool SpawnSubtree where
             AC.allowedTools = maybe [] id (ssAllowedTools args),
             AC.disallowedTools = maybe [] id (ssDisallowedTools args)
           }
-    result <- AC.spawnSubtree (ssTask args) (ssBranchName args) "" forkSession Nothing Nothing perms (ssWorkingDir args) (ssPermissions args) standaloneRepo
+        cfg = AC.SpawnSubtreeConfig
+          { AC.stcTask = ssTask args
+          , AC.stcBranchName = ssBranchName args
+          , AC.stcParentSessionId = ""
+          , AC.stcForkSession = forkSession
+          , AC.stcRole = Nothing
+          , AC.stcAgentType = Nothing
+          , AC.stcPerms = perms
+          , AC.stcWorkingDir = ssWorkingDir args
+          , AC.stcPermissions = ssPermissions args
+          , AC.stcStandaloneRepo = standaloneRepo
+          }
+    result <- AC.spawnSubtree cfg
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
@@ -150,7 +162,15 @@ instance MCPTool SpawnLeafSubtree where
             AC.allowedTools = maybe [] id (slsAllowedTools args),
             AC.disallowedTools = maybe [] id (slsDisallowedTools args)
           }
-    result <- AC.spawnLeafSubtree renderedTask (slsBranchName args) Nothing Nothing perms standaloneRepo
+        cfg = AC.SpawnLeafSubtreeConfig
+          { AC.slcTask = renderedTask
+          , AC.slcBranchName = slsBranchName args
+          , AC.slcRole = Nothing
+          , AC.slcAgentType = Nothing
+          , AC.slcPerms = perms
+          , AC.slcStandaloneRepo = standaloneRepo
+          }
+    result <- AC.spawnLeafSubtree cfg
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
