@@ -50,10 +50,11 @@ data TaskReport = TaskReport
 
 instance JsonSchema TaskReport where
   toSchema =
-    genericToolSchemaWith @TaskReport
-      [ ("what", "task description"),
-        ("how", "verification command that was run")
-      ]
+    Aeson.Object $
+      genericToolSchemaWith @TaskReport
+        [ ("what", "task description"),
+          ("how", "verification command that was run")
+        ]
 
 instance FromJSON TaskReport where
   parseJSON = withObject "TaskReport" $ \v ->
