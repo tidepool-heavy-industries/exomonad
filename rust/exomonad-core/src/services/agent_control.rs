@@ -28,21 +28,23 @@ use std::sync::Arc;
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
 const ZELLIJ_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Ensure the given branch is pushed to the remote so child PRs can
-/// reference it as their base.
+/// Push the parent branch to the remote so child PRs can reference it as
+/// their base. Non-fatal: warns on failure (supports local/airgapped setups
+/// where no remote or non-GitHub remote is configured).
 async fn ensure_branch_pushed(
     git_wt: &Arc<GitWorktreeService>,
     branch: &str,
     project_dir: &Path,
-) -> Result<()> {
+) {
     info!(branch = %branch, "Pushing parent branch to remote");
     let git_wt = git_wt.clone();
     let dir = project_dir.to_path_buf();
     let bookmark = crate::domain::BranchName::from(branch);
-    tokio::task::spawn_blocking(move || git_wt.push_bookmark(&dir, &bookmark))
-        .await
-        .context("tokio task join error while pushing parent branch")?
-        .context("Failed to push parent branch")
+    match tokio::task::spawn_blocking(move || git_wt.push_bookmark(&dir, &bookmark)).await {
+        Ok(Ok(())) => info!(branch = %branch, "Branch pushed successfully"),
+        Ok(Err(e)) => warn!(branch = %branch, error = %e, "Failed to push parent branch (non-fatal, PRs may not work)"),
+        Err(e) => warn!(branch = %branch, error = %e, "Push task panicked (non-fatal)"),
+    }
 }
 
 // ============================================================================
@@ -1042,7 +1044,7 @@ impl AgentControlService {
             let current_branch = effective_birth.as_parent_branch();
 
             // Push parent branch so child PRs can reference it as base
-            ensure_branch_pushed(&self.git_wt, current_branch, effective_project_dir).await?;
+            ensure_branch_pushed(&self.git_wt, current_branch, effective_project_dir).await;
 
             // Branch: {current_branch}.{slug}
             let child_birth = effective_birth.child(&slug);
@@ -1196,7 +1198,7 @@ impl AgentControlService {
             }
 
             // Push parent branch so child PRs can reference it as base
-            ensure_branch_pushed(&self.git_wt, &current_branch, effective_project_dir).await?;
+            ensure_branch_pushed(&self.git_wt, &current_branch, effective_project_dir).await;
 
             let child_birth = effective_birth.child(&slug);
             let branch_name = child_birth.to_string();
