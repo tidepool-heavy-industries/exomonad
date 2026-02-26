@@ -1289,7 +1289,7 @@ async fn main() -> Result<()> {
                 .layer(cors)
                 .layer(TraceLayer::new_for_http());
 
-            let addr = std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, port));
+            let addr = std::net::SocketAddr::from((std::net::Ipv4Addr::UNSPECIFIED, port));
             let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {
                 if e.kind() == std::io::ErrorKind::AddrInUse {
                     anyhow::anyhow!(
