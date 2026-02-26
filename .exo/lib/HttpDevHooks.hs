@@ -23,7 +23,6 @@ import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
 import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), allowResponse, denyResponse, postToolUseResponse)
 import ExoMonad.Permissions (PermissionCheck (..), checkAgentPermissions)
 import ExoMonad.Types (HookConfig (..), HookEffects, defaultSessionStartHook)
-import SecureHooks (securePreToolUse)
 
 -- | Hook config for HTTP-native dev agents.
 --
@@ -49,12 +48,8 @@ httpDevHooks =
 -- 3. Escalate to human (popup in Zellij)
 permissionCascade :: HookInput -> Eff HookEffects HookOutput
 permissionCascade hookInput = do
-  secureOut <- securePreToolUse hookInput
-  if not (continue_ secureOut)
-    then pure secureOut
-    else do
-      let tool = fromMaybe "" (hiToolName hookInput)
-          args = fromMaybe (Aeson.Object mempty) (hiToolInput hookInput)
+  let tool = fromMaybe "" (hiToolName hookInput)
+      args = fromMaybe (Aeson.Object mempty) (hiToolInput hookInput)
           argsJson = TLE.decodeUtf8 $ Aeson.encode args
       void $ suspendEffect_ @LogInfo $ Log.InfoRequest
         { Log.infoRequestMessage = "[BeforeTool] tool=" <> TL.fromStrict tool <> " input=" <> argsJson
