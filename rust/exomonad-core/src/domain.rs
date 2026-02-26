@@ -617,6 +617,8 @@ pub struct AgentPermissions {
     pub allow: Vec<String>,
     /// Tool patterns to deny.
     pub deny: Vec<String>,
+    /// Permission mode override (e.g., "dontAsk" for deny-by-default).
+    pub default_mode: Option<String>,
 }
 
 // ============================================================================

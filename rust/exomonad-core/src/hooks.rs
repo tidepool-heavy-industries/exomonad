@@ -136,10 +136,14 @@ impl HookConfig {
 
         // Write permissions if provided
         if let Some(p) = permissions {
-            settings["permissions"] = json!({
+            let mut perm_obj = serde_json::json!({
                 "allow": p.allow,
                 "deny": p.deny,
             });
+            if let Some(ref mode) = p.default_mode {
+                perm_obj["defaultMode"] = serde_json::json!(mode);
+            }
+            settings["permissions"] = perm_obj;
         }
 
         let content =
