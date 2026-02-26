@@ -50,12 +50,12 @@ permissionCascade :: HookInput -> Eff HookEffects HookOutput
 permissionCascade hookInput = do
   let tool = fromMaybe "" (hiToolName hookInput)
       args = fromMaybe (Aeson.Object mempty) (hiToolInput hookInput)
-          argsJson = TLE.decodeUtf8 $ Aeson.encode args
-      void $ suspendEffect_ @LogInfo $ Log.InfoRequest
-        { Log.infoRequestMessage = "[BeforeTool] tool=" <> TL.fromStrict tool <> " input=" <> argsJson
-        , Log.infoRequestFields = ""
-        }
-      case checkAgentPermissions "dev" tool args of
-        Allowed -> pure (allowResponse Nothing)
-        Escalate -> pure (allowResponse (Just "escalation-needed"))
-        Denied reason -> pure (denyResponse reason)
+      argsJson = TLE.decodeUtf8 $ Aeson.encode args
+  void $ suspendEffect_ @LogInfo $ Log.InfoRequest
+    { Log.infoRequestMessage = "[BeforeTool] tool=" <> TL.fromStrict tool <> " input=" <> argsJson
+    , Log.infoRequestFields = ""
+    }
+  case checkAgentPermissions "dev" tool args of
+    Allowed -> pure (allowResponse Nothing)
+    Escalate -> pure (allowResponse (Just "escalation-needed"))
+    Denied reason -> pure (denyResponse reason)
