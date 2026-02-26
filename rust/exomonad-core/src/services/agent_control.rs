@@ -295,6 +295,24 @@ pub struct SpawnSubtreeOptions {
     pub standalone_repo: bool,
 }
 
+/// Options for spawning a Gemini leaf subtree agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnLeafOptions {
+    /// Full task/prompt for the agent.
+    pub task: String,
+    /// Branch name suffix.
+    pub branch_name: String,
+    /// Optional role override.
+    pub role: Option<String>,
+    /// Optional agent type override.
+    pub agent_type: Option<AgentType>,
+    /// Claude-specific permission flags (ignored for Gemini).
+    #[serde(default)]
+    pub claude_flags: ClaudeSpawnFlags,
+    /// When true, creates a standalone git repo instead of a worktree.
+    pub standalone_repo: bool,
+}
+
 /// Result of spawning an agent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SpawnResult {
@@ -1178,7 +1196,7 @@ impl AgentControlService {
     #[tracing::instrument(skip(self, options), fields(branch_name = %options.branch_name))]
     pub async fn spawn_leaf_subtree(
         &self,
-        options: &SpawnSubtreeOptions,
+        options: &SpawnLeafOptions,
         caller_bb: &BirthBranch,
     ) -> Result<SpawnResult> {
         info!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_leaf_subtree");
@@ -1219,19 +1237,11 @@ impl AgentControlService {
             let child_birth = effective_birth.child(&slug);
             let branch_name = child_birth.to_string();
 
-            // Resolve working directory
-            // Path resolution: working_dir overrides the default worktree location.
-            // standalone_repo: git init (fresh .git boundary) instead of git worktree add.
-            // These are orthogonal: working_dir controls WHERE, standalone_repo controls HOW.
-            let (worktree_path, is_custom_dir) = if let Some(ref custom_dir) = options.working_dir {
-                (custom_dir.clone(), true)
-            } else {
-                (self.worktree_base.join(&slug), false)
-            };
+            let worktree_path = self.worktree_base.join(&slug);
 
             if options.standalone_repo {
                 self.init_standalone_repo(&worktree_path).await?;
-            } else if !is_custom_dir {
+            } else {
                 self.create_worktree_checked(&worktree_path, &branch_name, &current_branch).await?;
             }
 
