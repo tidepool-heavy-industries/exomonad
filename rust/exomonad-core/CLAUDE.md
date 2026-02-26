@@ -33,6 +33,8 @@ Without `runtime`: only `ui_protocol` module available. Used by `exomonad-plugin
 | `RuntimeBuilder` | Fluent API for assembling handlers and loading WASM |
 | `AcpRegistry` | Registry of active ACP connections to Gemini agents |
 | `AcpConnection` | Wraps `ClientSideConnection` + agent_id + session_id |
+| `SpawnSubtreeOptions` | Options for spawning a Claude agent (permissions, etc.) |
+| `SpawnLeafOptions` | Options for spawning a Gemini agent |
 
 ## ACP Integration
 
