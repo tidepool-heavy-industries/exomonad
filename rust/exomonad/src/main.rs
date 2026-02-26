@@ -621,6 +621,26 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
         eprintln!("Gemini MCP configuration written to .gemini/settings.json");
     }
 
+    // Write Gemini MCP configuration if root agent is Gemini
+    if config.root_agent_type == AgentType::Gemini {
+        let gemini_dir = cwd.join(".gemini");
+        std::fs::create_dir_all(&gemini_dir)?;
+        let settings_path = gemini_dir.join("settings.json");
+        let mcp_url = format!(
+            "http://localhost:{}/agents/tl/root/mcp",
+            config.port
+        );
+        let settings = serde_json::json!({
+            "mcpServers": {
+                "exomonad": {
+                    "httpUrl": mcp_url
+                }
+            }
+        });
+        std::fs::write(&settings_path, serde_json::to_string_pretty(&settings)?)?;
+        eprintln!("Gemini MCP configuration written to .gemini/settings.json");
+    }
+
     // Query existing sessions
     let output = std::process::Command::new("zellij")
         .args(["list-sessions", "--short"])
