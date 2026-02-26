@@ -86,7 +86,11 @@ impl HookConfig {
     ///
     /// Used by `exomonad init` and `spawn_subtree` where hooks must persist
     /// for the lifetime of the agent session.
-    pub fn write_persistent(cwd: &Path, binary_path: &Path) -> Result<()> {
+    pub fn write_persistent(
+        cwd: &Path,
+        binary_path: &Path,
+        permissions: Option<&crate::domain::AgentPermissions>,
+    ) -> Result<()> {
         let claude_dir = cwd.join(".claude");
         let settings_path = claude_dir.join("settings.local.json");
 
@@ -128,6 +132,14 @@ impl HookConfig {
                 "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".to_string(),
                 json!("1"),
             );
+        }
+
+        // Write permissions if provided
+        if let Some(p) = permissions {
+            settings["permissions"] = json!({
+                "allow": p.allow,
+                "deny": p.deny,
+            });
         }
 
         let content =

@@ -2,12 +2,13 @@
 //!
 //! Uses proto-generated types from `exomonad_proto::effects::agent`.
 
-use crate::domain::{AgentName, BirthBranch, ClaudeSessionUuid};
+use crate::domain::{AgentName, BirthBranch, ClaudeSessionUuid, AgentPermissions};
 use crate::effects::{
     dispatch_agent_effect, AgentEffects, EffectError, EffectHandler, EffectResult, ResultExt,
 };
 
 use super::non_empty;
+use std::path::PathBuf;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::{
     AgentControlService, AgentInfo, AgentType as ServiceAgentType, ClaudeSpawnFlags,
@@ -294,6 +295,11 @@ impl AgentEffects for AgentHandler {
             ),
             secure_mode: req.secure_mode,
             allowed_read_paths: req.allowed_read_paths.clone(),
+            working_dir: non_empty(req.working_dir).map(PathBuf::from),
+            permissions: req.permissions.map(|p| AgentPermissions {
+                allow: p.allow,
+                deny: p.deny,
+            }),
         };
 
         let result = self
@@ -345,6 +351,8 @@ impl AgentEffects for AgentHandler {
             ),
             secure_mode: req.secure_mode,
             allowed_read_paths: req.allowed_read_paths.clone(),
+            working_dir: None,
+            permissions: None,
         };
 
         let result = self

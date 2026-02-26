@@ -248,6 +248,11 @@ message SpawnWorkerResponse {
   AgentInfo agent = 1;
 }
 
+message Permissions {
+  repeated string allow = 1;
+  repeated string deny = 2;
+}
+
 // ============================================================================
 // SpawnSubtree - Spawn a subtree agent (Claude-only) in a new git worktree
 // ============================================================================
@@ -274,6 +279,8 @@ message SpawnSubtreeRequest {
   bool secure_mode = 10;
   // Specific absolute paths outside the worktree that the agent is allowed to read.
   repeated string allowed_read_paths = 11;
+  string working_dir = 12;
+  Permissions permissions = 13;
 }
 
 message SpawnSubtreeResponse {
