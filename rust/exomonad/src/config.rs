@@ -3,9 +3,16 @@
 use anyhow::{Context, Result};
 use exomonad_core::services::AgentType;
 use exomonad_core::Role;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tracing::debug;
+
+/// External MCP server configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct McpServerConfig {
+    /// HTTP URL for the MCP server.
+    pub url: String,
+}
 
 /// Raw configuration from file (supports both config.toml and config.local.toml fields).
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -39,6 +46,10 @@ pub struct RawConfig {
 
     /// Optional flake reference to use when building WASM plugin via nix.
     pub flake_ref: Option<String>,
+
+    /// Extra MCP servers to include in agent settings (e.g. metacog).
+    #[serde(default)]
+    pub extra_mcp_servers: std::collections::HashMap<String, McpServerConfig>,
 }
 
 /// Final resolved configuration.
@@ -60,6 +71,8 @@ pub struct Config {
     pub root_agent_type: AgentType,
     /// Flake reference to use when building WASM plugin via nix.
     pub flake_ref: Option<String>,
+    /// Extra MCP servers to include in agent settings.
+    pub extra_mcp_servers: std::collections::HashMap<String, McpServerConfig>,
 }
 
 impl Config {
@@ -164,6 +177,10 @@ impl Config {
         // Resolve flake_ref: local > global > fallback to None
         let flake_ref = local_raw.flake_ref.or(global_raw.flake_ref);
 
+        // Merge extra_mcp_servers: global first, local overrides
+        let mut extra_mcp_servers = global_raw.extra_mcp_servers;
+        extra_mcp_servers.extend(local_raw.extra_mcp_servers);
+
         Ok(Self {
             project_dir,
             role,
@@ -174,6 +191,7 @@ impl Config {
             wasm_dir,
             root_agent_type,
             flake_ref,
+            extra_mcp_servers,
         })
     }
 
@@ -201,6 +219,7 @@ impl Default for Config {
             wasm_dir: global_wasm_dir(),
             root_agent_type: AgentType::Claude,
             flake_ref: None,
+            extra_mcp_servers: std::collections::HashMap::new(),
         }
     }
 }

@@ -578,17 +578,22 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
         let gemini_dir = cwd.join(".gemini");
         std::fs::create_dir_all(&gemini_dir)?;
         let settings_path = gemini_dir.join("settings.json");
-        let mcp_url = format!(
-            "http://localhost:{}/agents/tl/root/mcp",
-            config.port
+
+        let mut mcp_servers = serde_json::Map::new();
+        mcp_servers.insert(
+            "exomonad".to_string(),
+            serde_json::json!({
+                "httpUrl": format!("http://localhost:{}/agents/tl/root/mcp", config.port)
+            }),
         );
-        let settings = serde_json::json!({
-            "mcpServers": {
-                "exomonad": {
-                    "httpUrl": mcp_url
-                }
-            }
-        });
+        for (name, server) in &config.extra_mcp_servers {
+            mcp_servers.insert(
+                name.clone(),
+                serde_json::json!({ "httpUrl": server.url }),
+            );
+        }
+
+        let settings = serde_json::json!({ "mcpServers": mcp_servers });
         std::fs::write(&settings_path, serde_json::to_string_pretty(&settings)?)?;
         eprintln!("Gemini MCP configuration written to .gemini/settings.json");
     }
