@@ -51,12 +51,6 @@ pub struct RawConfig {
     #[serde(default)]
     pub extra_mcp_servers: std::collections::HashMap<String, McpServerConfig>,
 
-    /// Initial prompt for the root agent (used with `gemini --prompt-interactive`).
-    /// Mutually exclusive with `initial_prompt_file`.
-    pub initial_prompt: Option<String>,
-
-    /// Path to a file containing the initial prompt. Mutually exclusive with `initial_prompt`.
-    pub initial_prompt_file: Option<PathBuf>,
 }
 
 /// Final resolved configuration.
@@ -80,8 +74,6 @@ pub struct Config {
     pub flake_ref: Option<String>,
     /// Extra MCP servers to include in agent settings.
     pub extra_mcp_servers: std::collections::HashMap<String, McpServerConfig>,
-    /// Initial prompt for the root agent.
-    pub initial_prompt: Option<String>,
 }
 
 impl Config {
@@ -190,37 +182,6 @@ impl Config {
         let mut extra_mcp_servers = global_raw.extra_mcp_servers;
         extra_mcp_servers.extend(local_raw.extra_mcp_servers);
 
-        // Resolve initial_prompt: inline > file, local > global. Error if both set.
-        let raw_prompt = local_raw.initial_prompt.or(global_raw.initial_prompt);
-        let raw_prompt_file = local_raw.initial_prompt_file.or(global_raw.initial_prompt_file);
-        if raw_prompt.is_some() && raw_prompt_file.is_some() {
-            anyhow::bail!(
-                "Cannot set both initial_prompt and initial_prompt_file in config"
-            );
-        }
-        let initial_prompt = match (raw_prompt, raw_prompt_file) {
-            (Some(p), _) => Some(p),
-            (_, Some(path)) => {
-                let resolved = if path.is_absolute() {
-                    path
-                } else {
-                    project_root.join(path)
-                };
-                Some(
-                    std::fs::read_to_string(&resolved)
-                        .with_context(|| {
-                            format!(
-                                "Failed to read initial_prompt_file: {}",
-                                resolved.display()
-                            )
-                        })?
-                        .trim()
-                        .to_string(),
-                )
-            }
-            _ => None,
-        };
-
         Ok(Self {
             project_dir,
             role,
@@ -232,7 +193,6 @@ impl Config {
             root_agent_type,
             flake_ref,
             extra_mcp_servers,
-            initial_prompt,
         })
     }
 
@@ -261,7 +221,6 @@ impl Default for Config {
             root_agent_type: AgentType::Claude,
             flake_ref: None,
             extra_mcp_servers: std::collections::HashMap::new(),
-            initial_prompt: None,
         }
     }
 }

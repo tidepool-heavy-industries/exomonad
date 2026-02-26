@@ -673,12 +673,8 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
 
     // 3. Start TL tab
     eprintln!("Server healthy, starting TL tab...");
-    let tl_layout_path = generate_tl_tab_layout(
-        port,
-        config.shell_command.as_deref(),
-        config.root_agent_type,
-        config.initial_prompt.as_deref(),
-    )?;
+    let tl_layout_path =
+        generate_tl_tab_layout(port, config.shell_command.as_deref(), config.root_agent_type)?;
     let status = std::process::Command::new("zellij")
         .env("ZELLIJ_SESSION_NAME", &session)
         .args(["action", "new-tab", "--layout"])
@@ -792,22 +788,18 @@ fn generate_tl_tab_layout(
     _port: u16,
     shell_command: Option<&str>,
     root_agent_type: AgentType,
-    initial_prompt: Option<&str>,
 ) -> Result<std::path::PathBuf> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let cwd = std::env::current_dir()?;
 
-    let base_command = match (root_agent_type, initial_prompt) {
-        (AgentType::Claude, _) => "claude --dangerously-skip-permissions --resume".to_string(),
-        (AgentType::Gemini, Some(prompt)) => {
-            format!("gemini --prompt-interactive '{}'", prompt.replace('\'', "'\\''"))
-        }
-        (AgentType::Gemini, None) => "gemini".to_string(),
+    let base_command = match root_agent_type {
+        AgentType::Claude => "claude --dangerously-skip-permissions --resume",
+        AgentType::Gemini => "gemini",
     };
 
     let tl_command = match shell_command {
         Some(sc) => format!("{} -c '{}'", sc, base_command),
-        None => base_command,
+        None => base_command.to_string(),
     };
 
     let params = exomonad_core::layout::AgentTabParams {
