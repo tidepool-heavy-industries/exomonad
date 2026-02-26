@@ -704,7 +704,7 @@ async fn wait_for_server(port: u16) -> Result<()> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(500))
         .build()?;
-    let url = format!("http://localhost:{}/health", port);
+    let url = format!("http://127.0.0.1:{}/health", port);
     let start = Instant::now();
     let timeout = Duration::from_secs(15);
 
