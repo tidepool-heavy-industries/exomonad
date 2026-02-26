@@ -291,6 +291,8 @@ pub struct SpawnSubtreeOptions {
     pub working_dir: Option<PathBuf>,
     /// Optional agent permissions.
     pub permissions: Option<AgentPermissions>,
+    /// When true, creates a standalone git repo instead of a worktree.
+    pub standalone_repo: bool,
 }
 
 /// Result of spawning an agent.
@@ -1054,7 +1056,20 @@ impl AgentControlService {
                 (self.worktree_base.join(&slug), false)
             };
 
-            if !is_custom_dir {
+            if options.standalone_repo {
+                tokio::fs::create_dir_all(&worktree_path).await?;
+                let status = tokio::process::Command::new("git")
+                    .args(["init"])
+                    .current_dir(&worktree_path)
+                    .output()
+                    .await?;
+                if !status.status.success() {
+                    return Err(anyhow!("Failed to initialize standalone git repo at {}: {}", 
+                        worktree_path.display(), 
+                        String::from_utf8_lossy(&status.stderr)));
+                }
+                tracing::info!("Initialized standalone repo at {}", worktree_path.display());
+            } else if !is_custom_dir {
                 self.create_worktree_checked(&worktree_path, &branch_name, current_branch).await?;
             }
 
@@ -1199,7 +1214,20 @@ impl AgentControlService {
                 (self.worktree_base.join(&slug), false)
             };
 
-            if !is_custom_dir {
+            if options.standalone_repo {
+                tokio::fs::create_dir_all(&worktree_path).await?;
+                let status = tokio::process::Command::new("git")
+                    .args(["init"])
+                    .current_dir(&worktree_path)
+                    .output()
+                    .await?;
+                if !status.status.success() {
+                    return Err(anyhow!("Failed to initialize standalone git repo at {}: {}", 
+                        worktree_path.display(), 
+                        String::from_utf8_lossy(&status.stderr)));
+                }
+                tracing::info!("Initialized standalone repo at {}", worktree_path.display());
+            } else if !is_custom_dir {
                 self.create_worktree_checked(&worktree_path, &branch_name, &current_branch).await?;
             }
 
