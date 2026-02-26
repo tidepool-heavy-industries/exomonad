@@ -87,7 +87,6 @@ instance MCPTool SpawnSubtree where
         cfg = AC.SpawnSubtreeConfig
           { AC.stcTask = ssTask args
           , AC.stcBranchName = ssBranchName args
-          , AC.stcParentSessionId = ""
           , AC.stcForkSession = forkSession
           , AC.stcRole = Nothing
           , AC.stcAgentType = Nothing

@@ -36,6 +36,7 @@ where
 
 import Control.Monad.Freer (Eff, Member, interpret, send)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.=))
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Vector qualified as V
@@ -115,7 +116,6 @@ defaultPermFlags = PermissionFlags Nothing [] []
 data SpawnSubtreeConfig = SpawnSubtreeConfig
   { stcTask :: Text,
     stcBranchName :: Text,
-    stcParentSessionId :: Text,
     stcForkSession :: Bool,
     stcRole :: Maybe Text,
     stcAgentType :: Maybe AgentType,
@@ -170,14 +170,14 @@ runAgentControlSuspend = interpret $ \case
           PA.SpawnSubtreeRequest
             { PA.spawnSubtreeRequestTask = fromText (stcTask cfg),
               PA.spawnSubtreeRequestBranchName = fromText (stcBranchName cfg),
-              PA.spawnSubtreeRequestParentSessionId = fromText (stcParentSessionId cfg),
+              PA.spawnSubtreeRequestParentSessionId = fromText "",
               PA.spawnSubtreeRequestForkSession = stcForkSession cfg,
-              PA.spawnSubtreeRequestRole = fromText (maybe "" id (stcRole cfg)),
+              PA.spawnSubtreeRequestRole = fromText (fromMaybe "" (stcRole cfg)),
               PA.spawnSubtreeRequestAgentType = Enumerated (Right (maybe PA.AgentTypeAGENT_TYPE_UNSPECIFIED toProtoAgentType (stcAgentType cfg))),
-              PA.spawnSubtreeRequestPermissionMode = fromText (maybe "" id (permMode (stcPerms cfg))),
+              PA.spawnSubtreeRequestPermissionMode = fromText (fromMaybe "" (permMode (stcPerms cfg))),
               PA.spawnSubtreeRequestAllowedTools = V.fromList (map fromText (allowedTools (stcPerms cfg))),
               PA.spawnSubtreeRequestDisallowedTools = V.fromList (map fromText (disallowedTools (stcPerms cfg))),
-              PA.spawnSubtreeRequestWorkingDir = fromText (maybe "" id (stcWorkingDir cfg)),
+              PA.spawnSubtreeRequestWorkingDir = fromText (fromMaybe "" (stcWorkingDir cfg)),
               PA.spawnSubtreeRequestPermissions = fmap permissionsToProto (stcPermissions cfg),
               PA.spawnSubtreeRequestStandaloneRepo = stcStandaloneRepo cfg
             }
@@ -192,9 +192,9 @@ runAgentControlSuspend = interpret $ \case
           PA.SpawnLeafSubtreeRequest
             { PA.spawnLeafSubtreeRequestTask = fromText (slcTask cfg),
               PA.spawnLeafSubtreeRequestBranchName = fromText (slcBranchName cfg),
-              PA.spawnLeafSubtreeRequestRole = fromText (maybe "" id (slcRole cfg)),
+              PA.spawnLeafSubtreeRequestRole = fromText (fromMaybe "" (slcRole cfg)),
               PA.spawnLeafSubtreeRequestAgentType = Enumerated (Right (maybe PA.AgentTypeAGENT_TYPE_UNSPECIFIED toProtoAgentType (slcAgentType cfg))),
-              PA.spawnLeafSubtreeRequestPermissionMode = fromText (maybe "" id (permMode (slcPerms cfg))),
+              PA.spawnLeafSubtreeRequestPermissionMode = fromText (fromMaybe "" (permMode (slcPerms cfg))),
               PA.spawnLeafSubtreeRequestAllowedTools = V.fromList (map fromText (allowedTools (slcPerms cfg))),
               PA.spawnLeafSubtreeRequestDisallowedTools = V.fromList (map fromText (disallowedTools (slcPerms cfg))),
               PA.spawnLeafSubtreeRequestStandaloneRepo = slcStandaloneRepo cfg
@@ -210,7 +210,7 @@ runAgentControlSuspend = interpret $ \case
           PA.SpawnWorkerRequest
             { PA.spawnWorkerRequestName = fromText name,
               PA.spawnWorkerRequestPrompt = fromText prompt,
-              PA.spawnWorkerRequestPermissionMode = fromText (maybe "" id (permMode perms)),
+              PA.spawnWorkerRequestPermissionMode = fromText (fromMaybe "" (permMode perms)),
               PA.spawnWorkerRequestAllowedTools = V.fromList (map fromText (allowedTools perms)),
               PA.spawnWorkerRequestDisallowedTools = V.fromList (map fromText (disallowedTools perms))
             }
@@ -225,7 +225,7 @@ runAgentControlSuspend = interpret $ \case
           PA.SpawnAcpRequest
             { PA.spawnAcpRequestName = fromText name,
               PA.spawnAcpRequestPrompt = fromText prompt,
-              PA.spawnAcpRequestPermissionMode = fromText (maybe "" id (permMode perms)),
+              PA.spawnAcpRequestPermissionMode = fromText (fromMaybe "" (permMode perms)),
               PA.spawnAcpRequestAllowedTools = V.fromList (map fromText (allowedTools perms)),
               PA.spawnAcpRequestDisallowedTools = V.fromList (map fromText (disallowedTools perms))
             }
