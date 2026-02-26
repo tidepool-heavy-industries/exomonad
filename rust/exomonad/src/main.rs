@@ -1039,7 +1039,6 @@ async fn main() -> Result<()> {
                     "kv".to_string(),
                     "fs".to_string(),
                     "git".to_string(),
-                    "github".to_string(),
                     "agent".to_string(),
                     "popup".to_string(),
                     "events".to_string(),
