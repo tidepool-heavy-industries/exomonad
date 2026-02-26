@@ -671,22 +671,38 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
     // 2. Poll health
     wait_for_server(port).await?;
 
-    // 3. Start TL tab
-    eprintln!("Server healthy, starting TL tab...");
+    // 3. Start TL tab (only if one doesn't already exist)
+    let tab_output = std::process::Command::new("zellij")
+        .env("ZELLIJ_SESSION_NAME", &session)
+        .args(["action", "query-tab-names"])
+        .output()
+        .context("Failed to query Zellij tab names")?;
+    let tab_names = String::from_utf8_lossy(&tab_output.stdout);
+    let tl_tab_exists = tab_names.lines().any(|l| l.trim() == "TL");
+
+    if tl_tab_exists {
+        eprintln!("TL tab already exists, skipping creation");
+    } else {
+        eprintln!("Server healthy, starting TL tab...");
+    }
+
     let tl_layout_path =
         generate_tl_tab_layout(port, config.shell_command.as_deref(), config.root_agent_type)?;
-    let status = std::process::Command::new("zellij")
-        .env("ZELLIJ_SESSION_NAME", &session)
-        .args(["action", "new-tab", "--layout"])
-        .arg(&tl_layout_path)
-        .status()
-        .context("Failed to add TL tab to Zellij")?;
 
-    if !status.success() {
-        return Err(anyhow::anyhow!(
-            "Failed to add TL tab to Zellij session: {}",
-            status
-        ));
+    if !tl_tab_exists {
+        let status = std::process::Command::new("zellij")
+            .env("ZELLIJ_SESSION_NAME", &session)
+            .args(["action", "new-tab", "--layout"])
+            .arg(&tl_layout_path)
+            .status()
+            .context("Failed to add TL tab to Zellij")?;
+
+        if !status.success() {
+            return Err(anyhow::anyhow!(
+                "Failed to add TL tab to Zellij session: {}",
+                status
+            ));
+        }
     }
 
     // 4. Attach (exec replaces process, releasing the binary for hot-swap)
