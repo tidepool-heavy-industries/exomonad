@@ -22,7 +22,6 @@ use super::git_worktree::GitWorktreeService;
 use super::github::{GitHubService, Repo};
 use super::zellij_events;
 use super::acp_registry::AcpRegistry;
-use crate::services::event_log::EventLog;
 use std::sync::Arc;
 
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
@@ -288,12 +287,6 @@ pub struct SpawnSubtreeOptions {
     /// Claude-specific permission flags (ignored for Gemini).
     #[serde(default)]
     pub claude_flags: ClaudeSpawnFlags,
-    /// Secure mode for agent isolation.
-    #[serde(default)]
-    pub secure_mode: bool,
-    /// Specific absolute paths outside the worktree that the agent is allowed to read.
-    #[serde(default)]
-    pub allowed_read_paths: Vec<String>,
     /// Optional working directory. If Some, worktree creation is skipped.
     pub working_dir: Option<PathBuf>,
     /// Optional agent permissions.
@@ -1065,21 +1058,7 @@ impl AgentControlService {
                 self.create_worktree_checked(&worktree_path, &branch_name, current_branch).await?;
             }
 
-            if options.secure_mode {
-                scrub_worktree(&worktree_path, None, &slug).await?;
-            }
-
             let mut env_vars = self.common_spawn_env(&internal_name, &branch_name);
-            if options.secure_mode {
-                env_vars.remove("EXOMONAD_SESSION_ID");
-                env_vars.insert("EXOMONAD_SECURE_MODE".to_string(), "1".to_string());
-                if !options.allowed_read_paths.is_empty() {
-                    env_vars.insert(
-                        "EXOMONAD_SECURE_ALLOWED_PATHS".to_string(),
-                        options.allowed_read_paths.join(":"),
-                    );
-                }
-            }
             // Enable Claude Code Agent Teams for native inter-agent messaging
             env_vars.insert(
                 "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".to_string(),
@@ -1224,21 +1203,7 @@ impl AgentControlService {
                 self.create_worktree_checked(&worktree_path, &branch_name, &current_branch).await?;
             }
 
-            if options.secure_mode {
-                scrub_worktree(&worktree_path, None, &slug).await?;
-            }
-
             let mut env_vars = self.common_spawn_env(&internal_name, &branch_name);
-            if options.secure_mode {
-                env_vars.remove("EXOMONAD_SESSION_ID");
-                env_vars.insert("EXOMONAD_SECURE_MODE".to_string(), "1".to_string());
-                if !options.allowed_read_paths.is_empty() {
-                    env_vars.insert(
-                        "EXOMONAD_SECURE_ALLOWED_PATHS".to_string(),
-                        options.allowed_read_paths.join(":"),
-                    );
-                }
-            }
 
             // Write .gemini/settings.json in worktree root
             let role = options.role.as_deref().unwrap_or("dev");
@@ -2486,68 +2451,3 @@ mod tests {
     }
 }
 
-/// Strip sensitive metadata from a worktree for secure agent isolation.
-pub async fn scrub_worktree(worktree_path: &Path, event_log: Option<&EventLog>, agent_id: &str) -> Result<()> {
-    let mut removed_items = Vec::new();
-    for dir_name in [".exo", ".claude", ".gemini"] {
-        let dir = worktree_path.join(dir_name);
-        if dir.exists() {
-            tokio::fs::remove_dir_all(&dir).await?;
-            removed_items.push(dir_name.to_string());
-        }
-    }
-    for pattern in [".env", "CLAUDE.md", "CLAUDE.local.md"] {
-        if pattern == ".env" {
-            let mut entries = tokio::fs::read_dir(worktree_path).await?;
-            while let Some(entry) = entries.next_entry().await? {
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy();
-                if name_str == ".env" || name_str.starts_with(".env.") {
-                    tokio::fs::remove_file(entry.path()).await?;
-                    removed_items.push(name_str.into_owned());
-                }
-            }
-        } else {
-            let file = worktree_path.join(pattern);
-            if file.exists() {
-                tokio::fs::remove_file(&file).await?;
-                removed_items.push(pattern.to_string());
-            }
-        }
-    }
-    if let Some(log) = event_log {
-        let data = serde_json::json!({
-            "removed_items": removed_items,
-        });
-        if let Err(e) = log.append("security.workspace.scrubbed", agent_id, &data) {
-            tracing::warn!("Failed to append security.workspace.scrubbed event: {}", e);
-        }
-    }
-    tracing::info!("Scrubbed worktree {}: removed {:?}", worktree_path.display(), removed_items);
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests2 {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_scrub_worktree() {
-        let tempdir = tempfile::tempdir().unwrap();
-        let path = tempdir.path();
-        tokio::fs::create_dir(path.join(".exo")).await.unwrap();
-        tokio::fs::create_dir(path.join(".claude")).await.unwrap();
-        tokio::fs::create_dir(path.join("src")).await.unwrap();
-        tokio::fs::write(path.join(".env"), "SECRET=1").await.unwrap();
-        tokio::fs::write(path.join("CLAUDE.md"), "info").await.unwrap();
-        tokio::fs::write(path.join("src/main.rs"), "fn main() {}").await.unwrap();
-
-        scrub_worktree(path, None, "test-agent").await.unwrap();
-
-        assert!(!path.join(".exo").exists());
-        assert!(!path.join(".claude").exists());
-        assert!(!path.join(".env").exists());
-        assert!(!path.join("CLAUDE.md").exists());
-        assert!(path.join("src/main.rs").exists());
-    }
-}
