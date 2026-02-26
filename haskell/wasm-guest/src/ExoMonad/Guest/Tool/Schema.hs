@@ -18,9 +18,10 @@ module ExoMonad.Guest.Tool.Schema
   )
 where
 
-import Data.Aeson (Value, object, (.=))
+import Data.Aeson (Value, object, toJSON, (.=))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Key qualified as AesonKey
+import Data.Aeson.KeyMap qualified as KM
 import Data.Char (isUpper, toLower)
 import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
@@ -33,7 +34,7 @@ import GHC.TypeLits (KnownSymbol, symbolVal)
 class JsonSchema a where
   toSchema :: Value
   default toSchema :: (Generic a, GJsonSchema (Rep a)) => Value
-  toSchema = genericToolSchema @a
+  toSchema = Aeson.Object (genericToolSchema @a)
 
 instance JsonSchema Text where
   toSchema = object ["type" .= ("string" :: Text)]
@@ -76,27 +77,30 @@ instance {-# OVERLAPPABLE #-} IsOptional a where
 
 -- | Derive a JSON schema for a Generic record.
 -- Strips common prefixes and converts to snake_case.
-genericToolSchema :: forall a. (Generic a, GJsonSchema (Rep a)) => Value
+genericToolSchema :: forall a. (Generic a, GJsonSchema (Rep a)) => Aeson.Object
 genericToolSchema = genericToolSchemaWith @a []
 
 -- | Derive a JSON schema with explicit field descriptions.
 --
 -- The descriptions list should use snake_case keys (the same ones that appear in the schema).
-genericToolSchemaWith :: forall a. (Generic a, GJsonSchema (Rep a)) => [(Text, Text)] -> Value
+genericToolSchemaWith :: forall a. (Generic a, GJsonSchema (Rep a)) => [(Text, Text)] -> Aeson.Object
 genericToolSchemaWith descs =
   case gToSchema (Proxy @(Rep a)) descs of
     SchemaObject props reqs ->
-      object $
-        [ "type" .= ("object" :: Text),
-          "properties" .= props,
-          "required" .= reqs
+      KM.fromList
+        [ ("type", Aeson.String "object"),
+          ("properties", props),
+          ("required", toJSON reqs)
         ]
     SchemaEnum vals ->
-      object
-        [ "type" .= ("string" :: Text),
-          "enum" .= vals
+      KM.fromList
+        [ ("type", Aeson.String "string"),
+          ("enum", toJSON vals)
         ]
-    SchemaSimple val -> val
+    SchemaSimple val ->
+      case val of
+        Aeson.Object obj -> obj
+        _ -> KM.singleton "type" (Aeson.String "object")
 
 -- | Result of generic schema derivation.
 data GSchemaResult

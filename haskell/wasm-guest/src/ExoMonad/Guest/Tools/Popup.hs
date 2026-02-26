@@ -20,6 +20,7 @@ import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
+import Data.Aeson.KeyMap qualified as KM
 import Data.ByteString.Lazy qualified as BL
 import Data.HashMap.Strict (HashMap)
 import Data.Text (Text)
@@ -227,7 +228,7 @@ instance MCPTool Popup where
   toolName = "popup"
   toolDescription = "Show interactive popup form and get user response"
   toolSchema =
-    object
+    case object
       [ "type" .= ("object" :: Text),
         "properties"
           .= object
@@ -321,7 +322,9 @@ instance MCPTool Popup where
                   ]
             ],
         "required" .= ([] :: [Text])
-      ]
+      ] of
+      Aeson.Object o -> o
+      _ -> KM.empty
   toolHandlerEff args = do
     let request = toShowPopupRequest args
     result <- suspendEffect @PopupShowPopup request

@@ -32,6 +32,7 @@ where
 import Control.Monad.Freer (Eff, Member, sendM)
 import Data.Aeson (FromJSON, ToJSON, Value, object, (.=))
 import Data.Aeson qualified as Aeson
+import Data.Aeson.KeyMap qualified as KM
 import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -48,7 +49,7 @@ import GHC.Generics (Generic)
 data ToolDefinition = ToolDefinition
   { tdName :: Text,
     tdDescription :: Text,
-    tdInputSchema :: Value
+    tdInputSchema :: Aeson.Object
   }
   deriving (Show, Eq)
 
@@ -58,7 +59,7 @@ toMCPFormat t =
   object
     [ "name" .= tdName t,
       "description" .= tdDescription t,
-      "inputSchema" .= tdInputSchema t
+      "inputSchema" .= Aeson.Object (tdInputSchema t)
     ]
 
 -- | Create a tool definition from an MCPTool instance.
@@ -142,7 +143,7 @@ class MCPTool (t :: Type) where
   toolDescription :: Text
 
   -- | JSON Schema for the input.
-  toolSchema :: Value
+  toolSchema :: Aeson.Object
 
   -- | Effectful handler that can suspend via coroutine yield.
   toolHandlerEff :: ToolArgs t -> Eff ToolEffects MCPCallOutput

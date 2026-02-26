@@ -212,8 +212,9 @@ data WorkerSpec = WorkerSpec
 
 instance JsonSchema WorkerSpec where
   toSchema =
-    genericToolSchemaWith @WorkerSpec
-      [ ("name", "Human-readable name for the leaf agent"),
+    Aeson.Object $
+      genericToolSchemaWith @WorkerSpec
+        [ ("name", "Human-readable name for the leaf agent"),
         ("task", "Short description of the task"),
         ("read_first", "Files the agent should read before starting"),
         ("steps", "Numbered implementation steps"),
