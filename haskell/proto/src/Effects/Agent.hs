@@ -2169,7 +2169,9 @@ data SpawnSubtreeRequest
                          spawnSubtreeRequestAllowedTools :: (Hs.Vector Hs.Text),
                          spawnSubtreeRequestDisallowedTools :: (Hs.Vector Hs.Text),
                          spawnSubtreeRequestSecureMode :: Hs.Bool,
-                         spawnSubtreeRequestAllowedReadPaths :: (Hs.Vector Hs.Text)}
+                         spawnSubtreeRequestAllowedReadPaths :: (Hs.Vector Hs.Text),
+                         spawnSubtreeRequestWorkingDir :: Hs.Text,
+                         spawnSubtreeRequestPermissions :: (Hs.Maybe Effects.Agent.Permissions)}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData SpawnSubtreeRequest)
 instance (HsProtobuf.Named SpawnSubtreeRequest) where
@@ -2184,7 +2186,8 @@ instance (HsProtobuf.Message SpawnSubtreeRequest) where
                          spawnSubtreeRequestAgentType, spawnSubtreeRequestPermissionMode,
                          spawnSubtreeRequestAllowedTools,
                          spawnSubtreeRequestDisallowedTools, spawnSubtreeRequestSecureMode,
-                         spawnSubtreeRequestAllowedReadPaths}
+                         spawnSubtreeRequestAllowedReadPaths, spawnSubtreeRequestWorkingDir,
+                         spawnSubtreeRequestPermissions}
     = Hs.mappend
         (Hs.mappend
            (Hs.mappend
@@ -2195,50 +2198,62 @@ instance (HsProtobuf.Message SpawnSubtreeRequest) where
                           (Hs.mappend
                              (Hs.mappend
                                 (Hs.mappend
+                                   (Hs.mappend
+                                      (Hs.mappend
+                                         (HsProtobuf.encodeMessageField
+                                            (HsProtobuf.FieldNumber 1)
+                                            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                                               spawnSubtreeRequestTask))
+                                         (HsProtobuf.encodeMessageField
+                                            (HsProtobuf.FieldNumber 2)
+                                            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                                               spawnSubtreeRequestBranchName)))
+                                      (HsProtobuf.encodeMessageField
+                                         (HsProtobuf.FieldNumber 3)
+                                         ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                                            spawnSubtreeRequestParentSessionId)))
                                    (HsProtobuf.encodeMessageField
-                                      (HsProtobuf.FieldNumber 1)
-                                      ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                                         spawnSubtreeRequestTask))
-                                   (HsProtobuf.encodeMessageField
-                                      (HsProtobuf.FieldNumber 2)
-                                      ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                                         spawnSubtreeRequestBranchName)))
+                                      (HsProtobuf.FieldNumber 4) spawnSubtreeRequestForkSession))
                                 (HsProtobuf.encodeMessageField
-                                   (HsProtobuf.FieldNumber 3)
+                                   (HsProtobuf.FieldNumber 5)
                                    ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                                      spawnSubtreeRequestParentSessionId)))
+                                      spawnSubtreeRequestRole)))
                              (HsProtobuf.encodeMessageField
-                                (HsProtobuf.FieldNumber 4) spawnSubtreeRequestForkSession))
+                                (HsProtobuf.FieldNumber 6) spawnSubtreeRequestAgentType))
                           (HsProtobuf.encodeMessageField
-                             (HsProtobuf.FieldNumber 5)
+                             (HsProtobuf.FieldNumber 7)
                              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                                spawnSubtreeRequestRole)))
+                                spawnSubtreeRequestPermissionMode)))
                        (HsProtobuf.encodeMessageField
-                          (HsProtobuf.FieldNumber 6) spawnSubtreeRequestAgentType))
+                          (HsProtobuf.FieldNumber 8)
+                          ((Hs.coerce
+                              @(Hs.Vector Hs.Text)
+                              @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                             spawnSubtreeRequestAllowedTools)))
                     (HsProtobuf.encodeMessageField
-                       (HsProtobuf.FieldNumber 7)
-                       ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                          spawnSubtreeRequestPermissionMode)))
+                       (HsProtobuf.FieldNumber 9)
+                       ((Hs.coerce
+                           @(Hs.Vector Hs.Text)
+                           @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                          spawnSubtreeRequestDisallowedTools)))
                  (HsProtobuf.encodeMessageField
-                    (HsProtobuf.FieldNumber 8)
-                    ((Hs.coerce
-                        @(Hs.Vector Hs.Text)
-                        @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
-                       spawnSubtreeRequestAllowedTools)))
+                    (HsProtobuf.FieldNumber 10) spawnSubtreeRequestSecureMode))
               (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 9)
+                 (HsProtobuf.FieldNumber 11)
                  ((Hs.coerce
                      @(Hs.Vector Hs.Text)
                      @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
-                    spawnSubtreeRequestDisallowedTools)))
+                    spawnSubtreeRequestAllowedReadPaths)))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 10) spawnSubtreeRequestSecureMode))
+              (HsProtobuf.FieldNumber 12)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 spawnSubtreeRequestWorkingDir)))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 11)
+           (HsProtobuf.FieldNumber 13)
            ((Hs.coerce
-               @(Hs.Vector Hs.Text)
-               @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
-              spawnSubtreeRequestAllowedReadPaths))
+               @(Hs.Maybe Effects.Agent.Permissions)
+               @(HsProtobuf.Nested Effects.Agent.Permissions))
+              spawnSubtreeRequestPermissions))
   decodeMessage _
     = Hs.pure SpawnSubtreeRequest
         <*>
@@ -2288,6 +2303,16 @@ instance (HsProtobuf.Message SpawnSubtreeRequest) where
               @(Hs.Vector Hs.Text))
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 11)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 12)))
+        <*>
+          ((HsProtobuf.coerceOver
+              @(HsProtobuf.Nested Effects.Agent.Permissions)
+              @(Hs.Maybe Effects.Agent.Permissions))
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 13)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -2331,9 +2356,19 @@ instance (HsProtobuf.Message SpawnSubtreeRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 11)
          (HsProtobufAST.Repeated HsProtobufAST.String)
-         (HsProtobufAST.Single "allowed_read_paths") [] ""]
+         (HsProtobufAST.Single "allowed_read_paths") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 12)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "working_dir") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 13)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "Permissions")))
+         (HsProtobufAST.Single "permissions") [] ""]
 instance (HsJSONPB.ToJSONPB SpawnSubtreeRequest) where
-  toJSONPB (SpawnSubtreeRequest f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11)
+  toJSONPB
+    (SpawnSubtreeRequest f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13)
     = HsJSONPB.object
         ["task" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "branch_name"
@@ -2363,9 +2398,17 @@ instance (HsJSONPB.ToJSONPB SpawnSubtreeRequest) where
              ((Hs.coerce
                  @(Hs.Vector Hs.Text)
                  @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
-                f11)]
+                f11),
+         "working_dir"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f12),
+         "permissions"
+           .=
+             ((Hs.coerce
+                 @(Hs.Maybe Effects.Agent.Permissions)
+                 @(HsProtobuf.Nested Effects.Agent.Permissions))
+                f13)]
   toEncodingPB
-    (SpawnSubtreeRequest f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11)
+    (SpawnSubtreeRequest f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13)
     = HsJSONPB.pairs
         ["task" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "branch_name"
@@ -2395,7 +2438,15 @@ instance (HsJSONPB.ToJSONPB SpawnSubtreeRequest) where
              ((Hs.coerce
                  @(Hs.Vector Hs.Text)
                  @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
-                f11)]
+                f11),
+         "working_dir"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f12),
+         "permissions"
+           .=
+             ((Hs.coerce
+                 @(Hs.Maybe Effects.Agent.Permissions)
+                 @(HsProtobuf.Nested Effects.Agent.Permissions))
+                f13)]
 instance (HsJSONPB.FromJSONPB SpawnSubtreeRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -2434,11 +2485,115 @@ instance (HsJSONPB.FromJSONPB SpawnSubtreeRequest) where
                   ((HsProtobuf.coerceOver
                       @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text))
                       @(Hs.Vector Hs.Text))
-                     (obj .: "allowed_read_paths")))
+                     (obj .: "allowed_read_paths"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "working_dir"))
+                <*>
+                  ((HsProtobuf.coerceOver
+                      @(HsProtobuf.Nested Effects.Agent.Permissions)
+                      @(Hs.Maybe Effects.Agent.Permissions))
+                     (obj .: "permissions")))
 instance (HsJSONPB.ToJSON SpawnSubtreeRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON SpawnSubtreeRequest) where
+  parseJSON = HsJSONPB.parseJSONPB
+data Permissions
+  = Permissions {permissionsAllow :: (Hs.Vector Hs.Text),
+                 permissionsDeny :: (Hs.Vector Hs.Text)}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData Permissions)
+instance (HsProtobuf.Named Permissions) where
+  nameOf _ = Hs.fromString "Permissions"
+instance (HsProtobuf.HasDefault Permissions)
+instance (HsProtobuf.Message Permissions) where
+  encodeMessage _ Permissions {permissionsAllow, permissionsDeny}
+    = Hs.mappend
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 1)
+           ((Hs.coerce
+               @(Hs.Vector Hs.Text)
+               @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+              permissionsAllow))
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 2)
+           ((Hs.coerce
+               @(Hs.Vector Hs.Text)
+               @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+              permissionsDeny))
+  decodeMessage _
+    = Hs.pure Permissions
+        <*>
+          ((HsProtobuf.coerceOver
+              @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text))
+              @(Hs.Vector Hs.Text))
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+        <*>
+          ((HsProtobuf.coerceOver
+              @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text))
+              @(Hs.Vector Hs.Text))
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1)
+         (HsProtobufAST.Repeated HsProtobufAST.String)
+         (HsProtobufAST.Single "allow") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 2)
+         (HsProtobufAST.Repeated HsProtobufAST.String)
+         (HsProtobufAST.Single "deny") [] ""]
+instance (HsJSONPB.ToJSONPB Permissions) where
+  toJSONPB (Permissions f1 f2)
+    = HsJSONPB.object
+        ["allow"
+           .=
+             ((Hs.coerce
+                 @(Hs.Vector Hs.Text)
+                 @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                f1),
+         "deny"
+           .=
+             ((Hs.coerce
+                 @(Hs.Vector Hs.Text)
+                 @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                f2)]
+  toEncodingPB (Permissions f1 f2)
+    = HsJSONPB.pairs
+        ["allow"
+           .=
+             ((Hs.coerce
+                 @(Hs.Vector Hs.Text)
+                 @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                f1),
+         "deny"
+           .=
+             ((Hs.coerce
+                 @(Hs.Vector Hs.Text)
+                 @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                f2)]
+instance (HsJSONPB.FromJSONPB Permissions) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "Permissions"
+        (\ obj
+           -> Hs.pure Permissions
+                <*>
+                  ((HsProtobuf.coerceOver
+                      @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text))
+                      @(Hs.Vector Hs.Text))
+                     (obj .: "allow"))
+                <*>
+                  ((HsProtobuf.coerceOver
+                      @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text))
+                      @(Hs.Vector Hs.Text))
+                     (obj .: "deny")))
+instance (HsJSONPB.ToJSON Permissions) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON Permissions) where
   parseJSON = HsJSONPB.parseJSONPB
 newtype SpawnSubtreeResponse
   = SpawnSubtreeResponse {spawnSubtreeResponseAgent :: (Hs.Maybe Effects.Agent.AgentInfo)}
