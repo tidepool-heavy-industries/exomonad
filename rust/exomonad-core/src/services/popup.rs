@@ -1,13 +1,13 @@
 //! Popup service for WASM host functions.
 //!
-//! Shows interactive popup forms and wizards via Zellij CLI pipes and returns user response.
+//! Shows interactive popup forms and wizards via direct Zellij IPC and returns user response.
 //!
-//! Uses the Zellij CLI pipe mechanism:
-//! 1. `zellij pipe --plugin file:plugin.wasm --name exomonad:popup -- "{JSON payload}"`
+//! Uses `ZellijIpc::pipe_to_plugin_blocking` (direct Unix socket, no subprocess):
+//! 1. Sends `Action::CliPipe` with `floating: false` for a tiled pane
 //! 2. Plugin receives via `pipe()` with `PipeSource::Cli(pipe_id)` and payload
-//! 3. Plugin blocks CLI, shows popup UI
+//! 3. Plugin renders form UI in a tiled pane
 //! 4. On submit, plugin calls `cli_pipe_output(&pipe_id, "{JSON response}")`
-//! 5. CLI receives response on stdout
+//! 5. IPC reads `ServerToClientMsg::CliPipeOutput` from the socket
 
 use crate::layout::resolve_plugin_path;
 use crate::ui_protocol::transport;
@@ -164,20 +164,6 @@ impl PopupService {
             false, // floating: false = tiled pane
             Some("Popup"),
         ).context("Failed to receive popup response via Zellij IPC")?;
-
-        /*
-        // NOTE: Previous subprocess-based fallback (kept as reference)
-        // This approach always created floating panes and had higher overhead.
-        let mut child = Command::new("zellij")
-            .arg("--session").arg(session)
-            .arg("pipe")
-            .arg("--plugin").arg(&plugin_path)
-            .arg("--name").arg(transport::POPUP_PIPE)
-            .arg("--").arg(&payload)
-            .stdout(Stdio::piped())
-            .spawn()?;
-        // ... read stdout ...
-        */
 
         let response_str = response_str.trim();
 

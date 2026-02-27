@@ -197,8 +197,9 @@ impl ZellijIpc {
                     }
                 }
                 Some((ServerToClientMsg::UnblockInputThread, _ctx)) => {
-                    warn!("[ZellijIpc] Received UnblockInputThread before CliPipeOutput");
-                    break;
+                    // UnblockInputThread means Zellij queued the action, NOT that
+                    // the plugin is done. Continue reading until CliPipeOutput.
+                    debug!("[ZellijIpc] Received UnblockInputThread, continuing to wait for CliPipeOutput");
                 }
                 Some((ServerToClientMsg::Exit(_), _ctx)) => break,
                 Some((_, _ctx)) => {
