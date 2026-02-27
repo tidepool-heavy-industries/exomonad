@@ -43,7 +43,8 @@ data SpawnSubtreeArgs = SpawnSubtreeArgs
     ssDisallowedTools :: Maybe [Text],
     ssWorkingDir :: Maybe Text,
     ssPermissions :: Maybe ClaudePermissions,
-    ssStandaloneRepo :: Maybe Bool
+    ssStandaloneRepo :: Maybe Bool,
+    ssAllowedDirs :: Maybe [Text]
   }
   deriving (Show, Eq, Generic)
 
@@ -59,6 +60,7 @@ instance FromJSON SpawnSubtreeArgs where
       <*> v .:? "working_dir"
       <*> v .:? "permissions"
       <*> v .:? "standalone_repo"
+      <*> v .:? "allowed_dirs"
 
 instance MCPTool SpawnSubtree where
   type ToolArgs SpawnSubtree = SpawnSubtreeArgs
@@ -74,7 +76,8 @@ instance MCPTool SpawnSubtree where
         ("disallowed_tools", "Tool patterns to disallow (e.g., ['Bash']). Omit for no restriction."),
         ("working_dir", "Working directory for the agent (relative to worktree root)."),
         ("permissions", "Explicit permission rules (object with 'allow' and 'deny' arrays of strings)."),
-        ("standalone_repo", "When true, creates a standalone git repo instead of a worktree for information isolation.")
+        ("standalone_repo", "When true, creates a standalone git repo instead of a worktree for information isolation."),
+        ("allowed_dirs", "Directories from the parent project to be copied into the agent's context (only for standalone_repo).")
       ]
   toolHandlerEff args = do
     let forkSession = maybe False id (ssForkSession args)
@@ -94,6 +97,7 @@ instance MCPTool SpawnSubtree where
           , AC.stcWorkingDir = ssWorkingDir args
           , AC.stcPermissions = ssPermissions args
           , AC.stcStandaloneRepo = standaloneRepo
+          , AC.stcAllowedDirs = maybe [] id (ssAllowedDirs args)
           }
     result <- AC.spawnSubtree cfg
     case result of
@@ -123,7 +127,8 @@ data SpawnLeafSubtreeArgs = SpawnLeafSubtreeArgs
     slsPermissionMode :: Maybe Text,
     slsAllowedTools :: Maybe [Text],
     slsDisallowedTools :: Maybe [Text],
-    slsStandaloneRepo :: Maybe Bool
+    slsStandaloneRepo :: Maybe Bool,
+    slsAllowedDirs :: Maybe [Text]
   }
   deriving (Show, Eq, Generic)
 
@@ -136,6 +141,7 @@ instance FromJSON SpawnLeafSubtreeArgs where
       <*> v .:? "allowed_tools"
       <*> v .:? "disallowed_tools"
       <*> v .:? "standalone_repo"
+      <*> v .:? "allowed_dirs"
 
 instance MCPTool SpawnLeafSubtree where
   type ToolArgs SpawnLeafSubtree = SpawnLeafSubtreeArgs
@@ -148,7 +154,8 @@ instance MCPTool SpawnLeafSubtree where
         ("permission_mode", "Permission mode for the agent. Omit for --dangerously-skip-permissions."),
         ("allowed_tools", "Tool patterns to allow. Omit for no restriction."),
         ("disallowed_tools", "Tool patterns to disallow. Omit for no restriction."),
-        ("standalone_repo", "When true, creates a standalone git repo instead of a worktree for information isolation.")
+        ("standalone_repo", "When true, creates a standalone git repo instead of a worktree for information isolation."),
+        ("allowed_dirs", "Directories from the parent project to be copied into the agent's context (only for standalone_repo).")
       ]
   toolHandlerEff args = do
     -- WASM32 BUG WORKAROUND: Prompt's derived Semigroup (<>) hangs when
@@ -168,6 +175,7 @@ instance MCPTool SpawnLeafSubtree where
           , AC.slcAgentType = Nothing
           , AC.slcPerms = perms
           , AC.slcStandaloneRepo = standaloneRepo
+          , AC.slcAllowedDirs = maybe [] id (slsAllowedDirs args)
           }
     result <- AC.spawnLeafSubtree cfg
     case result of

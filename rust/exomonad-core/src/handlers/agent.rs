@@ -300,6 +300,7 @@ impl AgentEffects for AgentHandler {
                 default_mode: None,
             }),
             standalone_repo: req.standalone_repo,
+            allowed_dirs: req.allowed_dirs,
         };
 
         let result = self
@@ -349,6 +350,7 @@ impl AgentEffects for AgentHandler {
                 req.disallowed_tools.clone(),
             ),
             standalone_repo: req.standalone_repo,
+            allowed_dirs: req.allowed_dirs,
         };
 
         let result = self
