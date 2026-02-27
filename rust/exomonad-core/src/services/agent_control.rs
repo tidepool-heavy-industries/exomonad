@@ -293,6 +293,8 @@ pub struct SpawnSubtreeOptions {
     pub permissions: Option<AgentPermissions>,
     /// When true, creates a standalone git repo instead of a worktree.
     pub standalone_repo: bool,
+    /// Directories from the parent project to be copied into the agent's worktree.
+    pub allowed_dirs: Vec<String>,
 }
 
 /// Options for spawning a Gemini leaf subtree agent.
@@ -311,6 +313,8 @@ pub struct SpawnLeafOptions {
     pub claude_flags: ClaudeSpawnFlags,
     /// When true, creates a standalone git repo instead of a worktree.
     pub standalone_repo: bool,
+    /// Directories from the parent project to be copied into the agent's worktree.
+    pub allowed_dirs: Vec<String>,
 }
 
 /// Result of spawning an agent.
@@ -583,6 +587,79 @@ impl AgentControlService {
             }
             None => Ok(self.project_dir.clone()),
         }
+    }
+
+    /// Copy allowed directories into the agent's context.
+    async fn copy_allowed_dirs(&self, target_dir: &Path, allowed_dirs: &[String]) -> Result<()> {
+        if allowed_dirs.is_empty() {
+            return Ok(());
+        }
+
+        let context_dir = target_dir.join(".exo/context");
+        fs::create_dir_all(&context_dir).await?;
+
+        for dir_str in allowed_dirs {
+            let dir_path = Path::new(dir_str);
+
+            // Validation: Reject absolute paths and path traversal
+            if dir_path.is_absolute() {
+                tracing::error!("allowed_dir '{}' rejected: must be relative", dir_str);
+                continue;
+            }
+            if dir_str.contains("..") {
+                tracing::error!("allowed_dir '{}' rejected: cannot contain '..'", dir_str);
+                continue;
+            }
+
+            let source_dir = self.project_dir.join(dir_path);
+
+            // Canonicalize and verify the resolved path is within project_dir
+            match source_dir.canonicalize() {
+                Ok(canonical_source) => {
+                    let canonical_project = self.project_dir.canonicalize()?;
+                    if !canonical_source.starts_with(&canonical_project) {
+                        tracing::error!("allowed_dir '{}' rejected: outside project_dir", dir_str);
+                        continue;
+                    }
+                    if !canonical_source.is_dir() {
+                        tracing::error!("allowed_dir '{}' rejected: not a directory", dir_str);
+                        continue;
+                    }
+
+                    tracing::info!("Copying allowed_dir '{}' to agent context", dir_str);
+
+                    // Recursive copy
+                    let target_subdir = context_dir.join(dir_path);
+                    self.copy_dir_recursive(&canonical_source, &target_subdir).await?;
+                }
+                Err(e) => {
+                    tracing::error!("allowed_dir '{}' rejected: {}", dir_str, e);
+                    continue;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn copy_dir_recursive(&self, src: &Path, dst: &Path) -> Result<()> {
+        let mut stack = vec![(src.to_path_buf(), dst.to_path_buf())];
+
+        while let Some((curr_src, curr_dst)) = stack.pop() {
+            fs::create_dir_all(&curr_dst).await?;
+            let mut entries = fs::read_dir(&curr_src).await?;
+            while let Some(entry) = entries.next_entry().await? {
+                let ty = entry.file_type().await?;
+                let entry_path = entry.path();
+                let dest_path = curr_dst.join(entry.file_name());
+                if ty.is_dir() {
+                    stack.push((entry_path, dest_path));
+                } else {
+                    fs::copy(&entry_path, &dest_path).await?;
+                }
+            }
+        }
+        Ok(())
     }
 
     // ========================================================================
@@ -1099,6 +1176,9 @@ impl AgentControlService {
 
             if options.standalone_repo {
                 self.init_standalone_repo(&worktree_path).await?;
+                if !options.allowed_dirs.is_empty() {
+                    self.copy_allowed_dirs(&worktree_path, &options.allowed_dirs).await?;
+                }
             } else if !is_custom_dir {
                 self.create_worktree_checked(&worktree_path, &branch_name, current_branch).await?;
             }
@@ -1154,10 +1234,14 @@ impl AgentControlService {
             }
 
             // Build task prompt with worktree context warning
-            let task_with_context = format!(
+            let mut task_with_context = format!(
                 "You are now in worktree {} on branch {}. All file paths from your inherited context are STALE — use relative paths only and re-read files before editing.\n\n{}",
                 worktree_path.display(), branch_name, options.task
             );
+
+            if options.standalone_repo && !options.allowed_dirs.is_empty() {
+                task_with_context.push_str("\n\nShared technical dependencies are available as read-only reference in `.exo/context/`. Do not modify files in this directory.");
+            }
 
             // Determine fork mode from parent_session_id
             let fork_id = options.parent_session_id.as_ref().map(|id| id.as_str());
@@ -1241,6 +1325,9 @@ impl AgentControlService {
 
             if options.standalone_repo {
                 self.init_standalone_repo(&worktree_path).await?;
+                if !options.allowed_dirs.is_empty() {
+                    self.copy_allowed_dirs(&worktree_path, &options.allowed_dirs).await?;
+                }
             } else {
                 self.create_worktree_checked(&worktree_path, &branch_name, &current_branch).await?;
             }
@@ -1259,13 +1346,18 @@ impl AgentControlService {
                 settings_path.to_string_lossy().to_string(),
             );
 
+            let mut task = options.task.clone();
+            if options.standalone_repo && !options.allowed_dirs.is_empty() {
+                task.push_str("\n\nShared technical dependencies are available as read-only reference in `.exo/context/`. Do not modify files in this directory.");
+            }
+
             // Open Zellij TAB (not pane)
             // Task already includes leaf completion protocol — rendered by Haskell Prompt builder.
             self.new_zellij_tab(
                 &display_name,
                 &worktree_path,
                 AgentType::Gemini,
-                Some(&options.task),
+                Some(&task),
                 env_vars,
             )
             .await?;
@@ -2490,6 +2582,32 @@ mod tests {
             command_hook.get("args").is_none(),
             "args should not be present when using command string"
         );
+    }
+
+    #[tokio::test]
+    async fn test_copy_allowed_dirs_validation() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let project_dir = temp_dir.path().to_path_buf();
+
+        // Setup source dirs
+        let shared_context = project_dir.join("shared-context");
+        fs::create_dir_all(&shared_context).await.unwrap();
+        fs::write(shared_context.join("ref.txt"), "context data").await.unwrap();
+
+        let agent_wt = project_dir.join("agent-wt");
+        fs::create_dir_all(&agent_wt).await.unwrap();
+
+        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(project_dir.clone()));
+        let service = AgentControlService::new(project_dir.clone(), None, git_wt);
+
+        // Test valid copy
+        service.copy_allowed_dirs(&agent_wt, &["shared-context".to_string()]).await.unwrap();
+        assert!(agent_wt.join(".exo/context/shared-context/ref.txt").exists());
+
+        // Test invalid paths (should skip but not fail)
+        service.copy_allowed_dirs(&agent_wt, &["/absolute".to_string(), "../outside".to_string()]).await.unwrap();
+        assert!(!agent_wt.join(".exo/context/absolute").exists());
+        assert!(!agent_wt.join(".exo/context/outside").exists());
     }
 }
 

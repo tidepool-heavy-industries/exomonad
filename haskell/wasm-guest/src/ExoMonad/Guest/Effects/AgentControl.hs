@@ -124,7 +124,8 @@ data SpawnSubtreeConfig = SpawnSubtreeConfig
     stcPerms :: PermissionFlags,
     stcWorkingDir :: Maybe Text,
     stcPermissions :: Maybe ClaudePermissions,
-    stcStandaloneRepo :: Bool
+    stcStandaloneRepo :: Bool,
+    stcAllowedDirs :: [Text]
   }
   deriving (Show, Eq, Generic)
 
@@ -135,7 +136,8 @@ data SpawnLeafSubtreeConfig = SpawnLeafSubtreeConfig
     slcRole :: Maybe Text,
     slcAgentType :: Maybe AgentType,
     slcPerms :: PermissionFlags,
-    slcStandaloneRepo :: Bool
+    slcStandaloneRepo :: Bool,
+    slcAllowedDirs :: [Text]
   }
   deriving (Show, Eq, Generic)
 
@@ -195,7 +197,8 @@ runAgentControlSuspend = interpret $ \case
               PA.spawnSubtreeRequestDisallowedTools = V.fromList (map fromText (disallowedTools (stcPerms cfg))),
               PA.spawnSubtreeRequestWorkingDir = fromText (fromMaybe "" (stcWorkingDir cfg)),
               PA.spawnSubtreeRequestPermissions = fmap permissionsToProto (stcPermissions cfg),
-              PA.spawnSubtreeRequestStandaloneRepo = stcStandaloneRepo cfg
+              PA.spawnSubtreeRequestStandaloneRepo = stcStandaloneRepo cfg,
+              PA.spawnSubtreeRequestAllowedDirs = V.fromList (map fromText (stcAllowedDirs cfg))
             }
     result <- suspendEffect @Agent.AgentSpawnSubtree req
     pure $ case result of
@@ -213,7 +216,8 @@ runAgentControlSuspend = interpret $ \case
               PA.spawnLeafSubtreeRequestPermissionMode = fromText (fromMaybe "" (permMode (slcPerms cfg))),
               PA.spawnLeafSubtreeRequestAllowedTools = V.fromList (map fromText (allowedTools (slcPerms cfg))),
               PA.spawnLeafSubtreeRequestDisallowedTools = V.fromList (map fromText (disallowedTools (slcPerms cfg))),
-              PA.spawnLeafSubtreeRequestStandaloneRepo = slcStandaloneRepo cfg
+              PA.spawnLeafSubtreeRequestStandaloneRepo = slcStandaloneRepo cfg,
+              PA.spawnLeafSubtreeRequestAllowedDirs = V.fromList (map fromText (slcAllowedDirs cfg))
             }
     result <- suspendEffect @Agent.AgentSpawnLeafSubtree req
     pure $ case result of

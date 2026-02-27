@@ -282,6 +282,8 @@ message SpawnSubtreeRequest {
   // When true, creates a standalone git repo instead of a worktree.
   // The agent's .git boundary prevents traversal to the parent repository.
   bool standalone_repo = 14;
+  // Directories from the parent project to be copied into the agent's worktree.
+  repeated string allowed_dirs = 15;
 }
 
 message SpawnSubtreeResponse {
@@ -309,6 +311,8 @@ message SpawnLeafSubtreeRequest {
   reserved "secure_mode", "allowed_read_paths";
   // When true, creates a standalone git repo instead of a worktree.
   bool standalone_repo = 10;
+  // Directories from the parent project to be copied into the agent's worktree.
+  repeated string allowed_dirs = 11;
 }
 
 message SpawnLeafSubtreeResponse {
