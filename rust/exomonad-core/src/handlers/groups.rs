@@ -12,6 +12,7 @@ use crate::services::git::GitService;
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::github::GitHubService;
 use crate::services::team_registry::TeamRegistry;
+use crate::services::zellij_ipc::ZellijIpc;
 
 use super::{
     AgentHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler, GitHandler,
@@ -89,9 +90,11 @@ pub fn orchestration_handlers(
         event_handler = event_handler.with_event_log(log.clone());
     }
 
+    let zellij_ipc = zellij_session.map(|s| ZellijIpc::new(&s));
+
     vec![
         Box::new(agent_handler),
-        Box::new(PopupHandler::new(zellij_session)),
+        Box::new(PopupHandler::new(zellij_ipc)),
         Box::new(event_handler),
         Box::new(SessionHandler::new(claude_session_registry).with_team_registry(team_registry)),
     ]

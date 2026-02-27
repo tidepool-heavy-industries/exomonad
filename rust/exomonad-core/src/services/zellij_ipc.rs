@@ -100,6 +100,7 @@ impl ZellijIpc {
         loop {
             match receiver.recv() {
                 Some((ServerToClientMsg::UnblockInputThread, _ctx)) => break,
+                Some((ServerToClientMsg::UnblockCliPipeInput(_), _ctx)) => break,
                 Some((ServerToClientMsg::Exit(_), _ctx)) => break,
                 Some((msg, _ctx)) => responses.push(msg),
                 None => {
@@ -137,6 +138,38 @@ impl ZellijIpc {
             cwd: None,
             pane_title: None,
         })
+    }
+
+    /// Open a popup via pipe and read the response.
+    ///
+    /// Synchronous, waits until the popup plugin closes.
+    pub fn popup_pipe(&self, plugin: &str, name: &str, payload: &str) -> Result<String> {
+        info!("Showing popup via ZellijIpc pipe: {}", name);
+
+        let responses = self.send_action_with_response(Action::CliPipe {
+            pipe_id: uuid::Uuid::new_v4().to_string(),
+            name: Some(name.to_string()),
+            payload: Some(payload.to_string()),
+            plugin: Some(plugin.to_string()),
+            args: None,
+            configuration: None,
+            launch_new: true,
+            skip_cache: false,
+            floating: Some(false),
+            in_place: None,
+            cwd: None,
+            pane_title: Some("Popup".to_string()),
+        })?;
+
+        for msg in responses {
+            if let ServerToClientMsg::CliPipeOutput(_name, output) = msg {
+                info!("Popup response received: {} bytes", output.len());
+                return Ok(output);
+            }
+        }
+        let err = anyhow::anyhow!("No pipe output received from popup plugin");
+        tracing::error!("Popup pipe failed: {}", err);
+        Err(err)
     }
 
     /// Create a new tab from a KDL layout string.
