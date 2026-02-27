@@ -1043,7 +1043,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                                 self.status_state = PluginState::Idle;
                                 self.status_message = "Ready.".to_string();
                                 should_render = true;
-                                hide_self();
+                                close_self();
                             }
                         },
                         Err(e) => {
@@ -1128,7 +1128,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                         self.status_state = PluginState::Idle;
                         self.status_message = "Ready.".to_string();
                         should_render = true;
-                        hide_self();
+                        close_self();
                     }
                 }
 
@@ -1165,7 +1165,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                         self.status_state = PluginState::Idle;
                         self.status_message = "Ready.".to_string();
                         should_render = true;
-                        hide_self();
+                        close_self();
                     }
                 }
             }
