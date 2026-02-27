@@ -13,14 +13,6 @@ use crate::layout::resolve_plugin_path;
 use crate::ui_protocol::transport;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::io::Read;
-use std::process::{Command, Stdio};
-use std::sync::mpsc;
-use std::time::Duration;
-
-/// Timeout for waiting for popup response (5 minutes).
-/// Reduced from 30min — popup blocks the WASM plugin lock for the entire duration.
-const POPUP_TIMEOUT: Duration = Duration::from_secs(300);
 
 // ============================================================================
 // Input/Output types
@@ -162,95 +154,30 @@ impl PopupService {
             }
         };
 
-        let cmd_args = vec![
-            "--session".to_string(),
-            session.to_string(),
-            "pipe".to_string(),
-            "--plugin".to_string(),
-            plugin_path.clone(),
-            "--name".to_string(),
-            transport::POPUP_PIPE.to_string(),
-            "--".to_string(),
-            payload.clone(),
-        ];
-        tracing::info!(request_id = %request_id, "[Popup] Spawning: zellij {}", cmd_args.join(" "));
+        let ipc = super::zellij_ipc::ZellijIpc::new(session);
+        tracing::info!(request_id = %request_id, "[Popup] Blocking on zellij-ipc pipe output...");
 
+        let response_str = ipc.pipe_to_plugin_blocking(
+            &plugin_path,
+            transport::POPUP_PIPE,
+            &payload,
+            false, // floating: false = tiled pane
+            Some("Popup"),
+        ).context("Failed to receive popup response via Zellij IPC")?;
+
+        /*
+        // NOTE: Previous subprocess-based fallback (kept as reference)
+        // This approach always created floating panes and had higher overhead.
         let mut child = Command::new("zellij")
-            .arg("--session")
-            .arg(session)
+            .arg("--session").arg(session)
             .arg("pipe")
-            .arg("--plugin")
-            .arg(&plugin_path)
-            .arg("--name")
-            .arg(transport::POPUP_PIPE)
-            .arg("--")
-            .arg(&payload)
-            .stdin(Stdio::null())
+            .arg("--plugin").arg(&plugin_path)
+            .arg("--name").arg(transport::POPUP_PIPE)
+            .arg("--").arg(&payload)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context("Failed to spawn zellij pipe command")?;
-
-        let child_id = child.id();
-        tracing::info!(request_id = %request_id, pid = child_id, "[Popup] zellij pipe spawned successfully");
-
-        let stdout = child.stdout.take().context("stdout was not piped")?;
-        let mut stderr = child.stderr.take().context("stderr was not piped")?;
-
-        // Read stderr in background (diagnostic only)
-        let req_id_stderr = request_id.clone();
-        let stderr_handle = std::thread::spawn(move || {
-            let mut buffer = Vec::new();
-            let _ = stderr.read_to_end(&mut buffer);
-            if !buffer.is_empty() {
-                tracing::info!(request_id = %req_id_stderr, stderr = %String::from_utf8_lossy(&buffer), "[Popup] zellij pipe stderr");
-            }
-        });
-
-        // Read exactly one line from stdout. The plugin sends a single response
-        // line via cli_pipe_output, so we don't need to wait for process exit.
-        let (tx, rx) = mpsc::channel();
-        let req_id_stdout = request_id.clone();
-        std::thread::spawn(move || {
-            use std::io::BufRead;
-            let mut reader = std::io::BufReader::new(stdout);
-            let mut line = String::new();
-            let result = reader.read_line(&mut line);
-            tracing::info!(request_id = %req_id_stdout, bytes = line.len(), ok = result.is_ok(), "[Popup] stdout line read complete");
-            let _ = tx.send(result.map(|_| line));
-        });
-
-        tracing::info!(request_id = %request_id, timeout_secs = POPUP_TIMEOUT.as_secs(), "[Popup] Waiting for response...");
-
-        // Wait for the single response line with timeout
-        let response_str = match rx.recv_timeout(POPUP_TIMEOUT) {
-            Ok(Ok(line)) => {
-                tracing::info!(request_id = %request_id, bytes = line.len(), "[Popup] Got response");
-                // Kill the pipe process — we have what we need
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stderr_handle.join();
-                line
-            }
-            Ok(Err(e)) => {
-                tracing::error!(request_id = %request_id, err = %e, "[Popup] stdout read failed");
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(anyhow::Error::from(e).context("Failed to read popup response"));
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                tracing::error!(request_id = %request_id, timeout_secs = POPUP_TIMEOUT.as_secs(), pid = child_id, "[Popup] TIMED OUT — killing zellij pipe process");
-                let _ = child.kill();
-                let _ = child.wait();
-                anyhow::bail!("Popup timed out after {} seconds", POPUP_TIMEOUT.as_secs());
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                tracing::error!(request_id = %request_id, "[Popup] Channel disconnected — stdout thread died");
-                let _ = child.kill();
-                let _ = child.wait();
-                anyhow::bail!("Popup response channel disconnected unexpectedly");
-            }
-        };
+            .spawn()?;
+        // ... read stdout ...
+        */
 
         let response_str = response_str.trim();
 

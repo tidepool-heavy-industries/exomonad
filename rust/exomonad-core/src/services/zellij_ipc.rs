@@ -139,6 +139,81 @@ impl ZellijIpc {
         })
     }
 
+    /// Send a CliPipe action and block until the plugin responds via cli_pipe_output.
+    /// Returns the response string from the plugin.
+    pub fn pipe_to_plugin_blocking(
+        &self,
+        plugin: &str,
+        name: &str,
+        payload: &str,
+        floating: bool,
+        pane_title: Option<&str>,
+    ) -> Result<String> {
+        let pipe_id = uuid::Uuid::new_v4().to_string();
+        debug!(
+            plugin = %plugin,
+            name = %name,
+            pipe_id = %pipe_id,
+            floating = %floating,
+            "[ZellijIpc] pipe_to_plugin_blocking"
+        );
+
+        let action = Action::CliPipe {
+            pipe_id: pipe_id.clone(),
+            name: Some(name.to_string()),
+            payload: Some(payload.to_string()),
+            plugin: Some(plugin.to_string()),
+            args: None,
+            configuration: None,
+            launch_new: true,
+            skip_cache: false,
+            floating: Some(floating),
+            in_place: None,
+            cwd: None,
+            pane_title: pane_title.map(|s| s.to_string()),
+        };
+
+        let stream = LocalSocketStream::connect(self.socket_path.as_path()).with_context(|| {
+            format!(
+                "Failed to connect to Zellij socket at {}",
+                self.socket_path.display()
+            )
+        })?;
+
+        let msg = ClientToServerMsg::Action(action, None, None);
+        let mut sender = IpcSenderWithContext::new(stream);
+        sender
+            .send(msg)
+            .context("Failed to send action to Zellij daemon")?;
+
+        let mut receiver = sender.get_receiver::<ServerToClientMsg>();
+
+        loop {
+            match receiver.recv() {
+                Some((ServerToClientMsg::CliPipeOutput(id, output), _ctx)) => {
+                    if id == pipe_id {
+                        debug!(pipe_id = %id, "[ZellijIpc] Received CliPipeOutput");
+                        return Ok(output);
+                    }
+                }
+                Some((ServerToClientMsg::UnblockInputThread, _ctx)) => {
+                    warn!("[ZellijIpc] Received UnblockInputThread before CliPipeOutput");
+                    break;
+                }
+                Some((ServerToClientMsg::Exit(_), _ctx)) => break,
+                Some((_, _ctx)) => {
+                    // Ignore other messages
+                }
+                None => {
+                    warn!("[ZellijIpc] Connection closed while reading response");
+                    break;
+                }
+            }
+        }
+
+        anyhow::bail!("Zellij connection closed before receiving pipe output")
+    }
+
     /// Create a new tab from a KDL layout string.
     ///
     /// Parses the KDL into zellij's internal layout types, then sends
