@@ -208,7 +208,7 @@ This is **native Claude Code Teams integration**. Messages from child agents arr
 
 ### Interactive UI
 
-- **`popup`** — **Disabled.** Blocks WASM plugin lock for entire duration, preventing all other MCP calls. Infrastructure intact (simple forms, multi-pane wizards), pending suspend/resume fix.
+- **`popup`** — Show interactive forms in a tiled split pane via ZellijIpc pipe. Supports simple forms and multi-pane wizards.
 
 ### Built Infrastructure
 
@@ -293,7 +293,7 @@ All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/To
 | `spawn_workers` | tl | Spawn Gemini agents as Zellij panes (ephemeral, no worktree) |
 | `file_pr` | tl, dev | Create/update PR (auto-detects base branch from naming) |
 | `merge_pr` | tl | Merge child PR (gh merge + git fetch) |
-| `popup` | ~~tl~~ | **Disabled.** Blocks WASM plugin lock for entire duration. Suspend/resume fix pending. |
+| `popup` | tl | Show interactive forms in a tiled split pane via ZellijIpc pipe |
 | `notify_parent` | all | Signal completion to parent. Auto-routed via Teams inbox (primary) or Zellij STDIN (fallback) |
 
 **Note**: Git operations (`git status`, `git log`, etc.) and GitHub operations (`gh pr list`, etc.) use the Bash tool with `git` and `gh` commands, not MCP tools.

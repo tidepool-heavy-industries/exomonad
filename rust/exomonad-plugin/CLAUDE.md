@@ -230,17 +230,16 @@ The 100ms delay ensures the OS kernel flushes the text write before the CR byte 
 ```
 Rust PopupService                              Zellij Plugin
        │                                              │
-       ├─ zellij pipe --plugin file:X.wasm ──────────►│
-       │   --name exomonad:popup -- {JSON payload}     │
+       ├─ Action::CliPipe { floating: false, ... } ───►│
+       │   via ZellijIpc (direct Unix socket)          │
        │                                              │
-       │   (CLI process blocks here)                  ├─ block_cli_pipe_input(&pipe_id)
-       │                                              ├─ show_self(true)
-       │                                              ├─ (user interacts)
+       │   (IPC reads response loop)                  ├─ block_cli_pipe_input(&pipe_id)
+       │                                              ├─ (tiled pane appears, user interacts)
        │                                              │
        │◄────────── cli_pipe_output(&pipe_id, resp) ──┤
-       │            unblock_cli_pipe_input(&pipe_id)   │
-       │                                              ├─ hide_self()
-       ├─ reads response from stdout                  │
+       │◄────────── UnblockCliPipeInput(pipe_id) ─────┤
+       │                                              ├─ close_self()
+       ├─ CliPipeOutput parsed from IPC responses     │
 ```
 
 Requires permissions: `ReadCliPipes`, `ChangeApplicationState`. Both are requested in `load()`. On first launch after a fresh install, the user must accept the permission prompt in the plugin pane.

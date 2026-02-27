@@ -1,9 +1,13 @@
 //! Popup service for WASM host functions.
 //!
-//! Shows interactive popup forms and wizards via Zellij IPC pipes and returns user response.
+//! Shows interactive popup forms and wizards via direct Zellij IPC and returns user response.
 //!
-//! Replaces the old subprocess-based implementation with direct Zellij IPC.
-//! The transport layer is now handled by `ZellijIpc::popup_pipe()`.
+//! Uses `ZellijIpc::pipe_to_plugin_blocking` (direct Unix socket, no subprocess):
+//! 1. Sends `Action::CliPipe` with `floating: false` for a tiled pane
+//! 2. Plugin receives via `pipe()` with `PipeSource::Cli(pipe_id)` and payload
+//! 3. Plugin renders form UI in a tiled pane
+//! 4. On submit, plugin calls `cli_pipe_output(&pipe_id, "{JSON response}")`
+//! 5. IPC reads `ServerToClientMsg::CliPipeOutput` from the socket
 
 use crate::services::zellij_ipc::ZellijIpc;
 use anyhow::Result;
@@ -57,7 +61,8 @@ impl PopupService {
     ///
     /// Synchronous, blocks until the popup plugin sends a response via the pipe.
     pub fn show_popup(&self, payload: &str) -> Result<String> {
-        self.ipc.popup_pipe(&self.plugin_path, "exomonad-popup", payload)
+        self.ipc
+            .pipe_to_plugin_blocking(&self.plugin_path, "exomonad-popup", payload, false, Some("Popup"))
     }
 }
 
