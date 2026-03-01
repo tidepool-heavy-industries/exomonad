@@ -18,6 +18,7 @@ pub mod inbox_watcher;
 pub mod local;
 pub mod log;
 pub mod merge_pr;
+pub mod mutex_registry;
 pub mod popup;
 pub mod repo;
 pub mod secrets;
@@ -36,6 +37,7 @@ pub use self::event_log::EventLog;
 pub use self::event_queue::EventQueue;
 pub use self::filesystem::FileSystemService;
 pub use self::git_worktree::GitWorktreeService;
+pub use self::mutex_registry::MutexRegistry;
 pub use self::secrets::Secrets;
 use thiserror::Error;
 

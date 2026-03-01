@@ -242,14 +242,9 @@ async fn handle_hook_inner(
     let runtime = params.runtime;
     let role = params
         .role
-        .as_deref()
-        .and_then(|r| match r {
-            "tl" | "TL" => Some(exomonad_core::Role::TL),
-            "dev" | "Dev" => Some(exomonad_core::Role::Dev),
-            "worker" | "Worker" => Some(exomonad_core::Role::Worker),
-            _ => None,
-        })
-        .unwrap_or(state.default_role);
+        .as_ref()
+        .map(|r| exomonad_core::Role::from(r.clone()))
+        .unwrap_or(state.default_role.clone());
 
     let trace_id = uuid::Uuid::new_v4().simple().to_string();
     let start_ns = std::time::SystemTime::now()
@@ -1007,15 +1002,15 @@ async fn main() -> Result<()> {
             let role_name = config.role.to_string();
             let wasm_dir = config.wasm_dir.clone();
 
-            // Prefer unified WASM (contains all roles, role selection per-call).
+            // Prefer devswarm WASM (contains all roles, role selection per-call).
             // Fall back to per-role WASM for backwards compatibility.
-            let unified_path = wasm_dir.join("wasm-guest-unified.wasm");
-            let wasm_path = if unified_path.exists() {
-                info!(dir = %wasm_dir.display(), "Using unified WASM (all roles in one module)");
-                unified_path
+            let devswarm_path = wasm_dir.join("wasm-guest-devswarm.wasm");
+            let wasm_path = if devswarm_path.exists() {
+                info!(dir = %wasm_dir.display(), "Using devswarm WASM (all roles in one module)");
+                devswarm_path
             } else {
                 let fallback = wasm_dir.join(format!("wasm-guest-{}.wasm", role_name));
-                info!(role = %role_name, dir = %wasm_dir.display(), "Unified WASM not found, falling back to per-role WASM");
+                info!(role = %role_name, dir = %wasm_dir.display(), "Devswarm WASM not found, falling back to per-role WASM");
                 fallback
             };
 
@@ -1073,6 +1068,9 @@ async fn main() -> Result<()> {
             let agent_control = Arc::new(agent_control);
 
             let event_queue = Arc::new(exomonad_core::services::event_queue::EventQueue::new());
+            let mutex_registry = Arc::new(exomonad_core::services::MutexRegistry::new());
+            mutex_registry.spawn_expiry_task();
+
             let claude_session_registry = Arc::new(
                 exomonad_core::services::claude_session_registry::ClaudeSessionRegistry::new(),
             );
@@ -1097,6 +1095,7 @@ async fn main() -> Result<()> {
                     "popup".to_string(),
                     "events".to_string(),
                     "session".to_string(),
+                    "coordination".to_string(),
                 ]);
             // Create structured event log (JSONL)
             let event_log = match exomonad_core::services::EventLog::open(
@@ -1128,6 +1127,7 @@ async fn main() -> Result<()> {
                 team_registry.clone(),
                 acp_registry.clone(),
                 event_log.clone(),
+                mutex_registry,
             );
             builder = builder.with_handlers(orch_handlers);
             let rt = builder.build().await.context("Failed to build runtime")?;

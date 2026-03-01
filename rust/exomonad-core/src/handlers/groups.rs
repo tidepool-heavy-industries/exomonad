@@ -11,12 +11,13 @@ use crate::services::filesystem::FileSystemService;
 use crate::services::git::GitService;
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::github::GitHubService;
+use crate::services::mutex_registry::MutexRegistry;
 use crate::services::team_registry::TeamRegistry;
 use crate::services::zellij_ipc::ZellijIpc;
 
 use super::{
-    AgentHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler, GitHandler,
-    GitHubHandler, KvHandler, LogHandler, MergePRHandler, PopupHandler, SessionHandler,
+    AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
+    GitHandler, GitHubHandler, KvHandler, LogHandler, MergePRHandler, PopupHandler, SessionHandler,
 };
 
 /// Core handlers every consumer needs: logging, key-value store, filesystem.
@@ -75,6 +76,7 @@ pub fn orchestration_handlers(
     team_registry: Arc<TeamRegistry>,
     acp_registry: Arc<AcpRegistry>,
     event_log: Option<Arc<EventLog>>,
+    mutex_registry: Arc<MutexRegistry>,
 ) -> Vec<Box<dyn EffectHandler>> {
     let mut agent_handler = AgentHandler::new(agent_control)
         .with_claude_session_registry(claude_session_registry.clone())
@@ -97,6 +99,7 @@ pub fn orchestration_handlers(
         Box::new(PopupHandler::new(zellij_ipc)),
         Box::new(event_handler),
         Box::new(SessionHandler::new(claude_session_registry).with_team_registry(team_registry)),
+        Box::new(CoordinationHandler::new(mutex_registry)),
     ]
 }
 
