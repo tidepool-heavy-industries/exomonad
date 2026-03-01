@@ -76,6 +76,12 @@ impl MutexRegistry {
             }
         }
 
+        // Capture current holder intent for timeout diagnostics
+        let current_holder_intent = {
+            let locks = self.locks.lock().await;
+            locks.get(&resource).map(|l| l.intent.clone()).unwrap_or_default()
+        };
+
         // Slow path: register waiter
         let (tx, rx) = oneshot::channel();
         {
@@ -95,16 +101,16 @@ impl MutexRegistry {
                 warn!(resource = %resource, agent = %agent, "Waiter channel closed");
                 AcquireMutexResponse {
                     acquired: false,
-                    lock_id: "".to_string(),
-                    holder_intent: "".to_string(),
+                    lock_id: String::new(),
+                    holder_intent: current_holder_intent,
                 }
             }
             Err(_) => {
                 info!(resource = %resource, agent = %agent, "Timeout waiting for mutex");
                 AcquireMutexResponse {
                     acquired: false,
-                    lock_id: "".to_string(),
-                    holder_intent: "".to_string(),
+                    lock_id: String::new(),
+                    holder_intent: current_holder_intent,
                 }
             }
         }
@@ -116,7 +122,7 @@ impl MutexRegistry {
             if lock.lock_id == lock_id {
                 locks.remove(&resource);
                 info!(resource = %resource, lock_id = %lock_id, "Mutex released");
-                
+
                 // Drop locks guard before granting next waiter to avoid deadlock
                 drop(locks);
                 self.grant_next_waiter(resource).await;
@@ -144,13 +150,13 @@ impl MutexRegistry {
                         expires_at: now + waiter.estimated_time,
                     };
                     locks.insert(resource.clone(), lock);
-                    
+
                     let resp = AcquireMutexResponse {
                         acquired: true,
                         lock_id: lock_id.clone(),
                         holder_intent: waiter.intent.clone(),
                     };
-                    
+
                     if waiter.tx.send(resp).is_ok() {
                         info!(resource = %resource, agent = %waiter.agent, lock_id = %lock_id, "Mutex granted to waiter");
                         return; // Successfully granted

@@ -6,13 +6,13 @@ Unified sidecar binary: Rust host with Haskell WASM plugin.
 
 **All logic is in Haskell WASM. Rust handles I/O only.**
 
-WASM is loaded from `.exo/wasm/wasm-guest-unified.wasm` at runtime by `exomonad serve`. The `exomonad hook` command is a thin HTTP client that forwards hook events to the running server — it does NOT load WASM itself.
+WASM is loaded from `.exo/wasm/wasm-guest-devswarm.wasm` at runtime by `exomonad serve`. The `exomonad hook` command is a thin HTTP client that forwards hook events to the running server — it does NOT load WASM itself.
 
 ```
 # Hook mode (thin HTTP client → server)
 Claude Code → exomonad hook → HTTP POST localhost:{port}/hook → server WASM → HookEnvelope → stdout
 
-# HTTP mode (multi-agent, unified WASM)
+# HTTP mode (multi-agent, devswarm WASM)
 N agents → exomonad serve → TCP (default: localhost:7432) → Unified WASM (handles all roles) → effects → I/O
 ```
 
@@ -53,7 +53,7 @@ wasm_dir = ".exo/wasm"    # optional: override WASM location (default: ~/.exo/wa
 
 **WASM resolution:** `wasm_dir` in config > `~/.exo/wasm/` (global default, installed by `just install-all`)
 
-To update WASM, run `just wasm-all` or `exomonad recompile --role unified`.
+To update WASM, run `just wasm-all` or `exomonad recompile --role devswarm`.
 
 ## MCP Server
 
@@ -109,6 +109,7 @@ All effects flow through a single `yield_effect` host function using protobuf bi
 | `merge_pr.*` | MergePRHandler | gh pr merge + git fetch |
 | `kv.*` | KvHandler | Key-value store (.exo/kv/) |
 | `session.*` | SessionHandler | Claude session registry |
+| `coordination.*` | CoordinationHandler | In-memory mutex (FIFO wait queue, TTL expiry) |
 
 ## Building
 
@@ -119,7 +120,7 @@ WASM must be built before running hooks or serve mode:
 just install-all-dev
 
 # Or manually:
-just wasm-all                    # Build unified WASM plugin
+just wasm-all                    # Build devswarm WASM plugin
 cargo build -p exomonad          # Build Rust binary
 ```
 

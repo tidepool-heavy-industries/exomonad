@@ -116,24 +116,24 @@ cargo build -p exomonad
 
 # Hot reload workflow (HTTP serve mode)
 exomonad serve                    # Start server
-# ... edit .exo/roles/unified/TLRole.hs ...
-exomonad recompile --role unified # Rebuild WASM via nix, copy to .exo/wasm/
+# ... edit .exo/roles/devswarm/TLRole.hs ...
+exomonad recompile --role devswarm # Rebuild WASM via nix, copy to .exo/wasm/
 # Next tool call picks up new WASM automatically
 ```
 
 **What `just install-all-dev` does:**
-1. Builds unified WASM plugin via nix
+1. Builds devswarm WASM plugin via nix
 2. Builds exomonad Rust binary (debug mode)
 3. Copies binary to `~/.cargo/bin/exomonad`
 4. Builds and installs Zellij plugins
 
 **WASM build pipeline:**
-1. Role configs in `.exo/roles/unified/` define tool composition per role (`TLRole.hs`, `DevRole.hs`)
+1. Role configs in `.exo/roles/devswarm/` define tool composition per role (`TLRole.hs`, `DevRole.hs`)
 2. `AllRoles.hs` registers all roles; `Main.hs` provides FFI exports
-3. `cabal.project.wasm` lists the unified package alongside `wasm-guest` SDK
+3. `cabal.project.wasm` lists the devswarm package alongside `wasm-guest` SDK
 4. `just wasm-all` builds via `nix develop .#wasm -c wasm32-wasi-cabal build ...`
-5. Compiled WASM copied to `.exo/wasm/wasm-guest-unified.wasm`
-6. `exomonad serve` loads unified WASM from `.exo/wasm/` at runtime (hot reload via mtime check)
+5. Compiled WASM copied to `.exo/wasm/wasm-guest-devswarm.wasm`
+6. `exomonad serve` loads devswarm WASM from `.exo/wasm/` at runtime (hot reload via mtime check)
 
 ### Configuration
 
@@ -219,6 +219,7 @@ This is **native Claude Code Teams integration**. Messages from child agents arr
 | **Event router** (Zellij STDIN fallback) | Built. Fallback path: `notify_parent` → `inject_input` into parent pane via Zellij plugin pipe. |
 | **GitHub poller** (PR status → events) | Built. Background service polls PR/CI status and injects notifications into agent panes. |
 | **Event log** (JSONL structured events) | Built. `.exo/events.jsonl` — append-only JSONL. Query with `duckdb -c "SELECT * FROM read_json_auto('.exo/events.jsonl')"` or `jq`. Events: `agent.spawned`, `agent.completed`, `pr.filed`, `pr.merged`, `copilot.review`, `ci.status_changed`. |
+| **Coordination mutexes** | Built. In-memory `MutexRegistry` with FIFO wait queues, TTL auto-expiry, idempotent acquire. Effect-only (`coordination.acquire_mutex`, `coordination.release_mutex`) — no MCP tool exposed. |
 
 ---
 

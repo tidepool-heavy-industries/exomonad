@@ -33,13 +33,13 @@ impl CoordinationEffects for CoordinationHandler {
         let agent = ctx.agent_name.to_string();
         let resource = req.resource.clone();
         let intent = req.intent.clone();
-        
+
         let estimated_time_secs = if req.estimated_time_secs == 0 {
             300
         } else {
             req.estimated_time_secs as u64
         };
-        
+
         let timeout_secs = if req.timeout_secs == 0 {
             300
         } else {

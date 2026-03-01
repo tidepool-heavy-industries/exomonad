@@ -1,0 +1,29 @@
+syntax = "proto3";
+package exomonad.effects.coordination;
+
+message AcquireMutexRequest {
+  string resource = 1;
+  string intent = 2;
+  int32 estimated_time_secs = 3;
+  int32 timeout_secs = 4;
+}
+
+message AcquireMutexResponse {
+  bool acquired = 1;
+  string lock_id = 2;
+  string holder_intent = 3;
+}
+
+message ReleaseMutexRequest {
+  string resource = 1;
+  string lock_id = 2;
+}
+
+message ReleaseMutexResponse {
+  bool released = 1;
+}
+
+service CoordinationEffects {
+  rpc AcquireMutex(AcquireMutexRequest) returns (AcquireMutexResponse);
+  rpc ReleaseMutex(ReleaseMutexRequest) returns (ReleaseMutexResponse);
+}

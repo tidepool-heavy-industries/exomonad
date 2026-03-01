@@ -18,6 +18,7 @@ haskell/proto/
     │   └── Popup.hs        # Generated from popup.proto
     └── Effects/
         ├── Agent.hs         # Generated from effects/agent.proto
+        ├── Coordination.hs  # Generated from effects/coordination.proto
         ├── Copilot.hs       # Generated from effects/copilot.proto
         ├── EffectError.hs   # Generated from effects/effect_error.proto
         ├── Envelope.hs      # Generated from effects/envelope.proto

@@ -2,6 +2,23 @@
 
 Documentation for the various effect handlers in `exomonad-core`.
 
+## CoordinationHandler (`handlers/coordination.rs`)
+
+Handles effects in the `coordination.*` namespace, providing in-memory mutual exclusion for parallel agents accessing shared resources.
+
+### Capabilities
+
+- **`acquire_mutex`**: Acquire a named mutex. Idempotent (same agent re-acquiring returns existing lock_id). FIFO wait queue for contention. TTL auto-expiry via background task. Defaults `estimated_time_secs` and `timeout_secs` to 300 if 0.
+- **`release_mutex`**: Release a mutex by resource name and lock_id. Validates lock_id to prevent cross-agent release. Grants next waiter in FIFO order.
+
+### Design
+
+- `MutexRegistry` service (`services/mutex_registry.rs`) holds all state
+- `LockState`: lock_id (UUID), holder_agent, intent, acquired_at, expires_at
+- `Waiter`: agent, intent, estimated_time, oneshot::Sender for wake-up
+- Background expiry task checks every 1s for expired locks
+- Effect-only — no MCP tool exposed. Haskell tool handlers use it internally.
+
 ## EventEffects Handler (`handlers/events.rs`)
 
 Handles effects in the `events.*` namespace, enabling synchronization between agents and the orchestration layer.

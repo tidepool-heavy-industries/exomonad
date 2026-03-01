@@ -140,7 +140,7 @@ exomonad serve
 echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 ```
 
-**Note:** WASM is loaded from `.exo/wasm/` at runtime. To update WASM, run `just wasm-all` or `exomonad recompile --role unified`.
+**Note:** WASM is loaded from `.exo/wasm/` at runtime. To update WASM, run `just wasm-all` or `exomonad recompile --role devswarm`.
 
 ### Environment Variables
 | Variable | Used By | Purpose |
@@ -221,6 +221,7 @@ Proto field helpers in `handlers/mod.rs`: `non_empty(String) → Option<String>`
 | `session.*` | SessionHandler | register_claude_id, register_team |
 | `events.*` | EventHandler | wait_for_event (internal), notify_event, notify_parent |
 | `merge_pr.*` | MergePRHandler | merge_pr (gh pr merge + git fetch) |
+| `coordination.*` | CoordinationHandler | acquire_mutex, release_mutex (in-memory mutex for parallel agents) |
 
 **Zellij Integration (Direct IPC):**
 - All Zellij communication uses direct Unix Domain Socket writes via `ZellijIpc` (`services/zellij_ipc.rs`)
@@ -268,7 +269,7 @@ cargo test -p exomonad-proto            # Wire format compatibility tests
 | Direct Zellij IPC | Unix socket writes instead of forking 19MB `zellij` binary per call |
 | Extism runtime | Mature WASM runtime with host function support |
 | KDL layouts | Declarative tab creation with proper environment inheritance |
-| File-based unified WASM | Single WASM for all roles, loaded from disk, hot reload in serve mode |
+| File-based devswarm WASM | Single WASM for all roles, loaded from disk, hot reload in serve mode |
 
 ## Related Documentation
 

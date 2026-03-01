@@ -240,6 +240,12 @@ PR merging (`merge_pr.*` namespace):
 UI popup interaction (`popup.*` namespace):
 - `ShowPopup`: Display interactive UI component
 
+### effects/coordination.proto
+
+Coordination primitives (`coordination.*` namespace):
+- `AcquireMutex`: Acquire named mutex with intent, TTL, and timeout
+- `ReleaseMutex`: Release mutex by resource name and lock ID
+
 ### effects/session.proto
 
 Session management (`session.*` namespace):
@@ -318,7 +324,7 @@ just proto-test  # Run wire format compatibility tests
 | fs.proto | ✅ | ✅ | ✅ |
 | agent.proto | ✅ | ✅ | ✅ |
 | session.proto | ✅ | ✅ | ✅ |
-| coordination.proto | ✅ | ✅ | ✅ |
+| coordination.proto | ✅ | ✅ | ❌ |
 | copilot.proto | ✅ | ✅ | ✅ |
 | events.proto | ✅ | ✅ | ✅ |
 | file_pr.proto | ✅ | ✅ | ✅ |
