@@ -48,6 +48,7 @@ library
     Effects.Agent
     Effects.Popup
     Effects.FilePr
+    Effects.Coordination
     Effects.Copilot
     Effects.Kv
 
