@@ -243,7 +243,7 @@ async fn handle_hook_inner(
     let role = params
         .role
         .as_ref()
-        .map(|r| exomonad_core::Role::from(r.clone()))
+        .and_then(|r| exomonad_core::Role::try_from(r.clone()).ok())
         .unwrap_or(state.default_role.clone());
 
     let trace_id = uuid::Uuid::new_v4().simple().to_string();
