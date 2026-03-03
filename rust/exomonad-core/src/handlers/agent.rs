@@ -87,10 +87,13 @@ fn claude_spawn_flags(
     }
 }
 
-fn convert_agent_type(t: AgentType) -> ServiceAgentType {
+fn convert_agent_type(t: AgentType) -> EffectResult<ServiceAgentType> {
     match t {
-        AgentType::Claude => ServiceAgentType::Claude,
-        AgentType::Gemini | AgentType::Unspecified => ServiceAgentType::Gemini,
+        AgentType::Claude => Ok(ServiceAgentType::Claude),
+        AgentType::Gemini => Ok(ServiceAgentType::Gemini),
+        AgentType::Unspecified => Err(EffectError::invalid_input(
+            "agent_type is required (must be 'claude' or 'gemini', got UNSPECIFIED)"
+        )),
     }
 }
 
@@ -120,7 +123,7 @@ impl AgentEffects for AgentHandler {
         let options = SpawnOptions {
             owner: parse_owner(&req.owner)?,
             repo: parse_repo(&req.repo)?,
-            agent_type: convert_agent_type(req.agent_type()),
+            agent_type: convert_agent_type(req.agent_type())?,
             subrepo: non_empty(req.subrepo),
             base_branch: non_empty(req.base_branch).map(|s| BirthBranch::from(s.as_str())),
         };
@@ -141,7 +144,7 @@ impl AgentEffects for AgentHandler {
         req: SpawnBatchRequest,
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<SpawnBatchResponse> {
-        let agent_type = convert_agent_type(req.agent_type());
+        let agent_type = convert_agent_type(req.agent_type())?;
         let mut agents = Vec::new();
         let mut errors = Vec::new();
 
@@ -182,7 +185,7 @@ impl AgentEffects for AgentHandler {
         let options = SpawnGeminiTeammateOptions {
             name: AgentName::from(req.name.as_str()),
             prompt: req.prompt.clone(),
-            agent_type: convert_agent_type(req.agent_type()),
+            agent_type: convert_agent_type(req.agent_type())?,
             subrepo: non_empty(req.subrepo),
             base_branch: non_empty(req.base_branch).map(|s| BirthBranch::from(s.as_str())),
         };
@@ -283,11 +286,7 @@ impl AgentEffects for AgentHandler {
             branch_name: req.branch_name.clone(),
             parent_session_id,
             role: non_empty(req.role.clone()),
-            agent_type: if req.agent_type == AgentType::Unspecified as i32 {
-                None
-            } else {
-                Some(convert_agent_type(req.agent_type()))
-            },
+            agent_type: convert_agent_type(req.agent_type())?,
             claude_flags: claude_spawn_flags(
                 req.permission_mode.clone(),
                 req.allowed_tools.clone(),
@@ -339,11 +338,7 @@ impl AgentEffects for AgentHandler {
             task: req.task.clone(),
             branch_name: req.branch_name.clone(),
             role: non_empty(req.role.clone()),
-            agent_type: if req.agent_type == AgentType::Unspecified as i32 {
-                None
-            } else {
-                Some(convert_agent_type(req.agent_type()))
-            },
+            agent_type: convert_agent_type(req.agent_type())?,
             claude_flags: claude_spawn_flags(
                 req.permission_mode.clone(),
                 req.allowed_tools.clone(),
@@ -729,16 +724,13 @@ mod tests {
     #[test]
     fn test_convert_agent_type() {
         assert_eq!(
-            convert_agent_type(AgentType::Claude),
+            convert_agent_type(AgentType::Claude).unwrap(),
             ServiceAgentType::Claude
         );
         assert_eq!(
-            convert_agent_type(AgentType::Gemini),
+            convert_agent_type(AgentType::Gemini).unwrap(),
             ServiceAgentType::Gemini
         );
-        assert_eq!(
-            convert_agent_type(AgentType::Unspecified),
-            ServiceAgentType::Gemini
-        );
+        assert!(convert_agent_type(AgentType::Unspecified).is_err());
     }
 }

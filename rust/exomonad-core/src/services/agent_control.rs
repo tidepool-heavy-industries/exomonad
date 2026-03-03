@@ -282,8 +282,8 @@ pub struct SpawnSubtreeOptions {
     pub parent_session_id: Option<ClaudeSessionUuid>,
     /// Optional role override.
     pub role: Option<String>,
-    /// Optional agent type override.
-    pub agent_type: Option<AgentType>,
+    /// Agent type (claude or gemini). Required — no default.
+    pub agent_type: AgentType,
     /// Claude-specific permission flags (ignored for Gemini).
     #[serde(default)]
     pub claude_flags: ClaudeSpawnFlags,
@@ -306,8 +306,8 @@ pub struct SpawnLeafOptions {
     pub branch_name: String,
     /// Optional role override.
     pub role: Option<String>,
-    /// Optional agent type override.
-    pub agent_type: Option<AgentType>,
+    /// Agent type (claude or gemini). Required — no default.
+    pub agent_type: AgentType,
     /// Claude-specific permission flags (ignored for Gemini).
     #[serde(default)]
     pub claude_flags: ClaudeSpawnFlags,
@@ -710,13 +710,14 @@ impl AgentControlService {
             let agent_suffix = options.agent_type.suffix();
             let internal_name = format!("gh-{}-{}-{}", issue_id, slug, agent_suffix);
 
-            // Determine base branch
+            // Determine base branch (use birth_branch for root detection)
+            let default_base = self.birth_branch.as_parent_branch().to_string();
             let base = options
                 .base_branch
                 .as_ref()
-                .map(|b| b.as_str())
-                .unwrap_or("main");
-            let branch_name = if base == "main" {
+                .map(|b| b.as_str().to_string())
+                .unwrap_or(default_base);
+            let branch_name = if self.birth_branch.depth() == 0 {
                 format!("gh-{}/{}-{}", issue_id, slug, agent_suffix)
             } else {
                 format!("{}/{}-{}", base, slug, agent_suffix)
@@ -725,7 +726,7 @@ impl AgentControlService {
             // Create worktree
             let worktree_path = self.worktree_base.join(&internal_name);
 
-            self.create_worktree_checked(&worktree_path, &branch_name, base)
+            self.create_worktree_checked(&worktree_path, &branch_name, &base)
                 .await?;
 
             // Use worktree path as agent_dir
@@ -1138,7 +1139,7 @@ impl AgentControlService {
 
             // Sanitize branch name for internal use
             let slug = slugify(&options.branch_name);
-            let agent_type = options.agent_type.unwrap_or(AgentType::Claude);
+            let agent_type = options.agent_type;
             let agent_suffix = agent_type.suffix();
             let internal_name = format!("{}-{}", slug, agent_suffix);
             let display_name = format!("{} {}", agent_type.emoji(), slug);
@@ -1148,7 +1149,7 @@ impl AgentControlService {
             if tab_alive {
                 info!(slug = %slug, "Subtree already running, returning existing");
                 return Ok(SpawnResult {
-                    agent_dir: PathBuf::new(),
+                    agent_dir: self.worktree_base.join(&slug),
                     tab_name: internal_name,
                     issue_title: options.branch_name.clone(),
                     agent_type,
@@ -1250,7 +1251,7 @@ impl AgentControlService {
             self.new_zellij_tab_inner(
                 &display_name,
                 &worktree_path,
-                AgentType::Claude,
+                agent_type,
                 Some(&task_with_context),
                 env_vars,
                 fork_id,
@@ -1262,7 +1263,7 @@ impl AgentControlService {
                 agent_dir: worktree_path.clone(),
                 tab_name: internal_name,
                 issue_title: options.branch_name.clone(),
-                agent_type: AgentType::Claude,
+                agent_type,
             })
         })
         .await
@@ -1298,7 +1299,7 @@ impl AgentControlService {
 
             // Sanitize branch name
             let slug = slugify(&options.branch_name);
-            let agent_type = options.agent_type.unwrap_or(AgentType::Gemini);
+            let agent_type = options.agent_type;
             let agent_suffix = agent_type.suffix();
             let internal_name = format!("{}-{}", slug, agent_suffix);
             let display_name = format!("{} {}", agent_type.emoji(), slug);
@@ -1308,7 +1309,7 @@ impl AgentControlService {
             if tab_alive {
                 info!(slug = %slug, "Leaf subtree already running, returning existing");
                 return Ok(SpawnResult {
-                    agent_dir: PathBuf::new(),
+                    agent_dir: self.worktree_base.join(&slug),
                     tab_name: internal_name,
                     issue_title: options.branch_name.clone(),
                     agent_type,
@@ -1356,7 +1357,7 @@ impl AgentControlService {
             self.new_zellij_tab(
                 &display_name,
                 &worktree_path,
-                AgentType::Gemini,
+                agent_type,
                 Some(&task),
                 env_vars,
             )
@@ -1374,7 +1375,7 @@ impl AgentControlService {
                 agent_dir: worktree_path.clone(),
                 tab_name: internal_name,
                 issue_title: options.branch_name.clone(),
-                agent_type: AgentType::Gemini,
+                agent_type,
             })
         })
         .await

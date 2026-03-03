@@ -76,6 +76,7 @@ Handles effects in the `agent.*` namespace.
 
 - `SpawnResult.agent_dir` is `PathBuf` (not String)
 - `SpawnResult.agent_type` uses the `AgentType` enum (not string "claude"/"gemini")
+- `SpawnSubtreeOptions.agent_type` and `SpawnLeafOptions.agent_type` are `AgentType` (required, no default — `AGENT_TYPE_UNSPECIFIED` is rejected)
 - `SpawnOptions.base_branch` and `SpawnGeminiTeammateOptions.base_branch` are `Option<BirthBranch>`
 - `SpawnGeminiTeammateOptions.name` is `AgentName`
 - `AgentInfo.agent_dir` is `Option<PathBuf>`, `AgentInfo.slug` is `Option<AgentName>`

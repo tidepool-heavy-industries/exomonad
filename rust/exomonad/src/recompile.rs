@@ -3,6 +3,18 @@
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 
+/// Resolve the exomonad SDK directory from the compiled-in source path.
+/// CARGO_MANIFEST_DIR at build time = `rust/exomonad/`, so `../../` = repo root.
+fn compiled_sdk_dir() -> Option<PathBuf> {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let sdk = manifest.join("../..").canonicalize().ok()?;
+    if sdk.join("flake.nix").exists() {
+        Some(sdk)
+    } else {
+        None
+    }
+}
+
 /// Generate a temporary cabal.project.wasm that bridges core SDK packages
 /// (from the flake_ref directory) with local roles (from project_dir).
 fn generate_cross_repo_cabal_project(
@@ -73,7 +85,25 @@ pub async fn run_recompile(role: &str, project_dir: &Path, flake_ref: Option<&st
         }
     }
 
-    let flake_ref_str = flake_ref.unwrap_or(".");
+    let flake_ref_str = match flake_ref {
+        Some(r) => r.to_string(),
+        None if project_dir.join("flake.nix").exists() => ".".to_string(),
+        None => {
+            // No flake_ref configured and no local flake.nix — try compiled-in SDK path
+            match compiled_sdk_dir() {
+                Some(sdk) => {
+                    tracing::info!("No flake_ref configured, using compiled-in SDK: {}", sdk.display());
+                    sdk.to_string_lossy().to_string()
+                }
+                None => bail!(
+                    "No flake.nix found in {} and no flake_ref configured.\n\
+                     Set flake_ref in .exo/config.toml to point to the exomonad SDK:\n\n\
+                     flake_ref = \"/path/to/exomonad\"",
+                    project_dir.display()
+                ),
+            }
+        }
+    };
     tracing::info!("Using flake ref: {}", flake_ref_str);
     println!("Building WASM for role '{role}'...");
 
@@ -111,9 +141,16 @@ pub async fn run_recompile(role: &str, project_dir: &Path, flake_ref: Option<&st
         );
     }
 
-    // Find the WASM artifact in dist-newstyle
+    // Find the WASM artifact in dist-newstyle (check .exo/dist-newstyle first)
     let artifact_name = format!("wasm-guest-{role}.wasm");
-    let dist_dir = project_dir.join("dist-newstyle");
+    let dist_dir = {
+        let exo_dist = project_dir.join(".exo/dist-newstyle");
+        if exo_dist.exists() {
+            exo_dist
+        } else {
+            project_dir.join("dist-newstyle")
+        }
+    };
 
     let wasm_path = find_wasm_artifact(&dist_dir, &artifact_name)?;
 

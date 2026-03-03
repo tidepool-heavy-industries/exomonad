@@ -142,19 +142,27 @@ validated_string!(
 );
 
 impl BirthBranch {
-    /// Root TL birth-branch (always "main").
+    /// Root TL birth-branch from the current git branch.
+    /// Detects the branch via `git rev-parse --abbrev-ref HEAD`, falls back to "main".
     pub fn root() -> Self {
-        Self("main".to_string())
+        let branch = std::process::Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|b| !b.is_empty() && b != "HEAD")
+            .unwrap_or_else(|| "main".to_string());
+        Self(branch)
     }
 
-    /// Depth in the agent tree (0 = root TL on "main", 1 = first subtree, etc.).
+    /// Depth in the agent tree (0 = root TL, 1 = first subtree, etc.).
     /// Depth equals the number of dot separators in the branch name.
     pub fn depth(&self) -> usize {
         self.0.chars().filter(|&c| c == '.').count()
     }
 
     /// Git branch to use as parent when creating child worktrees.
-    /// Root ("main") returns "main", subtrees return themselves.
     pub fn as_parent_branch(&self) -> &str {
         &self.0
     }
@@ -165,14 +173,11 @@ impl BirthBranch {
     }
 
     /// Get the parent's birth-branch (one level up in dot hierarchy).
-    /// Returns None for root ("main") since it has no parent.
+    /// Returns None for root (no dot separator) since it has no parent.
     pub fn parent(&self) -> Option<Self> {
-        if self.0 == "main" {
-            None
-        } else if let Some((parent, _)) = self.0.rsplit_once('.') {
+        if let Some((parent, _)) = self.0.rsplit_once('.') {
             Some(Self(parent.to_string()))
         } else {
-            // Single segment like "main" with no dots — this IS root
             None
         }
     }
@@ -434,42 +439,53 @@ pub enum FilterState {
 // Role
 // ============================================================================
 
-/// Agent role (dev, tl, worker).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Role {
-    /// Developer role.
-    #[default]
-    Dev,
-    /// Tech lead role.
-    TL,
-    /// Worker role (ephemeral, notify_parent only).
-    Worker,
+/// Agent role identifier. Known roles include "dev", "tl", "worker",
+/// but consuming projects can define arbitrary roles in WASM.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Role(String);
+
+impl Role {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into().to_lowercase())
+    }
+
+    pub fn tl() -> Self {
+        Self("tl".into())
+    }
+    pub fn dev() -> Self {
+        Self("dev".into())
+    }
+    pub fn worker() -> Self {
+        Self("worker".into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for Role {
+    fn default() -> Self {
+        Self::dev()
+    }
 }
 
 impl fmt::Display for Role {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Dev => write!(f, "dev"),
-            Self::TL => write!(f, "tl"),
-            Self::Worker => write!(f, "worker"),
-        }
+        f.write_str(&self.0)
     }
 }
 
-impl TryFrom<String> for Role {
-    type Error = DomainError;
+impl From<&str> for Role {
+    fn from(s: &str) -> Self {
+        Self::new(s)
+    }
+}
 
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        match s.to_lowercase().as_str() {
-            "dev" => Ok(Self::Dev),
-            "tl" => Ok(Self::TL),
-            "worker" => Ok(Self::Worker),
-            _ => Err(DomainError::Invalid {
-                field: "role",
-                value: s,
-            }),
-        }
+impl From<String> for Role {
+    fn from(s: String) -> Self {
+        Self::new(s)
     }
 }
 
@@ -717,19 +733,28 @@ mod tests {
 
     #[test]
     fn test_role() {
-        assert_eq!(Role::try_from("dev".to_string()).unwrap(), Role::Dev);
-        assert_eq!(Role::try_from("tl".to_string()).unwrap(), Role::TL);
-        assert_eq!(Role::try_from("worker".to_string()).unwrap(), Role::Worker);
+        // Known roles
+        assert_eq!(Role::from("dev"), Role::dev());
+        assert_eq!(Role::from("tl"), Role::tl());
+        assert_eq!(Role::from("worker"), Role::worker());
 
-        // Case insensitive
-        assert_eq!(Role::try_from("DEV".to_string()).unwrap(), Role::Dev);
+        // Case insensitive (lowercased on construction)
+        assert_eq!(Role::from("DEV"), Role::dev());
+        assert_eq!(Role::from("TL"), Role::tl());
 
-        // Invalid
-        let result = Role::try_from("invalid".to_string());
-        assert!(matches!(result, Err(DomainError::Invalid { .. })));
+        // Arbitrary roles accepted
+        let unified = Role::from("unified");
+        assert_eq!(unified.as_str(), "unified");
 
         // Default
-        assert_eq!(Role::default(), Role::Dev);
+        assert_eq!(Role::default(), Role::dev());
+
+        // Serde round-trip for arbitrary role
+        let role = Role::from("custom-role");
+        let json = serde_json::to_string(&role).unwrap();
+        assert_eq!(json, "\"custom-role\"");
+        let back: Role = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, role);
     }
 
     #[test]
@@ -787,15 +812,16 @@ mod tests {
 
     #[test]
     fn test_birth_branch_depth() {
-        assert_eq!(BirthBranch::root().depth(), 0);
         assert_eq!(BirthBranch::from("main").depth(), 0);
+        assert_eq!(BirthBranch::from("master").depth(), 0);
         assert_eq!(BirthBranch::from("main.feature-a").depth(), 1);
         assert_eq!(BirthBranch::from("main.feature-a.sub-task").depth(), 2);
     }
 
     #[test]
     fn test_birth_branch_parent() {
-        assert_eq!(BirthBranch::root().parent(), None);
+        assert_eq!(BirthBranch::from("main").parent(), None);
+        assert_eq!(BirthBranch::from("master").parent(), None);
         assert_eq!(
             BirthBranch::from("main.feature-a").parent(),
             Some(BirthBranch::from("main"))
@@ -808,7 +834,7 @@ mod tests {
 
     #[test]
     fn test_birth_branch_child() {
-        let root = BirthBranch::root();
+        let root = BirthBranch::from("main");
         let child = root.child("feature-a");
         assert_eq!(child.as_str(), "main.feature-a");
         assert_eq!(child.depth(), 1);
@@ -816,6 +842,12 @@ mod tests {
         let grandchild = child.child("sub-task");
         assert_eq!(grandchild.as_str(), "main.feature-a.sub-task");
         assert_eq!(grandchild.depth(), 2);
+
+        // Works with any root branch name
+        let master_root = BirthBranch::from("master");
+        let master_child = master_root.child("feature-a");
+        assert_eq!(master_child.as_str(), "master.feature-a");
+        assert_eq!(master_child.parent(), Some(BirthBranch::from("master")));
     }
 
     #[test]
@@ -1075,7 +1107,7 @@ mod proptest_tests {
 
         #[test]
         fn test_birth_branch_hierarchy(slugs in prop::collection::vec("[a-z0-9-]+", 1..5)) {
-            let mut current = BirthBranch::root();
+            let mut current = BirthBranch::from("main");
 
             for (i, slug) in slugs.into_iter().enumerate() {
                 let child = current.child(&slug);
@@ -1115,7 +1147,7 @@ mod proptest_tests {
         #[test]
         fn test_role_roundtrip(r in any_role()) {
             let s = r.to_string();
-            let back = Role::try_from(s).unwrap();
+            let back = Role::from(s);
             prop_assert_eq!(r, back);
         }
 
@@ -1152,7 +1184,7 @@ mod proptest_tests {
     }
 
     fn any_role() -> impl Strategy<Value = Role> {
-        prop_oneof![Just(Role::Dev), Just(Role::TL), Just(Role::Worker),]
+        "[a-z]{2,10}".prop_map(Role::from)
     }
 
     fn any_agent_type() -> impl Strategy<Value = crate::services::agent_control::AgentType> {

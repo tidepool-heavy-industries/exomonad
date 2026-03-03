@@ -243,7 +243,7 @@ async fn handle_hook_inner(
     let role = params
         .role
         .as_ref()
-        .and_then(|r| exomonad_core::Role::try_from(r.clone()).ok())
+        .map(|r| exomonad_core::Role::from(r.as_str()))
         .unwrap_or(state.default_role.clone());
 
     let trace_id = uuid::Uuid::new_v4().simple().to_string();
@@ -543,15 +543,11 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
     let cwd = std::env::current_dir()?;
     let config_path = cwd.join(".exo/config.toml");
     if !config_path.exists() {
-        let dirname = cwd
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("project");
         eprintln!("Bootstrapping .exo/config.toml");
         std::fs::create_dir_all(cwd.join(".exo"))?;
         std::fs::write(
             &config_path,
-            format!("default_role = \"tl\"\nzellij_session = \"{}\"\n", dirname),
+            "# ExoMonad project config\n# All fields are optional — see docs for overrides\n",
         )?;
 
         // Add gitignore entries
@@ -561,6 +557,27 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
     // Resolve config
     let config = config::Config::discover()?;
     let session = session_override.unwrap_or(config.zellij_session.clone());
+
+    // Auto-build WASM if it doesn't exist yet
+    let wasm_path = config.wasm_dir.join(format!("wasm-guest-{}.wasm", config.wasm_name));
+    if !wasm_path.exists() {
+        let roles_dir = cwd.join(".exo/roles");
+        if roles_dir.is_dir() {
+            eprintln!("WASM not found at {}, building...", wasm_path.display());
+            exomonad::recompile::run_recompile(
+                &config.wasm_name,
+                &cwd,
+                config.flake_ref.as_deref(),
+            )
+            .await?;
+        } else {
+            eprintln!(
+                "Warning: No WASM at {} and no .exo/roles/ to build from.\n\
+                 Copy roles from exomonad: cp -r /path/to/exomonad/.exo/roles .exo/roles",
+                wasm_path.display()
+            );
+        }
+    }
 
     // Write hook configuration (SessionStart registers Claude UUID for --fork-session)
     let binary_path = exomonad_core::find_exomonad_binary();
@@ -666,6 +683,17 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
     // 2. Poll health
     wait_for_server(port).await?;
 
+    // 2b. Auto-register Claude MCP server (non-fatal)
+    let mcp_url = format!("http://localhost:{}/agents/tl/root/mcp", port);
+    match std::process::Command::new("claude")
+        .args(["mcp", "add", "--transport", "http", "exomonad", &mcp_url])
+        .status()
+    {
+        Ok(s) if s.success() => eprintln!("Registered Claude MCP server"),
+        Ok(s) => eprintln!("Warning: claude mcp add exited with {} (is claude installed?)", s),
+        Err(_) => eprintln!("Warning: Could not register Claude MCP (is claude installed?)"),
+    }
+
     // 3. Start TL tab (only if one doesn't already exist)
     let tab_output = std::process::Command::new("zellij")
         .env("ZELLIJ_SESSION_NAME", &session)
@@ -722,9 +750,13 @@ fn ensure_gitignore(project_dir: &std::path::Path) -> Result<()> {
         String::new()
     };
 
-    let has_ignore = content.lines().any(|l| l.trim() == ".exo/*");
-    let has_negate = content.lines().any(|l| l.trim() == "!.exo/config.toml");
-    if has_ignore && has_negate {
+    let has_line = |line: &str| content.lines().any(|l| l.trim() == line);
+    let needed: Vec<&str> = [".exo/*", "!.exo/config.toml", "!.exo/roles/", "!.exo/lib/"]
+        .into_iter()
+        .filter(|line| !has_line(line))
+        .collect();
+
+    if needed.is_empty() {
         return Ok(());
     }
 
@@ -736,9 +768,12 @@ fn ensure_gitignore(project_dir: &std::path::Path) -> Result<()> {
     if !content.is_empty() && !content.ends_with('\n') {
         writeln!(file)?;
     }
-    writeln!(file, "# ExoMonad - track config, ignore runtime artifacts")?;
-    writeln!(file, ".exo/*")?;
-    writeln!(file, "!.exo/config.toml")?;
+    if !has_line(".exo/*") {
+        writeln!(file, "# ExoMonad - track config and source, ignore runtime artifacts")?;
+    }
+    for line in &needed {
+        writeln!(file, "{}", line)?;
+    }
 
     eprintln!("Updated .gitignore with .exo/ entries");
     Ok(())
@@ -1002,15 +1037,16 @@ async fn main() -> Result<()> {
             let role_name = config.role.to_string();
             let wasm_dir = config.wasm_dir.clone();
 
-            // Prefer devswarm WASM (contains all roles, role selection per-call).
+            // Prefer named WASM module (contains all roles, role selection per-call).
             // Fall back to per-role WASM for backwards compatibility.
-            let devswarm_path = wasm_dir.join("wasm-guest-devswarm.wasm");
-            let wasm_path = if devswarm_path.exists() {
-                info!(dir = %wasm_dir.display(), "Using devswarm WASM (all roles in one module)");
-                devswarm_path
+            let wasm_name = &config.wasm_name;
+            let named_path = wasm_dir.join(format!("wasm-guest-{wasm_name}.wasm"));
+            let wasm_path = if named_path.exists() {
+                info!(wasm_name, dir = %wasm_dir.display(), "Using {wasm_name} WASM (all roles in one module)");
+                named_path
             } else {
                 let fallback = wasm_dir.join(format!("wasm-guest-{}.wasm", role_name));
-                info!(role = %role_name, dir = %wasm_dir.display(), "Devswarm WASM not found, falling back to per-role WASM");
+                info!(role = %role_name, dir = %wasm_dir.display(), "{wasm_name} WASM not found, falling back to per-role WASM");
                 fallback
             };
 

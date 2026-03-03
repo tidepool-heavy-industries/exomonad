@@ -93,10 +93,25 @@ Use `--port` to override the default port (7432).
 
 ### MCP Registration
 
-One-time setup per project:
+`exomonad init` automatically registers the Claude MCP server. For Gemini, register manually:
 ```bash
-claude mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
 gemini mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
+```
+
+### Zero-Config for Consuming Repos
+
+New projects need only `.exo/roles/` and `.exo/lib/` copied from exomonad:
+
+```bash
+cd ~/new-project && git init
+cp -r /path/to/exomonad/.exo/roles .exo/roles
+cp -r /path/to/exomonad/.exo/lib .exo/lib
+exomonad init
+# → Bootstraps .exo/config.toml (empty, all defaults)
+# → Auto-detects role from .exo/roles/
+# → Builds WASM if missing
+# → Starts server, registers Claude MCP
+# → Creates Zellij session
 ```
 
 ### Building
@@ -137,20 +152,22 @@ exomonad recompile --role devswarm # Rebuild WASM via nix, copy to .exo/wasm/
 
 ### Configuration
 
-**Bootstrap:** `exomonad init` auto-creates `.exo/config.toml` and `.gitignore` entries if missing. Works in any project directory.
+**Bootstrap:** `exomonad init` auto-creates `.exo/config.toml` (empty, all defaults) and `.gitignore` entries if missing. Works in any project directory. All fields are optional — auto-detection handles the common case.
 
 ```toml
-default_role = "tl"  # or "dev"
+# All fields below are optional — shown with their auto-detected defaults
+default_role = "tl"          # auto-detected from .exo/roles/ if exactly one role exists
 project_dir = "."
-shell_command = "nix develop"  # optional: environment wrapper for TL tab + server
-wasm_dir = ".exo/wasm"    # optional: override WASM location (default: ~/.exo/wasm/)
+shell_command = "nix develop" # environment wrapper for TL tab + server
+wasm_dir = ".exo/wasm"       # project-local (default), override for shared installs
+wasm_name = "devswarm"       # auto-detected from .exo/roles/ if exactly one role exists
 ```
 
 **Config hierarchy:**
 - `config.toml` uses `default_role` (project-wide default)
 - `config.local.toml` uses `role` (worktree-specific override)
 - Resolution: `local.role > global.default_role`
-- WASM: `wasm_dir` in config > `~/.exo/wasm/`
+- WASM: `wasm_dir` in config > `.exo/wasm/` (project-local)
 
 **Hook configuration** is auto-generated in two places:
 - **`exomonad init`**: Writes `.claude/settings.local.json` with all hooks (SessionStart, PreToolUse, etc.) for the root TL session

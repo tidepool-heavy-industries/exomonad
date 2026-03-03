@@ -234,16 +234,16 @@ Proto field helpers in `handlers/mod.rs`: `non_empty(String) → Option<String>`
 
 ## Configuration
 
-Use CLI-native config commands to register the MCP server:
+`exomonad init` auto-registers the Claude MCP server. For Gemini or custom setups, register manually:
 ```bash
-# Claude Code
-claude mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
-
 # Gemini CLI (HTTP mode only)
 gemini mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
+
+# Claude Code (manual, e.g. custom port)
+claude mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
 ```
 
-And ensure `.exo/config.toml` and/or `config.local.toml` exists.
+`config.toml` is auto-created by `exomonad init` — all fields are optional.
 
 ## Testing
 

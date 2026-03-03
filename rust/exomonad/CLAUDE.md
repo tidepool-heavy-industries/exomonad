@@ -33,25 +33,27 @@ exomonad init [--session NAME]    # Initialize Zellij session (Server tab + TL t
 - **Server tab**: Runs `exomonad serve --port <port>` (stays open on exit)
 - **TL tab**: Runs `nix develop` for the dev environment (focused by default)
 
-MCP config is managed by the CLI tools (`claude mcp add` / `gemini mcp add`), not by `exomonad init`.
+Claude MCP is auto-registered during init. For Gemini, register manually (`gemini mcp add ...`).
 
 Use `--recreate` to delete an existing session and create fresh (e.g., after binary updates).
 
 **Example `.exo/config.toml`:**
 ```toml
+# All fields are optional — auto-detection handles the common case
 default_role = "tl"
 project_dir = "."
-shell_command = "nix develop"  # optional: environment wrapper for TL tab + server
-wasm_dir = ".exo/wasm"    # optional: override WASM location (default: ~/.exo/wasm/)
+shell_command = "nix develop"  # environment wrapper for TL tab + server
+wasm_dir = ".exo/wasm"        # project-local default
+wasm_name = "devswarm"        # auto-detected from .exo/roles/ if exactly one exists
 ```
 
-**Bootstrap:** `exomonad init` auto-creates `.exo/config.toml` and `.gitignore` entries if missing. Works in any project directory.
+**Bootstrap:** `exomonad init` auto-creates `.exo/config.toml` (empty, all defaults) and `.gitignore` entries if missing. Works in any project directory — just needs `.exo/roles/` and `.exo/lib/` present.
 
 **Config hierarchy:**
 - `config.toml` uses `default_role` (project-wide default)
 - `config.local.toml` uses `role` (worktree-specific override)
 
-**WASM resolution:** `wasm_dir` in config > `~/.exo/wasm/` (global default, installed by `just install-all`)
+**WASM resolution:** `wasm_dir` in config > `.exo/wasm/` (project-local default)
 
 To update WASM, run `just wasm-all` or `exomonad recompile --role devswarm`.
 

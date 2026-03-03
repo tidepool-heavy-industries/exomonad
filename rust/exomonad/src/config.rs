@@ -38,7 +38,7 @@ pub struct RawConfig {
     /// Shell command to wrap environment (e.g. "nix develop"). TL tab runs this as shell.
     pub shell_command: Option<String>,
 
-    /// WASM directory override (default: ~/.exo/wasm/).
+    /// WASM directory override (default: .exo/wasm/).
     pub wasm_dir: Option<PathBuf>,
 
     /// Agent type for the root (TL) tab.
@@ -46,6 +46,9 @@ pub struct RawConfig {
 
     /// Optional flake reference to use when building WASM plugin via nix.
     pub flake_ref: Option<String>,
+
+    /// Name of the WASM module (default: "devswarm"). Used to find wasm-guest-{name}.wasm.
+    pub wasm_name: Option<String>,
 
     /// Extra MCP servers to include in agent settings (e.g. metacog).
     #[serde(default)]
@@ -74,6 +77,8 @@ pub struct Config {
     pub root_agent_type: AgentType,
     /// Flake reference to use when building WASM plugin via nix.
     pub flake_ref: Option<String>,
+    /// Name of the WASM module (default: "devswarm").
+    pub wasm_name: String,
     /// Extra MCP servers to include in agent settings.
     pub extra_mcp_servers: std::collections::HashMap<String, McpServerConfig>,
     /// Initial prompt for the root agent.
@@ -113,7 +118,7 @@ impl Config {
         let role = local_raw
             .role
             .or(global_raw.default_role)
-            .unwrap_or(Role::TL);
+            .unwrap_or_else(Role::tl);
 
         // Resolve project_dir: global.project_dir > project_root
         let project_dir = global_raw
@@ -160,7 +165,7 @@ impl Config {
         // Resolve shell_command: local > global
         let shell_command = local_raw.shell_command.or(global_raw.shell_command);
 
-        // Resolve wasm_dir: config > ~/.exo/wasm/
+        // Resolve wasm_dir: config > .exo/wasm/ (project-local)
         let wasm_dir = global_raw
             .wasm_dir
             .or(local_raw.wasm_dir)
@@ -171,7 +176,7 @@ impl Config {
                     project_root.join(p)
                 }
             })
-            .unwrap_or_else(global_wasm_dir);
+            .unwrap_or_else(|| project_root.join(".exo/wasm"));
 
         // Resolve root_agent_type: global > local > default (Claude)
         let root_agent_type = global_raw
@@ -186,6 +191,12 @@ impl Config {
         let mut extra_mcp_servers = global_raw.extra_mcp_servers;
         extra_mcp_servers.extend(local_raw.extra_mcp_servers);
 
+        let wasm_name = local_raw
+            .wasm_name
+            .or(global_raw.wasm_name)
+            .or_else(|| detect_role_name(&project_dir))
+            .unwrap_or_else(|| "devswarm".to_string());
+
         let initial_prompt = local_raw.initial_prompt.or(global_raw.initial_prompt);
 
         Ok(Self {
@@ -198,6 +209,7 @@ impl Config {
             wasm_dir,
             root_agent_type,
             flake_ref,
+            wasm_name,
             extra_mcp_servers,
             initial_prompt,
         })
@@ -219,45 +231,56 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             project_dir: PathBuf::from("."),
-            role: Role::TL,
+            role: Role::tl(),
             zellij_session: "default".to_string(),
             port: 7432,
             worktree_base: PathBuf::from(".exo/worktrees"),
             shell_command: None,
-            wasm_dir: global_wasm_dir(),
+            wasm_dir: PathBuf::from(".exo/wasm"),
             root_agent_type: AgentType::Claude,
             flake_ref: None,
+            wasm_name: "devswarm".to_string(),
             extra_mcp_servers: std::collections::HashMap::new(),
             initial_prompt: None,
         }
     }
 }
 
-/// Walk up from CWD to find the project root containing `.exo/config.toml`.
-/// Falls back to CWD if not found (bootstrap case).
+/// Walk up from CWD to find the project root containing `.exo/`.
+/// Looks for `.exo/config.toml` first, then `.exo/` directory.
+/// Falls back to CWD if neither found (bootstrap case).
 fn find_project_root() -> Result<PathBuf> {
     let start = std::env::current_dir()?;
     let mut current = start.as_path();
     loop {
-        if current.join(".exo/config.toml").exists() {
+        if current.join(".exo/config.toml").exists() || current.join(".exo").is_dir() {
             return Ok(current.to_path_buf());
         }
         match current.parent() {
             Some(parent) => current = parent,
             None => {
-                debug!("No .exo/config.toml found, using CWD as project root");
+                debug!("No .exo/ found, using CWD as project root");
                 return Ok(start);
             }
         }
     }
 }
 
-/// Global WASM directory: ~/.exo/wasm/
-pub fn global_wasm_dir() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".exo/wasm")
+/// Auto-detect role name from `.exo/roles/`. If exactly one role dir exists, use it.
+fn detect_role_name(project_dir: &Path) -> Option<String> {
+    let roles_dir = project_dir.join(".exo/roles");
+    let entries: Vec<_> = std::fs::read_dir(&roles_dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .collect();
+    if entries.len() == 1 {
+        let name = entries[0].file_name().to_string_lossy().to_string();
+        debug!(role = %name, "Auto-detected role from .exo/roles/");
+        Some(name)
+    } else {
+        None
+    }
 }
 
 /// Sanitize session name per Zellij constraints.
@@ -277,7 +300,7 @@ mod tests {
             role = "dev"
         "#;
         let raw: RawConfig = toml::from_str(content).unwrap();
-        assert_eq!(raw.role, Some(Role::Dev));
+        assert_eq!(raw.role, Some(Role::dev()));
     }
 
     #[test]
@@ -288,7 +311,7 @@ mod tests {
         "#;
         let raw: RawConfig = toml::from_str(content).unwrap();
         assert_eq!(raw.project_dir, Some(PathBuf::from("/my/project")));
-        assert_eq!(raw.default_role, Some(Role::TL));
+        assert_eq!(raw.default_role, Some(Role::tl()));
     }
 
     #[test]
@@ -303,7 +326,7 @@ mod tests {
     fn test_config_default() {
         let config = Config::default();
         assert_eq!(config.project_dir, PathBuf::from("."));
-        assert_eq!(config.role, Role::TL);
+        assert_eq!(config.role, Role::tl());
         assert_eq!(config.root_agent_type, AgentType::Claude);
     }
 
