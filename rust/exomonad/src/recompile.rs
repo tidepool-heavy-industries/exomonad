@@ -109,8 +109,10 @@ pub async fn run_recompile(role: &str, project_dir: &Path, flake_ref: Option<&st
 
     let nix_flake_arg = format!("{}#wasm", flake_ref_str);
 
-    let project_file_arg = if let Some(ref flake) = flake_ref {
-        let sdk_dir = Path::new(flake);
+    let sdk_dir = Path::new(&flake_ref_str);
+    let is_consuming_repo = sdk_dir.canonicalize().ok() != project_dir.canonicalize().ok();
+
+    let project_file_arg = if is_consuming_repo {
         let cabal_path = generate_cross_repo_cabal_project(sdk_dir, project_dir, role)?;
         format!("--project-file={}", cabal_path.display())
     } else {
