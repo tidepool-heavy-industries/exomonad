@@ -1177,6 +1177,8 @@ impl AgentControlService {
                 self.create_worktree_checked(&worktree_path, &branch_name, current_branch).await?;
             }
 
+            self.create_socket_symlink(&worktree_path).await;
+
             let mut env_vars = self.common_spawn_env(&internal_name, &branch_name);
             // Enable Claude Code Agent Teams for native inter-agent messaging
             env_vars.insert(
@@ -1325,6 +1327,8 @@ impl AgentControlService {
             } else {
                 self.create_worktree_checked(&worktree_path, &branch_name, &current_branch).await?;
             }
+
+            self.create_socket_symlink(&worktree_path).await;
 
             let mut env_vars = self.common_spawn_env(&internal_name, &branch_name);
 
@@ -2117,6 +2121,34 @@ impl AgentControlService {
         Ok(())
     }
 
+    /// Symlink server socket into worktree so agents find it without walk-up.
+    async fn create_socket_symlink(&self, worktree_path: &Path) {
+        let source = self.project_dir.join(".exo/server.sock");
+        let target_dir = worktree_path.join(".exo");
+        let target = target_dir.join("server.sock");
+
+        if let Err(e) = tokio::fs::create_dir_all(&target_dir).await {
+            warn!(path = %target_dir.display(), error = %e, "Failed to create .exo/ in worktree");
+            return;
+        }
+
+        let _ = tokio::fs::remove_file(&target).await;
+
+        match tokio::fs::symlink(&source, &target).await {
+            Ok(()) => info!(
+                source = %source.display(),
+                target = %target.display(),
+                "Symlinked server socket into worktree"
+            ),
+            Err(e) => warn!(
+                source = %source.display(),
+                target = %target.display(),
+                error = %e,
+                "Failed to symlink server socket"
+            ),
+        }
+    }
+
     /// Generate MCP configuration JSON for an agent using stdio transport.
     fn generate_mcp_config(name: &str, agent_type: AgentType, role: &str) -> String {
         match agent_type {
@@ -2552,6 +2584,28 @@ mod tests {
         service.copy_allowed_dirs(&agent_wt, &["/absolute".to_string(), "../outside".to_string()]).await.unwrap();
         assert!(!agent_wt.join(".exo/context/absolute").exists());
         assert!(!agent_wt.join(".exo/context/outside").exists());
+    }
+
+    #[tokio::test]
+    async fn test_create_socket_symlink() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let project_dir = temp_dir.path().to_path_buf();
+        let exo_dir = project_dir.join(".exo");
+        tokio::fs::create_dir_all(&exo_dir).await.unwrap();
+        tokio::fs::write(exo_dir.join("server.sock"), "placeholder").await.unwrap();
+
+        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(project_dir.clone()));
+        let service = AgentControlService::new(project_dir.clone(), None, git_wt);
+
+        let worktree = temp_dir.path().join("child-wt");
+        tokio::fs::create_dir_all(&worktree).await.unwrap();
+
+        service.create_socket_symlink(&worktree).await;
+
+        let link = worktree.join(".exo/server.sock");
+        assert!(link.exists(), "Symlink should exist");
+        let target = tokio::fs::read_link(&link).await.unwrap();
+        assert_eq!(target, project_dir.join(".exo/server.sock"));
     }
 }
 
