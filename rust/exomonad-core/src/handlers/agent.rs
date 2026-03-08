@@ -388,16 +388,9 @@ impl AgentEffects for AgentHandler {
         // Resolve working directory from context
         let working_dir = crate::services::agent_control::resolve_agent_working_dir(ctx);
 
-        // Generate MCP settings for the agent
-        let mcp_port = self.service.mcp_server_port().ok_or_else(|| {
-            EffectError::custom("agent_error", "MCP server port not set")
-        })?;
+        // Generate MCP settings for the agent using stdio transport
         let agent_name = &req.name;
-        let mcp_url = format!(
-            "http://localhost:{}/agents/worker/{}/mcp",
-            mcp_port, agent_name
-        );
-        let settings_json = AgentControlService::generate_gemini_settings(&mcp_url);
+        let settings_json = AgentControlService::generate_gemini_worker_settings(agent_name);
 
         // Write settings to agent config dir
         let agent_dir = working_dir.join(format!(".exo/agents/{}", agent_name));

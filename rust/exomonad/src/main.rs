@@ -6,6 +6,8 @@
 //!
 //! WASM plugins are loaded from file (server-side only).
 
+mod uds_client;
+
 use exomonad::config;
 use urlencoding::encode;
 
@@ -79,15 +81,10 @@ enum Commands {
         role: Option<String>,
     },
 
-    /// Run HTTP MCP server (all agents connect to this)
+    /// Run MCP server on Unix domain socket (.exo/server.sock)
     ///
     /// Loads WASM from file path (not embedded) with hot reload on change.
-    /// Listens on TCP (default: localhost:7432).
-    Serve {
-        /// TCP port to listen on (default: from config, or 7432)
-        #[arg(long)]
-        port: Option<u16>,
-    },
+    Serve,
 
     /// Reply to a UI request (sent by Zellij plugin)
     Reply {
@@ -550,7 +547,7 @@ async fn handle_hook_inner(
 ///
 /// With `--recreate`: delete any existing session (even alive), then create fresh.
 ///
-async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Result<()> {
+async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()> {
     use std::os::unix::process::CommandExt;
 
     // Preflight: warn if XDG_RUNTIME_DIR missing (SSH edge case)
@@ -614,7 +611,8 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
         mcp_servers.insert(
             "exomonad".to_string(),
             serde_json::json!({
-                "httpUrl": format!("http://localhost:{}/agents/tl/root/mcp", config.port)
+                "command": "exomonad",
+                "args": ["mcp-stdio", "--role", "tl", "--name", "root"]
             }),
         );
         for (name, server) in &config.extra_mcp_servers {
@@ -680,7 +678,7 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
     // shell_command (e.g. "nix develop") is only for the interactive TL tab.
     // Wrapping the server in nix develop adds 15-30s startup on macOS,
     // causing the health check to timeout.
-    let server_layout_path = generate_server_layout(port, None)?;
+    let server_layout_path = generate_server_layout(None)?;
 
     eprintln!("Starting server...");
     // Create zellij session with server layout in background (fork, don't attach).
@@ -699,19 +697,21 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
     // Reap the background process (zellij -n detaches into daemon, this child exits)
     let _ = child.try_wait();
 
-    // 2. Poll health
-    wait_for_server(port).await?;
+    // 2. Poll for server socket
+    wait_for_server_socket(&cwd).await?;
 
-    // 2b. Auto-register Claude MCP server (non-fatal)
-    let mcp_url = format!("http://localhost:{}/agents/tl/root/mcp", port);
-    match std::process::Command::new("claude")
-        .args(["mcp", "add", "--transport", "http", "exomonad", &mcp_url])
-        .status()
-    {
-        Ok(s) if s.success() => eprintln!("Registered Claude MCP server"),
-        Ok(s) => eprintln!("Warning: claude mcp add exited with {} (is claude installed?)", s),
-        Err(_) => eprintln!("Warning: Could not register Claude MCP (is claude installed?)"),
-    }
+    // 2b. Write .mcp.json for Claude MCP (replaces `claude mcp add`)
+    let mcp_json = serde_json::json!({
+        "mcpServers": {
+            "exomonad": {
+                "type": "stdio",
+                "command": "exomonad",
+                "args": ["mcp-stdio", "--role", "tl", "--name", "root"]
+            }
+        }
+    });
+    std::fs::write(cwd.join(".mcp.json"), serde_json::to_string_pretty(&mcp_json)?)?;
+    eprintln!("Wrote .mcp.json with stdio MCP config");
 
     // 3. Start TL tab (only if one doesn't already exist)
     let tab_output = std::process::Command::new("zellij")
@@ -730,7 +730,6 @@ async fn run_init(session_override: Option<String>, recreate: bool, port: u16) -
 
     let tl_layout_path =
         generate_tl_tab_layout(
-            port,
             config.shell_command.as_deref(),
             config.root_agent_type,
             config.initial_prompt.as_deref(),
@@ -798,19 +797,33 @@ fn ensure_gitignore(project_dir: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Wait for the server health endpoint to be healthy.
-async fn wait_for_server(port: u16) -> Result<()> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(500))
-        .build()?;
-    let url = format!("http://127.0.0.1:{}/health", port);
+/// Wait for the server socket to appear and respond to health checks.
+async fn wait_for_server_socket(project_dir: &std::path::Path) -> Result<()> {
+    let socket_path = project_dir.join(".exo/server.sock");
     let start = Instant::now();
-    let timeout = Duration::from_secs(30);
+    let timeout_dur = Duration::from_secs(30);
 
-    eprintln!("Waiting for server health...");
-    while start.elapsed() < timeout {
-        match client.get(&url).send().await {
-            Ok(resp) if resp.status().is_success() => {
+    eprintln!("Waiting for server socket...");
+
+    // Phase 1: Wait for socket file to exist
+    while start.elapsed() < timeout_dur {
+        if socket_path.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    if !socket_path.exists() {
+        return Err(anyhow::anyhow!(
+            "Server socket not found at {} after 30s. Check the Server tab for errors.",
+            socket_path.display()
+        ));
+    }
+
+    // Phase 2: Verify server responds to health check
+    for _ in 0..5 {
+        match uds_client::uds_get(&socket_path, "/health").await {
+            Ok((status, _)) if (200..300).contains(&status) => {
                 return Ok(());
             }
             _ => {
@@ -820,18 +833,18 @@ async fn wait_for_server(port: u16) -> Result<()> {
     }
 
     Err(anyhow::anyhow!(
-        "Server failed to start within 30s. Check the Server tab for errors."
+        "Server socket exists but health check failed. Check the Server tab for errors."
     ))
 }
 
 /// Generate a Server-only Zellij layout.
-fn generate_server_layout(port: u16, shell_command: Option<&str>) -> Result<std::path::PathBuf> {
+fn generate_server_layout(shell_command: Option<&str>) -> Result<std::path::PathBuf> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let cwd = std::env::current_dir()?;
 
     let serve_command = match shell_command {
-        Some(sc) => format!("{} -c 'exomonad serve --port {}'", sc, port),
-        None => format!("exomonad serve --port {}", port),
+        Some(sc) => format!("{} -c 'exomonad serve'", sc),
+        None => "exomonad serve".to_string(),
     };
 
     let params = exomonad_core::layout::AgentTabParams {
@@ -855,7 +868,6 @@ fn generate_server_layout(port: u16, shell_command: Option<&str>) -> Result<std:
 
 /// Generate a TL-only Zellij layout for a new tab.
 fn generate_tl_tab_layout(
-    _port: u16,
     shell_command: Option<&str>,
     root_agent_type: AgentType,
     initial_prompt: Option<&str>,
@@ -1049,8 +1061,7 @@ async fn main() -> Result<()> {
             .await;
         }
 
-        Commands::Serve { port } => {
-            let port = port.unwrap_or(config.port);
+        Commands::Serve => {
             let project_dir = if config.project_dir.is_absolute() {
                 config.project_dir.clone()
             } else {
@@ -1069,10 +1080,6 @@ async fn main() -> Result<()> {
                 ))?;
 
             let server_pid_path = project_dir.join(".exo/server.pid");
-
-            let remote_port = std::env::var("EXOMONAD_SERVER_PORT")
-                .ok()
-                .and_then(|s| s.parse().ok());
 
             // Validate prerequisites
             exomonad_core::services::validate_git().context("Failed to validate git")?;
@@ -1107,8 +1114,7 @@ async fn main() -> Result<()> {
                 .with_acp_registry(acp_registry.clone());
             let worktree_base = config.worktree_base;
             agent_control = agent_control
-                .with_worktree_base(worktree_base.clone())
-                .with_mcp_server_port(port);
+                .with_worktree_base(worktree_base.clone());
             agent_control = agent_control.with_birth_branch(exomonad_core::BirthBranch::root());
             agent_control = agent_control.with_zellij_session(config.zellij_session.clone());
             let event_session_id = uuid::Uuid::new_v4().to_string();
@@ -1124,10 +1130,9 @@ async fn main() -> Result<()> {
 
             info!(
                 wasm_path = %wasm_path.display(),
-                port = %port,
                 role = %role_name,
                 event_session_id = %event_session_id,
-                "Starting HTTP MCP server with file-based WASM (hot reload enabled)"
+                "Starting MCP server on Unix domain socket (hot reload enabled)"
             );
 
             // Build runtime with handler groups
@@ -1168,7 +1173,7 @@ async fn main() -> Result<()> {
                 event_queue.clone(),
                 Some(config.zellij_session.clone()),
                 project_dir.clone(),
-                remote_port,
+                None,
                 Some(event_session_id),
                 claude_session_registry,
                 team_registry.clone(),
@@ -1200,10 +1205,9 @@ async fn main() -> Result<()> {
                 role: None,
             };
 
-            // Write server.pid for client discovery
+            // Write server.pid for stale socket detection
             let pid_info = serde_json::json!({
                 "pid": std::process::id(),
-                "port": port,
                 "role": role_name,
             });
             if let Some(parent) = server_pid_path.parent() {
@@ -1234,7 +1238,6 @@ async fn main() -> Result<()> {
             // Health endpoint
             let health_plugin = base_state.plugin.clone();
             let health_role = role_name.clone();
-            let health_port = port;
             let health_handler = move || {
                 let plugin = health_plugin.clone();
                 let role = health_role.clone();
@@ -1243,7 +1246,6 @@ async fn main() -> Result<()> {
                     axum::Json(serde_json::json!({
                         "status": "ok",
                         "version": env!("CARGO_PKG_VERSION"),
-                        "port": health_port,
                         "role": role,
                         "wasm_hash": wasm_hash,
                     }))
@@ -1399,21 +1401,51 @@ async fn main() -> Result<()> {
                 .layer(cors)
                 .layer(TraceLayer::new_for_http());
 
-            let addr = std::net::SocketAddr::from((std::net::Ipv4Addr::UNSPECIFIED, port));
-            let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AddrInUse {
-                    anyhow::anyhow!(
-                        "Port {} is already in use. Is another exomonad serve running?\n\
-                         Check with: lsof -i :{}\n\
-                         Or use --port to pick a different port.",
-                        port,
-                        port
-                    )
-                } else {
-                    anyhow::anyhow!("Failed to bind to port {}: {}", port, e)
+            // Bind Unix domain socket
+            let socket_path = project_dir.join(".exo/server.sock");
+
+            // Check for existing server
+            if socket_path.exists() {
+                let pid_path = project_dir.join(".exo/server.pid");
+                if let Ok(content) = std::fs::read_to_string(&pid_path) {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(pid) = parsed.get("pid").and_then(|v| v.as_u64()) {
+                            use nix::sys::signal;
+                            use nix::unistd::Pid;
+                            if signal::kill(Pid::from_raw(pid as i32), None).is_ok() {
+                                return Err(anyhow::anyhow!(
+                                    "Server already running (PID {}). Stop it first or use a different project directory.",
+                                    pid
+                                ));
+                            }
+                        }
+                    }
                 }
+                // Stale socket — clean up
+                info!(path = %socket_path.display(), "Removing stale socket");
+                std::fs::remove_file(&socket_path)?;
+            }
+
+            // Ensure parent directory exists
+            if let Some(parent) = socket_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+
+            let listener = tokio::net::UnixListener::bind(&socket_path).map_err(|e| {
+                anyhow::anyhow!("Failed to bind Unix socket {}: {}", socket_path.display(), e)
             })?;
-            info!(port = %port, addr = %addr, "HTTP MCP server listening on TCP (dual-stack)");
+
+            // Set socket permissions to owner-only (0600)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))?;
+            }
+
+            info!(socket = %socket_path.display(), "MCP server listening on Unix domain socket");
+
+            let socket_path_for_cleanup = socket_path.clone();
+            let server_pid_for_cleanup = server_pid_path.clone();
 
             // Run with graceful shutdown on SIGINT or SIGTERM
             axum::serve(listener, app)
@@ -1436,30 +1468,29 @@ async fn main() -> Result<()> {
                 })
                 .await?;
 
-            // Clean up server.pid on shutdown
-            if server_pid_path.exists() {
-                let _ = std::fs::remove_file(&server_pid_path);
+            // Clean up socket and pid on shutdown
+            if socket_path_for_cleanup.exists() {
+                let _ = std::fs::remove_file(&socket_path_for_cleanup);
+                info!("Cleaned up server socket");
+            }
+            if server_pid_for_cleanup.exists() {
+                let _ = std::fs::remove_file(&server_pid_for_cleanup);
                 info!("Cleaned up server.pid");
             }
 
-            info!("HTTP MCP server shut down");
+            info!("MCP server shut down");
         }
 
         Commands::Hook { event, runtime } => {
             use std::io::Read;
             use std::time::Duration;
 
-            let port = config.port;
-            let mut url = format!(
-                "http://127.0.0.1:{}/hook?event={}&runtime={}",
-                port, event, runtime
-            );
-            // Forward agent identity env vars so the server can inject them into WASM calls
+            let mut path = format!("/hook?event={}&runtime={}", event, runtime);
             if let Ok(agent_id) = std::env::var("EXOMONAD_AGENT_ID") {
-                url.push_str(&format!("&agent_id={}", encode(&agent_id)));
+                path.push_str(&format!("&agent_id={}", encode(&agent_id)));
             }
             if let Ok(session_id) = std::env::var("EXOMONAD_SESSION_ID") {
-                url.push_str(&format!("&session_id={}", encode(&session_id)));
+                path.push_str(&format!("&session_id={}", encode(&session_id)));
             }
 
             let mut body = String::new();
@@ -1467,66 +1498,71 @@ async fn main() -> Result<()> {
                 .read_to_string(&mut body)
                 .context("Failed to read stdin")?;
 
-            let client = reqwest::Client::builder()
-                .connect_timeout(Duration::from_secs(5))
-                .timeout(Duration::from_secs(10))
-                .build()?;
+            debug!(path = %path, event = ?event, "Forwarding hook to server via UDS");
 
-            debug!(url = %url, event = ?event, "Forwarding hook to server");
-
-            // SessionStart on root session: retry for up to 5s to wait for server warmup.
-            // On `exomonad init`, the server tab and TL tab start concurrently — the
-            // SessionStart hook can fire before the server is ready to accept connections.
+            // SessionStart on root session: poll for socket to appear (server may still be starting)
             let is_root_session_start =
                 event == HookEventType::SessionStart && std::env::var("EXOMONAD_AGENT_ID").is_err();
-            let max_attempts = if is_root_session_start { 10 } else { 1 };
 
-            let mut last_err = String::new();
-            let mut resp_result = None;
-            for attempt in 0..max_attempts {
-                if attempt > 0 {
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                    debug!(attempt, "Retrying SessionStart hook");
-                }
-                match client
-                    .post(&url)
-                    .header("content-type", "application/json")
-                    .body(body.clone())
-                    .send()
-                    .await
-                {
-                    Ok(r) => {
-                        debug!(status = %r.status(), "Hook forwarding response");
-                        if r.status().is_success() {
-                            resp_result = Some(r.json::<HookEnvelope>().await?);
-                            break;
-                        } else {
-                            last_err = format!("server returned {}", r.status());
+            let socket = if is_root_session_start {
+                let start = std::time::Instant::now();
+                let timeout_dur = Duration::from_secs(5);
+                let mut found = None;
+                while start.elapsed() < timeout_dur {
+                    match uds_client::find_server_socket() {
+                        Ok(s) => { found = Some(s); break; }
+                        Err(_) => {
+                            tokio::time::sleep(Duration::from_millis(500)).await;
                         }
                     }
-                    Err(e) => {
-                        last_err = format!("server unreachable: {}", e);
+                }
+                match found {
+                    Some(s) => s,
+                    None => {
+                        eprintln!("exomonad hook: server socket not found after {}s", timeout_dur.as_secs());
+                        println!(r#"{{"continue":true}}"#);
+                        return Ok(());
                     }
                 }
-            }
-
-            let resp = match resp_result {
-                Some(r) => r,
-                None => {
-                    eprintln!("exomonad hook: {}", last_err);
-                    println!(r#"{{"continue":true}}"#);
-                    return Ok(());
+            } else {
+                match uds_client::find_server_socket() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("exomonad hook: {}", e);
+                        println!(r#"{{"continue":true}}"#);
+                        return Ok(());
+                    }
                 }
             };
 
-            print!("{}", resp.stdout);
-            if resp.exit_code != 0 {
-                std::process::exit(resp.exit_code);
+            match uds_client::uds_post(
+                &socket,
+                &path,
+                vec![("content-type", "application/json")],
+                body.into_bytes(),
+            ).await {
+                Ok((status, resp_body)) => {
+                    if (200..300).contains(&status) {
+                        let resp: HookEnvelope = serde_json::from_slice(&resp_body)
+                            .context("Failed to parse hook response")?;
+                        print!("{}", resp.stdout);
+                        if resp.exit_code != 0 {
+                            std::process::exit(resp.exit_code);
+                        }
+                    } else {
+                        eprintln!("exomonad hook: server returned {}", status);
+                        println!(r#"{{"continue":true}}"#);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("exomonad hook: {}", e);
+                    println!(r#"{{"continue":true}}"#);
+                }
             }
         }
 
         Commands::Init { session, recreate } => {
-            run_init(session, recreate, config.port).await?;
+            run_init(session, recreate).await?;
         }
 
         Commands::Reply {

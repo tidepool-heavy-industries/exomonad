@@ -29,9 +29,6 @@ pub struct RawConfig {
     /// Canonical Zellij session name for this project.
     pub zellij_session: Option<String>,
 
-    /// TCP port for the HTTP MCP server.
-    pub port: Option<u16>,
-
     /// Base directory for worktrees (default: .exo/worktrees).
     pub worktree_base: Option<PathBuf>,
 
@@ -65,8 +62,6 @@ pub struct Config {
     pub role: Role,
     /// Canonical Zellij session name (required after discovery).
     pub zellij_session: String,
-    /// TCP port for the HTTP MCP server (default: 7432).
-    pub port: u16,
     /// Base directory for worktrees.
     pub worktree_base: PathBuf,
     /// Shell command to wrap environment (e.g. "nix develop").
@@ -146,9 +141,6 @@ impl Config {
             });
         let zellij_session = sanitize_session_name(zellij_session);
 
-        // Resolve port: local > global > default (7432)
-        let port = local_raw.port.or(global_raw.port).unwrap_or(7432);
-
         // Resolve worktree_base: global > local > default (.exo/worktrees)
         let worktree_base = global_raw
             .worktree_base
@@ -203,7 +195,6 @@ impl Config {
             project_dir,
             role,
             zellij_session,
-            port,
             worktree_base,
             shell_command,
             wasm_dir,
@@ -233,7 +224,6 @@ impl Default for Config {
             project_dir: PathBuf::from("."),
             role: Role::tl(),
             zellij_session: "default".to_string(),
-            port: 7432,
             worktree_base: PathBuf::from(".exo/worktrees"),
             shell_command: None,
             wasm_dir: PathBuf::from(".exo/wasm"),
