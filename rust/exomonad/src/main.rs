@@ -7,6 +7,7 @@
 //! WASM plugins are loaded from file (server-side only).
 
 mod uds_client;
+mod mcp_stdio;
 
 use exomonad::config;
 use urlencoding::encode;
@@ -85,6 +86,16 @@ enum Commands {
     ///
     /// Loads WASM from file path (not embedded) with hot reload on change.
     Serve,
+
+    /// Run stdio MCP proxy (stdin/stdout ↔ UDS server)
+    McpStdio {
+        /// Agent role (e.g., "tl", "dev", "worker")
+        #[arg(long)]
+        role: String,
+        /// Agent name (e.g., "root", "feature-impl")
+        #[arg(long)]
+        name: String,
+    },
 
     /// Reply to a UI request (sent by Zellij plugin)
     Reply {
@@ -1045,6 +1056,10 @@ async fn main() -> Result<()> {
     });
 
     match cli.command {
+        Commands::McpStdio { ref role, ref name } => {
+            return mcp_stdio::run(role, name).await;
+        }
+
         Commands::Recompile { ref role } => {
             let default_role = config.role.to_string();
             let role_str = role.as_deref().unwrap_or(&default_role);
