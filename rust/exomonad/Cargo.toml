@@ -34,12 +34,14 @@ urlencoding = "2"
 prost = { workspace = true }
 exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"] }
 
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 futures-util = { workspace = true }
+nix = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 assert_cmd = "2.0"
 duct = { workspace = true }
 predicates = "3.0"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }

@@ -92,7 +92,7 @@ instance MCPTool SpawnSubtree where
           , AC.stcBranchName = ssBranchName args
           , AC.stcForkSession = forkSession
           , AC.stcRole = Nothing
-          , AC.stcAgentType = Just AC.Claude
+          , AC.stcAgentType = AC.Claude
           , AC.stcPerms = perms
           , AC.stcWorkingDir = ssWorkingDir args
           , AC.stcPermissions = ssPermissions args
@@ -172,7 +172,7 @@ instance MCPTool SpawnLeafSubtree where
           { AC.slcTask = renderedTask
           , AC.slcBranchName = slsBranchName args
           , AC.slcRole = Nothing
-          , AC.slcAgentType = Just AC.Gemini
+          , AC.slcAgentType = AC.Gemini
           , AC.slcPerms = perms
           , AC.slcStandaloneRepo = standaloneRepo
           , AC.slcAllowedDirs = maybe [] id (slsAllowedDirs args)
