@@ -745,6 +745,9 @@ impl AgentControlService {
             // Use worktree path as agent_dir
             let agent_dir = worktree_path;
 
+            // Create socket symlink so spawned agent can find the server
+            self.create_socket_symlink(&agent_dir).await?;
+
             // Write .mcp.json for the agent
             let role = match options.agent_type {
                 AgentType::Claude => "tl",
@@ -924,6 +927,9 @@ impl AgentControlService {
 
             self.create_worktree_checked(&worktree_path, &branch_name, &base_branch)
                 .await?;
+
+            // Create socket symlink so spawned agent can find the server
+            self.create_socket_symlink(&worktree_path).await?;
 
             let mut env_vars = self.common_spawn_env(
                 &internal_name,
@@ -1198,6 +1204,9 @@ impl AgentControlService {
                 self.create_worktree_checked(&worktree_path, &branch_name, current_branch).await?;
             }
 
+            // Create socket symlink so spawned agent can find the server
+            self.create_socket_symlink(&worktree_path).await?;
+
             let mut env_vars = self.common_spawn_env(&internal_name, &branch_name);
             // Enable Claude Code Agent Teams for native inter-agent messaging
             env_vars.insert(
@@ -1346,6 +1355,9 @@ impl AgentControlService {
             } else {
                 self.create_worktree_checked(&worktree_path, &branch_name, &current_branch).await?;
             }
+
+            // Create socket symlink so spawned agent can find the server
+            self.create_socket_symlink(&worktree_path).await?;
 
             let mut env_vars = self.common_spawn_env(&internal_name, &branch_name);
 
@@ -2131,6 +2143,38 @@ impl AgentControlService {
     // Internal: Agent Config Files
     // ========================================================================
 
+    /// Create a symlink to the server socket in the agent's worktree.
+    ///
+    /// This allows `find_server_socket()` to discover the socket without
+    /// traversing above the worktree boundary.
+    async fn create_socket_symlink(&self, agent_dir: &Path) -> Result<()> {
+        let source = self.project_dir.join(".exo/server.sock");
+        let target_dir = agent_dir.join(".exo");
+        let target = target_dir.join("server.sock");
+
+        // Ensure .exo/ exists in the agent directory
+        fs::create_dir_all(&target_dir).await?;
+
+        // Remove existing symlink if present (idempotent)
+        if target.exists() || target.symlink_metadata().is_ok() {
+            fs::remove_file(&target).await.ok();
+        }
+
+        tokio::fs::symlink(&source, &target).await
+            .with_context(|| format!(
+                "Failed to symlink {} -> {}",
+                target.display(), source.display()
+            ))?;
+
+        info!(
+            source = %source.display(),
+            target = %target.display(),
+            "Created server socket symlink in worktree"
+        );
+
+        Ok(())
+    }
+
     /// Write MCP config for the agent directory.
     ///
     /// Claude agents get `.mcp.json`. Gemini agents get `.gemini/settings.json`.
@@ -2638,6 +2682,37 @@ mod tests {
         service.copy_allowed_dirs(&agent_wt, &["/absolute".to_string(), "../outside".to_string()]).await.unwrap();
         assert!(!agent_wt.join(".exo/context/absolute").exists());
         assert!(!agent_wt.join(".exo/context/outside").exists());
+    }
+
+    #[tokio::test]
+    async fn test_create_socket_symlink() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let project_dir = temp_dir.path().to_path_buf();
+
+        // Create the source socket path (doesn't need to be a real socket for the test)
+        let exo_dir = project_dir.join(".exo");
+        fs::create_dir_all(&exo_dir).await.unwrap();
+        fs::write(exo_dir.join("server.sock"), "placeholder").await.unwrap();
+
+        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(project_dir.clone()));
+        let service = AgentControlService::new(project_dir.clone(), None, git_wt);
+
+        // Create agent dir
+        let agent_dir = project_dir.join(".exo/worktrees/test-agent");
+        fs::create_dir_all(&agent_dir).await.unwrap();
+
+        // Create symlink
+        service.create_socket_symlink(&agent_dir).await.unwrap();
+
+        // Verify symlink exists and points to project root socket
+        let symlink_path = agent_dir.join(".exo/server.sock");
+        assert!(symlink_path.exists(), "Symlink should exist");
+
+        let target = fs::read_link(&symlink_path).await.unwrap();
+        assert_eq!(target, project_dir.join(".exo/server.sock"));
+
+        // Test idempotency — calling again should not fail
+        service.create_socket_symlink(&agent_dir).await.unwrap();
     }
 }
 
