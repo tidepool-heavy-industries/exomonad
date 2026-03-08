@@ -70,7 +70,6 @@ pub fn orchestration_handlers(
     event_queue: Arc<EventQueue>,
     zellij_session: Option<String>,
     project_dir: PathBuf,
-    remote_port: Option<u16>,
     event_queue_scope: Option<String>,
     claude_session_registry: Arc<ClaudeSessionRegistry>,
     team_registry: Arc<TeamRegistry>,
@@ -85,7 +84,7 @@ pub fn orchestration_handlers(
         agent_handler = agent_handler.with_event_log(log.clone());
     }
 
-    let mut event_handler = EventHandler::new(event_queue, remote_port, event_queue_scope, project_dir)
+    let mut event_handler = EventHandler::new(event_queue, event_queue_scope, project_dir)
         .with_team_registry(team_registry.clone())
         .with_acp_registry(acp_registry.clone());
     if let Some(ref log) = event_log {

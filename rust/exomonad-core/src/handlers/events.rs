@@ -10,21 +10,17 @@ use crate::services::team_registry::TeamRegistry;
 use crate::services::EventQueue;
 use async_trait::async_trait;
 use exomonad_proto::effects::events::*;
-use prost::Message;
 use std::sync::Arc;
 use std::time::Duration;
 
 /// Events effect handler.
 ///
 /// Handles all effects in the `events.*` namespace.
-/// If `remote_url` is set, forwards notify events to the server via HTTP.
-/// Otherwise, delegates to the local `EventQueue` service.
+/// Delegates to the local `EventQueue` service.
 pub struct EventHandler {
     queue: Arc<EventQueue>,
-    remote_url: Option<String>,
     /// Event queue scope ID (server-internal UUID, NOT the birth-branch).
     event_queue_scope: String,
-    client: reqwest::Client,
     /// Tracks agents that have already called notify_parent to prevent duplicate notifications.
     notified_agents: std::sync::Mutex<std::collections::HashSet<String>>,
     /// Claude Teams registry for inbox-based delivery.
@@ -39,16 +35,12 @@ pub struct EventHandler {
 impl EventHandler {
     pub fn new(
         queue: Arc<EventQueue>,
-        remote_port: Option<u16>,
         event_queue_scope: Option<String>,
         project_dir: std::path::PathBuf,
     ) -> Self {
-        let remote_url = remote_port.map(|port| format!("http://127.0.0.1:{}/events", port));
         Self {
             queue,
-            remote_url,
             event_queue_scope: event_queue_scope.unwrap_or_else(|| "default".to_string()),
-            client: reqwest::Client::new(),
             notified_agents: std::sync::Mutex::new(std::collections::HashSet::new()),
             team_registry: None,
             acp_registry: None,
@@ -135,37 +127,14 @@ impl EventEffects for EventHandler {
         tracing::info!(
             session_id = %req.session_id,
             has_event = req.event.is_some(),
-            remote = self.remote_url.is_some(),
             "notify_event called"
         );
-        if let Some(ref url) = self.remote_url {
-            // Forward to server
-            let body = req.encode_to_vec();
-
-            let resp = self
-                .client
-                .post(url)
-                .body(body)
-                .send()
-                .await
-                .map_err(|e| crate::effects::EffectError::network_error(e.to_string()))?;
-
-            if !resp.status().is_success() {
-                return Err(crate::effects::EffectError::network_error(format!(
-                    "Server returned {}",
-                    resp.status()
-                )));
-            }
-
+        // Local handling
+        if let Some(event) = req.event {
+            self.queue.notify_event(&req.session_id, event).await;
             Ok(NotifyEventResponse { success: true })
         } else {
-            // Local handling
-            if let Some(event) = req.event {
-                self.queue.notify_event(&req.session_id, event).await;
-                Ok(NotifyEventResponse { success: true })
-            } else {
-                Ok(NotifyEventResponse { success: false })
-            }
+            Ok(NotifyEventResponse { success: false })
         }
     }
 
@@ -247,30 +216,7 @@ impl EventEffects for EventHandler {
             })),
         };
 
-        if let Some(ref url) = self.remote_url {
-            tracing::debug!(url = %url, parent_session_id = %parent_session_id, "notify_parent: forwarding to remote server");
-            let forward_req = NotifyEventRequest {
-                session_id: parent_session_id.clone(),
-                event: Some(event),
-            };
-            let body = forward_req.encode_to_vec();
-
-            let resp = self.client.post(url).body(body).send().await.map_err(|e| {
-                tracing::error!(url = %url, error = %e, "notify_parent: remote forwarding failed");
-                crate::effects::EffectError::network_error(e.to_string())
-            })?;
-
-            if !resp.status().is_success() {
-                tracing::error!(status = %resp.status(), "notify_parent: remote server returned error");
-                return Err(crate::effects::EffectError::network_error(format!(
-                    "Server returned {} during parent notification",
-                    resp.status()
-                )));
-            }
-            tracing::debug!(status = %resp.status(), "notify_parent: remote forwarding succeeded");
-        } else {
-            self.queue.notify_event(&parent_session_id, event).await;
-        }
+        self.queue.notify_event(&parent_session_id, event).await;
 
         // Deliver notification to parent: prefer Teams inbox, fall back to Zellij injection.
         let notification = format_parent_notification(&agent_id_str, &req.status, &req.message);
@@ -379,7 +325,7 @@ mod tests {
     #[test]
     fn test_event_handler_namespace() {
         let queue = Arc::new(EventQueue::new());
-        let handler = EventHandler::new(queue, None, None, std::path::PathBuf::from("."));
+        let handler = EventHandler::new(queue, None, std::path::PathBuf::from("."));
         assert_eq!(handler.namespace(), "events");
     }
 }

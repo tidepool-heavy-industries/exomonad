@@ -1188,7 +1188,6 @@ async fn main() -> Result<()> {
                 event_queue.clone(),
                 Some(config.zellij_session.clone()),
                 project_dir.clone(),
-                None,
                 Some(event_session_id),
                 claude_session_registry,
                 team_registry.clone(),
