@@ -339,7 +339,8 @@ fn resolve_recipient_tab_name(recipient: &str) -> String {
     if recipient == "root" {
         "TL".to_string()
     } else {
-        crate::services::agent_control::AgentType::from_dir_name(recipient).tab_display_name(recipient)
+        crate::services::agent_control::AgentType::from_dir_name(recipient)
+            .tab_display_name(recipient)
     }
 }
 
@@ -390,7 +391,13 @@ mod tests {
     #[test]
     fn test_resolve_recipient_tab_name() {
         assert_eq!(super::resolve_recipient_tab_name("root"), "TL");
-        assert_eq!(super::resolve_recipient_tab_name("feature-a-gemini"), "💎 feature-a-gemini");
-        assert_eq!(super::resolve_recipient_tab_name("feature-b-claude"), "🤖 feature-b-claude");
+        assert_eq!(
+            super::resolve_recipient_tab_name("feature-a-gemini"),
+            "💎 feature-a-gemini"
+        );
+        assert_eq!(
+            super::resolve_recipient_tab_name("feature-b-claude"),
+            "🤖 feature-b-claude"
+        );
     }
 }

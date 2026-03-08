@@ -61,8 +61,13 @@ impl PopupService {
     ///
     /// Synchronous, blocks until the popup plugin sends a response via the pipe.
     pub fn show_popup(&self, payload: &str) -> Result<String> {
-        self.ipc
-            .pipe_to_plugin_blocking(&self.plugin_path, "exomonad-popup", payload, false, Some("Popup"))
+        self.ipc.pipe_to_plugin_blocking(
+            &self.plugin_path,
+            "exomonad-popup",
+            payload,
+            false,
+            Some("Popup"),
+        )
     }
 }
 

@@ -1,10 +1,10 @@
+use exomonad_proto::effects::coordination::AcquireMutexResponse;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{oneshot, Mutex};
 use tracing::{info, warn};
 use uuid::Uuid;
-use exomonad_proto::effects::coordination::AcquireMutexResponse;
 
 #[derive(Debug, Clone)]
 pub struct LockState {
@@ -79,7 +79,10 @@ impl MutexRegistry {
         // Capture current holder intent for timeout diagnostics
         let current_holder_intent = {
             let locks = self.locks.lock().await;
-            locks.get(&resource).map(|l| l.intent.clone()).unwrap_or_default()
+            locks
+                .get(&resource)
+                .map(|l| l.intent.clone())
+                .unwrap_or_default()
         };
 
         // Slow path: register waiter

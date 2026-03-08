@@ -4,17 +4,17 @@
 //! Each connection allows structured messaging (prompts, notifications) instead of
 //! fragile Zellij STDIN injection.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use anyhow::Context;
 use agent_client_protocol::{
-    Agent, ClientSideConnection, InitializeRequest, NewSessionRequest, PromptRequest,
-    Implementation, ProtocolVersion,
+    Agent, ClientSideConnection, Implementation, InitializeRequest, NewSessionRequest,
+    PromptRequest, ProtocolVersion,
 };
-use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use anyhow::Context;
+use std::collections::HashMap;
 use std::process::Stdio;
+use std::sync::Arc;
 use tokio::process::Command;
+use tokio::sync::RwLock;
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 /// Metadata for an active ACP connection.
 #[derive(Debug)]
@@ -98,14 +98,9 @@ pub async fn connect_and_prompt(
         agent_id: agent_id.clone(),
     };
 
-    let (conn, io_task) = ClientSideConnection::new(
-        client,
-        outgoing,
-        incoming,
-        |fut| {
-            tokio::spawn(fut);
-        },
-    );
+    let (conn, io_task) = ClientSideConnection::new(client, outgoing, incoming, |fut| {
+        tokio::spawn(fut);
+    });
 
     // Spawn the I/O task
     let io_handle = tokio::spawn(async move {
@@ -125,7 +120,8 @@ pub async fn connect_and_prompt(
 
     // Create session
     tracing::info!(agent = %agent_id, "Creating ACP session");
-    let session = conn.new_session(NewSessionRequest::new(working_dir.to_path_buf()))
+    let session = conn
+        .new_session(NewSessionRequest::new(working_dir.to_path_buf()))
         .await
         .map_err(|e| anyhow::anyhow!("ACP new_session failed: {:?}", e))?;
 

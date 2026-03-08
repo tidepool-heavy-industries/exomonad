@@ -76,12 +76,10 @@ impl PopupEffects for PopupHandler {
 
         let popup_service = PopupService::new(ipc, plugin_path);
 
-        let response_str = tokio::task::spawn_blocking(move || {
-            popup_service.show_popup(&payload)
-        })
-        .await
-        .map_err(|e| EffectError::custom("popup_error", format!("Task join failed: {}", e)))?
-        .map_err(|e| EffectError::custom("popup_error", format!("Popup failed: {}", e)))?;
+        let response_str = tokio::task::spawn_blocking(move || popup_service.show_popup(&payload))
+            .await
+            .map_err(|e| EffectError::custom("popup_error", format!("Task join failed: {}", e)))?
+            .map_err(|e| EffectError::custom("popup_error", format!("Popup failed: {}", e)))?;
 
         // Response parsing logic (moved from PopupService)
         let output = parse_response(&request_id, &response_str).map_err(|e| {
@@ -132,8 +130,7 @@ fn build_payload(request_id: &str, input: &PopupInput) -> Result<String> {
             }
 
             let safe_title = sanitize_payload_field(&input.title);
-            let safe_items: Vec<String> =
-                items.iter().map(|s| sanitize_payload_field(s)).collect();
+            let safe_items: Vec<String> = items.iter().map(|s| sanitize_payload_field(s)).collect();
             format!("{}|{}|{}", request_id, safe_title, safe_items.join(","))
         }
     } else {
@@ -168,8 +165,8 @@ fn parse_response(request_id: &str, response_str: &str) -> Result<PopupOutput> {
 
     // Parse response: try JSON first (new format), then legacy "request_id:selection"
     if response_str.starts_with('{') {
-        let json: serde_json::Value = serde_json::from_str(response_str)
-            .context("Failed to parse JSON popup response")?;
+        let json: serde_json::Value =
+            serde_json::from_str(response_str).context("Failed to parse JSON popup response")?;
 
         let resp_request_id = json["request_id"].as_str().unwrap_or("");
         if resp_request_id != request_id {
@@ -227,106 +224,83 @@ mod tests {
         assert_eq!(handler.namespace(), "popup");
     }
 
-        #[test]
+    #[test]
 
-        fn test_construction_no_session() {
+    fn test_construction_no_session() {
+        let handler = PopupHandler::new(None);
 
-            let handler = PopupHandler::new(None);
-
-            assert_eq!(handler.namespace(), "popup");
-
-        }
-
-    
-
-        #[test]
-
-        fn test_construction_with_session() {
-
-            let ipc = ZellijIpc::new("my-session");
-
-            let handler = PopupHandler::new(Some(ipc));
-
-            assert_eq!(handler.namespace(), "popup");
-
-        }
-
-    
-
-        #[test]
-
-        fn test_build_payload_form() {
-
-            let input = PopupInput {
-
-                title: "Test".to_string(),
-
-                raw_json: serde_json::json!([{
-
-                    "type": "text",
-
-                    "id": "msg",
-
-                    "content": "Hello"
-
-                }]),
-
-                target_tab: None,
-
-            };
-
-            let res = build_payload("req-123", &input).unwrap();
-
-            assert!(res.contains("req-123"));
-
-            assert!(res.contains("Test"));
-
-            assert!(res.contains("Hello"));
-
-        }
-
-    
-
-        #[test]
-
-        fn test_parse_response_json() {
-
-            let response = serde_json::json!({
-
-                "request_id": "req-123",
-
-                "result": {
-
-                    "button": "submit",
-
-                    "values": {"name": "test"}
-
-                }
-
-            });
-
-            let res = parse_response("req-123", &response.to_string()).unwrap();
-
-            assert_eq!(res.button, "submit");
-
-            assert_eq!(res.values["name"], "test");
-
-        }
-
-    
-
-        #[test]
-
-        fn test_parse_response_legacy() {
-
-            let res = parse_response("req-123", "req-123:Option A").unwrap();
-
-            assert_eq!(res.button, "submit");
-
-            assert_eq!(res.values["selected"], "Option A");
-
-        }
-
+        assert_eq!(handler.namespace(), "popup");
     }
 
-    
+    #[test]
+
+    fn test_construction_with_session() {
+        let ipc = ZellijIpc::new("my-session");
+
+        let handler = PopupHandler::new(Some(ipc));
+
+        assert_eq!(handler.namespace(), "popup");
+    }
+
+    #[test]
+
+    fn test_build_payload_form() {
+        let input = PopupInput {
+            title: "Test".to_string(),
+
+            raw_json: serde_json::json!([{
+
+                "type": "text",
+
+                "id": "msg",
+
+                "content": "Hello"
+
+            }]),
+
+            target_tab: None,
+        };
+
+        let res = build_payload("req-123", &input).unwrap();
+
+        assert!(res.contains("req-123"));
+
+        assert!(res.contains("Test"));
+
+        assert!(res.contains("Hello"));
+    }
+
+    #[test]
+
+    fn test_parse_response_json() {
+        let response = serde_json::json!({
+
+            "request_id": "req-123",
+
+            "result": {
+
+                "button": "submit",
+
+                "values": {"name": "test"}
+
+            }
+
+        });
+
+        let res = parse_response("req-123", &response.to_string()).unwrap();
+
+        assert_eq!(res.button, "submit");
+
+        assert_eq!(res.values["name"], "test");
+    }
+
+    #[test]
+
+    fn test_parse_response_legacy() {
+        let res = parse_response("req-123", "req-123:Option A").unwrap();
+
+        assert_eq!(res.button, "submit");
+
+        assert_eq!(res.values["selected"], "Option A");
+    }
+}

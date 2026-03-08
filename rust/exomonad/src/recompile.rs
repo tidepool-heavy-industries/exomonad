@@ -22,10 +22,15 @@ fn generate_cross_repo_cabal_project(
     project_dir: &Path,
     role: &str,
 ) -> Result<PathBuf> {
-    let sdk = sdk_dir.canonicalize()
+    let sdk = sdk_dir
+        .canonicalize()
         .with_context(|| format!("Failed to canonicalize SDK dir: {}", sdk_dir.display()))?;
-    let proj = project_dir.canonicalize()
-        .with_context(|| format!("Failed to canonicalize project dir: {}", project_dir.display()))?;
+    let proj = project_dir.canonicalize().with_context(|| {
+        format!(
+            "Failed to canonicalize project dir: {}",
+            project_dir.display()
+        )
+    })?;
 
     let content = format!(
         r#"-- Auto-generated cabal.project.wasm for cross-repo build
@@ -70,7 +75,10 @@ allow-newer: all
     std::fs::write(&out_path, content)
         .with_context(|| format!("Failed to write {}", out_path.display()))?;
 
-    tracing::info!("Generated cross-repo cabal project at {}", out_path.display());
+    tracing::info!(
+        "Generated cross-repo cabal project at {}",
+        out_path.display()
+    );
     Ok(out_path)
 }
 
@@ -92,7 +100,10 @@ pub async fn run_recompile(role: &str, project_dir: &Path, flake_ref: Option<&st
             // No flake_ref configured and no local flake.nix — try compiled-in SDK path
             match compiled_sdk_dir() {
                 Some(sdk) => {
-                    tracing::info!("No flake_ref configured, using compiled-in SDK: {}", sdk.display());
+                    tracing::info!(
+                        "No flake_ref configured, using compiled-in SDK: {}",
+                        sdk.display()
+                    );
                     sdk.to_string_lossy().to_string()
                 }
                 None => bail!(

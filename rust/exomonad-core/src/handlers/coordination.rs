@@ -21,7 +21,11 @@ impl CoordinationHandler {
     }
 }
 
-crate::impl_pass_through_handler!(CoordinationHandler, "coordination", dispatch_coordination_effect);
+crate::impl_pass_through_handler!(
+    CoordinationHandler,
+    "coordination",
+    dispatch_coordination_effect
+);
 
 #[async_trait]
 impl CoordinationEffects for CoordinationHandler {

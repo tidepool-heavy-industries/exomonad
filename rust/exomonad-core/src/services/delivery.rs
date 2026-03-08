@@ -21,9 +21,9 @@ async fn deliver_via_uds(
     message: &str,
     summary: &str,
 ) -> Result<(), String> {
+    use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::UnixStream;
-    use std::time::Duration;
 
     let body = serde_json::json!({
         "from": from,
@@ -38,9 +38,17 @@ async fn deliver_via_uds(
     );
 
     let result = tokio::time::timeout(Duration::from_secs(5), async {
-        let mut stream = UnixStream::connect(socket_path).await.map_err(|e| e.to_string())?;
-        stream.write_all(request.as_bytes()).await.map_err(|e| e.to_string())?;
-        stream.write_all(&body_bytes).await.map_err(|e| e.to_string())?;
+        let mut stream = UnixStream::connect(socket_path)
+            .await
+            .map_err(|e| e.to_string())?;
+        stream
+            .write_all(request.as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+        stream
+            .write_all(&body_bytes)
+            .await
+            .map_err(|e| e.to_string())?;
         stream.flush().await.map_err(|e| e.to_string())?;
 
         let mut buf = [0u8; 128];
@@ -49,9 +57,13 @@ async fn deliver_via_uds(
         if response.contains("200") || response.contains("204") || response.contains("202") {
             Ok(())
         } else {
-            Err(format!("UDS server responded: {}", response.lines().next().unwrap_or("empty")))
+            Err(format!(
+                "UDS server responded: {}",
+                response.lines().next().unwrap_or("empty")
+            ))
         }
-    }).await;
+    })
+    .await;
 
     match result {
         Ok(inner) => inner,
@@ -165,7 +177,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_deliver_no_registry_returns_zellij() {
-        let result = deliver_to_agent(None, None, std::path::Path::new("/tmp/nonexistent"), "agent-1", "tab-1", "test", "hello", "summary").await;
+        let result = deliver_to_agent(
+            None,
+            None,
+            std::path::Path::new("/tmp/nonexistent"),
+            "agent-1",
+            "tab-1",
+            "test",
+            "hello",
+            "summary",
+        )
+        .await;
         assert_eq!(result, DeliveryResult::Zellij);
     }
 }

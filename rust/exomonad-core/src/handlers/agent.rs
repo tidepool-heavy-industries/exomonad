@@ -2,23 +2,24 @@
 //!
 //! Uses proto-generated types from `exomonad_proto::effects::agent`.
 
-use crate::domain::{AgentName, BirthBranch, ClaudeSessionUuid, AgentPermissions};
+use crate::domain::{AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid};
 use crate::effects::{
     dispatch_agent_effect, AgentEffects, EffectError, EffectHandler, EffectResult, ResultExt,
 };
 
 use super::non_empty;
-use std::path::PathBuf;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::{
     AgentControlService, AgentInfo, AgentType as ServiceAgentType, ClaudeSpawnFlags,
-    SpawnGeminiTeammateOptions, SpawnLeafOptions, SpawnOptions, SpawnSubtreeOptions, SpawnWorkerOptions,
+    SpawnGeminiTeammateOptions, SpawnLeafOptions, SpawnOptions, SpawnSubtreeOptions,
+    SpawnWorkerOptions,
 };
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
 use crate::services::event_log::EventLog;
 use crate::{GithubOwner, GithubRepo, IssueNumber};
 use async_trait::async_trait;
 use exomonad_proto::effects::agent::*;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -93,7 +94,7 @@ fn convert_agent_type(t: AgentType) -> EffectResult<ServiceAgentType> {
         AgentType::Gemini => Ok(ServiceAgentType::Gemini),
         AgentType::Shoal => Ok(ServiceAgentType::Shoal),
         AgentType::Unspecified => Err(EffectError::invalid_input(
-            "agent_type is required (must be 'claude', 'gemini', or 'shoal', got UNSPECIFIED)"
+            "agent_type is required (must be 'claude', 'gemini', or 'shoal', got UNSPECIFIED)",
         )),
     }
 }
@@ -381,9 +382,10 @@ impl AgentEffects for AgentHandler {
         req: SpawnAcpRequest,
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<SpawnAcpResponse> {
-        let registry = self.acp_registry.as_ref().ok_or_else(|| {
-            EffectError::custom("agent_error", "ACP registry not configured")
-        })?;
+        let registry = self
+            .acp_registry
+            .as_ref()
+            .ok_or_else(|| EffectError::custom("agent_error", "ACP registry not configured"))?;
 
         // Resolve working directory from context
         let working_dir = crate::services::agent_control::resolve_agent_working_dir(ctx);
@@ -434,7 +436,9 @@ impl AgentEffects for AgentHandler {
         // Register as synthetic team member for Teams inbox delivery
         let team_name = format!("exo-{}", ctx.birth_branch);
         if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
-            &team_name, agent_name, "gemini-acp",
+            &team_name,
+            agent_name,
+            "gemini-acp",
         ) {
             warn!(agent = %agent_name, team = %team_name, error = %e, "Failed to register synthetic team member (non-fatal)");
         }
