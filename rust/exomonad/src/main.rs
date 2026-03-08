@@ -33,6 +33,9 @@ use tower_http::trace::TraceLayer;
 use tracing::{debug, info, warn};
 use tracing_subscriber::prelude::*;
 
+mod uds_client;
+mod mcp_stdio;
+
 // ============================================================================
 // CLI Types
 // ============================================================================
@@ -87,6 +90,20 @@ enum Commands {
         /// TCP port to listen on (default: from config, or 7432)
         #[arg(long)]
         port: Option<u16>,
+    },
+
+    /// Run stdio MCP proxy (stdin/stdout ↔ UDS server)
+    ///
+    /// Used by Claude Code and Gemini CLI as stdio MCP transport.
+    /// Discovers server socket automatically via .exo/server.sock walk-up.
+    McpStdio {
+        /// Agent role (e.g., "tl", "dev", "worker")
+        #[arg(long)]
+        role: String,
+
+        /// Agent name (e.g., "root", "feature-impl")
+        #[arg(long)]
+        name: String,
     },
 
     /// Reply to a UI request (sent by Zellij plugin)
@@ -1413,33 +1430,54 @@ async fn main() -> Result<()> {
                     anyhow::anyhow!("Failed to bind to port {}: {}", port, e)
                 }
             })?;
-            info!(port = %port, addr = %addr, "HTTP MCP server listening on TCP (dual-stack)");
+
+            // Also listen on UDS at .exo/server.sock
+            let uds_path = project_dir.join(".exo/server.sock");
+            if uds_path.exists() {
+                let _ = std::fs::remove_file(&uds_path);
+            }
+            if let Some(parent) = uds_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let uds_listener = tokio::net::UnixListener::bind(&uds_path)?;
+            
+            info!(port = %port, addr = %addr, uds = %uds_path.display(), "HTTP MCP server listening on TCP and UDS");
+
+            let tcp_server = axum::serve(listener, app.clone());
+            let uds_server = axum::serve(uds_listener, app);
 
             // Run with graceful shutdown on SIGINT or SIGTERM
-            axum::serve(listener, app)
-                .with_graceful_shutdown(async move {
-                    let ctrl_c = tokio::signal::ctrl_c();
-                    #[cfg(unix)]
-                    let terminate = async {
-                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                            .expect("failed to install SIGTERM handler")
-                            .recv()
-                            .await;
-                    };
-                    #[cfg(not(unix))]
-                    let terminate = std::future::pending::<()>();
+            let shutdown = async move {
+                let ctrl_c = tokio::signal::ctrl_c();
+                #[cfg(unix)]
+                let terminate = async {
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                        .expect("failed to install SIGTERM handler")
+                        .recv()
+                        .await;
+                };
+                #[cfg(not(unix))]
+                let terminate = std::future::pending::<()>();
 
-                    tokio::select! {
-                        _ = ctrl_c => info!("Received SIGINT, initiating graceful shutdown"),
-                        _ = terminate => info!("Received SIGTERM, initiating graceful shutdown"),
-                    }
-                })
-                .await?;
+                tokio::select! {
+                    _ = ctrl_c => info!("Received SIGINT, initiating graceful shutdown"),
+                    _ = terminate => info!("Received SIGTERM, initiating graceful shutdown"),
+                }
+            };
 
-            // Clean up server.pid on shutdown
+            tokio::select! {
+                _ = tcp_server.with_graceful_shutdown(async { shutdown.await }) => {},
+                _ = uds_server.with_graceful_shutdown(async { }) => {},
+            }
+
+            // Clean up server.pid and server.sock on shutdown
             if server_pid_path.exists() {
                 let _ = std::fs::remove_file(&server_pid_path);
                 info!("Cleaned up server.pid");
+            }
+            if uds_path.exists() {
+                let _ = std::fs::remove_file(&uds_path);
+                info!("Cleaned up server.sock");
             }
 
             info!("HTTP MCP server shut down");
@@ -1567,6 +1605,10 @@ async fn main() -> Result<()> {
                 .context("Failed to write to socket")?;
 
             info!("Sent reply to control socket");
+        }
+
+        Commands::McpStdio { role, name } => {
+            mcp_stdio::run(&role, &name).await?;
         }
     }
 
