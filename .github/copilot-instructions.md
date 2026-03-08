@@ -40,16 +40,7 @@ Agents are built in separate repos () using this library.
 ## Project Structure
 
 ```
-exomonad-core/              # Core library (Graph DSL, effects, templates)
-├── src/ExoMonad/
-│   ├── Effect.hs           # Core effects
-│   ├── Template.hs         # TypedTemplate
-│   ├── Tool.hs             # Tool typeclass, ToolList GADT
-│   ├── Schema.hs           # JSON Schema derivation
-│   └── Graph/              # Type-level DSL for agent graphs
-
-haskell/wasm-guest/         # WASM guest with MCP tool definitions
-haskell/effects/            # Effect interpreters (LLM, Git, GitHub, etc.)
+haskell/wasm-guest/         # WASM guest with MCP tool definitions (freer-simple)
 rust/exomonad/              # Rust binary (WASM host, MCP server)
 rust/exomonad-core/         # Framework, handlers, services, protocol
 ```

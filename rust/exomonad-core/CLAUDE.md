@@ -1,6 +1,6 @@
 # exomonad-core — Unified Library
 
-ExoMonad core is the unified library providing the effect system framework, WASM hosting via Extism, an MCP server implementation, and built-in effect handlers and services for git, GitHub, agent orchestration, and more. It defines the FFI boundary using protobuf and provides a lightweight UI protocol for frontend plugins.
+ExoMonad core is the unified library providing the effect system framework, WASM hosting via Extism, and built-in effect handlers and services for git, GitHub, agent orchestration, and more. It defines the FFI boundary using protobuf and provides a lightweight UI protocol for frontend plugins.
 
 ## Module Structure
 
@@ -10,14 +10,14 @@ ExoMonad core is the unified library providing the effect system framework, WASM
 | `handlers/` | Effect handler implementations (git, github, log, agent, fs, etc.) |
 | `services/` | Business logic services (git, github, agent_control, event_queue, etc.) |
 | `services/external/` | External API clients (anthropic, github/octocrab, ollama, otel) |
-| `mcp/` | MCP server implementation (tools, server, state) |
+| `mcp/` | MCP types (ToolDefinition) and tools module |
 | `protocol/` | Wire format types (hook, mcp, service) |
 
 ## Feature Flags
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `runtime` | Yes | Full runtime: WASM hosting, effect handlers, MCP server, services |
+| `runtime` | Yes | Full runtime: WASM hosting, effect handlers, services |
 
 Without `runtime`: only `ui_protocol` module available. Used by `exomonad-plugin` which targets wasm32-wasi.
 
@@ -52,4 +52,4 @@ Agent Client Protocol (ACP) provides structured JSON-RPC messaging to Gemini age
 
 - [Root CLAUDE.md](../../CLAUDE.md)
 - [Handlers CLAUDE.md](src/handlers/CLAUDE.md)
-- [Haskell effects](../../haskell/effects/CLAUDE.md)
+- [Haskell WASM guest](../../haskell/wasm-guest/CLAUDE.md)

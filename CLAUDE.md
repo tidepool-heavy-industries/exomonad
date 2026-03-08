@@ -400,10 +400,9 @@ GitHub Issues. Branch naming: `gh-{number}/{description}`. Reference issue in co
 
 ### Key Design Decisions
 
-1. **freer-simple for effects** — Reified continuations for WASM yield/resume
+1. **freer-simple for effects** — Standardized on freer-simple for reified continuations (WASM yield/resume)
 2. **IO-blind agents** — All IO in Rust runners, enables WASM + deterministic testing
 3. **Haskell WASM = embedded DSL** — All logic in Haskell, Rust handles I/O only
-4. **Single effect tier** — wasm-guest uses freer-simple exclusively; no polysemy
 
 ---
 

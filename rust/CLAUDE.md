@@ -79,7 +79,7 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 ├── exomonad-core/  ← Unified library (publishable)
 │   • Framework: EffectHandler trait, EffectRegistry, RuntimeBuilder, Runtime
 │   • PluginManager (single host fn: yield_effect)
-│   • MCP server implementation (reusable)
+│   • MCP types (ToolDefinition, tools module)
 │   • Protocol types (hook, mcp, service)
 │   • Handlers: GitHandler, GitHubHandler, LogHandler, AgentHandler,
 │     FsHandler, PopupHandler, FilePRHandler, CopilotHandler
@@ -112,7 +112,7 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `runtime` | Yes | Full runtime: WASM hosting, effect handlers, MCP server, services |
+| `runtime` | Yes | Full runtime: WASM hosting, effect handlers, services |
 
 Without `runtime`: only `ui_protocol` module is available (serde + serde_json deps only). Used by `exomonad-plugin` which targets wasm32-wasi.
 
@@ -154,7 +154,7 @@ echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 
 In `mcp-stdio` mode, the agent's identity is passed via command-line flags: `--role {role} --agent-id {name}`. Role determines which WASM tool set. Identity is structural: each agent gets its own `PluginManager` with `EffectContext` (agent name + birth branch) baked in at construction. All effect handlers receive `&EffectContext` — identity is always present, no Option, no task-locals, no panic paths.
 
-Roles are defined in Haskell WASM (`AllRoles.hs`). Adding a role is a Haskell-only change — Rust uses a lazy cache that creates an `McpServer` per role on first request.
+Roles are defined in Haskell WASM (`AllRoles.hs`). Adding a role is a Haskell-only change — Rust uses a lazy cache that creates a `PluginManager` per role on first request.
 
 At spawn time, `spawn_subtree`/`spawn_leaf_subtree`/`spawn_workers` writes per-agent MCP config with the agent's identity flags. Identity is unforgeable and visible in logs.
 
@@ -269,4 +269,4 @@ cargo test -p exomonad-proto            # Wire format compatibility tests
 
 - [Root CLAUDE.md](../CLAUDE.md) - Project overview and documentation tree
 - [Haskell wasm-guest](../haskell/wasm-guest/) - Haskell WASM plugin source
-- [Haskell effects](../haskell/effects/CLAUDE.md) - Effect interpreters
+- [Haskell WASM guest](../haskell/wasm-guest/CLAUDE.md) - MCP tool definitions

@@ -2,7 +2,7 @@
 
 ## Language-Specific Guidance
 
-### Haskell (haskell/dsl/core/, haskell/wasm-guest/, haskell/effects/)
+### Haskell (haskell/wasm-guest/)
 
 **Effect System (freer-simple)**
 - Effect constraints should be ordered correctly - effects are interpreted outermost-first

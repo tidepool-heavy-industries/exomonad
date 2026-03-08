@@ -259,6 +259,56 @@ impl EventEffects for EventHandler {
 
         Ok(NotifyParentResponse { ack: true })
     }
+
+    async fn send_message(
+        &self,
+        req: SendMessageRequest,
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<SendMessageResponse> {
+        let sender = ctx.agent_name.as_str();
+        let summary = if req.summary.is_empty() {
+            req.content.chars().take(50).collect::<String>()
+        } else {
+            req.summary.clone()
+        };
+        let tab_name = resolve_recipient_tab_name(&req.recipient);
+
+        let delivery_result = crate::services::delivery::deliver_to_agent(
+            self.team_registry.as_deref(),
+            self.acp_registry.as_deref(),
+            &self.project_dir,
+            &req.recipient,
+            &tab_name,
+            sender,
+            &req.content,
+            &summary,
+        )
+        .await;
+
+        let method_string = match delivery_result {
+            DeliveryResult::Teams => "teams_inbox",
+            DeliveryResult::Acp => "acp",
+            DeliveryResult::Uds => "unix_socket",
+            DeliveryResult::Zellij => "zellij_stdin",
+            DeliveryResult::Failed => "failed",
+        };
+
+        if let Some(ref log) = self.event_log {
+            let _ = log.append(
+                "agent.message_sent",
+                sender,
+                &serde_json::json!({
+                    "recipient": &req.recipient,
+                    "method": method_string,
+                }),
+            );
+        }
+
+        Ok(SendMessageResponse {
+            success: !matches!(delivery_result, DeliveryResult::Failed),
+            delivery_method: method_string.to_string(),
+        })
+    }
 }
 
 fn format_parent_notification(agent_id: &str, status: &str, message: &str) -> String {
@@ -282,6 +332,14 @@ fn format_parent_notification(agent_id: &str, status: &str, message: &str) -> St
             }
         ),
         _ => format!("[CHILD STATUS: {} - {}] {}", agent_id, status, message),
+    }
+}
+
+fn resolve_recipient_tab_name(recipient: &str) -> String {
+    if recipient == "root" {
+        "TL".to_string()
+    } else {
+        crate::services::agent_control::AgentType::from_dir_name(recipient).tab_display_name(recipient)
     }
 }
 
@@ -327,5 +385,12 @@ mod tests {
         let queue = Arc::new(EventQueue::new());
         let handler = EventHandler::new(queue, None, std::path::PathBuf::from("."));
         assert_eq!(handler.namespace(), "events");
+    }
+
+    #[test]
+    fn test_resolve_recipient_tab_name() {
+        assert_eq!(super::resolve_recipient_tab_name("root"), "TL");
+        assert_eq!(super::resolve_recipient_tab_name("feature-a-gemini"), "💎 feature-a-gemini");
+        assert_eq!(super::resolve_recipient_tab_name("feature-b-claude"), "🤖 feature-b-claude");
     }
 }

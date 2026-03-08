@@ -2,33 +2,21 @@
 
 All Haskell packages live here.
 
-## When to Read Which CLAUDE.md
-
-| I want to... | Read this |
-|--------------|-----------|
-| Understand effect types, structured output | `dsl/core/CLAUDE.md` |
-| Add or modify an effect interpreter | `effects/CLAUDE.md` |
-| Work on WASM guest (MCP tools) | `wasm-guest/` |
-| Understand wire protocols | `protocol/CLAUDE.md` |
-| Generate training data | `tools/training-generator/CLAUDE.md` |
-
 ## Structure
 
 | Directory | Purpose |
 |-----------|---------|
-| `wasm-guest/` | WASM plugin with MCP tools (hosted by Rust runtime) |
-| `dsl/core/` | Effect types, structured output, LLM infrastructure (SDK) |
-| `effects/` | Effect interpreters (LLM, Git, GitHub, Zellij, etc.) |
+| `wasm-guest/` | WASM plugin with MCP tools (hosted by Rust runtime, freer-simple) |
 | `proto/` | Generated Haskell proto types (from `proto/` root) |
-| `proto-test/` | Tests for generated proto types |
-| `protocol/` | Wire formats for native UI |
-| `tools/` | Standalone utilities (training data generation) |
-| `vendor/` | Vendored dependencies (ginger, polysemy, freer-simple) |
+| `vendor/freer-simple/` | Vendored freer-simple (GHC 9.12 patches) |
+| `vendor/exomonad-pdk/` | Vendored Extism PDK |
+| `vendor/proto3-runtime/` | Vendored protobuf runtime |
+| `vendor/ginger/` | Vendored typed Jinja templates |
 
 ## Design Patterns
 
-- **Algebraic effects**: Polysemy (DSL/effects) and freer-simple (WASM guest) interpreted to IO
-- **Adapter pattern**: Interpreters adapt external APIs (HTTP, subprocess, sockets)
+- **Algebraic effects**: freer-simple `Eff` with coroutine-based yield/resume
+- **IO-blind WASM guest**: All logic in Haskell, all I/O in Rust effect handlers
 - **Embedded DSL**: Haskell WASM as pure logic, hosted by Rust runtime
 
 ## Role System
@@ -83,7 +71,7 @@ config = RoleConfig { roleName = "tl", tools = Tools { ... }, hooks = ... }
 
 The `mode` parameter enables the same record for both schema generation (`AsSchema`) and handler dispatch (`AsHandler`). See ADR-004 for the full design rationale.
 
-- **Library/SDK**: `haskell/wasm-guest` and `haskell/dsl/core` (specifically `ExoMonad.Effect.*`) provide the SDK.
+- **Library/SDK**: `haskell/wasm-guest` provides the SDK for defining MCP tools and hooks.
 
 ## Common Commands
 
@@ -93,9 +81,9 @@ cabal test all       # Run tests
 just pre-commit      # Run all checks
 ```
 
-## Adding New Effects
+## Adding New MCP Tools
 
-1. Define effect type in `dsl/core/src/ExoMonad/Effect/Types.hs` (or `Effects/*.hs`)
-2. Create interpreter package at `effects/{name}-interpreter/`
-3. Add to `cabal.project`
-4. Wire into `wasm-guest/` if needed for MCP tools (via host functions)
+1. Create tool module in `wasm-guest/src/ExoMonad/Guest/Tools/`
+2. Define tool using `MCPTool` typeclass (schema + handler)
+3. Wire into role configs in `.exo/roles/devswarm/`
+4. If new I/O is needed, add effect GADT in `wasm-guest/src/ExoMonad/Guest/Effects/` and corresponding Rust handler
