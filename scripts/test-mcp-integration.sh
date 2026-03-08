@@ -23,9 +23,7 @@ EOF
 git -C "$WORK_DIR" init -q
 git -C "$WORK_DIR" -c user.name=Test -c user.email=test@test.com commit -q --allow-empty -m initial
 
-# Find free port, start server
-PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1]); s.close()')
-
+# Start server
 EXOMONAD_BIN="$PROJECT_ROOT/target/debug/exomonad"
 if [ ! -x "$EXOMONAD_BIN" ]; then
     echo "Building exomonad..." >&2
@@ -33,12 +31,12 @@ if [ ! -x "$EXOMONAD_BIN" ]; then
 fi
 
 cd "$WORK_DIR"
-"$EXOMONAD_BIN" serve --port "$PORT" &
+"$EXOMONAD_BIN" serve &
 SERVER_PID=$!
 
-# Wait for health
+# Wait for health (socket creation)
 for i in $(seq 1 100); do
-    if curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; then break; fi
+    if [ -S ".exo/server.sock" ]; then break; fi
     if ! kill -0 "$SERVER_PID" 2>/dev/null; then
         echo "Server exited early" >&2
         exit 1
@@ -48,4 +46,4 @@ done
 
 # Run tests
 cd "$PROJECT_ROOT"
-MCP_TEST_PORT="$PORT" cargo test -p exomonad --test mcp_integration "$@"
+cargo test -p exomonad --test mcp_integration "$@"

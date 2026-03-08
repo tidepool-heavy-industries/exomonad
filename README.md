@@ -51,9 +51,7 @@ just install-all-dev  # Builds WASM via Nix and installs the Rust binary to ~/.c
 
 1. **Initialize**: Run `exomonad init` in your project root. This starts the background server and sets up your environment.
 2. **Register MCP** (one-time):
-   ```bash
-   claude mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
-   ```
+   ExoMonad is auto-configured by `exomonad init`. It adds itself to your Claude/Gemini config via `.mcp.json` using the `stdio` transport. No manual registration is required.
 3. **Launch Agent**: Open the Tech Lead tab in your Zellij session and run `claude`.
 4. **Orchestrate**: Delegate tasks using tools like `spawn_workers` or `spawn_subtree`.
 

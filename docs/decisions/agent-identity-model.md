@@ -54,20 +54,20 @@ struct EffectContext {
 
 The server maintains a per-agent backend cache keyed by birth-branch. When an MCP request arrives, the server looks up the caller's EffectContext and routes the request to the right backend instance.
 
-### MCP URL Routing
+### MCP Stdio Routing
 
-Each agent connects to the MCP server at a URL that encodes its identity:
+Each agent connects to the MCP server via stdio using a command that encodes its identity:
 
-```
-http://localhost:7432/agents/{role}/{name}/mcp
+```bash
+exomonad mcp-stdio --role {role} --name {name}
 ```
 
 For example:
-- Root TL: `http://localhost:7432/agents/tl/root/mcp`
-- Feature subtree: `http://localhost:7432/agents/tl/main.feature/mcp`
-- Leaf worker: `http://localhost:7432/agents/dev/main.feature.auth/mcp`
+- Root TL: `exomonad mcp-stdio --role tl --name root`
+- Feature subtree: `exomonad mcp-stdio --role tl --name main.feature`
+- Leaf worker: `exomonad mcp-stdio --role dev --name main.feature.auth`
 
-The server extracts `role` and `name` from the URL path and constructs the EffectContext.
+The server extracts `role` and `name` from the command-line arguments and constructs the EffectContext. This ensures that even when using stdio, each agent operates with its own identity and isolated backend state.
 
 ## Consequences
 

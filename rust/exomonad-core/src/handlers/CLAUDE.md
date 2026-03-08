@@ -36,14 +36,6 @@ Handles effects in the `events.*` namespace, enabling synchronization between ag
 - Tab display names computed via `AgentType::tab_display_name(slug)` — single source of truth
 - Agent identity resolved as `AgentName` from `EffectContext` (structural, baked into PluginManager)
 
-### Remote Forwarding
-
-The handler can be configured with a `remote_url` (derived from `remote_port`).
-- If `remote_url` is set: `notify_event` calls are forwarded via HTTP POST to the specified URL (e.g., `http://127.0.0.1:{port}/events`).
-- If `remote_url` is NOT set: `notify_event` calls are handled locally by the `EventQueue` service.
-
-This allows worker agents running in isolated processes (or even machines) to notify the main orchestration server.
-
 ### Session ID Resolution
 
 - The handler is initialized with an optional `session_id`.

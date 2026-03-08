@@ -22,7 +22,7 @@ The following paths referenced in the "Documentation Tree" or "Package Inventory
 *   `tools/` (including `micro-gastown`, `blast-radius`)
 
 ### Inaccurate Claims
-*   **Server Transport**: States "Uses synchronous Unix sockets... for minimal overhead... during blocking hook execution." While `exomonad reply` uses a control socket, `exomonad serve` (the main MCP server) listens on TCP/HTTP (default port 7432), and hooks communicate via HTTP to `localhost:{port}/hook`.
+*   **Server Transport**: This claim is now accurate as the system has been migrated to use synchronous Unix sockets (defaulting to `.exo/server.sock`) for the main MCP server and hooks, eliminating TCP/HTTP overhead during agent operations.
 *   **Documentation Tree**: The tree visualization is stale and missing current paths like `haskell/effects/filesystem-interpreter/` (which likely corresponds to `fs.proto`).
 
 ## 2. `rust/CLAUDE.md`

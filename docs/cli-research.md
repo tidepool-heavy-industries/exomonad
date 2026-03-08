@@ -27,7 +27,7 @@ For exomonad's graph input types, a hybrid approach works best:
 | Feature | Status | Example |
 |---------|--------|---------|
 | Sum types → subcommands | Works | `data Cmd = A {...} \| B {...}` → `a ...` / `b ...` |
-| Record fields → flags | Works | `{ port :: Int }` → `--port INT` |
+| Record fields → flags | Works | `{ val :: Int }` → `--val INT` |
 | Maybe fields → optional | Works | `Maybe Text` → `[--field TEXT]` |
 | Bool fields → switches | Works | `Bool` → `--flag` (no argument) |
 | Lists → repeatable | Works | `[Int]` → `--item 1 --item 2` |
