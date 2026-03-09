@@ -27,7 +27,6 @@
 //!
 //! ```rust,ignore
 //! use exomonad_core::{RuntimeBuilder, core_handlers, git_handlers, EffectHandler, EffectResult};
-//! use exomonad_core::mcp::{McpServer, McpState};
 //!
 //! // Pick only the handler groups you need
 //! let mut builder = RuntimeBuilder::new()
@@ -39,10 +38,6 @@
 //! builder = builder.with_effect_handler(MyDomainHandler::new());
 //!
 //! let rt = builder.build().await?;
-//!
-//! // Embed MCP server
-//! let state = McpState::builder(Arc::new(rt.plugin_manager), project_dir).build();
-//! McpServer::new(state).serve(addr).await?;
 //! ```
 
 // === Always available (lightweight types for plugin consumers) ===
@@ -306,15 +301,6 @@ impl Runtime {
         ctx: &EffectContext,
     ) -> EffectResult<Vec<u8>> {
         self.registry.dispatch(effect_type, payload, ctx).await
-    }
-
-    /// Convert into MCP state for running the MCP server.
-    pub fn into_mcp_state(self, project_dir: PathBuf) -> mcp::McpState {
-        mcp::McpState {
-            project_dir,
-            plugin: Arc::new(self.plugin_manager),
-            role: None,
-        }
     }
 }
 

@@ -46,17 +46,17 @@ pub struct MCPCallOutput {
 }
 
 impl MCPCallOutput {
-    /// Convert to a JSON value suitable for a JSON-RPC result.
-    /// Used by our custom MCP server (replaces rmcp's CallToolResult).
-    pub fn into_json_rpc_result(self) -> Value {
+    /// Convert to MCP tool result format (content array with isError flag).
+    pub fn to_mcp_result(&self) -> Value {
         if self.success {
             let text = self
                 .result
-                .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
+                .as_ref()
+                .map(|v| serde_json::to_string_pretty(v).unwrap_or_default())
                 .unwrap_or_default();
-            json!({"content": [{"type": "text", "text": text}]})
+            json!({"content": [{"type": "text", "text": text}], "isError": false})
         } else {
-            let err = self.error.unwrap_or_else(|| "Unknown error".to_string());
+            let err = self.error.as_deref().unwrap_or("Unknown error");
             json!({"content": [{"type": "text", "text": err}], "isError": true})
         }
     }

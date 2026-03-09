@@ -1,73 +1,14 @@
-//! MCP (Model Context Protocol) server.
+//! MCP (Model Context Protocol) types and WASM tool execution.
 //!
-//! All tool logic is in Haskell WASM. This module handles MCP transport
-//! (plain JSON-RPC over HTTP) and forwards tool calls to the WASM plugin.
+//! All tool logic is in Haskell WASM. This module provides:
+//! - Tool definition types for MCP discovery
+//! - WASM call types (MCPCallInput/MCPCallOutput)
+//! - Tool schema discovery via WASM
 
 pub mod tools;
 
-#[cfg(feature = "runtime")]
-pub mod server;
-
-#[cfg(feature = "runtime")]
-pub use server::McpServer;
-
-use crate::PluginManager;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::PathBuf;
-use std::sync::Arc;
-
-// ============================================================================
-// State
-// ============================================================================
-
-/// Shared state for MCP server.
-#[derive(Clone)]
-pub struct McpState {
-    /// Working directory for git operations (used for logging).
-    pub project_dir: PathBuf,
-    /// WASM plugin for routing tool calls through Haskell.
-    /// All tool calls are routed through handle_mcp_call in WASM.
-    pub plugin: Arc<PluginManager>,
-    /// Role for this MCP endpoint (e.g. "tl" or "dev").
-    /// Controls which tools are exposed. None means all tools.
-    pub role: Option<String>,
-}
-
-/// Builder for constructing McpState with optional fields.
-pub struct McpStateBuilder {
-    plugin: Arc<PluginManager>,
-    project_dir: PathBuf,
-    role: Option<String>,
-}
-
-impl McpStateBuilder {
-    /// Set the role for this MCP endpoint.
-    pub fn role(mut self, role: impl Into<String>) -> Self {
-        self.role = Some(role.into());
-        self
-    }
-
-    /// Build the McpState.
-    pub fn build(self) -> McpState {
-        McpState {
-            plugin: self.plugin,
-            project_dir: self.project_dir,
-            role: self.role,
-        }
-    }
-}
-
-impl McpState {
-    /// Create a builder for McpState.
-    pub fn builder(plugin: Arc<PluginManager>, project_dir: PathBuf) -> McpStateBuilder {
-        McpStateBuilder {
-            plugin,
-            project_dir,
-            role: None,
-        }
-    }
-}
 
 // ============================================================================
 // MCP Types

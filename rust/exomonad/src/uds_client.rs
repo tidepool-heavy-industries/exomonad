@@ -1,7 +1,12 @@
-//! HTTP-over-Unix-Domain-Socket client for communicating with exomonad server.
+//! Typed HTTP-over-UDS client for communicating with the exomonad server.
+//!
+//! Callers work with JSON types, not raw bytes or HTTP status codes.
 
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use exomonad_core::mcp::ToolDefinition;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::Value;
+use std::path::PathBuf;
 
 /// Walk up from CWD to find `.exo/server.sock`. Follows symlinks.
 pub fn find_server_socket() -> Result<PathBuf> {
@@ -24,100 +29,171 @@ pub fn find_server_socket() -> Result<PathBuf> {
     }
 }
 
-/// HTTP POST over Unix Domain Socket.
-///
-/// Sends a POST request to the given path on the UDS server.
-/// Returns (status_code, response_body_bytes).
-pub async fn uds_post(
-    socket: &Path,
-    path: &str,
-    headers: Vec<(&str, &str)>,
-    body: Vec<u8>,
-) -> Result<(u16, Vec<u8>)> {
-    use http_body_util::{BodyExt, Full};
-    use hyper::Request;
-    use hyper_util::rt::TokioIo;
-    use tokio::net::UnixStream;
-
-    let stream = UnixStream::connect(socket)
-        .await
-        .with_context(|| format!("Failed to connect to socket: {}", socket.display()))?;
-    let io = TokioIo::new(stream);
-
-    let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
-        .await
-        .context("HTTP/1.1 handshake failed")?;
-
-    tokio::spawn(async move {
-        if let Err(e) = conn.await {
-            tracing::debug!("UDS connection closed: {}", e);
-        }
-    });
-
-    let mut req_builder = Request::builder()
-        .method("POST")
-        .uri(path)
-        .header("host", "localhost");
-
-    for (key, value) in headers {
-        req_builder = req_builder.header(key, value);
-    }
-
-    let req = req_builder
-        .body(Full::new(hyper::body::Bytes::from(body)))
-        .context("Failed to build request")?;
-
-    let resp = sender.send_request(req).await.context("Request failed")?;
-    let status = resp.status().as_u16();
-    let body_bytes = resp
-        .into_body()
-        .collect()
-        .await
-        .context("Failed to read response body")?
-        .to_bytes()
-        .to_vec();
-
-    Ok((status, body_bytes))
+/// Request body for calling a tool via the REST API.
+#[derive(Serialize)]
+pub struct ToolCallRequest {
+    pub name: String,
+    pub arguments: Value,
 }
 
-/// HTTP GET over Unix Domain Socket.
-pub async fn uds_get(socket: &Path, path: &str) -> Result<(u16, Vec<u8>)> {
-    use http_body_util::{BodyExt, Empty};
-    use hyper::Request;
-    use hyper_util::rt::TokioIo;
-    use tokio::net::UnixStream;
+/// Response from the tools list endpoint.
+#[derive(Deserialize)]
+struct ToolListResponse {
+    tools: Vec<ToolDefinition>,
+}
 
-    let stream = UnixStream::connect(socket)
-        .await
-        .with_context(|| format!("Failed to connect to socket: {}", socket.display()))?;
-    let io = TokioIo::new(stream);
+/// Client for the exomonad UDS server.
+pub struct ServerClient {
+    socket: PathBuf,
+}
 
-    let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
-        .await
-        .context("HTTP/1.1 handshake failed")?;
+impl ServerClient {
+    pub fn new(socket: PathBuf) -> Self {
+        Self { socket }
+    }
 
-    tokio::spawn(async move {
-        if let Err(e) = conn.await {
-            tracing::debug!("UDS connection closed: {}", e);
+    /// Check if the server is alive and responding.
+    pub async fn is_healthy(&self) -> bool {
+        self.get("/health").await.is_ok()
+    }
+
+    /// List available tools for an agent.
+    pub async fn list_tools(&self, role: &str, name: &str) -> Result<Vec<ToolDefinition>> {
+        let path = format!("/agents/{}/{}/tools", role, name);
+        let resp: ToolListResponse = self.get_json(&path).await?;
+        Ok(resp.tools)
+    }
+
+    /// Call a tool via the REST API.
+    pub async fn call_tool(
+        &self,
+        role: &str,
+        name: &str,
+        request: &ToolCallRequest,
+    ) -> Result<exomonad_core::mcp::tools::MCPCallOutput> {
+        let path = format!("/agents/{}/{}/tools/call", role, name);
+        self.post_json(&path, request).await
+    }
+
+    /// POST typed JSON, receive typed JSON response.
+    pub async fn post_json<T: Serialize, R: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &T,
+    ) -> Result<R> {
+        let body_bytes = serde_json::to_vec(body).context("Failed to serialize request")?;
+        let resp = self.raw_post(path, &body_bytes).await?;
+        serde_json::from_slice(&resp)
+            .with_context(|| format!("Failed to deserialize response from {}", path))
+    }
+
+    /// GET typed JSON response.
+    async fn get_json<R: DeserializeOwned>(&self, path: &str) -> Result<R> {
+        let resp = self.raw_get(path).await?;
+        serde_json::from_slice(&resp)
+            .with_context(|| format!("Failed to deserialize response from {}", path))
+    }
+
+    /// GET request, returns Ok if 2xx.
+    async fn get(&self, path: &str) -> Result<()> {
+        let _ = self.raw_get(path).await?;
+        Ok(())
+    }
+
+    /// Low-level GET over UDS. Returns response body bytes.
+    async fn raw_get(&self, path: &str) -> Result<Vec<u8>> {
+        use http_body_util::{BodyExt, Empty};
+        use hyper::Request;
+        use hyper_util::rt::TokioIo;
+        use tokio::net::UnixStream;
+
+        let stream = UnixStream::connect(&self.socket)
+            .await
+            .with_context(|| format!("Failed to connect to {}", self.socket.display()))?;
+        let io = TokioIo::new(stream);
+
+        let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
+            .await
+            .context("HTTP handshake failed")?;
+        tokio::spawn(async move {
+            let _ = conn.await;
+        });
+
+        let req = Request::get(path)
+            .header("host", "localhost")
+            .body(Empty::<hyper::body::Bytes>::new())?;
+
+        let resp = sender
+            .send_request(req)
+            .await
+            .context("GET request failed")?;
+        let status = resp.status().as_u16();
+        let body = resp
+            .into_body()
+            .collect()
+            .await
+            .context("Failed to read response body")?
+            .to_bytes()
+            .to_vec();
+
+        if !(200..300).contains(&status) {
+            return Err(anyhow::anyhow!(
+                "Server returned {} for {}: {}",
+                status,
+                path,
+                String::from_utf8_lossy(&body)
+            ));
         }
-    });
 
-    let req = Request::builder()
-        .method("GET")
-        .uri(path)
-        .header("host", "localhost")
-        .body(Empty::<hyper::body::Bytes>::new())
-        .context("Failed to build request")?;
+        Ok(body)
+    }
 
-    let resp = sender.send_request(req).await.context("Request failed")?;
-    let status = resp.status().as_u16();
-    let body_bytes = resp
-        .into_body()
-        .collect()
-        .await
-        .context("Failed to read response body")?
-        .to_bytes()
-        .to_vec();
+    /// Low-level POST over UDS. Returns response body bytes.
+    async fn raw_post(&self, path: &str, body: &[u8]) -> Result<Vec<u8>> {
+        use http_body_util::{BodyExt, Full};
+        use hyper::Request;
+        use hyper_util::rt::TokioIo;
+        use tokio::net::UnixStream;
 
-    Ok((status, body_bytes))
+        let stream = UnixStream::connect(&self.socket)
+            .await
+            .with_context(|| format!("Failed to connect to {}", self.socket.display()))?;
+        let io = TokioIo::new(stream);
+
+        let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
+            .await
+            .context("HTTP handshake failed")?;
+        tokio::spawn(async move {
+            let _ = conn.await;
+        });
+
+        let req = Request::post(path)
+            .header("host", "localhost")
+            .header("content-type", "application/json")
+            .body(Full::new(hyper::body::Bytes::from(body.to_vec())))?;
+
+        let resp = sender
+            .send_request(req)
+            .await
+            .context("POST request failed")?;
+        let status = resp.status().as_u16();
+        let resp_body = resp
+            .into_body()
+            .collect()
+            .await
+            .context("Failed to read response body")?
+            .to_bytes()
+            .to_vec();
+
+        if !(200..300).contains(&status) {
+            return Err(anyhow::anyhow!(
+                "Server returned {} for {}: {}",
+                status,
+                path,
+                String::from_utf8_lossy(&resp_body)
+            ));
+        }
+
+        Ok(resp_body)
+    }
 }

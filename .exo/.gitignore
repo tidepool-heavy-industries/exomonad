@@ -1,2 +1,4 @@
-# Auto-generated for worktree
+# Runtime artifacts
+server.sock
+server.pid
 result

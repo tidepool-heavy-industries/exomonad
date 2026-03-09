@@ -23,10 +23,6 @@ pub enum ExoMonadError {
     /// Generic I/O error (for cases not covered above).
     #[error("I/O error: {0}")]
     Io(#[source] io::Error),
-
-    /// MCP server error.
-    #[error("MCP server error: {0}")]
-    McpServer(String),
 }
 
 /// Result type alias using ExoMonadError.
@@ -74,11 +70,5 @@ mod tests {
         let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
         let exo_err = ExoMonadError::Io(io_err);
         assert!(exo_err.to_string().contains("I/O error"));
-    }
-
-    #[test]
-    fn test_error_mcp_server_display() {
-        let exo_err = ExoMonadError::McpServer("test error".to_string());
-        assert!(exo_err.to_string().contains("MCP server error"));
     }
 }

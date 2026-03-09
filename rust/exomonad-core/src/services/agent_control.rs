@@ -6,7 +6,7 @@
 //! - ListAgents: Discover from Zellij tabs (source of truth for running agents)
 
 use crate::common::TimeoutError;
-use crate::domain::{AgentName, BirthBranch, ClaudeSessionUuid, ItemState, AgentPermissions};
+use crate::domain::{AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, ItemState};
 use crate::ffi::FFIBoundary;
 use crate::{GithubOwner, GithubRepo, IssueNumber};
 use anyhow::{anyhow, Context, Result};
@@ -18,10 +18,10 @@ use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 use tracing::{debug, info, warn};
 
+use super::acp_registry::AcpRegistry;
 use super::git_worktree::GitWorktreeService;
 use super::github::{GitHubService, Repo};
 use super::zellij_events;
-use super::acp_registry::AcpRegistry;
 use std::sync::Arc;
 
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
@@ -30,18 +30,16 @@ const ZELLIJ_TIMEOUT: Duration = Duration::from_secs(30);
 /// Push the parent branch to the remote so child PRs can reference it as
 /// their base. Non-fatal: warns on failure (supports local/airgapped setups
 /// where no remote or non-GitHub remote is configured).
-async fn ensure_branch_pushed(
-    git_wt: &Arc<GitWorktreeService>,
-    branch: &str,
-    project_dir: &Path,
-) {
+async fn ensure_branch_pushed(git_wt: &Arc<GitWorktreeService>, branch: &str, project_dir: &Path) {
     info!(branch = %branch, "Pushing parent branch to remote");
     let git_wt = git_wt.clone();
     let dir = project_dir.to_path_buf();
     let bookmark = crate::domain::BranchName::from(branch);
     match tokio::task::spawn_blocking(move || git_wt.push_bookmark(&dir, &bookmark)).await {
         Ok(Ok(())) => info!(branch = %branch, "Branch pushed successfully"),
-        Ok(Err(e)) => warn!(branch = %branch, error = %e, "Failed to push parent branch (non-fatal, PRs may not work)"),
+        Ok(Err(e)) => {
+            warn!(branch = %branch, error = %e, "Failed to push parent branch (non-fatal, PRs may not work)")
+        }
         Err(e) => warn!(branch = %branch, error = %e, "Push task panicked (non-fatal)"),
     }
 }
@@ -628,7 +626,8 @@ impl AgentControlService {
 
                     // Recursive copy
                     let target_subdir = context_dir.join(dir_path);
-                    self.copy_dir_recursive(&canonical_source, &target_subdir).await?;
+                    self.copy_dir_recursive(&canonical_source, &target_subdir)
+                        .await?;
                 }
                 Err(e) => {
                     tracing::error!("allowed_dir '{}' rejected: {}", dir_str, e);
@@ -769,6 +768,7 @@ impl AgentControlService {
             let env_vars = self.common_spawn_env(
                 &internal_name,
                 self.effective_birth_branch(Some(caller_bb)).as_ref(),
+                role,
             );
 
             // Open Zellij tab with cwd = worktree_path
@@ -913,6 +913,7 @@ impl AgentControlService {
             let mut env_vars = self.common_spawn_env(
                 &internal_name,
                 self.effective_birth_branch(Some(caller_bb)).as_ref(),
+                "dev",
             );
 
             // Write per-agent MCP config into the worktree
@@ -974,6 +975,7 @@ impl AgentControlService {
         serde_json::json!({
             "mcpServers": {
                 "exomonad": {
+                    "type": "stdio",
                     "command": "exomonad",
                     "args": ["mcp-stdio", "--role", "worker", "--name", agent_name]
                 }
@@ -1040,7 +1042,7 @@ impl AgentControlService {
                 });
             }
 
-            let mut env_vars = self.common_spawn_env(&internal_name, self.effective_birth_branch(Some(&ctx.birth_branch)).as_ref());
+            let mut env_vars = self.common_spawn_env(&internal_name, self.effective_birth_branch(Some(&ctx.birth_branch)).as_ref(), "worker");
 
             // Write Gemini settings to worker config dir in project root
             fs::create_dir_all(&agent_config_dir).await?;
@@ -1179,15 +1181,13 @@ impl AgentControlService {
 
             self.create_socket_symlink(&worktree_path).await;
 
-            let mut env_vars = self.common_spawn_env(&internal_name, &branch_name);
+            let role = options.role.as_deref().unwrap_or("tl");
+            let mut env_vars = self.common_spawn_env(&internal_name, &branch_name, role);
             // Enable Claude Code Agent Teams for native inter-agent messaging
             env_vars.insert(
                 "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".to_string(),
                 "1".to_string(),
             );
-
-            // Write .mcp.json in worktree root
-            let role = options.role.as_deref().unwrap_or("tl");
             self.write_agent_mcp_config(effective_project_dir, &worktree_path, agent_type, role)
                 .await?;
 
@@ -1330,10 +1330,8 @@ impl AgentControlService {
 
             self.create_socket_symlink(&worktree_path).await;
 
-            let mut env_vars = self.common_spawn_env(&internal_name, &branch_name);
-
-            // Write .gemini/settings.json in worktree root
             let role = options.role.as_deref().unwrap_or("dev");
+            let mut env_vars = self.common_spawn_env(&internal_name, &branch_name, role);
             self.write_agent_mcp_config(effective_project_dir, &worktree_path, agent_type, role)
                 .await?;
 
@@ -1786,10 +1784,11 @@ impl AgentControlService {
     }
 
     /// Build the common env vars shared by all spawn functions.
-    fn common_spawn_env(&self, internal_name: &str, session_id: &str) -> HashMap<String, String> {
+    fn common_spawn_env(&self, internal_name: &str, session_id: &str, role: &str) -> HashMap<String, String> {
         let mut env_vars = HashMap::new();
         env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.to_string());
         env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session_id.to_string());
+        env_vars.insert("EXOMONAD_ROLE".to_string(), role.to_string());
         env_vars
     }
 
@@ -1919,8 +1918,14 @@ impl AgentControlService {
     ) -> Result<()> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating Zellij tab via direct IPC");
 
-        let full_command =
-            Self::build_agent_command(agent_type, prompt, fork_session_id, &env_vars, cwd, claude_flags);
+        let full_command = Self::build_agent_command(
+            agent_type,
+            prompt,
+            fork_session_id,
+            &env_vars,
+            cwd,
+            claude_flags,
+        );
 
         // Escape the command for KDL string literal (escape backslashes, quotes, newlines)
         let kdl_escaped_command = Self::escape_for_kdl(&full_command);
@@ -2055,7 +2060,8 @@ impl AgentControlService {
             let _ = tokio::task::spawn_blocking(move || ipc.go_to_tab_name(&tab)).await;
         }
 
-        let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd, claude_flags);
+        let full_command =
+            Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd, claude_flags);
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
 
         let ipc = self.ipc()?;
@@ -2132,6 +2138,14 @@ impl AgentControlService {
             return;
         }
 
+        // Ensure worktree .exo/ has a .gitignore so runtime artifacts don't cause
+        // untracked file warnings (which force `git worktree remove --force`).
+        let gitignore = target_dir.join(".gitignore");
+        if !gitignore.exists() {
+            let _ = tokio::fs::write(&gitignore, "# Runtime artifacts\nserver.sock\nserver.pid\n")
+                .await;
+        }
+
         let _ = tokio::fs::remove_file(&target).await;
 
         match tokio::fs::symlink(&source, &target).await {
@@ -2152,57 +2166,55 @@ impl AgentControlService {
     /// Generate MCP configuration JSON for an agent using stdio transport.
     fn generate_mcp_config(name: &str, agent_type: AgentType, role: &str) -> String {
         match agent_type {
-            AgentType::Claude => {
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "mcpServers": {
-                        "exomonad": {
-                            "type": "stdio",
-                            "command": "exomonad",
-                            "args": ["mcp-stdio", "--role", role, "--name", name]
-                        }
+            AgentType::Claude => serde_json::to_string_pretty(&serde_json::json!({
+                "mcpServers": {
+                    "exomonad": {
+                        "type": "stdio",
+                        "command": "exomonad",
+                        "args": ["mcp-stdio", "--role", role, "--name", name]
                     }
-                })).unwrap()
-            }
-            AgentType::Gemini => {
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "mcpServers": {
-                        "exomonad": {
-                            "command": "exomonad",
-                            "args": ["mcp-stdio", "--role", role, "--name", name]
-                        }
-                    },
-                    "hooks": {
-                        "BeforeTool": [
-                            {
-                                "matcher": "*",
-                                "hooks": [
-                                    {
-                                        "type": "command",
-                                        "command": "exomonad hook before-tool --runtime gemini"
-                                    }
-                                ]
-                            }
-                        ],
-                        "AfterAgent": [
-                            {
-                                "matcher": "*",
-                                "hooks": [
-                                    {
-                                        "type": "command",
-                                        "command": "exomonad hook after-agent --runtime gemini"
-                                    }
-                                ]
-                            }
-                        ]
+                }
+            }))
+            .unwrap(),
+            AgentType::Gemini => serde_json::to_string_pretty(&serde_json::json!({
+                "mcpServers": {
+                    "exomonad": {
+                        "type": "stdio",
+                        "command": "exomonad",
+                        "args": ["mcp-stdio", "--role", role, "--name", name]
                     }
-                })).unwrap()
-            }
-            AgentType::Shoal => {
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "command": "exomonad",
-                    "args": ["mcp-stdio", "--role", role, "--name", name]
-                })).unwrap()
-            }
+                },
+                "hooks": {
+                    "BeforeTool": [
+                        {
+                            "matcher": "*",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "exomonad hook before-tool --runtime gemini"
+                                }
+                            ]
+                        }
+                    ],
+                    "AfterAgent": [
+                        {
+                            "matcher": "*",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "exomonad hook after-agent --runtime gemini"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }))
+            .unwrap(),
+            AgentType::Shoal => serde_json::to_string_pretty(&serde_json::json!({
+                "command": "exomonad",
+                "args": ["mcp-stdio", "--role", role, "--name", name]
+            }))
+            .unwrap(),
         }
     }
 
@@ -2487,7 +2499,10 @@ mod tests {
         assert_eq!(parsed["mcpServers"]["exomonad"]["type"], "stdio");
         assert_eq!(parsed["mcpServers"]["exomonad"]["command"], "exomonad");
         let args = parsed["mcpServers"]["exomonad"]["args"].as_array().unwrap();
-        assert_eq!(args, &["mcp-stdio", "--role", "tl", "--name", "test-claude"]);
+        assert_eq!(
+            args,
+            &["mcp-stdio", "--role", "tl", "--name", "test-claude"]
+        );
     }
 
     #[test]
@@ -2497,9 +2512,11 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(parsed["mcpServers"]["exomonad"]["command"], "exomonad");
         let args = parsed["mcpServers"]["exomonad"]["args"].as_array().unwrap();
-        assert_eq!(args, &["mcp-stdio", "--role", "dev", "--name", "test-gemini"]);
-        // No "type": "stdio" for Gemini (Gemini uses command directly)
-        assert!(parsed["mcpServers"]["exomonad"].get("type").is_none());
+        assert_eq!(
+            args,
+            &["mcp-stdio", "--role", "dev", "--name", "test-gemini"]
+        );
+        assert_eq!(parsed["mcpServers"]["exomonad"]["type"], "stdio");
 
         // Check hooks
         let before_tool = &parsed["hooks"]["BeforeTool"];
@@ -2524,9 +2541,15 @@ mod tests {
         let settings = AgentControlService::generate_gemini_worker_settings("test-worker");
 
         // 1. MCP config uses stdio transport
+        assert_eq!(settings["mcpServers"]["exomonad"]["type"], "stdio");
         assert_eq!(settings["mcpServers"]["exomonad"]["command"], "exomonad");
-        let args = settings["mcpServers"]["exomonad"]["args"].as_array().unwrap();
-        assert_eq!(args, &["mcp-stdio", "--role", "worker", "--name", "test-worker"]);
+        let args = settings["mcpServers"]["exomonad"]["args"]
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            args,
+            &["mcp-stdio", "--role", "worker", "--name", "test-worker"]
+        );
 
         // 2. Hooks must strictly use PascalCase
         assert!(
@@ -2568,20 +2591,35 @@ mod tests {
         // Setup source dirs
         let shared_context = project_dir.join("shared-context");
         fs::create_dir_all(&shared_context).await.unwrap();
-        fs::write(shared_context.join("ref.txt"), "context data").await.unwrap();
+        fs::write(shared_context.join("ref.txt"), "context data")
+            .await
+            .unwrap();
 
         let agent_wt = project_dir.join("agent-wt");
         fs::create_dir_all(&agent_wt).await.unwrap();
 
-        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(project_dir.clone()));
+        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(
+            project_dir.clone(),
+        ));
         let service = AgentControlService::new(project_dir.clone(), None, git_wt);
 
         // Test valid copy
-        service.copy_allowed_dirs(&agent_wt, &["shared-context".to_string()]).await.unwrap();
-        assert!(agent_wt.join(".exo/context/shared-context/ref.txt").exists());
+        service
+            .copy_allowed_dirs(&agent_wt, &["shared-context".to_string()])
+            .await
+            .unwrap();
+        assert!(agent_wt
+            .join(".exo/context/shared-context/ref.txt")
+            .exists());
 
         // Test invalid paths (should skip but not fail)
-        service.copy_allowed_dirs(&agent_wt, &["/absolute".to_string(), "../outside".to_string()]).await.unwrap();
+        service
+            .copy_allowed_dirs(
+                &agent_wt,
+                &["/absolute".to_string(), "../outside".to_string()],
+            )
+            .await
+            .unwrap();
         assert!(!agent_wt.join(".exo/context/absolute").exists());
         assert!(!agent_wt.join(".exo/context/outside").exists());
     }
@@ -2592,9 +2630,13 @@ mod tests {
         let project_dir = temp_dir.path().to_path_buf();
         let exo_dir = project_dir.join(".exo");
         tokio::fs::create_dir_all(&exo_dir).await.unwrap();
-        tokio::fs::write(exo_dir.join("server.sock"), "placeholder").await.unwrap();
+        tokio::fs::write(exo_dir.join("server.sock"), "placeholder")
+            .await
+            .unwrap();
 
-        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(project_dir.clone()));
+        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(
+            project_dir.clone(),
+        ));
         let service = AgentControlService::new(project_dir.clone(), None, git_wt);
 
         let worktree = temp_dir.path().join("child-wt");
@@ -2608,4 +2650,3 @@ mod tests {
         assert_eq!(target, project_dir.join(".exo/server.sock"));
     }
 }
-

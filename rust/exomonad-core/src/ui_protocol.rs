@@ -1428,24 +1428,69 @@ mod proptest_tests {
 
     fn any_agent_event() -> impl Strategy<Value = AgentEvent> {
         prop_oneof![
-            (any_agent_id(), any_string()).prop_map(|(agent_id, timestamp)| AgentEvent::AgentStarted { agent_id, timestamp }),
-            (any_agent_id(), any_string()).prop_map(|(agent_id, timestamp)| AgentEvent::AgentStopped { agent_id, timestamp }),
-            (any_agent_id(), any_string(), any_string()).prop_map(|(agent_id, reason, timestamp)| AgentEvent::StopHookBlocked { agent_id, reason, timestamp }),
-            (any_agent_id(), any_string(), any_string()).prop_map(|(agent_id, hook_type, timestamp)| AgentEvent::HookReceived { agent_id, hook_type, timestamp }),
-            (any_agent_id(), any::<u64>(), any_string()).prop_map(|(agent_id, pr_number, timestamp)| AgentEvent::PrFiled { agent_id, pr_number, timestamp }),
-            (any_agent_id(), any::<u32>(), any_string()).prop_map(|(agent_id, comment_count, timestamp)| AgentEvent::CopilotReviewed { agent_id, comment_count, timestamp }),
-            (any_agent_id(), any::<u32>(), any_string()).prop_map(|(agent_id, failed_stop_count, timestamp)| AgentEvent::AgentStuck { agent_id, failed_stop_count, timestamp }),
+            (any_agent_id(), any_string()).prop_map(|(agent_id, timestamp)| {
+                AgentEvent::AgentStarted {
+                    agent_id,
+                    timestamp,
+                }
+            }),
+            (any_agent_id(), any_string()).prop_map(|(agent_id, timestamp)| {
+                AgentEvent::AgentStopped {
+                    agent_id,
+                    timestamp,
+                }
+            }),
+            (any_agent_id(), any_string(), any_string()).prop_map(
+                |(agent_id, reason, timestamp)| AgentEvent::StopHookBlocked {
+                    agent_id,
+                    reason,
+                    timestamp
+                }
+            ),
+            (any_agent_id(), any_string(), any_string()).prop_map(
+                |(agent_id, hook_type, timestamp)| AgentEvent::HookReceived {
+                    agent_id,
+                    hook_type,
+                    timestamp
+                }
+            ),
+            (any_agent_id(), any::<u64>(), any_string()).prop_map(
+                |(agent_id, pr_number, timestamp)| AgentEvent::PrFiled {
+                    agent_id,
+                    pr_number,
+                    timestamp
+                }
+            ),
+            (any_agent_id(), any::<u32>(), any_string()).prop_map(
+                |(agent_id, comment_count, timestamp)| AgentEvent::CopilotReviewed {
+                    agent_id,
+                    comment_count,
+                    timestamp
+                }
+            ),
+            (any_agent_id(), any::<u32>(), any_string()).prop_map(
+                |(agent_id, failed_stop_count, timestamp)| AgentEvent::AgentStuck {
+                    agent_id,
+                    failed_stop_count,
+                    timestamp
+                }
+            ),
         ]
     }
 
     fn any_visibility_rule() -> impl Strategy<Value = VisibilityRule> {
         prop_oneof![
             any_string().prop_map(VisibilityRule::Checked),
-            prop::collection::hash_map(any_string(), any_string(), 0..5).prop_map(VisibilityRule::Equals),
-            (any_string(), any_f32()).prop_map(|(id, min_value)| VisibilityRule::GreaterThan { id, min_value }),
-            (any_string(), any_f32()).prop_map(|(id, max_value)| VisibilityRule::LessThan { id, max_value }),
-            (any_string(), any::<u32>()).prop_map(|(id, exact_count)| VisibilityRule::CountEquals { id, exact_count }),
-            (any_string(), any::<u32>()).prop_map(|(id, min_count)| VisibilityRule::CountGreaterThan { id, min_count }),
+            prop::collection::hash_map(any_string(), any_string(), 0..5)
+                .prop_map(VisibilityRule::Equals),
+            (any_string(), any_f32())
+                .prop_map(|(id, min_value)| VisibilityRule::GreaterThan { id, min_value }),
+            (any_string(), any_f32())
+                .prop_map(|(id, max_value)| VisibilityRule::LessThan { id, max_value }),
+            (any_string(), any::<u32>())
+                .prop_map(|(id, exact_count)| VisibilityRule::CountEquals { id, exact_count }),
+            (any_string(), any::<u32>())
+                .prop_map(|(id, min_count)| VisibilityRule::CountGreaterThan { id, min_count }),
         ]
     }
 
@@ -1455,18 +1500,96 @@ mod proptest_tests {
 
     fn any_component() -> impl Strategy<Value = Component> {
         prop_oneof![
-            (any_string(), any_string(), any_visibility_option()).prop_map(|(id, content, v)| Component::Text { id, content, visible_when: v }),
-            (any_string(), any_string(), any_f32(), any_f32(), any_f32(), any_visibility_option()).prop_map(|(id, label, min, max, default, v)| Component::Slider { id, label, min, max, default, visible_when: v }),
-            (any_string(), any_string(), any::<bool>(), any_visibility_option()).prop_map(|(id, label, default, v)| Component::Checkbox { id, label, default, visible_when: v }),
-            (any_string(), any_string(), prop::option::of(any_string()), prop::option::of(any::<u32>()), any_visibility_option()).prop_map(|(id, label, placeholder, rows, v)| Component::Textbox { id, label, placeholder, rows, visible_when: v }),
-            (any_string(), any_string(), prop::collection::vec(any_string(), 0..5), prop::option::of(any::<usize>()), any_visibility_option()).prop_map(|(id, label, options, default, v)| Component::Choice { id, label, options, default, visible_when: v }),
-            (any_string(), any_string(), prop::collection::vec(any_string(), 0..5), prop::option::of(any::<usize>()), any_visibility_option()).prop_map(|(id, label, options, default, v)| Component::Multiselect { id, label, options, default, visible_when: v }),
-            (any_string(), any_string(), any_visibility_option()).prop_map(|(id, label, v)| Component::Group { id, label, visible_when: v }),
+            (any_string(), any_string(), any_visibility_option()).prop_map(|(id, content, v)| {
+                Component::Text {
+                    id,
+                    content,
+                    visible_when: v,
+                }
+            }),
+            (
+                any_string(),
+                any_string(),
+                any_f32(),
+                any_f32(),
+                any_f32(),
+                any_visibility_option()
+            )
+                .prop_map(|(id, label, min, max, default, v)| Component::Slider {
+                    id,
+                    label,
+                    min,
+                    max,
+                    default,
+                    visible_when: v
+                }),
+            (
+                any_string(),
+                any_string(),
+                any::<bool>(),
+                any_visibility_option()
+            )
+                .prop_map(|(id, label, default, v)| Component::Checkbox {
+                    id,
+                    label,
+                    default,
+                    visible_when: v
+                }),
+            (
+                any_string(),
+                any_string(),
+                prop::option::of(any_string()),
+                prop::option::of(any::<u32>()),
+                any_visibility_option()
+            )
+                .prop_map(|(id, label, placeholder, rows, v)| Component::Textbox {
+                    id,
+                    label,
+                    placeholder,
+                    rows,
+                    visible_when: v
+                }),
+            (
+                any_string(),
+                any_string(),
+                prop::collection::vec(any_string(), 0..5),
+                prop::option::of(any::<usize>()),
+                any_visibility_option()
+            )
+                .prop_map(|(id, label, options, default, v)| Component::Choice {
+                    id,
+                    label,
+                    options,
+                    default,
+                    visible_when: v
+                }),
+            (
+                any_string(),
+                any_string(),
+                prop::collection::vec(any_string(), 0..5),
+                prop::option::of(any::<usize>()),
+                any_visibility_option()
+            )
+                .prop_map(|(id, label, options, default, v)| Component::Multiselect {
+                    id,
+                    label,
+                    options,
+                    default,
+                    visible_when: v
+                }),
+            (any_string(), any_string(), any_visibility_option()).prop_map(|(id, label, v)| {
+                Component::Group {
+                    id,
+                    label,
+                    visible_when: v,
+                }
+            }),
         ]
     }
 
     fn any_popup_definition() -> impl Strategy<Value = PopupDefinition> {
-        (any_string(), prop::collection::vec(any_component(), 0..5)).prop_map(|(title, components)| PopupDefinition { title, components })
+        (any_string(), prop::collection::vec(any_component(), 0..5))
+            .prop_map(|(title, components)| PopupDefinition { title, components })
     }
 
     fn any_json_value() -> impl Strategy<Value = serde_json::Value> {
@@ -1483,11 +1606,13 @@ mod proptest_tests {
     }
 
     fn any_popup_result() -> impl Strategy<Value = PopupResult> {
-        (any_string(), any_json_value(), prop::option::of(any_f64())).prop_map(|(button, values, time)| PopupResult {
-            button,
-            values,
-            time_spent_seconds: time,
-        })
+        (any_string(), any_json_value(), prop::option::of(any_f64())).prop_map(
+            |(button, values, time)| PopupResult {
+                button,
+                values,
+                time_spent_seconds: time,
+            },
+        )
     }
 
     fn any_coordinator_status() -> impl Strategy<Value = CoordinatorAgentStatus> {
@@ -1502,13 +1627,22 @@ mod proptest_tests {
     }
 
     fn any_coordinator_agent_state() -> impl Strategy<Value = CoordinatorAgentState> {
-        (any_string(), any_string(), any_string(), any_string(), any_coordinator_status()).prop_map(|(id, worktree_path, branch, agent_type, status)| CoordinatorAgentState {
-            id,
-            worktree_path,
-            branch,
-            agent_type,
-            status,
-        })
+        (
+            any_string(),
+            any_string(),
+            any_string(),
+            any_string(),
+            any_coordinator_status(),
+        )
+            .prop_map(|(id, worktree_path, branch, agent_type, status)| {
+                CoordinatorAgentState {
+                    id,
+                    worktree_path,
+                    branch,
+                    agent_type,
+                    status,
+                }
+            })
     }
 
     fn any_popup_request() -> impl Strategy<Value = PopupRequest> {
@@ -1519,10 +1653,8 @@ mod proptest_tests {
     }
 
     fn any_popup_response() -> impl Strategy<Value = PopupResponse> {
-        (any_string(), any_popup_result()).prop_map(|(request_id, result)| PopupResponse {
-            request_id,
-            result,
-        })
+        (any_string(), any_popup_result())
+            .prop_map(|(request_id, result)| PopupResponse { request_id, result })
     }
 
     fn any_transition() -> impl Strategy<Value = Transition> {
@@ -1532,31 +1664,58 @@ mod proptest_tests {
                 any_string(),
                 prop::collection::hash_map(any_string(), any_string(), 1..3),
                 1..3
-            ).prop_map(Transition::Branch),
+            )
+            .prop_map(Transition::Branch),
         ]
     }
 
     fn any_wizard_pane() -> impl Strategy<Value = WizardPane> {
-        (any_string(), prop::collection::vec(any_component(), 0..5), prop::option::of(any_transition()))
-            .prop_map(|(title, elements, then_transition)| WizardPane { title, elements, then_transition })
+        (
+            any_string(),
+            prop::collection::vec(any_component(), 0..5),
+            prop::option::of(any_transition()),
+        )
+            .prop_map(|(title, elements, then_transition)| WizardPane {
+                title,
+                elements,
+                then_transition,
+            })
     }
 
     fn any_wizard_definition() -> impl Strategy<Value = WizardDefinition> {
-        (any_string(), prop::collection::hash_map(any_string(), any_wizard_pane(), 1..3), any_string())
-            .prop_map(|(title, panes, start)| WizardDefinition { title, panes, start })
+        (
+            any_string(),
+            prop::collection::hash_map(any_string(), any_wizard_pane(), 1..3),
+            any_string(),
+        )
+            .prop_map(|(title, panes, start)| WizardDefinition {
+                title,
+                panes,
+                start,
+            })
     }
 
     fn any_wizard_request() -> impl Strategy<Value = WizardRequest> {
-        (any_string(), any_wizard_definition()).prop_map(|(request_id, wizard)| WizardRequest { request_id, wizard })
+        (any_string(), any_wizard_definition())
+            .prop_map(|(request_id, wizard)| WizardRequest { request_id, wizard })
     }
 
     fn any_wizard_result() -> impl Strategy<Value = WizardResult> {
-        (any_string(), prop::collection::hash_map(any_string(), any_json_value(), 0..5), prop::collection::vec(any_string(), 0..5))
-            .prop_map(|(button, values, panes_visited)| WizardResult { button, values, panes_visited })
+        (
+            any_string(),
+            prop::collection::hash_map(any_string(), any_json_value(), 0..5),
+            prop::collection::vec(any_string(), 0..5),
+        )
+            .prop_map(|(button, values, panes_visited)| WizardResult {
+                button,
+                values,
+                panes_visited,
+            })
     }
 
     fn any_state_update() -> impl Strategy<Value = StateUpdate> {
-        prop::collection::vec(any_coordinator_agent_state(), 0..5).prop_map(|agents| StateUpdate::FullState { agents })
+        prop::collection::vec(any_coordinator_agent_state(), 0..5)
+            .prop_map(|agents| StateUpdate::FullState { agents })
     }
 
     #[test]

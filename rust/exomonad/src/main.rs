@@ -6,15 +6,14 @@
 //!
 //! WASM plugins are loaded from file (server-side only).
 
-mod uds_client;
 mod mcp_stdio;
+mod uds_client;
 
 use exomonad::config;
 use urlencoding::encode;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use exomonad_core::mcp::server::McpServer;
 use exomonad_core::protocol::{Runtime as HookRuntime, ServiceRequest};
 use exomonad_core::services::external::otel::OtelService;
 use exomonad_core::services::external::ExternalService;
@@ -77,7 +76,7 @@ enum Commands {
 
     /// Recompile WASM plugin from Haskell source
     Recompile {
-        /// Role to build (default: from config, usually "tl")
+        /// WASM package to build (default: from config wasm_name, usually "devswarm")
         #[arg(long)]
         role: Option<String>,
     },
@@ -120,7 +119,11 @@ enum Commands {
 /// Resolve the WASM file path for a given role.
 /// Convention: if `wasm-guest-{role}.wasm` exists, use it (role-specific WASM).
 /// Otherwise fall back to `wasm-guest-{default_name}.wasm` (shared WASM).
-fn resolve_wasm_path_for_role(wasm_dir: &std::path::Path, role: &str, default_name: &str) -> Option<PathBuf> {
+fn resolve_wasm_path_for_role(
+    wasm_dir: &std::path::Path,
+    role: &str,
+    default_name: &str,
+) -> Option<PathBuf> {
     let role_specific = wasm_dir.join(format!("wasm-guest-{role}.wasm"));
     if role_specific.exists() {
         return Some(role_specific);
@@ -169,6 +172,46 @@ async fn get_or_create_plugin(
     }
     cache.insert(agent_name, p.clone());
     Ok(p)
+}
+
+// ============================================================================
+// REST API Types
+// ============================================================================
+
+/// Request body for POST /agents/{role}/{name}/tools/call.
+#[derive(serde::Deserialize)]
+struct ToolCallRequest {
+    name: String,
+    #[serde(default)]
+    arguments: serde_json::Value,
+}
+
+/// Resolve the per-agent PluginManager (cached, with identity).
+async fn resolve_plugin(
+    plugins: &tokio::sync::RwLock<HashMap<exomonad_core::AgentName, Arc<PluginManager>>>,
+    registry: &Arc<exomonad_core::effects::EffectRegistry>,
+    worktree_base: &std::path::Path,
+    name: &str,
+    wasm_path: &std::path::Path,
+) -> anyhow::Result<Arc<PluginManager>> {
+    let agent_name = exomonad_core::AgentName::from(name);
+
+    // Fast path: check plugin cache
+    {
+        let cache = plugins.read().await;
+        if let Some(p) = cache.get(&agent_name) {
+            return Ok(p.clone());
+        }
+    }
+
+    // Slow path: resolve birth branch and create plugin
+    let birth_branch = if name == "root" {
+        exomonad_core::BirthBranch::root()
+    } else {
+        resolve_agent_birth_branch(worktree_base, name).await
+    };
+
+    get_or_create_plugin(plugins, agent_name, birth_branch, registry, wasm_path).await
 }
 
 // ============================================================================
@@ -586,7 +629,9 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     let session = session_override.unwrap_or(config.zellij_session.clone());
 
     // Auto-build WASM if it doesn't exist yet
-    let wasm_path = config.wasm_dir.join(format!("wasm-guest-{}.wasm", config.wasm_name));
+    let wasm_path = config
+        .wasm_dir
+        .join(format!("wasm-guest-{}.wasm", config.wasm_name));
     if !wasm_path.exists() {
         let roles_dir = cwd.join(".exo/roles");
         if roles_dir.is_dir() {
@@ -622,15 +667,13 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
         mcp_servers.insert(
             "exomonad".to_string(),
             serde_json::json!({
+                "type": "stdio",
                 "command": "exomonad",
                 "args": ["mcp-stdio", "--role", "tl", "--name", "root"]
             }),
         );
         for (name, server) in &config.extra_mcp_servers {
-            mcp_servers.insert(
-                name.clone(),
-                serde_json::json!({ "httpUrl": server.url }),
-            );
+            mcp_servers.insert(name.clone(), serde_json::json!({ "httpUrl": server.url }));
         }
 
         let settings = serde_json::json!({ "mcpServers": mcp_servers });
@@ -654,9 +697,37 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
         .any(|l| l.starts_with(&session) && l.contains("EXITED"));
 
     if recreate && (session_alive || session_exited) {
+        // Kill the running server process before tearing down the session
+        let pid_path = cwd.join(".exo/server.pid");
+        if let Ok(content) = std::fs::read_to_string(&pid_path) {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(pid) = parsed.get("pid").and_then(|v| v.as_u64()) {
+                    use nix::sys::signal;
+                    use nix::unistd::Pid;
+                    let pid = Pid::from_raw(pid as i32);
+                    if signal::kill(pid, None).is_ok() {
+                        eprintln!("Stopping server (PID {})", pid);
+                        let _ = signal::kill(pid, signal::Signal::SIGTERM);
+                        // Wait briefly for graceful shutdown
+                        for _ in 0..10 {
+                            if signal::kill(pid, None).is_err() {
+                                break;
+                            }
+                            std::thread::sleep(Duration::from_millis(200));
+                        }
+                    }
+                }
+            }
+        }
+        // Clean up stale socket
+        let sock = cwd.join(".exo/server.sock");
+        if sock.exists() {
+            let _ = std::fs::remove_file(&sock);
+        }
+
         eprintln!("Deleting session (--recreate): {}", session);
         let status = std::process::Command::new("zellij")
-            .args(["delete-session", &session])
+            .args(["delete-session", "--force", &session])
             .status()
             .context("Failed to run zellij delete-session")?;
         if !status.success() {
@@ -721,7 +792,10 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
             }
         }
     });
-    std::fs::write(cwd.join(".mcp.json"), serde_json::to_string_pretty(&mcp_json)?)?;
+    std::fs::write(
+        cwd.join(".mcp.json"),
+        serde_json::to_string_pretty(&mcp_json)?,
+    )?;
     eprintln!("Wrote .mcp.json with stdio MCP config");
 
     // 3. Start TL tab (only if one doesn't already exist)
@@ -739,12 +813,11 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
         eprintln!("Server healthy, starting TL tab...");
     }
 
-    let tl_layout_path =
-        generate_tl_tab_layout(
-            config.shell_command.as_deref(),
-            config.root_agent_type,
-            config.initial_prompt.as_deref(),
-        )?;
+    let tl_layout_path = generate_tl_tab_layout(
+        config.shell_command.as_deref(),
+        config.root_agent_type,
+        config.initial_prompt.as_deref(),
+    )?;
 
     if !tl_tab_exists {
         let status = std::process::Command::new("zellij")
@@ -798,7 +871,10 @@ fn ensure_gitignore(project_dir: &std::path::Path) -> Result<()> {
         writeln!(file)?;
     }
     if !has_line(".exo/*") {
-        writeln!(file, "# ExoMonad - track config and source, ignore runtime artifacts")?;
+        writeln!(
+            file,
+            "# ExoMonad - track config and source, ignore runtime artifacts"
+        )?;
     }
     for line in &needed {
         writeln!(file, "{}", line)?;
@@ -832,15 +908,12 @@ async fn wait_for_server_socket(project_dir: &std::path::Path) -> Result<()> {
     }
 
     // Phase 2: Verify server responds to health check
+    let client = uds_client::ServerClient::new(socket_path.to_path_buf());
     for _ in 0..5 {
-        match uds_client::uds_get(&socket_path, "/health").await {
-            Ok((status, _)) if (200..300).contains(&status) => {
-                return Ok(());
-            }
-            _ => {
-                tokio::time::sleep(Duration::from_millis(500)).await;
-            }
+        if client.is_healthy().await {
+            return Ok(());
         }
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
     Err(anyhow::anyhow!(
@@ -889,7 +962,10 @@ fn generate_tl_tab_layout(
     let base_command = match (root_agent_type, initial_prompt) {
         (AgentType::Claude, _) => "claude --dangerously-skip-permissions --resume".to_string(),
         (AgentType::Gemini, Some(prompt)) => {
-            format!("gemini --prompt-interactive '{}'", prompt.replace('\'', "'\\''"))
+            format!(
+                "gemini --prompt-interactive '{}'",
+                prompt.replace('\'', "'\\''")
+            )
         }
         (AgentType::Gemini, None) => "gemini".to_string(),
         (AgentType::Shoal, Some(prompt)) => {
@@ -1061,8 +1137,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Recompile { ref role } => {
-            let default_role = config.role.to_string();
-            let role_str = role.as_deref().unwrap_or(&default_role);
+            let role_str = role.as_deref().unwrap_or(&config.wasm_name);
             let project_dir = if config.project_dir.is_absolute() {
                 config.project_dir.clone()
             } else {
@@ -1089,10 +1164,12 @@ async fn main() -> Result<()> {
 
             // Resolve default WASM (for root TL role and as fallback)
             let wasm_path = resolve_wasm_path_for_role(&wasm_dir, &role_name, &wasm_name)
-                .ok_or_else(|| anyhow::anyhow!(
-                    "WASM file not found in {}\nRun `exomonad recompile` first to build it.",
-                    wasm_dir.display()
-                ))?;
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "WASM file not found in {}\nRun `exomonad recompile` first to build it.",
+                        wasm_dir.display()
+                    )
+                })?;
 
             let server_pid_path = project_dir.join(".exo/server.pid");
 
@@ -1116,8 +1193,7 @@ async fn main() -> Result<()> {
 
             let team_registry =
                 Arc::new(exomonad_core::services::team_registry::TeamRegistry::new());
-            let acp_registry =
-                Arc::new(exomonad_core::services::acp_registry::AcpRegistry::new());
+            let acp_registry = Arc::new(exomonad_core::services::acp_registry::AcpRegistry::new());
 
             let project_dir_for_services = project_dir.clone();
             let mut agent_control =
@@ -1128,8 +1204,7 @@ async fn main() -> Result<()> {
                 )
                 .with_acp_registry(acp_registry.clone());
             let worktree_base = config.worktree_base;
-            agent_control = agent_control
-                .with_worktree_base(worktree_base.clone());
+            agent_control = agent_control.with_worktree_base(worktree_base.clone());
             agent_control = agent_control.with_birth_branch(exomonad_core::BirthBranch::root());
             agent_control = agent_control.with_zellij_session(config.zellij_session.clone());
             let event_session_id = uuid::Uuid::new_v4().to_string();
@@ -1213,12 +1288,6 @@ async fn main() -> Result<()> {
                 .await
                 .insert(exomonad_core::AgentName::from("root"), root_plugin.clone());
 
-            let base_state = exomonad_core::mcp::McpState {
-                project_dir: project_dir.clone(),
-                plugin: root_plugin,
-                role: None,
-            };
-
             // Write server.pid for stale socket detection
             let pid_info = serde_json::json!({
                 "pid": std::process::id(),
@@ -1244,13 +1313,8 @@ async fn main() -> Result<()> {
                 poller.run().await;
             });
 
-            // Lazy server cache — one McpServer per role, created on first request.
-            // Rust never enumerates roles; WASM AllRoles.hs is the single source of truth.
-            let servers: Arc<tokio::sync::RwLock<HashMap<String, McpServer>>> =
-                Arc::new(tokio::sync::RwLock::new(HashMap::new()));
-
             // Health endpoint
-            let health_plugin = base_state.plugin.clone();
+            let health_plugin = root_plugin.clone();
             let health_role = role_name.clone();
             let health_handler = move || {
                 let plugin = health_plugin.clone();
@@ -1266,87 +1330,128 @@ async fn main() -> Result<()> {
                 }
             };
 
-            // Unified per-agent MCP handler: /agents/{role}/{name}/mcp
-            let unified_handler = {
-                let servers = servers.clone();
+            // REST handler: GET /agents/{role}/{name}/tools — list available tools
+            let list_tools_handler = {
                 let plugins = plugins.clone();
                 let registry = rt_registry.clone();
                 let wasm_path_default = wasm_path.clone();
                 let wasm_dir_for_handler = wasm_dir.clone();
                 let wasm_name_for_handler = wasm_name.clone();
-                let base_state = base_state.clone();
                 let wb = worktree_base.clone();
-                move |axum::extract::Path((role, name)): axum::extract::Path<(String, String)>,
-                      headers: axum::http::HeaderMap,
-                      body: axum::extract::Json<serde_json::Value>| {
-                    let servers = servers.clone();
+                move |axum::extract::Path((role, name)): axum::extract::Path<(String, String)>| {
                     let plugins = plugins.clone();
                     let registry = registry.clone();
                     let wasm_path_default = wasm_path_default.clone();
                     let wasm_dir_for_handler = wasm_dir_for_handler.clone();
                     let wasm_name_for_handler = wasm_name_for_handler.clone();
-                    let base_state = base_state.clone();
                     let wb = wb.clone();
                     async move {
-                        // Resolve WASM path for this role (role-specific > default)
+                        let wasm_path_for_handler = resolve_wasm_path_for_role(
+                            &wasm_dir_for_handler,
+                            &role,
+                            &wasm_name_for_handler,
+                        )
+                        .unwrap_or_else(|| wasm_path_default.clone());
+
+                        let plugin = match resolve_plugin(
+                            &plugins,
+                            &registry,
+                            &wb,
+                            &name,
+                            &wasm_path_for_handler,
+                        )
+                        .await
+                        {
+                            Ok(p) => p,
+                            Err(e) => {
+                                tracing::error!(role = %role, name = %name, error = %e, "Failed to resolve plugin");
+                                return (
+                                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                    axum::Json(serde_json::json!({"error": e.to_string()})),
+                                )
+                                    .into_response();
+                            }
+                        };
+
+                        // Hot reload WASM if changed
+                        let _ = plugin.reload_if_changed().await;
+
+                        match exomonad_core::mcp::tools::get_tool_definitions(&plugin, Some(&role))
+                            .await
+                        {
+                            Ok(tools) => {
+                                axum::Json(serde_json::json!({ "tools": tools })).into_response()
+                            }
+                            Err(e) => {
+                                tracing::error!(role = %role, error = %e, "Tool discovery failed");
+                                (
+                                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                    axum::Json(serde_json::json!({"error": e.to_string()})),
+                                )
+                                    .into_response()
+                            }
+                        }
+                    }
+                }
+            };
+
+            // REST handler: POST /agents/{role}/{name}/tools/call — call a tool
+            let call_tool_handler = {
+                let plugins = plugins.clone();
+                let registry = rt_registry.clone();
+                let wasm_path_default = wasm_path.clone();
+                let wasm_dir_for_handler = wasm_dir.clone();
+                let wasm_name_for_handler = wasm_name.clone();
+                let wb = worktree_base.clone();
+                move |axum::extract::Path((role, name)): axum::extract::Path<(String, String)>,
+                      axum::extract::Json(body): axum::extract::Json<ToolCallRequest>| {
+                    let plugins = plugins.clone();
+                    let registry = registry.clone();
+                    let wasm_path_default = wasm_path_default.clone();
+                    let wasm_dir_for_handler = wasm_dir_for_handler.clone();
+                    let wasm_name_for_handler = wasm_name_for_handler.clone();
+                    let wb = wb.clone();
+                    async move {
                         let wasm_path_for_handler = resolve_wasm_path_for_role(
                             &wasm_dir_for_handler, &role, &wasm_name_for_handler
                         ).unwrap_or_else(|| wasm_path_default.clone());
 
-                        // Resolve agent identity
-                        let agent_name = exomonad_core::AgentName::from(name.as_str());
-
-                        // Fast path: check plugin cache before resolving birth branch
-                        let plugin = {
-                            let cache = plugins.read().await;
-                            cache.get(&agent_name).cloned()
-                        };
-
-                        let plugin = if let Some(p) = plugin {
-                            p
-                        } else {
-                            // Slow path: resolve birth branch only when creating a new plugin
-                            let birth_branch = if name == "root" {
-                                exomonad_core::BirthBranch::root()
-                            } else {
-                                resolve_agent_birth_branch(&wb, &name).await
-                            };
-                            match get_or_create_plugin(
-                                &plugins,
-                                agent_name.clone(),
-                                birth_branch,
-                                &registry,
-                                &wasm_path_for_handler,
-                            )
-                            .await
-                            {
-                                Ok(p) => p,
-                                Err(e) => {
-                                    tracing::error!(agent = %agent_name, error = %e, "Failed to create plugin");
-                                    return axum::http::StatusCode::INTERNAL_SERVER_ERROR
-                                        .into_response();
-                                }
+                        let plugin = match resolve_plugin(
+                            &plugins, &registry, &wb, &name, &wasm_path_for_handler
+                        ).await {
+                            Ok(p) => p,
+                            Err(e) => {
+                                tracing::error!(role = %role, name = %name, error = %e, "Failed to resolve plugin");
+                                return (
+                                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                    axum::Json(serde_json::json!({"error": e.to_string()})),
+                                ).into_response();
                             }
                         };
 
-                        // Get or create McpServer for this role (with per-agent plugin)
-                        let server = {
-                            let cache = servers.read().await;
-                            cache.get(&role).cloned()
-                        };
-                        let server = match server {
-                            Some(s) => s,
-                            None => {
-                                let mut state = base_state.clone();
-                                state.role = Some(role.clone());
-                                state.plugin = plugin.clone();
-                                let s = McpServer::new(state);
-                                servers.write().await.insert(role.clone(), s.clone());
-                                s
+                        tracing::info!(tool = %body.name, role = %role, agent = %name, "Executing tool");
+
+                        let input = exomonad_core::mcp::tools::MCPCallInput::new(
+                            role, body.name.clone(), body.arguments,
+                        );
+
+                        let output: exomonad_core::mcp::tools::MCPCallOutput = match plugin.call("handle_mcp_call", &input).await {
+                            Ok(o) => o,
+                            Err(e) => {
+                                tracing::error!(tool = %body.name, error = %e, "WASM call failed");
+                                return axum::Json(serde_json::json!({
+                                    "success": false,
+                                    "result": null,
+                                    "error": format!("WASM call failed: {}", e)
+                                })).into_response();
                             }
                         };
 
-                        server.handle(headers, body, Some(plugin)).await
+                        axum::Json(serde_json::json!({
+                            "success": output.success,
+                            "result": output.result,
+                            "error": output.error,
+                        })).into_response()
                     }
                 }
             };
@@ -1382,20 +1487,6 @@ async fn main() -> Result<()> {
                 default_role: config.role,
             };
 
-            // Minimal SSE handler for MCP Streamable HTTP protocol compatibility.
-            // Gemini CLI sends GET to establish an SSE event stream during initialization.
-            // Returns Content-Type: text/event-stream with keep-alive pings.
-            let sse_handler = || async {
-                let stream = futures_util::stream::pending::<
-                    Result<axum::response::sse::Event, std::convert::Infallible>,
-                >();
-                axum::response::sse::Sse::new(stream).keep_alive(
-                    axum::response::sse::KeepAlive::new()
-                        .interval(std::time::Duration::from_secs(15))
-                        .text("keep-alive"),
-                )
-            };
-
             let cors = CorsLayer::new()
                 .allow_origin(Any)
                 .allow_methods(Any)
@@ -1408,8 +1499,12 @@ async fn main() -> Result<()> {
                     axum::routing::post(handle_hook_request).with_state(hook_state),
                 )
                 .route(
-                    "/agents/{role}/{name}/mcp",
-                    axum::routing::post(unified_handler).get(sse_handler),
+                    "/agents/{role}/{name}/tools",
+                    axum::routing::get(list_tools_handler),
+                )
+                .route(
+                    "/agents/{role}/{name}/tools/call",
+                    axum::routing::post(call_tool_handler),
                 )
                 .route("/events", axum::routing::post(events_handler))
                 .layer(cors)
@@ -1446,7 +1541,11 @@ async fn main() -> Result<()> {
             }
 
             let listener = tokio::net::UnixListener::bind(&socket_path).map_err(|e| {
-                anyhow::anyhow!("Failed to bind Unix socket {}: {}", socket_path.display(), e)
+                anyhow::anyhow!(
+                    "Failed to bind Unix socket {}: {}",
+                    socket_path.display(),
+                    e
+                )
             })?;
 
             // Set socket permissions to owner-only (0600)
@@ -1506,6 +1605,9 @@ async fn main() -> Result<()> {
             if let Ok(session_id) = std::env::var("EXOMONAD_SESSION_ID") {
                 path.push_str(&format!("&session_id={}", encode(&session_id)));
             }
+            if let Ok(role) = std::env::var("EXOMONAD_ROLE") {
+                path.push_str(&format!("&role={}", encode(&role)));
+            }
 
             let mut body = String::new();
             std::io::stdin()
@@ -1524,7 +1626,10 @@ async fn main() -> Result<()> {
                 let mut found = None;
                 while start.elapsed() < timeout_dur {
                     match uds_client::find_server_socket() {
-                        Ok(s) => { found = Some(s); break; }
+                        Ok(s) => {
+                            found = Some(s);
+                            break;
+                        }
                         Err(_) => {
                             tokio::time::sleep(Duration::from_millis(500)).await;
                         }
@@ -1533,7 +1638,10 @@ async fn main() -> Result<()> {
                 match found {
                     Some(s) => s,
                     None => {
-                        eprintln!("exomonad hook: server socket not found after {}s", timeout_dur.as_secs());
+                        eprintln!(
+                            "exomonad hook: server socket not found after {}s",
+                            timeout_dur.as_secs()
+                        );
                         println!(r#"{{"continue":true}}"#);
                         return Ok(());
                     }
@@ -1549,23 +1657,26 @@ async fn main() -> Result<()> {
                 }
             };
 
-            match uds_client::uds_post(
-                &socket,
-                &path,
-                vec![("content-type", "application/json")],
-                body.into_bytes(),
-            ).await {
-                Ok((status, resp_body)) => {
-                    if (200..300).contains(&status) {
-                        let resp: HookEnvelope = serde_json::from_slice(&resp_body)
-                            .context("Failed to parse hook response")?;
-                        print!("{}", resp.stdout);
-                        if resp.exit_code != 0 {
-                            std::process::exit(resp.exit_code);
-                        }
-                    } else {
-                        eprintln!("exomonad hook: server returned {}", status);
-                        println!(r#"{{"continue":true}}"#);
+            let client = uds_client::ServerClient::new(socket);
+
+            // Parse stdin as JSON; fail-open on invalid input
+            let json_body: serde_json::Value = match serde_json::from_str(&body) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("exomonad hook: invalid JSON: {}", e);
+                    println!(r#"{{"continue":true}}"#);
+                    return Ok(());
+                }
+            };
+
+            match client
+                .post_json::<serde_json::Value, HookEnvelope>(&path, &json_body)
+                .await
+            {
+                Ok(resp) => {
+                    print!("{}", resp.stdout);
+                    if resp.exit_code != 0 {
+                        std::process::exit(resp.exit_code);
                     }
                 }
                 Err(e) => {
