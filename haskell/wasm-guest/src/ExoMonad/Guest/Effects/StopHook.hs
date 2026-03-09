@@ -24,7 +24,7 @@ import ExoMonad.Effects.Git (GitGetBranch, GitGetRepoInfo, GitGetStatus, GitHasU
 import ExoMonad.Effects.GitHub (GitHubGetPullRequest, GitHubGetPullRequestForBranch, GitHubGetPullRequestReviewComments)
 import ExoMonad.Effects.Log (LogEmitEvent)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
-import ExoMonad.Guest.Types (StopDecision (..), StopHookOutput (..), allowStopResponse)
+import ExoMonad.Guest.Types (StopDecision (..), StopHookOutput (..), allowStopResponse, blockStopResponse)
 import ExoMonad.Types (HookEffects)
 import Proto3.Suite.Types qualified as Protobuf
 import System.Environment (lookupEnv)
@@ -33,31 +33,43 @@ import System.Environment (lookupEnv)
 -- Main Check Logic
 -- ============================================================================
 
+data StopCheckResult
+  = MustBlock Text   -- ^ changes_requested: agent must address
+  | ShouldNudge Text -- ^ informational: agent can still stop
+  | Clean            -- ^ no issues
+
 runStopHookChecks :: Eff HookEffects StopHookOutput
 runStopHookChecks = do
   branch <- getCurrentBranch
   if branch `elem` ["main", "master"]
     then pure allowStopResponse
     else do
-      nudge <- gatherNudge branch
+      result <- gatherStopCheck branch
       -- Log to event log (JSONL) for observability
       let eventPayload = BSL.toStrict $ Aeson.encode $
-            object ["branch" .= branch, "nudge" .= nudge]
+            object ["branch" .= branch, "result" .= describeResult result]
       void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
         { Log.emitEventRequestEventType = "agent.stop_check",
           Log.emitEventRequestPayload = eventPayload,
           Log.emitEventRequestTimestamp = 0
         })
-      -- Return nudge as reason so the agent sees it
-      pure $ StopHookOutput Allow nudge
 
--- | Check git/PR state and return a nudge message if the agent should
--- consider calling notify_parent before stopping.
-gatherNudge :: Text -> Eff HookEffects (Maybe Text)
-gatherNudge branch = do
+      case result of
+        MustBlock msg -> pure $ blockStopResponse msg
+        ShouldNudge msg -> pure $ StopHookOutput Allow (Just msg)
+        Clean -> pure allowStopResponse
+
+describeResult :: StopCheckResult -> Text
+describeResult (MustBlock msg) = "block: " <> msg
+describeResult (ShouldNudge msg) = "nudge: " <> msg
+describeResult Clean = "clean"
+
+-- | Check git/PR state and return a structured check result.
+gatherStopCheck :: Text -> Eff HookEffects StopCheckResult
+gatherStopCheck branch = do
   repoInfoResult <- suspendEffect @GitGetRepoInfo (Git.GetRepoInfoRequest {Git.getRepoInfoRequestWorkingDir = "."})
   case repoInfoResult of
-    Left _ -> pure Nothing
+    Left _ -> pure Clean
     Right repoInfo -> do
       let repoOwner = TL.toStrict (Git.getRepoInfoResponseOwner repoInfo)
           repoName = TL.toStrict (Git.getRepoInfoResponseName repoInfo)
@@ -71,16 +83,20 @@ gatherNudge branch = do
       case prResult of
         Right prResp | GH.getPullRequestForBranchResponseFound prResp ->
           case GH.getPullRequestForBranchResponsePullRequest prResp of
-            Nothing -> pure Nothing
+            Nothing -> pure Clean
             Just pr -> do
               let prNum = fromIntegral (GH.pullRequestNumber pr) :: Int
-              checkPrStatus repoOwner repoName prNum
+              checkPrStatusStructured repoOwner repoName prNum
 
-        _ -> checkUncommittedWork branch
+        _ -> do
+          nudge <- checkUncommittedWork branch
+          case nudge of
+            Just msg -> pure (ShouldNudge msg)
+            Nothing -> pure Clean
 
--- | Check PR review status and nudge if there are unresolved comments.
-checkPrStatus :: Text -> Text -> Int -> Eff HookEffects (Maybe Text)
-checkPrStatus repoOwner repoName prNum = do
+-- | Check PR review status and return structured result if there are issues.
+checkPrStatusStructured :: Text -> Text -> Int -> Eff HookEffects StopCheckResult
+checkPrStatusStructured repoOwner repoName prNum = do
   fullPrResult <- suspendEffect @GitHubGetPullRequest GH.GetPullRequestRequest
     { GH.getPullRequestRequestOwner = TL.fromStrict repoOwner
     , GH.getPullRequestRequestRepo = TL.fromStrict repoName
@@ -104,12 +120,12 @@ checkPrStatus repoOwner repoName prNum = do
 
   let hasChangesRequested = any (\r -> GH.reviewState r == Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_CHANGES_REQUESTED)) reviews
   if hasChangesRequested
-    then pure $ Just $ "PR #" <> T.pack (show prNum) <> " has changes requested. Address review comments before stopping."
+    then pure $ MustBlock $ "PR #" <> T.pack (show prNum) <> " has changes requested. Address review comments before stopping."
     else if not (null comments)
-      then pure $ Just $ "PR #" <> T.pack (show prNum) <> " has review comments. Address them before stopping."
+      then pure $ ShouldNudge $ "PR #" <> T.pack (show prNum) <> " has review comments. Address them before stopping."
       else if null reviews
-        then pure $ Just $ "PR #" <> T.pack (show prNum) <> " is awaiting review. The system will auto-notify your parent when review completes or times out. You can continue working or yield."
-        else pure Nothing
+        then pure $ ShouldNudge $ "PR #" <> T.pack (show prNum) <> " is awaiting review. The system will auto-notify your parent when review completes or times out. You can continue working or yield."
+        else pure Clean
 
 -- | Check for uncommitted/unpushed work and nudge if found.
 checkUncommittedWork :: Text -> Eff HookEffects (Maybe Text)
