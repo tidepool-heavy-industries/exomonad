@@ -17,6 +17,7 @@ module AllRoles
     roleListTools,
     roleHooks,
     roleToolsMCP,
+    roleEventHandlers,
   )
 where
 
@@ -28,7 +29,7 @@ import Data.Text (Text)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, ToolDefinition, WasmResult, toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
-import ExoMonad.Types (HookConfig (..), RoleConfig (..))
+import ExoMonad.Types (EventHandlerConfig, HookConfig (..), RoleConfig (..))
 
 -- Import all role configs under unique module names.
 import qualified DevRole
@@ -42,7 +43,9 @@ data RoleCapabilities = RoleCapabilities
     -- | List all tool definitions for this role (raw).
     rcListTools :: [ToolDefinition],
     -- | Get hook config for this role.
-    rcHooks :: HookConfig
+    rcHooks :: HookConfig,
+    -- | Get event handler config for this role.
+    rcEventHandlers :: EventHandlerConfig
   }
 
 -- | Existential wrapper for role configs with heterogeneous tool types.
@@ -59,7 +62,8 @@ mkSomeRoleConfig cfg =
     RoleCapabilities
       { rcDispatch = dispatchRecord (tools cfg),
         rcListTools = reifyToolDefs (Proxy @tools),
-        rcHooks = hooks cfg
+        rcHooks = hooks cfg,
+        rcEventHandlers = eventHandlers cfg
       }
 
 -- | Dispatch a tool call for this role.
@@ -77,6 +81,10 @@ roleToolsMCP = map toMCPFormat . roleListTools
 -- | Get hook config for this role.
 roleHooks :: SomeRoleConfig -> HookConfig
 roleHooks (SomeRoleConfig caps) = rcHooks caps
+
+-- | Get event handler config for this role.
+roleEventHandlers :: SomeRoleConfig -> EventHandlerConfig
+roleEventHandlers (SomeRoleConfig caps) = rcEventHandlers caps
 
 -- | All role configs indexed by role name.
 allConfigs :: Map Text SomeRoleConfig

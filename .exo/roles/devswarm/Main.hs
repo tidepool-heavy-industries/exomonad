@@ -12,7 +12,8 @@
 -- parse of the input bytes.
 module Main where
 
-import AllRoles (lookupRole, roleDispatch, roleHooks, roleToolsMCP)
+import AllRoles (lookupRole, roleDispatch, roleEventHandlers, roleHooks, roleToolsMCP)
+import ExoMonad.Guest.Events (EventInput, dispatchEvent)
 import Data.Aeson (Value, (.:), (.:?))
 import Data.Aeson qualified as Aeson
 import Data.ByteString (ByteString)
@@ -32,6 +33,7 @@ import Control.Monad.Freer.Coroutine (runC)
 foreign export ccall handle_mcp_call :: IO CInt
 foreign export ccall handle_list_tools :: IO CInt
 foreign export ccall handle_pre_tool_use :: IO CInt
+foreign export ccall handle_event :: IO CInt
 foreign export ccall resume :: IO CInt
 
 -- | Input for role-aware MCP calls: { "role": "dev", "toolName": "...", "toolArgs": {...} }
@@ -70,6 +72,17 @@ instance Aeson.FromJSON RoleAwareHookInput where
     role <- v .: "role"
     pure $ RoleAwareHookInput role val) val
 
+-- | Input for role-aware event calls: { "role": "dev", "event_type": "pr_review", "payload": {...} }
+data RoleAwareEventInput = RoleAwareEventInput
+  { raeRole :: Text,
+    raeRawValue :: Value
+  }
+
+instance Aeson.FromJSON RoleAwareEventInput where
+  parseJSON val = Aeson.withObject "RoleAwareEventInput" (\v -> do
+    role <- v .: "role"
+    pure $ RoleAwareEventInput role val) val
+
 -- | Dispatch an MCP tool call to the correct role's handler.
 handle_mcp_call :: IO CInt
 handle_mcp_call = wrapHandler $ do
@@ -88,6 +101,30 @@ handle_mcp_call = wrapHandler $ do
         resp <- roleDispatch roleCfg name args
         output (BSL.toStrict $ Aeson.encode resp)
         pure 0
+
+-- | Handle an event call (PRReview, CIStatus, Timeout) for a given role.
+handle_event :: IO CInt
+handle_event = wrapHandler $ do
+  inp <- input @ByteString
+  case Aeson.eitherDecodeStrict inp of
+    Left err -> do
+      outputError $ "Event parse error: " <> T.pack err
+      pure 1
+    Right raei -> case lookupRole (raeRole raei) of
+      Nothing -> do
+        outputError $ "Unknown role: " <> raeRole raei
+        pure 1
+      Just roleCfg ->
+        case Aeson.fromJSON (raeRawValue raei) of
+          Aeson.Error err -> do
+            outputError $ "Event input parse error: " <> T.pack err
+            pure 1
+          Aeson.Success eventInput -> do
+            let handlers = roleEventHandlers roleCfg
+            status <- runM $ runC (dispatchEvent handlers eventInput)
+            result <- statusToWasmResult status
+            output (BSL.toStrict $ Aeson.encode result)
+            pure 0
 
 -- | List tools for a given role. Reads role from input JSON.
 -- Returns WasmResult (Done envelope) for consistency with all other exports.

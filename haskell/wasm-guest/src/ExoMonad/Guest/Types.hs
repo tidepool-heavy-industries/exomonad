@@ -1,3 +1,8 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeOperators #-}
+
 -- | Shared types for MCP and hook handling.
 module ExoMonad.Guest.Types
   ( -- * MCP Call types
@@ -11,6 +16,7 @@ module ExoMonad.Guest.Types
     StopHookOutput (..),
     StopDecision (..),
     Runtime (..),
+    HookEffects,
     allowResponse,
     denyResponse,
     postToolUseResponse,
@@ -24,6 +30,13 @@ import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
 import GHC.Generics (Generic)
+import Control.Monad.Freer (Eff)
+import ExoMonad.Guest.Tool.Suspend.Types (SuspendYield)
+
+-- | Effects available to hooks.
+-- Currently allows arbitrary IO via IO (required for Host Calls).
+-- Future versions may restrict this to specific effects (Git, GitHub, Log).
+type HookEffects = '[SuspendYield, IO]
 
 -- ============================================================================
 -- MCP Call Types

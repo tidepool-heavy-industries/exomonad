@@ -7,6 +7,8 @@ module ExoMonad.Types
   ( RoleConfig (..),
     HookConfig (..),
     HookEffects,
+    EventHandlerConfig,
+    defaultEventHandlers,
     defaultHooks,
     defaultSessionStartHook,
     teamRegistrationPostToolUse,
@@ -24,22 +26,18 @@ import Data.Text.Lazy qualified as TL
 import ExoMonad.Effects.Log (LogError, LogInfo)
 import ExoMonad.Effects.Log qualified as Log
 import ExoMonad.Effects.Session qualified as Session
-import ExoMonad.Guest.Tool.Suspend.Types (SuspendYield)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
-import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), HookSpecificOutput (..), StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
+import ExoMonad.Guest.Events (EventHandlerConfig, defaultEventHandlers)
+import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), HookSpecificOutput (..), StopHookOutput, HookEffects, allowResponse, allowStopResponse, postToolUseResponse)
 import GHC.Generics (Generic)
-
--- | Effects available to hooks.
--- Currently allows arbitrary IO via IO (required for Host Calls).
--- Future versions may restrict this to specific effects (Git, GitHub, Log).
-type HookEffects = '[SuspendYield, IO]
 
 -- | Role configuration.
 -- Defines the role name, available tools, and lifecycle hooks.
 data RoleConfig tools = RoleConfig
   { roleName :: Text,
     tools :: tools,
-    hooks :: HookConfig
+    hooks :: HookConfig,
+    eventHandlers :: EventHandlerConfig
   }
   deriving (Generic)
 

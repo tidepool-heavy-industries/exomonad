@@ -26,5 +26,6 @@ config =
             notifyParent = mkHandler @NotifyParent,
             sendMessage = mkHandler @SendMessage
           },
-      hooks = httpDevHooks
+      hooks = httpDevHooks,
+      eventHandlers = defaultEventHandlers
     }

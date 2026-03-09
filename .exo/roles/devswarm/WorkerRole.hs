@@ -32,5 +32,6 @@ config =
             onStop = \_ -> pure allowStopResponse,
             onSubagentStop = \_ -> pure allowStopResponse,
             onSessionStart = defaultSessionStartHook
-          }
+          },
+      eventHandlers = defaultEventHandlers
     }

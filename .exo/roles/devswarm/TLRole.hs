@@ -42,5 +42,6 @@ config =
             onStop = \_ -> runStopHookChecks,
             onSubagentStop = \_ -> runStopHookChecks,
             onSessionStart = defaultSessionStartHook
-          }
+          },
+      eventHandlers = defaultEventHandlers
     }
