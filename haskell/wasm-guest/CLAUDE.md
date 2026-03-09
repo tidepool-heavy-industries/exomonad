@@ -118,9 +118,10 @@ GitHub poller (Rust, 60s interval)
 
 | Type | Purpose |
 |------|---------|
-| `EventHandlerConfig` | Per-role handler config: `onPRReview`, `onCIStatus`, `onTimeout` |
+| `EventHandlerConfig` | Per-role handler config: `onPRReview`, `onCIStatus`, `onTimeout`, `onSiblingMerged` |
 | `EventAction` | Handler return: `InjectMessage Text`, `NotifyParentAction Text Int`, `NoAction` |
 | `PRReviewEvent` | `ReviewReceived` (comments), `ReviewApproved`, `ReviewTimeout` |
+| `SiblingMergedEvent` | `mergedBranch`, `parentBranch`, `siblingPRNumber` |
 | `EventInput` | Top-level wrapper with `event_type` discriminator for dispatch |
 
 ### PR Review Handler (`.exo/lib/PRReviewHandler.hs`)
@@ -130,6 +131,7 @@ GitHub poller (Rust, 60s interval)
 | `ReviewReceived` | `InjectMessage` | Copilot comments injected into agent pane |
 | `ReviewApproved` | `NotifyParentAction` | Auto-notifies parent via `notify_parent_delivery` |
 | `ReviewTimeout` (15 min) | `NotifyParentAction` | Auto-notifies parent with timeout note |
+| `SiblingMerged` | `InjectMessage` | Injects rebase instructions when a sibling branch is merged |
 
 ### Wiring
 
