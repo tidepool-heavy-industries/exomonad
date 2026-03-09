@@ -12,16 +12,17 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import ExoMonad.Effects.Log qualified as Log
-import ExoMonad.Guest.Events (EventAction (..), EventHandlerConfig (..), PRReviewEvent (..), SiblingMergedEvent (..), defaultEventHandlers)
+import ExoMonad.Guest.Events (CIStatusEvent (..), EventAction (..), EventHandlerConfig (..), PRReviewEvent (..), SiblingMergedEvent (..), defaultEventHandlers)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
 import ExoMonad.Guest.Types (HookEffects)
 
 -- | Event handler config with PR review handling.
--- CI and timeout handlers use defaults (NoAction).
+-- Timeout handlers use defaults (NoAction).
 prReviewEventHandlers :: EventHandlerConfig
 prReviewEventHandlers =
   defaultEventHandlers
     { onPRReview = prReviewHandler,
+      onCIStatus = ciStatusHandler,
       onSiblingMerged = siblingMergedHandler
     }
 
@@ -70,4 +71,21 @@ siblingMergedHandler (SiblingMergedEvent merged parent _prNum) = do
   let msg = "[Sibling Merged] PR on branch " <> merged
          <> " was merged into " <> parent
          <> ". Rebase your branch to pick up the changes: git fetch origin && git rebase origin/" <> parent
+  pure (InjectMessage msg)
+
+-- | Handle CI status events.
+ciStatusHandler :: CIStatusEvent -> Eff HookEffects EventAction
+ciStatusHandler (CIStatusEvent n status_ branch_) = do
+  void $ suspendEffect_ @Log.LogInfo $ Log.InfoRequest
+    { Log.infoRequestMessage = TL.fromStrict $
+        "[PRReviewHandler] CI status changed on PR #" <> T.pack (show n)
+        <> ": " <> status_
+    , Log.infoRequestFields = ""
+    }
+  let msg = "[CI Status] PR #" <> T.pack (show n) <> " on branch " <> branch_
+         <> ": " <> status_
+         <> case status_ of
+              "success" -> "\n\nCI passed."
+              "failure" -> "\n\nCI failed. Check the logs and fix the issue before proceeding."
+              _ -> ""
   pure (InjectMessage msg)

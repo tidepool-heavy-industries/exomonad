@@ -576,11 +576,24 @@ impl GitHubPoller {
 
             // Check CI changes
             if ci_status != old_state.last_ci_status {
-                // Status changed!
-                let message = format!("[CI STATUS: {}] {}", branch, ci_status);
-                // TODO: Route CI status changes through WASM event handlers (onCIStatus)
-                // once CI pipeline is stable. Currently only logs + emits to event queue.
-                self.emit_event(branch, &ci_status, &message, agent_type, Some(pr_number))
+                info!("[Poller] CI status changed for {}: {} -> {}", branch, old_state.last_ci_status, ci_status);
+                if let Ok(Some(action)) = self
+                    .call_handle_event(
+                        branch,
+                        agent_type,
+                        "ci_status",
+                        serde_json::json!({
+                            "pr_number": pr_number.as_u64(),
+                            "status": ci_status,
+                            "branch": branch,
+                        }),
+                    )
+                    .await
+                {
+                    self.handle_event_action(action, branch, agent_type, pr_number)
+                        .await;
+                }
+                self.emit_event(branch, &ci_status, &format!("[CI STATUS: {}] {}", branch, ci_status), agent_type, Some(pr_number))
                     .await;
                 old_state.last_ci_status = ci_status;
             }
