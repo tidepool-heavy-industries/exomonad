@@ -6,6 +6,7 @@ module ExoMonad.Guest.Events
     PRReviewEvent (..),
     CIStatusEvent (..),
     TimeoutEvent (..),
+    SiblingMergedEvent (..),
     EventInput (..),
     defaultEventHandlers,
     dispatchEvent,
@@ -77,6 +78,21 @@ instance FromJSON TimeoutEvent where
 instance ToJSON TimeoutEvent where
   toJSON (TimeoutEvent n m) = object ["pr_number" .= n, "minutes_elapsed" .= m]
 
+-- | Sibling merged event
+data SiblingMergedEvent = SiblingMergedEvent
+  { mergedBranch :: Text,
+    parentBranch :: Text,
+    siblingPRNumber :: Int
+  }
+  deriving (Show, Generic)
+
+instance FromJSON SiblingMergedEvent where
+  parseJSON = withObject "SiblingMergedEvent" $ \v ->
+    SiblingMergedEvent <$> v .: "merged_branch" <*> v .: "parent_branch" <*> v .: "sibling_pr_number"
+
+instance ToJSON SiblingMergedEvent where
+  toJSON (SiblingMergedEvent mb pb n) = object ["merged_branch" .= mb, "parent_branch" .= pb, "sibling_pr_number" .= n]
+
 -- | Event handler return type
 data EventAction
   = InjectMessage Text
@@ -102,7 +118,8 @@ instance FromJSON EventAction where
 data EventHandlerConfig = EventHandlerConfig
   { onPRReview :: PRReviewEvent -> Eff HookEffects EventAction,
     onCIStatus :: CIStatusEvent -> Eff HookEffects EventAction,
-    onTimeout :: TimeoutEvent -> Eff HookEffects EventAction
+    onTimeout :: TimeoutEvent -> Eff HookEffects EventAction,
+    onSiblingMerged :: SiblingMergedEvent -> Eff HookEffects EventAction
   }
 
 -- | Default event handlers (all NoAction).
@@ -111,7 +128,8 @@ defaultEventHandlers =
   EventHandlerConfig
     { onPRReview = \_ -> pure NoAction,
       onCIStatus = \_ -> pure NoAction,
-      onTimeout = \_ -> pure NoAction
+      onTimeout = \_ -> pure NoAction,
+      onSiblingMerged = \_ -> pure NoAction
     }
 
 -- | Top-level event type wrapper for dispatching.
@@ -119,6 +137,7 @@ data EventInput
   = PRReviewInput PRReviewEvent
   | CIStatusInput CIStatusEvent
   | TimeoutInput TimeoutEvent
+  | SiblingMergedInput SiblingMergedEvent
   deriving (Show, Generic)
 
 instance FromJSON EventInput where
@@ -129,6 +148,7 @@ instance FromJSON EventInput where
       "pr_review" -> PRReviewInput <$> Aeson.parseJSON payload
       "ci_status" -> CIStatusInput <$> Aeson.parseJSON payload
       "timeout" -> TimeoutInput <$> Aeson.parseJSON payload
+      "sibling_merged" -> SiblingMergedInput <$> Aeson.parseJSON payload
       other -> fail $ "Unknown event_type: " <> show other
 
 -- | Dispatch an event to the appropriate handler.
@@ -136,3 +156,4 @@ dispatchEvent :: EventHandlerConfig -> EventInput -> Eff HookEffects EventAction
 dispatchEvent cfg (PRReviewInput ev) = onPRReview cfg ev
 dispatchEvent cfg (CIStatusInput ev) = onCIStatus cfg ev
 dispatchEvent cfg (TimeoutInput ev) = onTimeout cfg ev
+dispatchEvent cfg (SiblingMergedInput ev) = onSiblingMerged cfg ev
