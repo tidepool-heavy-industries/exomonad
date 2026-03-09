@@ -51,7 +51,7 @@ If an event is notified before the waiter starts, it is stored in the queue and 
 ```rust
 let queue = EventQueue::new();
 queue.notify_event("session1", event.clone()).await;
-let result = queue.wait_for_event("session1", &["worker_complete".to_string()], Duration::from_secs(1)).await;
+let result = queue.wait_for_event("session1", &["agent_message".to_string()], Duration::from_secs(1)).await;
 assert!(result.is_ok());
 ```
 
@@ -62,7 +62,7 @@ If `wait_for_event` is called first, it blocks until `notify_event` is called.
 let queue = Arc::new(EventQueue::new());
 // Spawn waiter
 tokio::spawn(async move {
-    queue.wait_for_event("session2", &["worker_complete".to_string()], Duration::from_secs(5)).await
+    queue.wait_for_event("session2", &["agent_message".to_string()], Duration::from_secs(5)).await
 });
 // Notify later
 queue.notify_event("session2", event).await;
