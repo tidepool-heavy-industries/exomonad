@@ -7,7 +7,7 @@ use crate::services::event_queue::EventQueue;
 use crate::services::repo;
 use crate::services::team_registry::TeamRegistry;
 use anyhow::{Context, Result};
-use exomonad_proto::effects::events::{event::EventType, Event, WorkerComplete};
+use exomonad_proto::effects::events::{event::EventType, Event, AgentMessage};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -862,8 +862,8 @@ impl GitHubPoller {
         // Queue event to owning agent (branch name IS the agent's session_id)
         let event = Event {
             event_id: 0,
-            event_type: Some(EventType::WorkerComplete(WorkerComplete {
-                worker_id: branch.to_string(),
+            event_type: Some(EventType::AgentMessage(AgentMessage {
+                agent_id: branch.to_string(),
                 status: status.to_string(),
                 message: message.to_string(),
                 changes: vec![],

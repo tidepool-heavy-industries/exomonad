@@ -5,7 +5,7 @@ use crate::services::team_registry::TeamRegistry;
 use crate::services::teams_mailbox;
 use crate::services::zellij_events;
 use agent_client_protocol::{Agent, PromptRequest};
-use exomonad_proto::effects::events::{event, Event, WorkerComplete};
+use exomonad_proto::effects::events::{event, Event, AgentMessage};
 use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,8 +82,8 @@ pub async fn notify_parent_delivery(
     // 2. Publish to event queue
     let event = Event {
         event_id: 0,
-        event_type: Some(event::EventType::WorkerComplete(WorkerComplete {
-            worker_id: agent_id.to_string(),
+        event_type: Some(event::EventType::AgentMessage(AgentMessage {
+            agent_id: agent_id.to_string(),
             status: status.to_string(),
             message: message.to_string(),
             changes: Vec::new(),

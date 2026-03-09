@@ -23,13 +23,14 @@ message NotifyEventResponse {
 message Event {
   uint64 event_id = 3;  // Monotonically increasing ID assigned by EventQueue
   oneof event_type {
-    WorkerComplete worker_complete = 1;
+    AgentMessage agent_message = 1;
     Timeout timeout = 2;
   }
 }
 
-message WorkerComplete {
-  string worker_id = 1;
+// Agent message notification
+message AgentMessage {
+  string agent_id = 1;
   string status = 2;
   repeated string changes = 3;
   string message = 4;

@@ -121,8 +121,8 @@ impl EventQueue {
             return true;
         }
         match &event.event_type {
-            Some(EventType::WorkerComplete(_)) => types.contains(&"worker_complete".to_string()),
-            Some(EventType::Timeout(_)) => types.contains(&"timeout".to_string()),
+            Some(EventType::AgentMessage(_)) => types.iter().any(|t| t == "agent_message"),
+            Some(EventType::Timeout(_)) => types.iter().any(|t| t == "timeout"),
             None => false,
         }
     }
@@ -152,9 +152,9 @@ mod tests {
         let queue = EventQueue::new();
         let event = Event {
             event_id: 0,
-            event_type: Some(EventType::WorkerComplete(
-                exomonad_proto::effects::events::WorkerComplete {
-                    worker_id: "test".to_string(),
+            event_type: Some(EventType::AgentMessage(
+                exomonad_proto::effects::events::AgentMessage {
+                    agent_id: "test".to_string(),
                     status: "success".to_string(),
                     changes: vec![],
                     message: "done".to_string(),
@@ -166,7 +166,7 @@ mod tests {
         let result = queue
             .wait_for_event(
                 "session1",
-                &["worker_complete".to_string()],
+                &["agent_message".to_string()],
                 Duration::from_secs(1),
                 0,
             )
@@ -183,7 +183,7 @@ mod tests {
             queue_clone
                 .wait_for_event(
                     "session2",
-                    &["worker_complete".to_string()],
+                    &["agent_message".to_string()],
                     Duration::from_secs(5),
                     0,
                 )
@@ -194,9 +194,9 @@ mod tests {
 
         let event = Event {
             event_id: 0,
-            event_type: Some(EventType::WorkerComplete(
-                exomonad_proto::effects::events::WorkerComplete {
-                    worker_id: "test2".to_string(),
+            event_type: Some(EventType::AgentMessage(
+                exomonad_proto::effects::events::AgentMessage {
+                    agent_id: "test2".to_string(),
                     status: "success".to_string(),
                     changes: vec![],
                     message: "done".to_string(),
@@ -215,9 +215,9 @@ mod tests {
 
         let event1 = Event {
             event_id: 0, // Will be assigned by queue
-            event_type: Some(EventType::WorkerComplete(
-                exomonad_proto::effects::events::WorkerComplete {
-                    worker_id: "worker-1".to_string(),
+            event_type: Some(EventType::AgentMessage(
+                exomonad_proto::effects::events::AgentMessage {
+                    agent_id: "worker-1".to_string(),
                     status: "success".to_string(),
                     changes: vec![],
                     message: "first".to_string(),
@@ -226,9 +226,9 @@ mod tests {
         };
         let event2 = Event {
             event_id: 0,
-            event_type: Some(EventType::WorkerComplete(
-                exomonad_proto::effects::events::WorkerComplete {
-                    worker_id: "worker-2".to_string(),
+            event_type: Some(EventType::AgentMessage(
+                exomonad_proto::effects::events::AgentMessage {
+                    agent_id: "worker-2".to_string(),
                     status: "success".to_string(),
                     changes: vec![],
                     message: "second".to_string(),
@@ -243,7 +243,7 @@ mod tests {
         let result = queue
             .wait_for_event(
                 "s1",
-                &["worker_complete".to_string()],
+                &["agent_message".to_string()],
                 Duration::from_secs(1),
                 0,
             )
@@ -255,7 +255,7 @@ mod tests {
         let result = queue
             .wait_for_event(
                 "s1",
-                &["worker_complete".to_string()],
+                &["agent_message".to_string()],
                 Duration::from_secs(1),
                 1,
             )
@@ -272,9 +272,9 @@ mod tests {
                 "test",
                 Event {
                     event_id: 0,
-                    event_type: Some(EventType::WorkerComplete(
-                        exomonad_proto::effects::events::WorkerComplete {
-                            worker_id: format!("worker-{}", i),
+                    event_type: Some(EventType::AgentMessage(
+                        exomonad_proto::effects::events::AgentMessage {
+                            agent_id: format!("worker-{}", i),
                             status: "success".to_string(),
                             changes: vec![],
                             message: "test".to_string(),
