@@ -54,12 +54,12 @@ Two levels of abstraction for sending messages:
 
 | Function | Purpose | Used by |
 |----------|---------|---------|
-| `deliver_to_agent()` | Low-level multi-channel delivery (Teams → ACP → UDS → Zellij) | Peer messaging (`send_message`), event handler `InjectMessage`, sibling notifications |
+| `deliver_to_agent()` | Low-level multi-channel delivery (Teams → ACP → UDS → Zellij) | Peer messaging (`send_message`), event handler `InjectMessage` |
 | `notify_parent_delivery()` | High-level parent notification: event log + EventQueue + formatted notification + `deliver_to_agent()` | `EventHandler::notify_parent` (agent-initiated), poller `NotifyParent` action (system-initiated) |
 
 **Rule**: Any code path that notifies a parent MUST use `notify_parent_delivery()`, never raw `deliver_to_agent()`. This ensures event log entries, EventQueue publication, and consistent `[CHILD COMPLETE]`/`[CHILD FAILED]` formatting.
 
-`deliver_to_agent()` is correct for peer-to-peer messaging (send_message, sibling rebase notifications, event handler InjectMessage).
+`deliver_to_agent()` is correct for peer-to-peer messaging (send_message, event handler InjectMessage).
 
 ## GitHub Poller State Machine (`services/github_poller.rs`)
 
@@ -95,7 +95,7 @@ ReviewState::None ──(Copilot approves)──→ ReviewState::Approved
 ### Merge Detection
 
 When a tracked PR's branch disappears from the open PR list, it was merged/closed. The poller:
-- Notifies sibling agents (same parent branch, open PRs) to rebase
+- Fires `sibling_merged` WASM event on sibling agents (same parent branch, open PRs) via `call_handle_event`
 - Logs `agent.sibling_merged` event
 - Removes the PRState from tracking
 
