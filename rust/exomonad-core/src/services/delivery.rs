@@ -1,7 +1,11 @@
+use crate::services::acp_registry::AcpRegistry;
+use crate::services::event_log::EventLog;
+use crate::services::event_queue::EventQueue;
 use crate::services::team_registry::TeamRegistry;
 use crate::services::teams_mailbox;
 use crate::services::zellij_events;
 use agent_client_protocol::{Agent, PromptRequest};
+use exomonad_proto::effects::events::{event, Event, WorkerComplete};
 use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,6 +15,107 @@ pub enum DeliveryResult {
     Uds,
     Zellij,
     Failed,
+}
+
+pub fn format_parent_notification(agent_id: &str, status: &str, message: &str) -> String {
+    match status {
+        "success" => format!(
+            "[CHILD COMPLETE: {}] {}",
+            agent_id,
+            if message.is_empty() {
+                "Task completed successfully."
+            } else {
+                message
+            }
+        ),
+        "failure" => format!(
+            "[CHILD FAILED: {}] {}",
+            agent_id,
+            if message.is_empty() {
+                "Task failed."
+            } else {
+                message
+            }
+        ),
+        _ => format!("[CHILD STATUS: {} - {}] {}", agent_id, status, message),
+    }
+}
+
+pub async fn notify_parent_delivery(
+    team_registry: Option<&TeamRegistry>,
+    acp_registry: Option<&AcpRegistry>,
+    event_log: Option<&EventLog>,
+    event_queue: &EventQueue,
+    project_dir: &std::path::Path,
+    agent_id: &str,
+    parent_session_id: &str,
+    parent_tab_name: &str,
+    status: &str,
+    message: &str,
+    summary: Option<&str>,
+) -> DeliveryResult {
+    // 1. Log to event log
+    if let Some(log) = event_log {
+        let _ = log.append(
+            "agent.notify_parent",
+            agent_id,
+            &serde_json::json!({
+                "parent": parent_session_id,
+                "status": status,
+                "message": message,
+            }),
+        );
+    }
+
+    // 2. Publish to event queue
+    let event = Event {
+        event_id: 0,
+        event_type: Some(event::EventType::WorkerComplete(WorkerComplete {
+            worker_id: agent_id.to_string(),
+            status: status.to_string(),
+            message: message.to_string(),
+            changes: Vec::new(),
+        })),
+    };
+    event_queue.notify_event(parent_session_id, event).await;
+
+    // 3. Format and deliver
+    let notification = format_parent_notification(agent_id, status, message);
+    let default_summary = format!("Agent completion: {}", agent_id);
+    let summary = summary.unwrap_or(&default_summary);
+
+    let delivery_result = deliver_to_agent(
+        team_registry,
+        acp_registry,
+        project_dir,
+        parent_session_id,
+        parent_tab_name,
+        agent_id,
+        &notification,
+        summary,
+    )
+    .await;
+
+    // 4. Log delivery result
+    if let Some(log) = event_log {
+        let delivery_method = match delivery_result {
+            DeliveryResult::Teams => "teams_inbox",
+            DeliveryResult::Acp => "acp",
+            DeliveryResult::Uds => "unix_socket",
+            DeliveryResult::Zellij => "zellij_stdin",
+            DeliveryResult::Failed => "failed",
+        };
+        let _ = log.append(
+            "agent.message_delivered",
+            agent_id,
+            &serde_json::json!({
+                "parent": parent_session_id,
+                "method": delivery_method,
+            }),
+        );
+    }
+
+    delivery_result
 }
 
 /// Deliver a notification via HTTP POST over a Unix domain socket.
@@ -167,6 +272,39 @@ pub async fn deliver_to_agent(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_format_parent_notification_success() {
+        let msg = format_parent_notification("agent-1", "success", "All done");
+        assert_eq!(msg, "[CHILD COMPLETE: agent-1] All done");
+    }
+
+    #[test]
+    fn test_format_parent_notification_success_empty() {
+        let msg = format_parent_notification("agent-1", "success", "");
+        assert_eq!(
+            msg,
+            "[CHILD COMPLETE: agent-1] Task completed successfully."
+        );
+    }
+
+    #[test]
+    fn test_format_parent_notification_failure() {
+        let msg = format_parent_notification("agent-2", "failure", "Something went wrong");
+        assert_eq!(msg, "[CHILD FAILED: agent-2] Something went wrong");
+    }
+
+    #[test]
+    fn test_format_parent_notification_failure_empty() {
+        let msg = format_parent_notification("agent-2", "failure", "");
+        assert_eq!(msg, "[CHILD FAILED: agent-2] Task failed.");
+    }
+
+    #[test]
+    fn test_format_parent_notification_unknown() {
+        let msg = format_parent_notification("agent-3", "running", "Working...");
+        assert_eq!(msg, "[CHILD STATUS: agent-3 - running] Working...");
+    }
 
     #[test]
     fn test_delivery_result_variants_distinct() {
