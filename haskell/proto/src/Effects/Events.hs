@@ -335,12 +335,12 @@ instance (HsProtobuf.Message Event) where
            Hs.Nothing -> Hs.mempty
            Hs.Just x
              -> case x of
-                  EventEventTypeWorkerComplete y
+                  EventEventTypeAgentMessage y
                     -> HsProtobuf.encodeMessageField
                          (HsProtobuf.FieldNumber 1)
                          ((Hs.coerce
-                             @(Hs.Maybe Effects.Events.WorkerComplete)
-                             @(HsProtobuf.Nested Effects.Events.WorkerComplete))
+                             @(Hs.Maybe Effects.Events.AgentMessage)
+                             @(HsProtobuf.Nested Effects.Events.AgentMessage))
                             (Hs.Just y))
                   EventEventTypeTimeout y
                     -> HsProtobuf.encodeMessageField
@@ -358,11 +358,11 @@ instance (HsProtobuf.Message Event) where
           HsProtobuf.oneof
             Hs.Nothing
             [((HsProtobuf.FieldNumber 1), 
-              Hs.pure (Hs.fmap EventEventTypeWorkerComplete)
+              Hs.pure (Hs.fmap EventEventTypeAgentMessage)
                 <*>
                   ((HsProtobuf.coerceOver
-                      @(HsProtobuf.Nested Effects.Events.WorkerComplete)
-                      @(Hs.Maybe Effects.Events.WorkerComplete))
+                      @(HsProtobuf.Nested Effects.Events.AgentMessage)
+                      @(Hs.Maybe Effects.Events.AgentMessage))
                      HsProtobuf.decodeMessageField)),
              ((HsProtobuf.FieldNumber 2), 
               Hs.pure (Hs.fmap EventEventTypeTimeout)
@@ -383,8 +383,8 @@ instance (HsJSONPB.ToJSONPB Event) where
          (let
             encodeEvent_type
               = (case f1_or_f2 of
-                   Hs.Just (EventEventTypeWorkerComplete f1)
-                     -> HsJSONPB.pair "worker_complete" f1
+                   Hs.Just (EventEventTypeAgentMessage f1)
+                     -> HsJSONPB.pair "agent_message" f1
                    Hs.Just (EventEventTypeTimeout f2) -> HsJSONPB.pair "timeout" f2
                    Hs.Nothing -> Hs.mempty)
           in
@@ -400,8 +400,8 @@ instance (HsJSONPB.ToJSONPB Event) where
          (let
             encodeEvent_type
               = (case f1_or_f2 of
-                   Hs.Just (EventEventTypeWorkerComplete f1)
-                     -> HsJSONPB.pair "worker_complete" f1
+                   Hs.Just (EventEventTypeAgentMessage f1)
+                     -> HsJSONPB.pair "agent_message" f1
                    Hs.Just (EventEventTypeTimeout f2) -> HsJSONPB.pair "timeout" f2
                    Hs.Nothing -> Hs.mempty)
           in
@@ -421,8 +421,8 @@ instance (HsJSONPB.FromJSONPB Event) where
                   (let
                      parseEvent_type parseObj
                        = Hs.msum
-                           [Hs.Just Hs.. EventEventTypeWorkerComplete
-                              <$> HsJSONPB.parseField parseObj "worker_complete",
+                           [Hs.Just Hs.. EventEventTypeAgentMessage
+                              <$> HsJSONPB.parseField parseObj "agent_message",
                             Hs.Just Hs.. EventEventTypeTimeout
                               <$> HsJSONPB.parseField parseObj "timeout",
                             Hs.pure Hs.Nothing]
@@ -436,50 +436,50 @@ instance (HsJSONPB.ToJSON Event) where
 instance (HsJSONPB.FromJSON Event) where
   parseJSON = HsJSONPB.parseJSONPB
 data EventEventType
-  = EventEventTypeWorkerComplete Effects.Events.WorkerComplete |
+  = EventEventTypeAgentMessage Effects.Events.AgentMessage |
     EventEventTypeTimeout Effects.Events.Timeout
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData EventEventType)
 instance (HsProtobuf.Named EventEventType) where
   nameOf _ = Hs.fromString "EventEventType"
-data WorkerComplete
-  = WorkerComplete {workerCompleteWorkerId :: Hs.Text,
-                    workerCompleteStatus :: Hs.Text,
-                    workerCompleteChanges :: (Hs.Vector Hs.Text),
-                    workerCompleteMessage :: Hs.Text}
+data AgentMessage
+  = AgentMessage {agentMessageAgentId :: Hs.Text,
+                  agentMessageStatus :: Hs.Text,
+                  agentMessageChanges :: (Hs.Vector Hs.Text),
+                  agentMessageMessage :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
-instance (Hs.NFData WorkerComplete)
-instance (HsProtobuf.Named WorkerComplete) where
-  nameOf _ = Hs.fromString "WorkerComplete"
-instance (HsProtobuf.HasDefault WorkerComplete)
-instance (HsProtobuf.Message WorkerComplete) where
+instance (Hs.NFData AgentMessage)
+instance (HsProtobuf.Named AgentMessage) where
+  nameOf _ = Hs.fromString "AgentMessage"
+instance (HsProtobuf.HasDefault AgentMessage)
+instance (HsProtobuf.Message AgentMessage) where
   encodeMessage
     _
-    WorkerComplete {workerCompleteWorkerId, workerCompleteStatus,
-                    workerCompleteChanges, workerCompleteMessage}
+    AgentMessage {agentMessageAgentId, agentMessageStatus,
+                  agentMessageChanges, agentMessageMessage}
     = Hs.mappend
         (Hs.mappend
            (Hs.mappend
               (HsProtobuf.encodeMessageField
                  (HsProtobuf.FieldNumber 1)
                  ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                    workerCompleteWorkerId))
+                    agentMessageAgentId))
               (HsProtobuf.encodeMessageField
                  (HsProtobuf.FieldNumber 2)
                  ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                    workerCompleteStatus)))
+                    agentMessageStatus)))
            (HsProtobuf.encodeMessageField
               (HsProtobuf.FieldNumber 3)
               ((Hs.coerce
                   @(Hs.Vector Hs.Text)
                   @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
-                 workerCompleteChanges)))
+                 agentMessageChanges)))
         (HsProtobuf.encodeMessageField
            (HsProtobuf.FieldNumber 4)
            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              workerCompleteMessage))
+              agentMessageMessage))
   decodeMessage _
-    = Hs.pure WorkerComplete
+    = Hs.pure AgentMessage
         <*>
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
@@ -502,7 +502,7 @@ instance (HsProtobuf.Message WorkerComplete) where
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "worker_id") [] "",
+         (HsProtobufAST.Single "agent_id") [] "",
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 2)
          (HsProtobufAST.Prim HsProtobufAST.String)
@@ -515,10 +515,10 @@ instance (HsProtobuf.Message WorkerComplete) where
          (HsProtobuf.FieldNumber 4)
          (HsProtobufAST.Prim HsProtobufAST.String)
          (HsProtobufAST.Single "message") [] ""]
-instance (HsJSONPB.ToJSONPB WorkerComplete) where
-  toJSONPB (WorkerComplete f1 f2 f3 f4)
+instance (HsJSONPB.ToJSONPB AgentMessage) where
+  toJSONPB (AgentMessage f1 f2 f3 f4)
     = HsJSONPB.object
-        ["worker_id"
+        ["agent_id"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "status" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "changes"
@@ -529,9 +529,9 @@ instance (HsJSONPB.ToJSONPB WorkerComplete) where
                 f3),
          "message"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4)]
-  toEncodingPB (WorkerComplete f1 f2 f3 f4)
+  toEncodingPB (AgentMessage f1 f2 f3 f4)
     = HsJSONPB.pairs
-        ["worker_id"
+        ["agent_id"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "status" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "changes"
@@ -542,15 +542,15 @@ instance (HsJSONPB.ToJSONPB WorkerComplete) where
                 f3),
          "message"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4)]
-instance (HsJSONPB.FromJSONPB WorkerComplete) where
+instance (HsJSONPB.FromJSONPB AgentMessage) where
   parseJSONPB
     = HsJSONPB.withObject
-        "WorkerComplete"
+        "AgentMessage"
         (\ obj
-           -> Hs.pure WorkerComplete
+           -> Hs.pure AgentMessage
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "worker_id"))
+                     (obj .: "agent_id"))
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
                      (obj .: "status"))
@@ -562,10 +562,10 @@ instance (HsJSONPB.FromJSONPB WorkerComplete) where
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
                      (obj .: "message")))
-instance (HsJSONPB.ToJSON WorkerComplete) where
+instance (HsJSONPB.ToJSON AgentMessage) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
-instance (HsJSONPB.FromJSON WorkerComplete) where
+instance (HsJSONPB.FromJSON AgentMessage) where
   parseJSON = HsJSONPB.parseJSONPB
 newtype Timeout
   = Timeout {timeoutTimeoutSecs :: Hs.Int32}

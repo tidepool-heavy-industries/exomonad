@@ -121,8 +121,8 @@ impl EventQueue {
             return true;
         }
         match &event.event_type {
-            Some(EventType::AgentMessage(_)) => types.contains(&"agent_message".to_string()),
-            Some(EventType::Timeout(_)) => types.contains(&"timeout".to_string()),
+            Some(EventType::AgentMessage(_)) => types.iter().any(|t| t == "agent_message"),
+            Some(EventType::Timeout(_)) => types.iter().any(|t| t == "timeout"),
             None => false,
         }
     }
