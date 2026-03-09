@@ -310,6 +310,89 @@ impl GitHubPoller {
             }
         }
 
+        // 4. Detect merged/closed PRs and notify siblings
+        let mut notifications: Vec<(String, String, String, String)> = Vec::new();
+        let mut removed_prs = Vec::new();
+        {
+            let mut state_guard = self.state.lock().await;
+            let tracked: Vec<(PRNumber, String)> = state_guard
+                .iter()
+                .map(|(n, s)| (*n, s.branch_name.clone()))
+                .collect();
+
+            for (pr_num, branch) in &tracked {
+                if !pr_map.contains_key(branch.as_str()) {
+                    let parent_branch = branch
+                        .rsplit_once('.')
+                        .map(|(parent, _)| parent)
+                        .unwrap_or("main");
+
+                    for (sib_num, sib_state) in state_guard.iter() {
+                        if sib_num == pr_num {
+                            continue;
+                        }
+                        let sib_parent = sib_state
+                            .branch_name
+                            .rsplit_once('.')
+                            .map(|(p, _)| p)
+                            .unwrap_or("main");
+                        if sib_parent == parent_branch
+                            && pr_map.contains_key(sib_state.branch_name.as_str())
+                        {
+                            let slug = sib_state
+                                .branch_name
+                                .rsplit_once('.')
+                                .map(|(_, s)| s)
+                                .unwrap_or(&sib_state.branch_name);
+                            let tab_name = sib_state.agent_type.tab_display_name(slug);
+                            let msg = format!(
+                                "[Sibling Merged] PR on branch {} was merged into {}. Rebase your branch to pick up the changes: git fetch origin && git rebase origin/{}",
+                                branch, parent_branch, parent_branch
+                            );
+                            notifications.push((
+                                sib_state.branch_name.clone(),
+                                tab_name,
+                                msg,
+                                format!("Sibling merged: {}", branch),
+                            ));
+                        }
+                    }
+
+                    if let Some(ref log) = self.event_log {
+                        let _ = log.append(
+                            "agent.sibling_merged",
+                            branch,
+                            &serde_json::json!({
+                                "pr_number": pr_num.as_u64(),
+                                "branch": branch,
+                                "parent": parent_branch,
+                            }),
+                        );
+                    }
+
+                    removed_prs.push(*pr_num);
+                }
+            }
+
+            for pr_num in &removed_prs {
+                state_guard.remove(pr_num);
+            }
+        }
+
+        for (agent_key, tab_name, msg, summary) in notifications {
+            crate::services::delivery::deliver_to_agent(
+                self.team_registry.as_deref(),
+                self.acp_registry.as_deref(),
+                &self.project_dir,
+                &agent_key,
+                &tab_name,
+                "github-poller",
+                &msg,
+                &summary,
+            )
+            .await;
+        }
+
         Ok(())
     }
 
