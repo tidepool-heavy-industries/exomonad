@@ -194,68 +194,22 @@ impl EventEffects for EventHandler {
             "notify_parent: routing completion to parent"
         );
 
-        if let Some(ref log) = self.event_log {
-            let _ = log.append(
-                "agent.notify_parent",
-                &agent_id_str,
-                &serde_json::json!({
-                    "parent": &parent_session_id,
-                    "status": &req.status,
-                    "message": &req.message,
-                }),
-            );
-        }
-
-        let event = Event {
-            event_id: 0, // Assigned by EventQueue
-            event_type: Some(event::EventType::WorkerComplete(WorkerComplete {
-                worker_id: agent_id_str.clone(),
-                status: req.status.clone(),
-                message: req.message.clone(),
-                changes: Vec::new(),
-            })),
-        };
-
-        self.queue.notify_event(&parent_session_id, event).await;
-
-        // Deliver notification to parent: prefer Teams inbox, fall back to Zellij injection.
-        let notification = format_parent_notification(&agent_id_str, &req.status, &req.message);
-        let parent_key = if parent_session_id == "root" {
-            "root".to_string()
-        } else {
-            parent_session_id.clone()
-        };
         let tab_name = crate::services::agent_control::resolve_parent_tab_name(ctx);
 
-        let delivery_result = crate::services::delivery::deliver_to_agent(
+        crate::services::delivery::notify_parent_delivery(
             self.team_registry.as_deref(),
             self.acp_registry.as_deref(),
+            self.event_log.as_deref(),
+            &self.queue,
             &self.project_dir,
-            &parent_key,
-            &tab_name,
             &agent_id_str,
-            &notification,
-            &format!("Agent completion: {}", agent_id_str),
+            &parent_session_id,
+            &tab_name,
+            &req.status,
+            &req.message,
+            None,
         )
         .await;
-
-        if let Some(ref log) = self.event_log {
-            let delivery_method = match delivery_result {
-                DeliveryResult::Teams => "teams_inbox",
-                DeliveryResult::Acp => "acp",
-                DeliveryResult::Uds => "unix_socket",
-                DeliveryResult::Zellij => "zellij_stdin",
-                DeliveryResult::Failed => "failed",
-            };
-            let _ = log.append(
-                "agent.message_delivered",
-                &agent_id_str,
-                &serde_json::json!({
-                    "parent": &parent_session_id,
-                    "method": delivery_method,
-                }),
-            );
-        }
 
         Ok(NotifyParentResponse { ack: true })
     }
@@ -311,30 +265,6 @@ impl EventEffects for EventHandler {
     }
 }
 
-fn format_parent_notification(agent_id: &str, status: &str, message: &str) -> String {
-    match status {
-        "success" => format!(
-            "[CHILD COMPLETE: {}] {}",
-            agent_id,
-            if message.is_empty() {
-                "Task completed successfully."
-            } else {
-                message
-            }
-        ),
-        "failure" => format!(
-            "[CHILD FAILED: {}] {}",
-            agent_id,
-            if message.is_empty() {
-                "Task failed."
-            } else {
-                message
-            }
-        ),
-        _ => format!("[CHILD STATUS: {} - {}] {}", agent_id, status, message),
-    }
-}
-
 fn resolve_recipient_tab_name(recipient: &str) -> String {
     if recipient == "root" {
         "TL".to_string()
@@ -347,39 +277,6 @@ fn resolve_recipient_tab_name(recipient: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_format_parent_notification_success() {
-        let msg = format_parent_notification("agent-1", "success", "All done");
-        assert_eq!(msg, "[CHILD COMPLETE: agent-1] All done");
-    }
-
-    #[test]
-    fn test_format_parent_notification_success_empty() {
-        let msg = format_parent_notification("agent-1", "success", "");
-        assert_eq!(
-            msg,
-            "[CHILD COMPLETE: agent-1] Task completed successfully."
-        );
-    }
-
-    #[test]
-    fn test_format_parent_notification_failure() {
-        let msg = format_parent_notification("agent-2", "failure", "Something went wrong");
-        assert_eq!(msg, "[CHILD FAILED: agent-2] Something went wrong");
-    }
-
-    #[test]
-    fn test_format_parent_notification_failure_empty() {
-        let msg = format_parent_notification("agent-2", "failure", "");
-        assert_eq!(msg, "[CHILD FAILED: agent-2] Task failed.");
-    }
-
-    #[test]
-    fn test_format_parent_notification_unknown() {
-        let msg = format_parent_notification("agent-3", "running", "Working...");
-        assert_eq!(msg, "[CHILD STATUS: agent-3 - running] Working...");
-    }
 
     #[test]
     fn test_event_handler_namespace() {

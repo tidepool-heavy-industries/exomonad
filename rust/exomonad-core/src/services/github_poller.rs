@@ -217,25 +217,34 @@ impl GitHubPoller {
                 message,
                 pr_number: pr_num,
             } => {
-                // Use delivery to send to parent (branch without last segment)
-                let parent_branch = branch
+                let agent_slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
+                let parent_session_id = branch
                     .rsplit_once('.')
-                    .map(|(parent, _)| parent)
-                    .unwrap_or("main");
-                let parent_slug = parent_branch
-                    .rsplit_once('.')
-                    .map(|(_, s)| s)
-                    .unwrap_or(parent_branch);
-                let notify_msg = format!("[Event Handler] {}", message);
-                crate::services::delivery::deliver_to_agent(
+                    .map(|(parent, _)| parent.to_string())
+                    .unwrap_or_else(|| "root".to_string());
+                let parent_tab = if parent_session_id == "root" || !parent_session_id.contains('.') {
+                    "TL".to_string()
+                } else {
+                    let parent_slug = parent_session_id
+                        .rsplit_once('.')
+                        .map(|(_, s)| s)
+                        .unwrap_or(&parent_session_id);
+                    AgentType::Claude.tab_display_name(parent_slug)
+                };
+
+                let summary = format!("Auto-notify: PR #{}", pr_num);
+                crate::services::delivery::notify_parent_delivery(
                     self.team_registry.as_deref(),
                     self.acp_registry.as_deref(),
+                    self.event_log.as_deref(),
+                    &self.event_queue,
                     &self.project_dir,
-                    parent_branch,
-                    parent_slug,
-                    branch,
-                    &notify_msg,
-                    &format!("Auto-notify: PR #{}", pr_num),
+                    agent_slug,
+                    &parent_session_id,
+                    &parent_tab,
+                    "success",
+                    &message,
+                    Some(&summary),
                 )
                 .await;
             }
