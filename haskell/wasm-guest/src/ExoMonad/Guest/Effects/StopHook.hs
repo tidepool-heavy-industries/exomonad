@@ -103,11 +103,13 @@ checkPrStatus repoOwner repoName prNum = do
         _ -> []
 
   let hasChangesRequested = any (\r -> GH.reviewState r == Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_CHANGES_REQUESTED)) reviews
-  if not (null comments) || hasChangesRequested
-    then pure $ Just $ "PR #" <> T.pack (show prNum) <> " has unresolved review comments. Address them before stopping, or call notify_parent with status 'failure' if you're stuck."
-    else if null reviews
-      then pure $ Just $ "PR #" <> T.pack (show prNum) <> " hasn't been reviewed yet. If your work is done, call notify_parent to let your parent know."
-      else pure Nothing
+  if hasChangesRequested
+    then pure $ Just $ "PR #" <> T.pack (show prNum) <> " has changes requested. Address review comments before stopping."
+    else if not (null comments)
+      then pure $ Just $ "PR #" <> T.pack (show prNum) <> " has review comments. Address them before stopping."
+      else if null reviews
+        then pure $ Just $ "PR #" <> T.pack (show prNum) <> " is awaiting review. The system will auto-notify your parent when review completes or times out. You can continue working or yield."
+        else pure Nothing
 
 -- | Check for uncommitted/unpushed work and nudge if found.
 checkUncommittedWork :: Text -> Eff HookEffects (Maybe Text)

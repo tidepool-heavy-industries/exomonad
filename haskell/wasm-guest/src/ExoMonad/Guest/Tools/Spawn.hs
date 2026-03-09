@@ -364,7 +364,7 @@ instance MCPTool SpawnAcp where
           }
     result <- AC.spawnAcp cfg
     case result of
-        
+
       Left err -> pure $ errorResult err
       Right spawnResult -> do
         let eventPayload = BSL.toStrict $ Aeson.encode $ object
@@ -408,7 +408,7 @@ renderWorkerPrompt spec =
 
 -- | Pre-rendered leaf profile text.
 leafProfileText :: Text
-leafProfileText = "## Completion Protocol (Leaf Subtree)\nYou are a **leaf agent** in your own git worktree and branch. Your branch name follows the pattern `{parent}.{slug}`.\n\nWhen you are done:\n\n1. **Commit your changes** with a descriptive message.\n   - `git add <specific files>` \x2014 NEVER `git add .` or `git add -A`\n   - `git commit -m \"feat: <description>\"`\n2. **File a PR** using `file_pr` tool. The base branch is auto-detected from your branch name.\n3. **Wait for Copilot review** if it arrives. Address review comments, push fixes.\n4. **Call `notify_parent`** with status `success`, a one-line summary, and the PR number.\n   - If you failed after multiple attempts, call `notify_parent` with status `failure` and explain what went wrong.\n\n**DO NOT:**\n- Merge your own PR (the parent TL merges)\n- Push to main or any branch other than your own\n- Create additional branches"
+leafProfileText = "## Completion Protocol (Leaf Subtree)\nYou are a **leaf agent** in your own git worktree and branch. Your branch name follows the pattern `{parent}.{slug}`.\n\nWhen you are done:\n\n1. **Commit your changes** with a descriptive message.\n   - `git add <specific files>` \x2014 NEVER `git add .` or `git add -A`\n   - `git commit -m \"feat: <description>\"`\n2. **File a PR** using `file_pr` tool. The base branch is auto-detected from your branch name.\n3. **Copilot review is automatic.** After you file a PR, the system monitors for Copilot review and will notify your parent when the review cycle completes. If Copilot posts comments, they'll appear in your pane \x2014 address them and push fixes.\n4. **Call `notify_parent`** only if you need to signal failure or early completion. For normal success, the system handles it.\n\n**DO NOT:**\n- Merge your own PR (the parent TL merges)\n- Push to main or any branch other than your own\n- Create additional branches"
 
 -- | Pre-rendered worker profile text. Same WASM workaround.
 workerProfileText :: Text

@@ -92,7 +92,7 @@ instance ToJSON NotifyParentArgs where
 instance MCPTool NotifyParent where
   type ToolArgs NotifyParent = NotifyParentArgs
   toolName = "notify_parent"
-  toolDescription = "Signal to your parent that you are DONE. Call as your final action — after PR is filed, Copilot feedback addressed, and changes pushed. Status 'success' means work is review-clean. Status 'failure' means retries exhausted, escalating to parent."
+  toolDescription = "Signal to your parent. Call with status 'failure' when retries are exhausted (escalating to parent), or 'success' for early completion before PR review. For normal PR flows, the system auto-notifies your parent when Copilot review completes or times out."
   toolSchema =
     genericToolSchemaWith @NotifyParentArgs
       [ ("status", "'success' = work is done and review-clean. 'failure' = exhausted retries, escalating to parent."),
