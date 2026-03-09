@@ -329,7 +329,7 @@ impl GitHubPoller {
         }
 
         // 4. Detect merged/closed PRs and notify siblings
-        let mut notifications: Vec<(String, String, String, String)> = Vec::new();
+        let mut sibling_events: Vec<(String, AgentType, PRNumber, serde_json::Value)> = Vec::new();
         let mut removed_prs = Vec::new();
         {
             let mut state_guard = self.state.lock().await;
@@ -357,21 +357,15 @@ impl GitHubPoller {
                         if sib_parent == parent_branch
                             && pr_map.contains_key(sib_state.branch_name.as_str())
                         {
-                            let slug = sib_state
-                                .branch_name
-                                .rsplit_once('.')
-                                .map(|(_, s)| s)
-                                .unwrap_or(&sib_state.branch_name);
-                            let tab_name = sib_state.agent_type.tab_display_name(slug);
-                            let msg = format!(
-                                "[Sibling Merged] PR on branch {} was merged into {}. Rebase your branch to pick up the changes: git fetch origin && git rebase origin/{}",
-                                branch, parent_branch, parent_branch
-                            );
-                            notifications.push((
+                            sibling_events.push((
                                 sib_state.branch_name.clone(),
-                                tab_name,
-                                msg,
-                                format!("Sibling merged: {}", branch),
+                                sib_state.agent_type,
+                                *sib_num,
+                                serde_json::json!({
+                                    "merged_branch": branch,
+                                    "parent_branch": parent_branch,
+                                    "sibling_pr_number": sib_num.as_u64(),
+                                }),
                             ));
                         }
                     }
@@ -397,18 +391,14 @@ impl GitHubPoller {
             }
         }
 
-        for (agent_key, tab_name, msg, summary) in notifications {
-            crate::services::delivery::deliver_to_agent(
-                self.team_registry.as_deref(),
-                self.acp_registry.as_deref(),
-                &self.project_dir,
-                &agent_key,
-                &tab_name,
-                "github-poller",
-                &msg,
-                &summary,
-            )
-            .await;
+        for (sib_branch, sib_agent_type, sib_pr_num, payload) in sibling_events {
+            if let Ok(Some(action)) = self
+                .call_handle_event(&sib_branch, sib_agent_type, "sibling_merged", payload)
+                .await
+            {
+                self.handle_event_action(action, &sib_branch, sib_agent_type, sib_pr_num)
+                    .await;
+            }
         }
 
         Ok(())
