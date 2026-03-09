@@ -50,6 +50,13 @@ struct WorktreeBranch {
     agent_type: AgentType,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReviewState {
+    None,
+    ChangesRequested,
+    Approved,
+}
+
 #[derive(Debug, Clone)]
 struct PRState {
     last_copilot_comment_count: usize,
@@ -58,7 +65,9 @@ struct PRState {
     agent_type: AgentType,
     first_seen: Instant,
     notified_parent_timeout: bool,
-    last_review_state: String, // "none", "changes_requested", "approved"
+    last_review_state: ReviewState,
+    last_sha: String,
+    notified_parent_approved: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -480,6 +489,17 @@ impl GitHubPoller {
         let mut state_guard = self.state.lock().await;
 
         if let Some(old_state) = state_guard.get_mut(&pr_number) {
+            // Reset review tracking if new commits pushed
+            if pr_sha != old_state.last_sha {
+                old_state.last_sha = pr_sha.to_string();
+                if old_state.last_review_state == ReviewState::ChangesRequested {
+                    // Agent pushed fixes — reset to await new review
+                    old_state.last_review_state = ReviewState::None;
+                    old_state.notified_parent_timeout = false;
+                    old_state.first_seen = Instant::now();
+                }
+            }
+
             // Check Copilot changes
             if copilot_count != old_state.last_copilot_comment_count {
                 if copilot_count > old_state.last_copilot_comment_count {
@@ -520,8 +540,9 @@ impl GitHubPoller {
             let approved = copilot_reviews
                 .iter()
                 .any(|r| r.state == "APPROVED" || r.body.to_lowercase().contains("approved"));
-            if approved && old_state.last_review_state != "approved" {
-                old_state.last_review_state = "approved".to_string();
+            if approved && old_state.last_review_state != ReviewState::Approved {
+                old_state.last_review_state = ReviewState::Approved;
+                old_state.notified_parent_approved = true;
                 if let Ok(Some(action)) = self
                     .call_handle_event(
                         branch,
@@ -539,10 +560,36 @@ impl GitHubPoller {
                 }
             }
 
+            // Check for changes_requested
+            let changes_requested = copilot_reviews
+                .iter()
+                .any(|r| r.state == "CHANGES_REQUESTED");
+            if changes_requested && old_state.last_review_state != ReviewState::ChangesRequested {
+                old_state.last_review_state = ReviewState::ChangesRequested;
+                if let Ok(Some(action)) = self
+                    .call_handle_event(
+                        branch,
+                        agent_type,
+                        "pr_review",
+                        serde_json::json!({
+                            "kind": "review_received",
+                            "pr_number": pr_number.as_u64(),
+                            "comments": self.format_copilot_message(&copilot_comments, &copilot_reviews),
+                        }),
+                    )
+                    .await
+                {
+                    self.handle_event_action(action, branch, agent_type, pr_number)
+                        .await;
+                }
+            }
+
             // Check CI changes
             if ci_status != old_state.last_ci_status {
                 // Status changed!
                 let message = format!("[CI STATUS: {}] {}", branch, ci_status);
+                // TODO: Route CI status changes through WASM event handlers (onCIStatus)
+                // once CI pipeline is stable. Currently only logs + emits to event queue.
                 self.emit_event(branch, &ci_status, &message, agent_type, Some(pr_number))
                     .await;
                 old_state.last_ci_status = ci_status;
@@ -551,7 +598,8 @@ impl GitHubPoller {
             // Check 15-minute timeout (no Copilot review)
             let timeout_minutes = 15;
             if !old_state.notified_parent_timeout
-                && old_state.last_review_state == "none"
+                && old_state.last_review_state == ReviewState::None
+                && !old_state.notified_parent_approved
                 && old_state.first_seen.elapsed() > Duration::from_secs(timeout_minutes * 60)
             {
                 old_state.notified_parent_timeout = true;
@@ -583,7 +631,9 @@ impl GitHubPoller {
                     agent_type,
                     first_seen: Instant::now(),
                     notified_parent_timeout: false,
-                    last_review_state: "none".to_string(),
+                    last_review_state: ReviewState::None,
+                    last_sha: pr_sha.to_string(),
+                    notified_parent_approved: false,
                 },
             );
         }
@@ -773,8 +823,8 @@ impl GitHubPoller {
         branch: &str,
         status: &str,
         message: &str,
-        agent_type: AgentType,
-        pr_number: Option<PRNumber>,
+        _agent_type: AgentType,
+        _pr_number: Option<PRNumber>,
     ) {
         info!(
             "Emitting event for branch {}: {} - {}",
@@ -800,7 +850,7 @@ impl GitHubPoller {
             }
         }
 
-        // 1. Queue event to owning agent (branch name IS the agent's session_id)
+        // Queue event to owning agent (branch name IS the agent's session_id)
         let event = Event {
             event_id: 0,
             event_type: Some(EventType::WorkerComplete(WorkerComplete {
@@ -811,41 +861,6 @@ impl GitHubPoller {
             })),
         };
         self.event_queue.notify_event(branch, event).await;
-
-        // 2. Inject actionable events to agent's Zellij pane
-        let agent_message = match status {
-            "copilot_review" => {
-                let pr_arg = pr_number.map(|n| n.to_string()).unwrap_or_default();
-                Some(format!(
-                    "[Copilot Review on {branch}] New review comments. \
-                     View with: gh pr view {pr_arg} --json reviews,comments"
-                ))
-            }
-            "failure" => Some(format!(
-                "[CI Failed]\n\
-                 CI checks failed on your branch ({branch}). \
-                 Investigate the failures and push a fix."
-            )),
-            // success, pending, etc. — non-actionable, don't interrupt the agent
-            _ => None,
-        };
-
-        if let Some(agent_message) = agent_message {
-            let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
-            let tab_name = agent_type.tab_display_name(slug);
-
-            crate::services::delivery::deliver_to_agent(
-                self.team_registry.as_deref(),
-                self.acp_registry.as_deref(),
-                &self.project_dir,
-                branch,
-                &tab_name,
-                "github-poller",
-                &agent_message,
-                &format!("GitHub event: {} on {}", status, branch),
-            )
-            .await;
-        }
     }
 }
 
