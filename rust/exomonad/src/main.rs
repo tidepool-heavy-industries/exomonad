@@ -1315,6 +1315,7 @@ async fn main() -> Result<()> {
             }
             poller = poller.with_team_registry(team_registry);
             poller = poller.with_acp_registry(acp_registry.clone());
+            poller = poller.with_plugins(plugins.clone());
             tokio::spawn(async move {
                 poller.run().await;
             });

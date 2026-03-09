@@ -5,16 +5,19 @@ use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
 use crate::services::repo;
 use crate::services::team_registry::TeamRegistry;
+use crate::plugin_manager::PluginManager;
 use anyhow::{Context, Result};
 use exomonad_proto::effects::events::{event::EventType, Event, WorkerComplete};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::process::Command;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, warn};
+
+type PluginMap = Arc<RwLock<HashMap<crate::AgentName, Arc<PluginManager>>>>;
 
 pub struct GitHubPoller {
     event_queue: Arc<EventQueue>,
@@ -25,6 +28,7 @@ pub struct GitHubPoller {
     repo_info: Arc<Mutex<Option<(String, String)>>>, // (owner, name)
     team_registry: Option<Arc<TeamRegistry>>,
     acp_registry: Option<Arc<AcpRegistry>>,
+    plugins: Option<PluginMap>,
 }
 
 /// A Copilot review comment with optional file context.
@@ -34,18 +38,38 @@ struct CopilotComment {
     diff_hunk: Option<String>,
 }
 
+/// A Copilot review with state.
+struct CopilotReview {
+    body: String,
+    state: String, // "APPROVED", "CHANGES_REQUESTED", "COMMENTED"
+}
+
 /// Branch info discovered from a worktree directory.
 struct WorktreeBranch {
     branch: String,
     agent_type: AgentType,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 struct PRState {
     last_copilot_comment_count: usize,
     last_ci_status: String,
     branch_name: String,
     agent_type: AgentType,
+    first_seen: Instant,
+    notified_parent_timeout: bool,
+    last_review_state: String, // "none", "changes_requested", "approved"
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "action")]
+enum EventActionResponse {
+    #[serde(rename = "inject_message")]
+    InjectMessage { message: String },
+    #[serde(rename = "notify_parent")]
+    NotifyParent { message: String, pr_number: i64 },
+    #[serde(rename = "no_action")]
+    NoAction,
 }
 
 impl GitHubPoller {
@@ -59,6 +83,7 @@ impl GitHubPoller {
             repo_info: Arc::new(Mutex::new(None)),
             team_registry: None,
             acp_registry: None,
+            plugins: None,
         }
     }
 
@@ -69,6 +94,11 @@ impl GitHubPoller {
 
     pub fn with_acp_registry(mut self, registry: Arc<AcpRegistry>) -> Self {
         self.acp_registry = Some(registry);
+        self
+    }
+
+    pub fn with_plugins(mut self, plugins: PluginMap) -> Self {
+        self.plugins = Some(plugins);
         self
     }
 
@@ -92,6 +122,124 @@ impl GitHubPoller {
             if let Err(e) = self.poll_cycle().await {
                 error!("GitHub poller cycle failed: {}", e);
             }
+        }
+    }
+
+    /// Call handle_event on the agent's WASM plugin.
+    /// The event JSON matches ExoMonad.Guest.Events.EventInput format:
+    /// { "role": "dev", "event_type": "pr_review", "payload": { "kind": "approved", "pr_number": 123 } }
+    async fn call_handle_event(
+        &self,
+        branch: &str,
+        agent_type: AgentType,
+        event_type: &str,
+        payload: serde_json::Value,
+    ) -> Result<Option<EventActionResponse>> {
+        let plugins = match &self.plugins {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+
+        // Resolve the agent name from branch (slug after last dot)
+        let agent_name = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
+        let role = match agent_type {
+            AgentType::Claude => "tl",
+            AgentType::Gemini => "dev",
+            AgentType::Shoal => "dev",
+        };
+
+        let event_input = serde_json::json!({
+            "role": role,
+            "event_type": event_type,
+            "payload": payload,
+        });
+
+        let plugins_guard = plugins.read().await;
+        let plugin = match plugins_guard.get(&crate::AgentName::from(agent_name)) {
+            Some(p) => p.clone(),
+            None => {
+                info!(
+                    "No plugin found for agent '{}', skipping event dispatch",
+                    agent_name
+                );
+                return Ok(None);
+            }
+        };
+        drop(plugins_guard);
+
+        info!(
+            "[EventDispatch] Calling handle_event for agent '{}': event_type={}, pr_payload={}",
+            agent_name, event_type, payload
+        );
+
+        match plugin
+            .call::<serde_json::Value, EventActionResponse>("handle_event", &event_input)
+            .await
+        {
+            Ok(action) => {
+                info!("[EventDispatch] handle_event returned: {:?}", action);
+                Ok(Some(action))
+            }
+            Err(e) => {
+                warn!(
+                    "[EventDispatch] handle_event failed for {}: {}",
+                    agent_name, e
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    async fn handle_event_action(
+        &self,
+        action: EventActionResponse,
+        branch: &str,
+        agent_type: AgentType,
+        pr_number: PRNumber,
+    ) {
+        match action {
+            EventActionResponse::InjectMessage { message } => {
+                let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
+                let tab_name = agent_type.tab_display_name(slug);
+                crate::services::delivery::deliver_to_agent(
+                    self.team_registry.as_deref(),
+                    self.acp_registry.as_deref(),
+                    &self.project_dir,
+                    branch,
+                    &tab_name,
+                    "event-handler",
+                    &message,
+                    &format!("Event handler action for PR #{}", pr_number),
+                )
+                .await;
+            }
+            EventActionResponse::NotifyParent {
+                message,
+                pr_number: pr_num,
+            } => {
+                // Use delivery to send to parent (branch without last segment)
+                let parent_branch = branch
+                    .rsplit_once('.')
+                    .map(|(parent, _)| parent)
+                    .unwrap_or("main");
+                let parent_slug = parent_branch
+                    .rsplit_once('.')
+                    .map(|(_, s)| s)
+                    .unwrap_or(parent_branch);
+                let notify_msg = format!("[Event Handler] {}", message);
+                crate::services::delivery::deliver_to_agent(
+                    self.team_registry.as_deref(),
+                    self.acp_registry.as_deref(),
+                    &self.project_dir,
+                    parent_branch,
+                    parent_slug,
+                    branch,
+                    &notify_msg,
+                    &format!("Auto-notify: PR #{}", pr_num),
+                )
+                .await;
+            }
+            EventActionResponse::NoAction => {}
         }
     }
 
@@ -253,9 +401,50 @@ impl GitHubPoller {
                         Some(pr_number),
                     )
                     .await;
+
+                    // Fire WASM event handler
+                    if let Ok(Some(action)) = self
+                        .call_handle_event(
+                            branch,
+                            agent_type,
+                            "pr_review",
+                            serde_json::json!({
+                                "kind": "review_received",
+                                "pr_number": pr_number.as_u64(),
+                                "comments": message,
+                            }),
+                        )
+                        .await
+                    {
+                        self.handle_event_action(action, branch, agent_type, pr_number)
+                            .await;
+                    }
                 }
                 // Update state even if count decreased (to sync with reality)
                 old_state.last_copilot_comment_count = copilot_count;
+            }
+
+            // Check for Copilot approval
+            let approved = copilot_reviews
+                .iter()
+                .any(|r| r.state == "APPROVED" || r.body.to_lowercase().contains("approved"));
+            if approved && old_state.last_review_state != "approved" {
+                old_state.last_review_state = "approved".to_string();
+                if let Ok(Some(action)) = self
+                    .call_handle_event(
+                        branch,
+                        agent_type,
+                        "pr_review",
+                        serde_json::json!({
+                            "kind": "approved",
+                            "pr_number": pr_number.as_u64(),
+                        }),
+                    )
+                    .await
+                {
+                    self.handle_event_action(action, branch, agent_type, pr_number)
+                        .await;
+                }
             }
 
             // Check CI changes
@@ -266,6 +455,31 @@ impl GitHubPoller {
                     .await;
                 old_state.last_ci_status = ci_status;
             }
+
+            // Check 15-minute timeout (no Copilot review)
+            let timeout_minutes = 15;
+            if !old_state.notified_parent_timeout
+                && old_state.last_review_state == "none"
+                && old_state.first_seen.elapsed() > Duration::from_secs(timeout_minutes * 60)
+            {
+                old_state.notified_parent_timeout = true;
+                if let Ok(Some(action)) = self
+                    .call_handle_event(
+                        branch,
+                        agent_type,
+                        "pr_review",
+                        serde_json::json!({
+                            "kind": "timeout",
+                            "pr_number": pr_number.as_u64(),
+                            "minutes_elapsed": timeout_minutes,
+                        }),
+                    )
+                    .await
+                {
+                    self.handle_event_action(action, branch, agent_type, pr_number)
+                        .await;
+                }
+            }
         } else {
             // New PR tracked - do not emit, just store
             state_guard.insert(
@@ -275,6 +489,9 @@ impl GitHubPoller {
                     last_ci_status: ci_status,
                     branch_name: branch.to_string(),
                     agent_type,
+                    first_seen: Instant::now(),
+                    notified_parent_timeout: false,
+                    last_review_state: "none".to_string(),
                 },
             );
         }
@@ -291,7 +508,7 @@ impl GitHubPoller {
         owner: &str,
         repo: &str,
         pr_number: PRNumber,
-    ) -> Result<(Vec<CopilotComment>, Vec<String>)> {
+    ) -> Result<(Vec<CopilotComment>, Vec<CopilotReview>)> {
         // Inline comments (with file context)
         let endpoint = format!("/repos/{}/{}/pulls/{}/comments", owner, repo, pr_number);
         let output = Command::new("gh").args(["api", &endpoint]).output().await?;
@@ -323,18 +540,19 @@ impl GitHubPoller {
             }
         }
 
-        // Reviews (with body text)
+        // Reviews (with body text and state)
         let endpoint_reviews = format!("/repos/{}/{}/pulls/{}/reviews", owner, repo, pr_number);
         let output_reviews = Command::new("gh")
             .args(["api", &endpoint_reviews])
             .output()
             .await?;
-        let mut review_bodies = Vec::new();
+        let mut copilot_reviews = Vec::new();
 
         if output_reviews.status.success() {
             #[derive(Deserialize)]
             struct Review {
                 body: Option<String>,
+                state: String,
                 user: User,
             }
             #[derive(Deserialize)]
@@ -344,17 +562,16 @@ impl GitHubPoller {
             if let Ok(reviews) = serde_json::from_slice::<Vec<Review>>(&output_reviews.stdout) {
                 for r in reviews {
                     if r.user.login.to_lowercase().contains("copilot") {
-                        if let Some(body) = r.body {
-                            if !body.is_empty() {
-                                review_bodies.push(body);
-                            }
-                        }
+                        copilot_reviews.push(CopilotReview {
+                            body: r.body.unwrap_or_default(),
+                            state: r.state,
+                        });
                     }
                 }
             }
         }
 
-        Ok((inline_comments, review_bodies))
+        Ok((inline_comments, copilot_reviews))
     }
 
     async fn fetch_ci_status(&self, owner: &str, repo: &str, sha: &str) -> Result<String> {
@@ -418,15 +635,23 @@ impl GitHubPoller {
     fn format_copilot_message(
         &self,
         inline_comments: &[CopilotComment],
-        review_bodies: &[String],
+        copilot_reviews: &[CopilotReview],
     ) -> String {
         let mut msg = String::new();
 
-        if !review_bodies.is_empty() {
-            msg.push_str("Review summary:\n");
-            for body in review_bodies {
-                msg.push_str(body);
-                msg.push('\n');
+        if !copilot_reviews.is_empty() {
+            let review_bodies: Vec<String> = copilot_reviews
+                .iter()
+                .filter(|r| !r.body.is_empty())
+                .map(|r| r.body.clone())
+                .collect();
+
+            if !review_bodies.is_empty() {
+                msg.push_str("Review summary:\n");
+                for body in review_bodies {
+                    msg.push_str(&body);
+                    msg.push('\n');
+                }
             }
         }
 
@@ -546,7 +771,16 @@ mod tests {
     #[test]
     fn test_format_copilot_message_with_reviews() {
         let poller = GitHubPoller::new(Arc::new(EventQueue::new()), PathBuf::from("."));
-        let reviews = vec!["LGTM!".to_string(), "Great job.".to_string()];
+        let reviews = vec![
+            CopilotReview {
+                body: "LGTM!".to_string(),
+                state: "APPROVED".to_string(),
+            },
+            CopilotReview {
+                body: "Great job.".to_string(),
+                state: "COMMENTED".to_string(),
+            },
+        ];
         let msg = poller.format_copilot_message(&[], &reviews);
         assert!(msg.contains("Review summary:"));
         assert!(msg.contains("LGTM!"));
