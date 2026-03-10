@@ -130,7 +130,7 @@ All effects flow through a single `yield_effect` host function using protobuf bi
 | `popup.*` | PopupHandler | Zellij plugin IPC |
 | `file_pr.*` | FilePRHandler | gh CLI |
 | `copilot.*` | CopilotHandler | GitHub API polling |
-| `events.*` | EventHandler | Event queue (blocking wait) |
+| `events.*` | EventHandler | Event queue, notify_parent, send_message |
 | `merge_pr.*` | MergePRHandler | gh pr merge + git fetch |
 | `kv.*` | KvHandler | Key-value store (.exo/kv/) |
 | `session.*` | SessionHandler | Claude session registry |
