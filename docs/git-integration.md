@@ -1,8 +1,7 @@
 # Git Integration Research
 
 > **STATUS: RESEARCH / REFERENCE**
-> This document represents early research. Production implementations may differ.
-> See `haskell/effects/worktree-interpreter/CLAUDE.md` for current git handling.
+> This document represents early research on git CLI output formats. The production implementation uses protobuf-encoded Git effects (`proto/effects/git.proto`) with a Rust handler (`rust/exomonad-core/src/handlers/git.rs`).
 
 > Research findings for the Git effect in exomonad.
 

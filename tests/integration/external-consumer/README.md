@@ -24,7 +24,7 @@ This directory simulates an external repo consuming exomonad as infrastructure.
 
 ```bash
 # 1. Install exomonad binary (incremental, fast)
-cargo install --git https://github.com/anthropics/exomonad exomonad
+cargo install --git https://github.com/tidepool-heavy-industries/exomonad exomonad
 # Or for local dev:
 cd /path/to/tidepool/repo/rust && cargo install --path exomonad
 
@@ -81,7 +81,7 @@ External repos need two things:
 
 **1. Binary (via cargo):**
 ```bash
-cargo install --git https://github.com/anthropics/exomonad exomonad
+cargo install --git https://github.com/tidepool-heavy-industries/exomonad exomonad
 ```
 
 **2. WASM build (via nix flake):**

@@ -59,7 +59,7 @@ The server maintains a per-agent backend cache keyed by birth-branch. When an MC
 Each agent connects to the MCP server via stdio using a command that encodes its identity:
 
 ```bash
-exomonad mcp-stdio --role {role} --name {name}
+exomonad mcp-stdio --role {role} --agent-id {name}
 ```
 
 For example:

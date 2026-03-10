@@ -2,145 +2,97 @@
 
 ## Project Overview
 
-ExoMonad is a type-safe LLM agent framework library written in Haskell. It provides:
-- **Typed state** that LLMs read via templates
-- **Typed mutations** that LLMs express via structured output
-- **Typed tools** for mid-turn capabilities
-- **IO-blind architecture** enabling deterministic testing and WASM compilation
-
-Agents are built in separate repos () using this library.
+ExoMonad is a heterogeneous LLM agent orchestration system. Haskell WASM defines all logic (tool schemas, handlers, hooks, event routing). Rust executes I/O effects. Agents are IO-blind state machines that yield typed effects.
 
 ## Architecture
 
-### Core Design Principles
+**Split architecture: Haskell WASM (logic) + Rust (I/O)**
 
-1. **freer-simple for effects** - Reified continuations for yield/resume across FFI
-   - Effects: `LLM`, `RequestInput`, `State`, `Emit`, `Random`, `Log`, `ChatHistory`, `Time`
-   - Agents are **IO-blind**: they cannot use `IOE` directly
-   - All IO happens in runners via effect interpreters
+1. **Haskell WASM guest** — All MCP tool definitions, hooks, and event handlers. Uses freer-simple for reified continuations (yield/resume across WASM FFI). Compiled to WASM32-WASI via GHC 9.12, loaded by Rust at runtime via Extism.
 
-2. **Typed Jinja templates** (via ginger library fork)
-   - Compile-time validation against Haskell types
-   - Template Haskell: `$(typedTemplateFile ''MyContext "templates/turn.jinja")`
-   - LLMs know Jinja from training data
+2. **Rust host** — Executes effects yielded by the WASM guest. Effect handlers for Git, GitHub API, filesystem, Zellij IPC, agent spawning, PR workflows. All I/O happens here.
 
-3. **Type-safe tool lists**
-   - `ToolList` GADT ensures compile-time tool type safety
-   - Tools have access to: `State`, `Emit`, `RequestInput`, `Random`
-
-4. **Delta fields for mutations**
-   - LLM outputs deltas, not absolute values
-   - Every mutation has a `because` field for explainability/training data
-
-5. **Typed graph execution** (via `OneOf` sum type)
-   - `GotoChoice` wraps `OneOf` for fully typed dispatch
-   - `DispatchGoto` typeclass for pattern matching to call handlers
-   - No `Dynamic` or `unsafeCoerce` - exact types at every step
+3. **Protobuf FFI boundary** — All WASM↔Rust communication uses protobuf binary encoding via a single `yield_effect` host function. Proto files in `proto/` are the source of truth for request/response types.
 
 ## Project Structure
 
 ```
-haskell/wasm-guest/         # WASM guest with MCP tool definitions (freer-simple)
-rust/exomonad/              # Rust binary (WASM host, MCP server)
-rust/exomonad-core/         # Framework, handlers, services, protocol
+haskell/wasm-guest/         # WASM guest SDK (freer-simple effects, tool/hook framework)
+haskell/proto/              # Generated Haskell proto types
+.exo/roles/devswarm/        # Role definitions (TL, Dev, Worker)
+.exo/lib/                   # Shared Haskell code across roles
+rust/exomonad/              # Rust binary (MCP server, hook handler, CLI)
+rust/exomonad-core/         # Framework, effect handlers, services, protocol types
+rust/exomonad-proto/        # Proto-generated Rust types (prost)
+proto/                      # Proto definitions (FFI boundary)
+```
+
+## Key Patterns
+
+### Tool Definitions (Haskell)
+
+Tools use a `mode :- Tool` record pattern for type-safe schema generation and handler dispatch:
+
+```haskell
+data Tools mode = Tools
+  { spawn :: SpawnTools mode
+  , pr :: FilePRTools mode
+  , notifyParent :: mode :- NotifyParent
+  } deriving Generic
+
+config :: RoleConfig (Tools AsHandler)
+config = RoleConfig { roleName = "tl", tools = Tools { ... }, hooks = ... }
+```
+
+### Effect System (Haskell)
+
+Effects are phantom types with `Effect` instances mapping to protobuf types:
+
+```haskell
+data GitGetBranch
+instance Effect GitGetBranch where
+  type Input GitGetBranch = GetBranchRequest
+  type Output GitGetBranch = GetBranchResponse
+  effectId = "git.get_branch"
+```
+
+### Effect Handlers (Rust)
+
+Handlers implement auto-generated traits from proto service definitions:
+
+```rust
+#[async_trait]
+impl GitEffects for GitHandler {
+    async fn get_branch(&self, req: GetBranchRequest) -> EffectResult<GetBranchResponse> { ... }
+}
 ```
 
 ## Building and Testing
 
 ```bash
-# Build all packages
-cabal build all
-
-# Run native server
-just native  # Starts at localhost:8080
-
-# Run tests
-cabal test all
-```
-
-## Code Conventions
-
-### Effect System Patterns
-
-1. **Effect Definitions**
-   ```haskell
-   data MyEffect :: Effect where
-     DoThing :: Arg -> MyEffect m Result
-   ```
-
-2. **Effect Constraints**
-   ```haskell
-   myFunction
-     :: ( State MyState :> es
-        , Emit MyEvent :> es
-        )
-     => Eff es ()
-   ```
-
-3. **IO-Blind Architecture**
-   - Agent code uses `BaseEffects` (no `IOE`)
-   - Runners use `RunnerEffects` (includes `IOE`)
-   - This enables WASM compilation and deterministic testing
-
-### Template System
-
-1. **Typed Templates** use Template Haskell for compile-time validation:
-   ```haskell
-   myTemplate :: Template MyContext
-   myTemplate = $(typedTemplateFile ''MyContext "templates/turn.jinja")
-   ```
-
-2. **Template Context** types define what LLM sees
-
-### Tool System
-
-1. **Tool Definition**
-   ```haskell
-   data MyTool = MyTool { input :: Text }
-
-   instance Tool MyTool where
-     toolName _ = "my_tool"
-     toolDescription _ = "Description"
-     executeTool input = do
-       emit (MyEvent input)
-       return result
-   ```
-
-2. **Tool Lists** are type-safe GADTs
-
-### Delta Fields
-
-Always include a `because` field for mutations:
-
-```haskell
-data StateDelta = StateDelta
-  { valueDelta :: Int       -- +2, not "set to 5"
-  , deltaBecause :: Text    -- "reason for change"
-  }
+just install-all-dev          # Build WASM + Rust, install binary
+cargo test --workspace        # Rust tests
+cabal test all                # Haskell tests
+just wasm-all                 # Rebuild WASM only
 ```
 
 ## Dependencies
 
 ### Haskell
+- **freer-simple** — Effect system with reified continuations
+- **proto3-suite** / **proto3-runtime** — Protobuf serialization
+- **aeson** — JSON serialization
+- **extism-pdk** — WASM host function interface
 
-- **freer-simple** - Effect system with reified continuations
-- **ginger** - Jinja templating (custom fork with typed templates)
-- **aeson** - JSON serialization
-- **servant** - REST API + WebSocket
+### Rust
+- **extism** — WASM runtime
+- **prost** — Protobuf codegen
+- **tokio** — Async runtime
+- **axum** — HTTP server (UDS)
+- **zellij-utils** — Direct Zellij IPC
 
-## Common Patterns
+## References
 
-### Error Handling
-
-- Use `Either` for recoverable errors
-- Effect handlers catch and log errors
-
-### Testing
-
-- Graph validation tests check type-level graph structure
-
-## Additional Resources
-
-- [freer-simple documentation](https://hackage.haskell.org/package/freer-simple)
-- [Anthropic tool use docs](https://docs.anthropic.com/en/docs/tool-use)
-- [GHC WASM docs](https://ghc.gitlab.haskell.org/ghc/doc/users_guide/wasm.html)
+- [freer-simple](https://hackage.haskell.org/package/freer-simple)
+- [GHC WASM](https://ghc.gitlab.haskell.org/ghc/doc/users_guide/wasm.html)
+- [Extism](https://extism.org/)

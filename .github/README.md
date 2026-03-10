@@ -80,7 +80,7 @@ Actions → Build CI Container → Run workflow
 - Trigger rebuild manually or push cabal file change
 
 **Container build fails**:
-- Check if base `haskell:9.6` image is accessible
+- Check if base `haskell:9.12.2` image is accessible
 - Verify cabal files are valid
 - Check build logs in Actions
 
