@@ -443,12 +443,14 @@ The TL's workflow is: **decompose → spec → spawn → move on**. The TL does 
 2. Leaf works → commits → files PR
 3. GitHub poller detects Copilot review comments → fires `handle_event(PRReview::ReviewReceived)` → handler injects comments into leaf's pane
 4. Leaf reads Copilot feedback, fixes, pushes
-5. Copilot re-reviews; loop repeats until clean
-6. Copilot approves → poller fires `handle_event(PRReview::Approved)` → handler sends `[PR READY]` to TL
-7. TL sees `[from: leaf-id] [PR READY] PR #N...` → merges the PR
+5. Poller detects SHA change after `ChangesRequested` → fires `handle_event(PRReview::FixesPushed)` → handler sends `[FIXES PUSHED]` to TL
+6. TL sees `[from: leaf-id] [FIXES PUSHED] PR #N — CI passing. Ready to merge.` → merges the PR
+
+**Note:** Copilot's first review is automatic (triggered on PR creation). Subsequent reviews after pushing fixes are NOT — Copilot does not re-review. The `FixesPushed` event is the system's signal that the iteration loop completed.
 
 **Alternative paths:**
-- **No Copilot review after 15 minutes** → poller fires `handle_event(PRReview::ReviewTimeout)` → handler sends `[REVIEW TIMEOUT]` to TL → TL merges if CI passes
+- **Copilot approves first time** → poller fires `handle_event(PRReview::Approved)` → handler sends `[PR READY]` to TL → TL merges
+- **No Copilot review after timeout** → poller fires `handle_event(PRReview::ReviewTimeout)` → handler sends `[REVIEW TIMEOUT]` to TL → TL merges if CI passes (15 min initial, 5 min after addressing changes)
 - **Leaf sends status updates** → `notify_parent` delivers `[from: leaf-id] message` to TL → informational, TL reads but does not auto-merge
 - **Leaf fails** → `notify_parent` with `failure` status → delivers `[FAILED: leaf-id] message` to TL → TL re-decomposes
 
@@ -493,8 +495,9 @@ Spawn multiple leaves when tasks are independent (no file conflicts, no ordering
 ### When TL Gets Notified
 
 The TL is idle between spawning and receiving notifications. It wakes up for:
-- **`[PR READY]`** (event handler, via Teams inbox or Zellij STDIN) — Copilot approved a leaf's PR. TL merges and verifies the result builds cleanly. Multiple leaves landing in parallel may interact.
-- **`[REVIEW TIMEOUT]`** (event handler) — no Copilot review after 15 minutes. TL merges if CI passes.
+- **`[FIXES PUSHED]`** (event handler) — leaf addressed Copilot review comments and pushed fixes. Copilot does NOT re-review, so this is the actionable signal. TL merges if CI passes.
+- **`[PR READY]`** (event handler) — Copilot approved a leaf's PR on first review. TL merges and verifies the result builds cleanly. Multiple leaves landing in parallel may interact.
+- **`[REVIEW TIMEOUT]`** (event handler) — no Copilot review after timeout (15 min initial, 5 min after addressing changes). TL merges if CI passes.
 - **`[from: agent-id]`** (agent message) — informational update from a leaf. Do not auto-merge; read the message.
 - **`[FAILED: agent-id]`** — leaf exhausted retries. TL re-decomposes or escalates.
 - GitHub poller notifications (CI status, PR merge conflicts).

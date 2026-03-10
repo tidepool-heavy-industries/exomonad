@@ -171,6 +171,7 @@ All tools are defined in Haskell WASM and executed via host functions.
 | `merge_pr` | tl | Merge child PR (gh pr merge + git fetch) |
 | `popup` | tl | Show interactive forms in a tiled split pane via ZellijIpc pipe |
 | `notify_parent` | all | Send message to parent agent (auto-routed via Teams inbox, ACP, or Zellij) |
+| `send_message` | all | Send message to another exomonad-spawned agent (routes via Teams inbox, ACP, UDS, or Zellij) |
 
 ## Effect System
 
@@ -210,7 +211,7 @@ Proto field helpers in `handlers/mod.rs`: `non_empty(String) → Option<String>`
 | `copilot.*` | CopilotHandler | wait_for_copilot_review |
 | `kv.*` | KvHandler | get, set |
 | `session.*` | SessionHandler | register_claude_id, register_team |
-| `events.*` | EventHandler | wait_for_event (internal), notify_event, notify_parent |
+| `events.*` | EventHandler | wait_for_event (internal), notify_event, notify_parent, send_message |
 | `merge_pr.*` | MergePRHandler | merge_pr (gh pr merge + git fetch) |
 | `coordination.*` | CoordinationHandler | acquire_mutex, release_mutex (in-memory mutex for parallel agents) |
 

@@ -68,6 +68,7 @@ struct PRState {
     last_review_state: ReviewState,
     last_sha: String,
     notified_parent_approved: bool,
+    addressed_changes: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -484,10 +485,29 @@ impl GitHubPoller {
             if pr_sha != old_state.last_sha {
                 old_state.last_sha = pr_sha.to_string();
                 if old_state.last_review_state == ReviewState::ChangesRequested {
-                    // Agent pushed fixes — reset to await new review
                     old_state.last_review_state = ReviewState::None;
                     old_state.notified_parent_timeout = false;
                     old_state.first_seen = Instant::now();
+                    old_state.addressed_changes = true;
+
+                    // Fire FixesPushed event — Copilot does NOT re-review,
+                    // so this is the actionable signal for the TL.
+                    if let Ok(Some(action)) = self
+                        .call_handle_event(
+                            branch,
+                            agent_type,
+                            "pr_review",
+                            serde_json::json!({
+                                "kind": "fixes_pushed",
+                                "pr_number": pr_number.as_u64(),
+                                "ci_status": ci_status,
+                            }),
+                        )
+                        .await
+                    {
+                        self.handle_event_action(action, branch, agent_type, pr_number)
+                            .await;
+                    }
                 }
             }
 
@@ -599,8 +619,8 @@ impl GitHubPoller {
                 old_state.last_ci_status = ci_status;
             }
 
-            // Check 15-minute timeout (no Copilot review)
-            let timeout_minutes = 15;
+            // Shorter timeout after addressing changes (Copilot won't re-review)
+            let timeout_minutes: u64 = if old_state.addressed_changes { 5 } else { 15 };
             if !old_state.notified_parent_timeout
                 && old_state.last_review_state == ReviewState::None
                 && !old_state.notified_parent_approved
@@ -638,6 +658,7 @@ impl GitHubPoller {
                     last_review_state: ReviewState::None,
                     last_sha: pr_sha.to_string(),
                     notified_parent_approved: false,
+                    addressed_changes: false,
                 },
             );
         }

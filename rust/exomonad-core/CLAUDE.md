@@ -80,11 +80,17 @@ ReviewState::None ──(Copilot approves)──→ ReviewState::Approved
        │                                         │
        │                              (agent pushes, SHA changes)
        │                                         │
+       │                              fires [FIXES PUSHED] to parent
+       │                              sets addressed_changes = true
        │                                    reset → None
        │
-       └──(15 min, no review)──→ timeout
-                                    sends [REVIEW TIMEOUT] to parent
+       └──(timeout, no review)──→ timeout
+              │                      sends [REVIEW TIMEOUT] to parent
+              │
+              15 min (initial) / 5 min (after addressing changes)
 ```
+
+**Copilot review lifecycle:** Copilot's first review is automatic (triggered on PR creation). Subsequent reviews after pushing fixes are NOT — Copilot does not re-review. The `FixesPushed` event fills this gap: when the poller detects a SHA change on a PR that was `ChangesRequested`, it fires `fixes_pushed` immediately and uses a shorter 5-minute fallback timeout.
 
 ### Event Dispatch Flow
 

@@ -28,7 +28,7 @@ The xmonad pattern for LLM agents: users define agent roles in Haskell, compiled
 ```
 .exo/roles/devswarm/
 ├── AllRoles.hs     # Role registry: Map Text SomeRoleConfig
-├── TLRole.hs       # TL role config (spawn, PR, merge, popup, notify_parent)
+├── TLRole.hs       # TL role config (spawn, PR, merge, popup, notify_parent, send_message)
 ├── DevRole.hs      # Dev role config (PR, notify_parent + permission cascade)
 ├── WorkerRole.hs   # Worker role config (notify_parent only, allow-all hooks)
 ├── Main.hs         # FFI exports that read role from input JSON
@@ -62,7 +62,8 @@ data Tools mode = Tools
     popups :: PopupTools mode,
     pr :: FilePRTools mode,
     mergePr :: mode :- MergePR,
-    notifyParent :: mode :- NotifyParent
+    notifyParent :: mode :- NotifyParent,
+    sendMessage :: mode :- SendMessage
   } deriving Generic
 
 config :: RoleConfig (Tools AsHandler)
@@ -76,9 +77,10 @@ The `mode` parameter enables the same record for both schema generation (`AsSche
 ## Common Commands
 
 ```bash
-cabal build all      # Build everything
-cabal test all       # Run tests
-just pre-commit      # Run all checks
+cabal build all           # Build everything
+cabal test all            # Run tests
+just pre-commit           # Run all checks
+just proto-gen-haskell    # Regenerate Haskell types from proto files
 ```
 
 ## Adding New MCP Tools

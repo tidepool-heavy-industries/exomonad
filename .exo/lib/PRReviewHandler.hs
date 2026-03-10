@@ -53,6 +53,15 @@ prReviewHandler (ReviewTimeout n mins) = do
     }
   pure (NotifyParentAction (Tpl.reviewTimeout n mins) n)
 
+prReviewHandler (FixesPushed n ci) = do
+  void $ suspendEffect_ @Log.LogInfo $ Log.InfoRequest
+    { Log.infoRequestMessage = TL.fromStrict $
+        "[PRReviewHandler] Fixes pushed on PR #" <> T.pack (show n)
+        <> ", CI: " <> ci
+    , Log.infoRequestFields = ""
+    }
+  pure (NotifyParentAction (Tpl.fixesPushed n ci) n)
+
 -- | Handle sibling merged events.
 siblingMergedHandler :: SiblingMergedEvent -> Eff HookEffects EventAction
 siblingMergedHandler (SiblingMergedEvent merged parent _prNum) = do

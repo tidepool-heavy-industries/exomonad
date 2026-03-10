@@ -120,7 +120,7 @@ GitHub poller (Rust, 60s interval)
 |------|---------|
 | `EventHandlerConfig` | Per-role handler config: `onPRReview`, `onCIStatus`, `onTimeout`, `onSiblingMerged` |
 | `EventAction` | Handler return: `InjectMessage Text`, `NotifyParentAction Text Int`, `NoAction` |
-| `PRReviewEvent` | `ReviewReceived` (comments), `ReviewApproved`, `ReviewTimeout` |
+| `PRReviewEvent` | `ReviewReceived` (comments), `ReviewApproved`, `ReviewTimeout`, `FixesPushed` (CI status) |
 | `SiblingMergedEvent` | `mergedBranch`, `parentBranch`, `siblingPRNumber` |
 | `EventInput` | Top-level wrapper with `event_type` discriminator for dispatch |
 
@@ -130,7 +130,8 @@ GitHub poller (Rust, 60s interval)
 |-------|--------|--------|
 | `ReviewReceived` | `InjectMessage` | Copilot comments injected into agent pane |
 | `ReviewApproved` | `NotifyParentAction` | Sends `[from: id] [PR READY] PR #N...` to parent via `notify_parent_delivery` |
-| `ReviewTimeout` (15 min) | `NotifyParentAction` | Sends `[from: id] [REVIEW TIMEOUT] PR #N...` to parent via `notify_parent_delivery` |
+| `ReviewTimeout` (15 min initial, 5 min after fixes) | `NotifyParentAction` | Sends `[from: id] [REVIEW TIMEOUT] PR #N...` to parent via `notify_parent_delivery` |
+| `FixesPushed` | `NotifyParentAction` | Sends `[from: id] [FIXES PUSHED] PR #N...` to parent — Copilot does NOT re-review, so this is the actionable signal |
 | `SiblingMerged` | `InjectMessage` | Injects rebase instructions when a sibling branch is merged |
 
 ### Wiring

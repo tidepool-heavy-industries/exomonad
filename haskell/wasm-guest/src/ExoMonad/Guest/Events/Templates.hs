@@ -12,6 +12,7 @@
 module ExoMonad.Guest.Events.Templates
   ( prReady,
     reviewTimeout,
+    fixesPushed,
     copilotReviewReceived,
     siblingMerged,
     ciStatus,
@@ -39,6 +40,20 @@ reviewTimeout n mins =
   "[REVIEW TIMEOUT] PR #" <> T.pack (show n)
     <> " \x2014 no Copilot review after " <> T.pack (show mins)
     <> " minutes. PR is ready to merge if CI passes."
+
+-- | Fixes pushed after Copilot review — Copilot does NOT re-review,
+-- so this is the actionable signal for the TL.
+--
+-- >>> fixesPushed 42 "success"
+-- "[FIXES PUSHED] PR #42 \x2014 review comments addressed, fixes pushed. CI passing. Ready to merge."
+fixesPushed :: Int -> Text -> Text
+fixesPushed n ci =
+  "[FIXES PUSHED] PR #" <> T.pack (show n)
+    <> " \x2014 review comments addressed, fixes pushed."
+    <> case ci of
+         "success" -> " CI passing. Ready to merge."
+         "pending" -> " CI running \x2014 merge when green."
+         _ -> " CI status: " <> ci <> "."
 
 -- | Copilot posted review comments — injected into the agent's pane.
 --
