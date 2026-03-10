@@ -413,7 +413,7 @@ exomonad_proto::effects::log       -- prost-generated Log types
 exomonad_proto::effects::envelope  -- EffectEnvelope, EffectResponse
 exomonad_proto::effects::effect_error -- EffectError
 
-exomonad_runtime::effects          -- EffectHandler trait, EffectRegistry
-exomonad_runtime::effects          -- Generated: GitEffects trait, dispatch_git_effect, etc.
-exomonad_runtime::handlers         -- Handler implementations
+exomonad_core::effects          -- EffectHandler trait, EffectRegistry
+exomonad_core::effects          -- Generated: GitEffects trait, dispatch_git_effect, etc.
+exomonad_core::handlers         -- Handler implementations
 ```

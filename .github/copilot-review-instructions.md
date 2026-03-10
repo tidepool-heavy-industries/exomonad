@@ -1,41 +1,61 @@
 # Copilot Code Review Instructions
 
+## Architecture Rule
+
+**All MCP tool logic lives in Haskell WASM. Rust handles I/O only.**
+
+If a PR adds tool schemas, argument parsing, or dispatch logic to Rust code, flag it. Tools belong in `haskell/wasm-guest/src/ExoMonad/Guest/Tools/`. Rust only adds effect handlers (new I/O capabilities) in `rust/exomonad-core/src/handlers/`.
+
 ## Language-Specific Guidance
 
-### Haskell (haskell/wasm-guest/)
+### Haskell (haskell/wasm-guest/, .exo/roles/, .exo/lib/)
 
 **Effect System (freer-simple)**
-- Effect constraints should be ordered correctly - effects are interpreted outermost-first
-- Agent code must NOT use `IOE` directly (IO-blind architecture)
-- Effect handlers should be in executor packages, not core library
+- WASM guest code must NOT do I/O — it yields typed effects via `runEffect @EffectType`
+- Effects use protobuf-encoded requests/responses across the WASM boundary
+- `suspendEffect_` is the low-level yield; smart constructors in `ExoMonad.Effects.*` are preferred
 
 **Tool Definitions**
-- Every `Tool` instance needs `deriveJSONSchema` for the input type
-- Tool execution should only use effects available in `ToolEffects`
-- Look for missing `Proxy @` in `ToolList` definitions
+- Tools use the `mode :- Tool` record pattern (`AsSchema` for schemas, `AsHandler` for dispatch)
+- Tool handlers return `Eff '[EffectYield] ToolResult`
+- New tools must be wired into role configs in `.exo/roles/devswarm/`
 
-**Delta Fields**
-- Mutation types should use deltas (`+2`), not absolute values
-- Every delta type needs a `because :: Text` field for explainability
+**Proto Field Naming**
+- Generated Haskell types use `messageName` + `FieldName` convention
+- Example: `GetBranchRequest` field `working_dir` → `getBranchRequestWorkingDir`
+- Use `Data.Text.Lazy.Text` for proto strings, `Data.Vector.Vector` for repeated fields
 
-**Templates**
-- `typedTemplateFile` requires the context type to match template variables
-- Template includes should exist in the templates/ directory
-- Jinja syntax should be valid (LLMs know Jinja well)
+**LANGUAGE Pragmas**
+- Closing delimiter is `#-}` not `#}` — verify after any edit to pragma blocks
 
-**Common Mistakes**
-- Using `unsafeCoerce` or `Dynamic` (should use `OneOf` pattern instead)
-- Partial functions (`head`, `tail`, `!!`) without guards
+### Rust (rust/)
+
+**Effect Handlers**
+- Implement auto-generated traits from proto service definitions
+- Use `EffectError` variants (`not_found`, `invalid_input`, `custom`) — not `anyhow`
+- Use `ResultExt::effect_err(namespace)` for error conversion
+- Register handlers in `EffectRegistry` by namespace prefix
+
+**Logging**
+- Log before subprocess/API calls (command + key params)
+- Log after (exit code, result summary)
+- Log on error (stderr, enough context to debug without reproducing)
+
+### Proto (proto/)
+
+- Proto files are the single source of truth for FFI types
+- `service` blocks drive Rust trait codegen (`build.rs`)
+- Changes require both `just proto-gen-haskell` AND `cargo build -p exomonad-proto`
 
 ## Review Focus
 
-1. **Type Safety** - This codebase prioritizes compile-time guarantees
-2. **Effect Ordering** - Wrong order causes runtime issues
-3. **Schema Derivation** - LLM tools need valid JSON schemas
-4. **IO-Blindness** - Agents must not escape their effect sandbox
+1. **IO-blindness** — Haskell WASM must not escape its effect sandbox
+2. **Effect boundary** — New I/O in Rust, new logic in Haskell, proto types bridge them
+3. **Logging** — Subprocess calls must log before/after/error per CLAUDE.md policy
+4. **No dead code** — No `todo!()`, placeholder variants, or half-done heuristics
 
 ## Less Important
 
-- Style/formatting (hlint handles this)
-- Documentation coverage (intentionally minimal)
+- Style/formatting (hlint and clippy handle this)
+- Documentation coverage (intentionally minimal in code)
 - Test coverage suggestions (tests are for critical paths only)
