@@ -19,8 +19,10 @@ import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Effects.Log qualified as Log
 import Effects.MergePr qualified as MP
+import Effects.Agent qualified as Agent
 import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
 import ExoMonad.Effects.MergePR (MergePRMergePr)
+import ExoMonad.Effects.Agent (AgentCleanup)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
@@ -89,15 +91,41 @@ instance MCPTool MergePR where
                   mpoGitFetched = MP.mergePrResponseGitFetched resp
                 }
         void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: " <> mpoMessage output), Log.infoRequestFields = ""})
-        let eventPayload = BSL.toStrict $ Aeson.encode $ object
-              [ "pr_number" .= mprPrNumber args,
-                "success" .= mpoSuccess output
-              ]
-        void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
-          { Log.emitEventRequestEventType = "pr.merged",
-            Log.emitEventRequestPayload = eventPayload,
-            Log.emitEventRequestTimestamp = 0
-          })
+
+        if mpoSuccess output
+          then do
+            let eventPayload = BSL.toStrict $ Aeson.encode $ object
+                  [ "pr_number" .= mprPrNumber args,
+                    "success" .= True
+                  ]
+            void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
+              { Log.emitEventRequestEventType = "pr.merged",
+                Log.emitEventRequestPayload = eventPayload,
+                Log.emitEventRequestTimestamp = 0
+              })
+
+            -- Auto-cleanup: close agent tab, remove worktree, unregister
+            let branchName = TL.toStrict (MP.mergePrResponseBranchName resp)
+            case extractSlug branchName of
+              Just slug -> do
+                let cleanupReq = Agent.CleanupRequest
+                      { Agent.cleanupRequestIssue = TL.fromStrict slug
+                      , Agent.cleanupRequestForce = True
+                      , Agent.cleanupRequestSubrepo = ""
+                      }
+                cleanupResult <- suspendEffect @AgentCleanup cleanupReq
+                case cleanupResult of
+                  Left err -> void $ suspendEffect_ @LogInfo (Log.InfoRequest
+                    { Log.infoRequestMessage = TL.fromStrict ("MergePR: cleanup failed (non-fatal): " <> T.pack (show err))
+                    , Log.infoRequestFields = ""
+                    })
+                  Right _ -> void $ suspendEffect_ @LogInfo (Log.InfoRequest
+                    { Log.infoRequestMessage = TL.fromStrict ("MergePR: cleaned up agent " <> slug)
+                    , Log.infoRequestFields = ""
+                    })
+              Nothing -> pure ()  -- No slug to clean up
+          else pure () -- Merge failed; skip cleanup and event
+
         pure $ successResult $
           object
             [ "success" .= mpoSuccess output,
@@ -105,4 +133,13 @@ instance MCPTool MergePR where
               "git_fetched" .= mpoGitFetched output,
               "next" .= ("Verify build: cargo check --workspace. Especially important after parallel merges — changes may interact." :: Text)
             ]
+
+-- | Extract the slug (last dot-segment) from a branch name.
+-- e.g., "main.features.tracing-cleanup" -> "tracing-cleanup"
+extractSlug :: Text -> Maybe Text
+extractSlug branch
+  | T.null branch = Nothing
+  | otherwise = case T.splitOn "." branch of
+      [] -> Nothing
+      parts -> Just (last parts)
   

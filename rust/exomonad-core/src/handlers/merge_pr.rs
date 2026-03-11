@@ -70,6 +70,7 @@ impl MergePrEffects for MergePRHandler {
             success: result.success,
             message: result.message,
             git_fetched: result.git_fetched,
+            branch_name: result.branch_name,
         })
     }
 }

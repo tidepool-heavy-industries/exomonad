@@ -132,7 +132,8 @@ instance (HsJSONPB.FromJSON MergePrRequest) where
 data MergePrResponse
   = MergePrResponse {mergePrResponseSuccess :: Hs.Bool,
                      mergePrResponseMessage :: Hs.Text,
-                     mergePrResponseGitFetched :: Hs.Bool}
+                     mergePrResponseGitFetched :: Hs.Bool,
+                     mergePrResponseBranchName :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData MergePrResponse)
 instance (HsProtobuf.Named MergePrResponse) where
@@ -142,17 +143,22 @@ instance (HsProtobuf.Message MergePrResponse) where
   encodeMessage
     _
     MergePrResponse {mergePrResponseSuccess, mergePrResponseMessage,
-                     mergePrResponseGitFetched}
+                     mergePrResponseGitFetched, mergePrResponseBranchName}
     = Hs.mappend
         (Hs.mappend
+           (Hs.mappend
+              (HsProtobuf.encodeMessageField
+                 (HsProtobuf.FieldNumber 1) mergePrResponseSuccess)
+              (HsProtobuf.encodeMessageField
+                 (HsProtobuf.FieldNumber 2)
+                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                    mergePrResponseMessage)))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 1) mergePrResponseSuccess)
-           (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 2)
-              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                 mergePrResponseMessage)))
+              (HsProtobuf.FieldNumber 3) mergePrResponseGitFetched))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 3) mergePrResponseGitFetched)
+           (HsProtobuf.FieldNumber 4)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              mergePrResponseBranchName))
   decodeMessage _
     = Hs.pure MergePrResponse
         <*>
@@ -165,6 +171,10 @@ instance (HsProtobuf.Message MergePrResponse) where
         <*>
           HsProtobuf.at
             HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 4)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1) (HsProtobufAST.Prim HsProtobufAST.Bool)
@@ -175,20 +185,28 @@ instance (HsProtobuf.Message MergePrResponse) where
          (HsProtobufAST.Single "message") [] "",
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 3) (HsProtobufAST.Prim HsProtobufAST.Bool)
-         (HsProtobufAST.Single "git_fetched") [] ""]
+         (HsProtobufAST.Single "git_fetched") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 4)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "branch_name") [] ""]
 instance (HsJSONPB.ToJSONPB MergePrResponse) where
-  toJSONPB (MergePrResponse f1 f2 f3)
+  toJSONPB (MergePrResponse f1 f2 f3 f4)
     = HsJSONPB.object
         ["success" .= f1,
          "message"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
-         "git_fetched" .= f3]
-  toEncodingPB (MergePrResponse f1 f2 f3)
+         "git_fetched" .= f3,
+         "branch_name"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4)]
+  toEncodingPB (MergePrResponse f1 f2 f3 f4)
     = HsJSONPB.pairs
         ["success" .= f1,
          "message"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
-         "git_fetched" .= f3]
+         "git_fetched" .= f3,
+         "branch_name"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4)]
 instance (HsJSONPB.FromJSONPB MergePrResponse) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -198,7 +216,10 @@ instance (HsJSONPB.FromJSONPB MergePrResponse) where
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
                      (obj .: "message"))
-                <*> obj .: "git_fetched")
+                <*> obj .: "git_fetched"
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "branch_name")))
 instance (HsJSONPB.ToJSON MergePrResponse) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding

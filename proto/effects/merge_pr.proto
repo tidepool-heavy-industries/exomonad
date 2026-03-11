@@ -14,6 +14,8 @@ message MergePrResponse {
   string message = 2;
   // True if git fetch was run after merge
   bool git_fetched = 3;
+  // Head branch of the merged PR (e.g., "main.feature-a"). Empty if unknown.
+  string branch_name = 4;
 }
 
 service MergePrEffects {
