@@ -227,7 +227,7 @@ impl AgentEffects for AgentHandler {
         let agent_info = worker_result_to_proto(&req.name, &result);
 
         if let Some(ref log) = self.event_log {
-            let _ = log.append(
+            if let Err(e) = log.append(
                 "agent.spawned",
                 &ctx.agent_name.to_string(),
                 &serde_json::json!({
@@ -237,7 +237,9 @@ impl AgentEffects for AgentHandler {
                     "worktree": &agent_info.worktree_path,
                     "spawn_type": "worker",
                 }),
-            );
+            ) {
+                warn!(error = %e, "Failed to write agent.spawned event");
+            }
         }
 
         Ok(SpawnWorkerResponse {
@@ -313,7 +315,7 @@ impl AgentEffects for AgentHandler {
         let agent_info = subtree_result_to_proto(&req.branch_name, &result);
 
         if let Some(ref log) = self.event_log {
-            let _ = log.append(
+            if let Err(e) = log.append(
                 "agent.spawned",
                 &ctx.agent_name.to_string(),
                 &serde_json::json!({
@@ -323,7 +325,9 @@ impl AgentEffects for AgentHandler {
                     "worktree": &agent_info.worktree_path,
                     "spawn_type": "subtree",
                 }),
-            );
+            ) {
+                warn!(error = %e, "Failed to write agent.spawned event");
+            }
         }
 
         Ok(SpawnSubtreeResponse {
@@ -359,7 +363,7 @@ impl AgentEffects for AgentHandler {
         let agent_info = leaf_subtree_result_to_proto(&req.branch_name, &result);
 
         if let Some(ref log) = self.event_log {
-            let _ = log.append(
+            if let Err(e) = log.append(
                 "agent.spawned",
                 &ctx.agent_name.to_string(),
                 &serde_json::json!({
@@ -369,7 +373,9 @@ impl AgentEffects for AgentHandler {
                     "worktree": &agent_info.worktree_path,
                     "spawn_type": "leaf_subtree",
                 }),
-            );
+            ) {
+                warn!(error = %e, "Failed to write agent.spawned event");
+            }
         }
 
         Ok(SpawnLeafSubtreeResponse {
@@ -461,7 +467,7 @@ impl AgentEffects for AgentHandler {
         };
 
         if let Some(ref log) = self.event_log {
-            let _ = log.append(
+            if let Err(e) = log.append(
                 "agent.spawned",
                 &ctx.agent_name.to_string(),
                 &serde_json::json!({
@@ -471,7 +477,9 @@ impl AgentEffects for AgentHandler {
                     "worktree": &agent_info.worktree_path,
                     "spawn_type": "acp",
                 }),
-            );
+            ) {
+                warn!(error = %e, "Failed to write agent.spawned event");
+            }
         }
 
         Ok(SpawnAcpResponse {
