@@ -144,7 +144,7 @@ impl GitHubEffects for GitHubHandler {
         req: GetPullRequestRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetPullRequestResponse> {
-        tracing::info!(owner = %req.owner, repo = %req.repo, number = req.number, "[GitHub] get_pull_request starting");
+        tracing::info!(owner = %req.owner, repo = %req.repo, number = req.number, include_reviews = req.include_reviews, "[GitHub] get_pull_request starting");
         let repo = make_repo(&req.owner, &req.repo);
 
         let raw_pr = self
@@ -154,9 +154,20 @@ impl GitHubEffects for GitHubHandler {
             .map_err(|e| EffectError::network_error(e.to_string()))?;
 
         let pull_request = convert_pr(raw_pr);
-        let reviews: Vec<Review> = Vec::new();
 
-        tracing::info!(number = req.number, "[GitHub] get_pull_request complete");
+        let reviews: Vec<Review> = if req.include_reviews {
+            let raw_reviews = self
+                .service
+                .get_pr_reviews(&repo, req.number as u64)
+                .await
+                .map_err(|e| EffectError::network_error(e.to_string()))?;
+            tracing::info!(count = raw_reviews.len(), "[GitHub] fetched reviews");
+            raw_reviews.into_iter().map(convert_review).collect()
+        } else {
+            Vec::new()
+        };
+
+        tracing::info!(number = req.number, reviews = reviews.len(), "[GitHub] get_pull_request complete");
         Ok(GetPullRequestResponse {
             pull_request: Some(pull_request),
             reviews,
@@ -306,6 +317,32 @@ fn convert_pr(pr: crate::services::github::PullRequest) -> PullRequest {
         labels: Vec::new(),
         created_at: 0,
         updated_at: 0,
+        head_sha: pr.head_sha,
+    }
+}
+
+fn review_state_to_proto(state: &str) -> i32 {
+    match state {
+        "APPROVED" => ReviewState::Approved as i32,
+        "CHANGES_REQUESTED" => ReviewState::ChangesRequested as i32,
+        "COMMENTED" => ReviewState::Commented as i32,
+        "PENDING" => ReviewState::Pending as i32,
+        _ => ReviewState::Unspecified as i32,
+    }
+}
+
+fn convert_review(r: crate::services::github::Review) -> Review {
+    Review {
+        id: r.id as i64,
+        author: Some(User {
+            login: r.author,
+            id: 0,
+            avatar_url: String::new(),
+        }),
+        state: review_state_to_proto(&r.state),
+        body: r.body,
+        submitted_at: 0,
+        commit_id: r.commit_id,
     }
 }
 

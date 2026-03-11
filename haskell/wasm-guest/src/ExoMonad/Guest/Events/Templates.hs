@@ -35,12 +35,12 @@ prReady n =
 -- | No Copilot review within timeout — signals TL to merge if CI passes.
 --
 -- >>> reviewTimeout 42 15
--- "[REVIEW TIMEOUT] PR #42 \x2014 no Copilot review after 15 minutes. PR is ready to merge if CI passes."
+-- "[REVIEW TIMEOUT] PR #42 \x2014 no Copilot review after 15 minutes. Merge with `merge_pr` using `force: true`."
 reviewTimeout :: Int -> Int -> Text
 reviewTimeout n mins =
   "[REVIEW TIMEOUT] PR #" <> T.pack (show n)
     <> " \x2014 no Copilot review after " <> T.pack (show mins)
-    <> " minutes. PR is ready to merge if CI passes."
+    <> " minutes. Merge with `merge_pr` using `force: true`."
 
 -- | Fixes pushed after Copilot review — Copilot does NOT re-review,
 -- so this is the actionable signal for the TL.

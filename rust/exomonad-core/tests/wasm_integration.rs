@@ -736,7 +736,8 @@ async fn wasm_merge_pr_roundtrip() {
         "tl",
         "merge_pr",
         json!({
-            "pr_number": 42
+            "pr_number": 42,
+            "force": true
         }),
     )
     .await;

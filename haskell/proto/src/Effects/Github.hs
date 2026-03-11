@@ -1099,7 +1099,8 @@ data PullRequest
                  pullRequestDraft :: Hs.Bool,
                  pullRequestLabels :: (Hs.Vector Effects.Github.Label),
                  pullRequestCreatedAt :: Hs.Int64,
-                 pullRequestUpdatedAt :: Hs.Int64}
+                 pullRequestUpdatedAt :: Hs.Int64,
+                 pullRequestHeadSha :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData PullRequest)
 instance (HsProtobuf.Named PullRequest) where
@@ -1111,7 +1112,8 @@ instance (HsProtobuf.Message PullRequest) where
     PullRequest {pullRequestNumber, pullRequestTitle, pullRequestBody,
                  pullRequestState, pullRequestAuthor, pullRequestHeadRef,
                  pullRequestBaseRef, pullRequestMerged, pullRequestDraft,
-                 pullRequestLabels, pullRequestCreatedAt, pullRequestUpdatedAt}
+                 pullRequestLabels, pullRequestCreatedAt, pullRequestUpdatedAt,
+                 pullRequestHeadSha}
     = Hs.mappend
         (Hs.mappend
            (Hs.mappend
@@ -1123,46 +1125,51 @@ instance (HsProtobuf.Message PullRequest) where
                              (Hs.mappend
                                 (Hs.mappend
                                    (Hs.mappend
+                                      (Hs.mappend
+                                         (HsProtobuf.encodeMessageField
+                                            (HsProtobuf.FieldNumber 1) pullRequestNumber)
+                                         (HsProtobuf.encodeMessageField
+                                            (HsProtobuf.FieldNumber 2)
+                                            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                                               pullRequestTitle)))
                                       (HsProtobuf.encodeMessageField
-                                         (HsProtobuf.FieldNumber 1) pullRequestNumber)
-                                      (HsProtobuf.encodeMessageField
-                                         (HsProtobuf.FieldNumber 2)
+                                         (HsProtobuf.FieldNumber 3)
                                          ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                                            pullRequestTitle)))
+                                            pullRequestBody)))
                                    (HsProtobuf.encodeMessageField
-                                      (HsProtobuf.FieldNumber 3)
-                                      ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                                         pullRequestBody)))
+                                      (HsProtobuf.FieldNumber 4) pullRequestState))
                                 (HsProtobuf.encodeMessageField
-                                   (HsProtobuf.FieldNumber 4) pullRequestState))
+                                   (HsProtobuf.FieldNumber 5)
+                                   ((Hs.coerce
+                                       @(Hs.Maybe Effects.Github.User)
+                                       @(HsProtobuf.Nested Effects.Github.User))
+                                      pullRequestAuthor)))
                              (HsProtobuf.encodeMessageField
-                                (HsProtobuf.FieldNumber 5)
-                                ((Hs.coerce
-                                    @(Hs.Maybe Effects.Github.User)
-                                    @(HsProtobuf.Nested Effects.Github.User))
-                                   pullRequestAuthor)))
+                                (HsProtobuf.FieldNumber 6)
+                                ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                                   pullRequestHeadRef)))
                           (HsProtobuf.encodeMessageField
-                             (HsProtobuf.FieldNumber 6)
+                             (HsProtobuf.FieldNumber 7)
                              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                                pullRequestHeadRef)))
+                                pullRequestBaseRef)))
                        (HsProtobuf.encodeMessageField
-                          (HsProtobuf.FieldNumber 7)
-                          ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                             pullRequestBaseRef)))
+                          (HsProtobuf.FieldNumber 8) pullRequestMerged))
                     (HsProtobuf.encodeMessageField
-                       (HsProtobuf.FieldNumber 8) pullRequestMerged))
+                       (HsProtobuf.FieldNumber 9) pullRequestDraft))
                  (HsProtobuf.encodeMessageField
-                    (HsProtobuf.FieldNumber 9) pullRequestDraft))
+                    (HsProtobuf.FieldNumber 10)
+                    ((Hs.coerce
+                        @(Hs.Vector Effects.Github.Label)
+                        @(HsProtobuf.NestedVec Effects.Github.Label))
+                       pullRequestLabels)))
               (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 10)
-                 ((Hs.coerce
-                     @(Hs.Vector Effects.Github.Label)
-                     @(HsProtobuf.NestedVec Effects.Github.Label))
-                    pullRequestLabels)))
+                 (HsProtobuf.FieldNumber 11) pullRequestCreatedAt))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 11) pullRequestCreatedAt))
+              (HsProtobuf.FieldNumber 12) pullRequestUpdatedAt))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 12) pullRequestUpdatedAt)
+           (HsProtobuf.FieldNumber 13)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              pullRequestHeadSha))
   decodeMessage _
     = Hs.pure PullRequest
         <*>
@@ -1211,6 +1218,10 @@ instance (HsProtobuf.Message PullRequest) where
         <*>
           HsProtobuf.at
             HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 12)
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 13)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1) (HsProtobufAST.Prim HsProtobufAST.Int32)
@@ -1259,9 +1270,13 @@ instance (HsProtobuf.Message PullRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 12)
          (HsProtobufAST.Prim HsProtobufAST.Int64)
-         (HsProtobufAST.Single "updated_at") [] ""]
+         (HsProtobufAST.Single "updated_at") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 13)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "head_sha") [] ""]
 instance (HsJSONPB.ToJSONPB PullRequest) where
-  toJSONPB (PullRequest f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12)
+  toJSONPB (PullRequest f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13)
     = HsJSONPB.object
         ["number" .= f1,
          "title" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
@@ -1284,8 +1299,11 @@ instance (HsJSONPB.ToJSONPB PullRequest) where
                  @(Hs.Vector Effects.Github.Label)
                  @(HsProtobuf.NestedVec Effects.Github.Label))
                 f10),
-         "created_at" .= f11, "updated_at" .= f12]
-  toEncodingPB (PullRequest f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12)
+         "created_at" .= f11, "updated_at" .= f12,
+         "head_sha"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f13)]
+  toEncodingPB
+    (PullRequest f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13)
     = HsJSONPB.pairs
         ["number" .= f1,
          "title" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
@@ -1308,7 +1326,9 @@ instance (HsJSONPB.ToJSONPB PullRequest) where
                  @(Hs.Vector Effects.Github.Label)
                  @(HsProtobuf.NestedVec Effects.Github.Label))
                 f10),
-         "created_at" .= f11, "updated_at" .= f12]
+         "created_at" .= f11, "updated_at" .= f12,
+         "head_sha"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f13)]
 instance (HsJSONPB.FromJSONPB PullRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -1341,7 +1361,10 @@ instance (HsJSONPB.FromJSONPB PullRequest) where
                       @(Hs.Vector Effects.Github.Label))
                      (obj .: "labels"))
                 <*> obj .: "created_at"
-                <*> obj .: "updated_at")
+                <*> obj .: "updated_at"
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "head_sha")))
 instance (HsJSONPB.ToJSON PullRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
@@ -1508,7 +1531,8 @@ data Review
             reviewAuthor :: (Hs.Maybe Effects.Github.User),
             reviewState :: (HsProtobuf.Enumerated Effects.Github.ReviewState),
             reviewBody :: Hs.Text,
-            reviewSubmittedAt :: Hs.Int64}
+            reviewSubmittedAt :: Hs.Int64,
+            reviewCommitId :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData Review)
 instance (HsProtobuf.Named Review) where
@@ -1518,25 +1542,29 @@ instance (HsProtobuf.Message Review) where
   encodeMessage
     _
     Review {reviewId, reviewAuthor, reviewState, reviewBody,
-            reviewSubmittedAt}
+            reviewSubmittedAt, reviewCommitId}
     = Hs.mappend
         (Hs.mappend
            (Hs.mappend
               (Hs.mappend
-                 (HsProtobuf.encodeMessageField (HsProtobuf.FieldNumber 1) reviewId)
+                 (Hs.mappend
+                    (HsProtobuf.encodeMessageField (HsProtobuf.FieldNumber 1) reviewId)
+                    (HsProtobuf.encodeMessageField
+                       (HsProtobuf.FieldNumber 2)
+                       ((Hs.coerce
+                           @(Hs.Maybe Effects.Github.User)
+                           @(HsProtobuf.Nested Effects.Github.User))
+                          reviewAuthor)))
                  (HsProtobuf.encodeMessageField
-                    (HsProtobuf.FieldNumber 2)
-                    ((Hs.coerce
-                        @(Hs.Maybe Effects.Github.User)
-                        @(HsProtobuf.Nested Effects.Github.User))
-                       reviewAuthor)))
+                    (HsProtobuf.FieldNumber 3) reviewState))
               (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 3) reviewState))
+                 (HsProtobuf.FieldNumber 4)
+                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) reviewBody)))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 4)
-              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) reviewBody)))
+              (HsProtobuf.FieldNumber 5) reviewSubmittedAt))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 5) reviewSubmittedAt)
+           (HsProtobuf.FieldNumber 6)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) reviewCommitId))
   decodeMessage _
     = Hs.pure Review
         <*>
@@ -1558,6 +1586,10 @@ instance (HsProtobuf.Message Review) where
         <*>
           HsProtobuf.at
             HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 5)
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 6)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1) (HsProtobufAST.Prim HsProtobufAST.Int64)
@@ -1578,9 +1610,13 @@ instance (HsProtobuf.Message Review) where
          (HsProtobufAST.Single "body") [] "",
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 5) (HsProtobufAST.Prim HsProtobufAST.Int64)
-         (HsProtobufAST.Single "submitted_at") [] ""]
+         (HsProtobufAST.Single "submitted_at") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 6)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "commit_id") [] ""]
 instance (HsJSONPB.ToJSONPB Review) where
-  toJSONPB (Review f1 f2 f3 f4 f5)
+  toJSONPB (Review f1 f2 f3 f4 f5 f6)
     = HsJSONPB.object
         ["id" .= f1,
          "author"
@@ -1591,8 +1627,10 @@ instance (HsJSONPB.ToJSONPB Review) where
                 f2),
          "state" .= f3,
          "body" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4),
-         "submitted_at" .= f5]
-  toEncodingPB (Review f1 f2 f3 f4 f5)
+         "submitted_at" .= f5,
+         "commit_id"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6)]
+  toEncodingPB (Review f1 f2 f3 f4 f5 f6)
     = HsJSONPB.pairs
         ["id" .= f1,
          "author"
@@ -1603,7 +1641,9 @@ instance (HsJSONPB.ToJSONPB Review) where
                 f2),
          "state" .= f3,
          "body" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4),
-         "submitted_at" .= f5]
+         "submitted_at" .= f5,
+         "commit_id"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6)]
 instance (HsJSONPB.FromJSONPB Review) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -1619,7 +1659,10 @@ instance (HsJSONPB.FromJSONPB Review) where
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
                      (obj .: "body"))
-                <*> obj .: "submitted_at")
+                <*> obj .: "submitted_at"
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "commit_id")))
 instance (HsJSONPB.ToJSON Review) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding

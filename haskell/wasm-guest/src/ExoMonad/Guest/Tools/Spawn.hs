@@ -66,7 +66,7 @@ instance FromJSON SpawnSubtreeArgs where
 instance MCPTool SpawnSubtree where
   type ToolArgs SpawnSubtree = SpawnSubtreeArgs
   toolName = "spawn_subtree"
-  toolDescription = "Fork a Claude agent into its own worktree and Zellij tab. The child gets TL role (can spawn its own children). After spawning, return immediately — you will be notified when the agent sends updates or when Copilot approves their PR. Do not poll or wait. Prefer spawn_leaf_subtree or spawn_workers for implementation work — Gemini agents are highly capable implementers and cost 10-30x less."
+  toolDescription = "Fork a Claude agent into its own worktree and Zellij tab. The child gets TL role (can spawn its own children). After spawning, return immediately — you will be notified when the agent sends updates or when Copilot approves their PR. Do not poll or wait. Prefer spawn_leaf_subtree or spawn_workers for implementation work — Gemini agents are highly capable implementers and cost 10-30x less. Spawned agents iterate with Copilot automatically — review comments are injected into their pane and addressed. Do not merge until you receive [PR READY], [FIXES PUSHED], or [REVIEW TIMEOUT] from the event system."
   toolSchema =
     genericToolSchemaWith @SpawnSubtreeArgs
       [ ("task", "Description of the sub-problem to solve"),
@@ -147,7 +147,7 @@ instance FromJSON SpawnLeafSubtreeArgs where
 instance MCPTool SpawnLeafSubtree where
   type ToolArgs SpawnLeafSubtree = SpawnLeafSubtreeArgs
   toolName = "spawn_leaf_subtree"
-  toolDescription = "Fork a Gemini agent into its own worktree and Zellij tab. Gets dev role (files PR, cannot spawn children). Gemini is a capable implementer — give it acceptance criteria and file paths, not line-by-line instructions. After spawning, return immediately — you will be notified when the agent sends updates or when Copilot approves their PR."
+  toolDescription = "Fork a Gemini agent into its own worktree and Zellij tab. Gets dev role (files PR, cannot spawn children). Gemini is a capable implementer — give it acceptance criteria and file paths, not line-by-line instructions. After spawning, return immediately — you will be notified when the agent sends updates or when Copilot approves their PR. After filing a PR, the agent iterates with Copilot automatically — review comments are injected and addressed. Do not merge until you receive [PR READY], [FIXES PUSHED], or [REVIEW TIMEOUT] from the event system."
   toolSchema =
     genericToolSchemaWith @SpawnLeafSubtreeArgs
       [ ("task", "Description of the sub-problem to solve"),

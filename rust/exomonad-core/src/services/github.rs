@@ -165,6 +165,9 @@ pub struct PullRequest {
 
     /// Merge timestamp (ISO 8601, if merged).
     pub merged_at: Option<String>,
+
+    /// SHA of the current HEAD commit on the PR branch.
+    pub head_sha: String,
 }
 
 impl FFIBoundary for PullRequest {}
@@ -178,13 +181,37 @@ impl From<models::pulls::PullRequest> for PullRequest {
             state: octocrab_optional_issue_state(pr.state),
             url: pr.html_url.map(|u| u.to_string()).unwrap_or_default(),
             author: pr.user.map(|u| u.login).unwrap_or_else(|| "unknown".into()),
-            head_ref: pr.head.ref_field,
+            head_ref: pr.head.ref_field.clone(),
+            head_sha: pr.head.sha,
             base_ref: pr.base.ref_field,
             created_at: pr.created_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
             merged_at: pr.merged_at.map(|t| t.to_rfc3339()),
         }
     }
 }
+
+/// A pull request review (top-level review, not inline comment).
+///
+/// Returned by [`GitHubService::get_pr_reviews()`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Review {
+    /// Review ID.
+    pub id: u64,
+
+    /// Review author's GitHub username.
+    pub author: String,
+
+    /// Review state (APPROVED, CHANGES_REQUESTED, COMMENTED, PENDING).
+    pub state: String,
+
+    /// Review body text.
+    pub body: String,
+
+    /// SHA of the commit that was HEAD when this review was submitted.
+    pub commit_id: String,
+}
+
+impl FFIBoundary for Review {}
 
 /// A review comment on a pull request.
 ///
@@ -501,6 +528,51 @@ impl GitHubService {
         );
 
         Ok(PullRequest::from(pr))
+    }
+
+    /// Get reviews for a pull request.
+    #[tracing::instrument(skip(self))]
+    pub async fn get_pr_reviews(&self, repo: &Repo, number: u64) -> Result<Vec<Review>> {
+        let route = format!(
+            "/repos/{}/{}/pulls/{}/reviews",
+            repo.owner, repo.name, number
+        );
+        info!(
+            repo = format!("{}/{}", repo.owner, repo.name),
+            number, "GitHub API: Get PR reviews"
+        );
+
+        let response: Vec<serde_json::Value> = timeout(
+            API_TIMEOUT,
+            self.client.get(&route, None::<&()>),
+        )
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "GitHub API get_pr_reviews timed out after {}s",
+                API_TIMEOUT.as_secs()
+            )
+        })??;
+
+        let reviews: Vec<Review> = response
+            .into_iter()
+            .map(|v| Review {
+                id: v["id"].as_u64().unwrap_or(0),
+                author: v["user"]["login"]
+                    .as_str()
+                    .unwrap_or("unknown")
+                    .to_string(),
+                state: v["state"].as_str().unwrap_or("").to_string(),
+                body: v["body"].as_str().unwrap_or("").to_string(),
+                commit_id: v["commit_id"].as_str().unwrap_or("").to_string(),
+            })
+            .collect();
+
+        info!(
+            count = reviews.len(),
+            "GitHub API: Get PR reviews successful"
+        );
+        Ok(reviews)
     }
 
     #[tracing::instrument(skip(self))]

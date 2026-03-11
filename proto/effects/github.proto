@@ -125,6 +125,8 @@ message PullRequest {
   repeated Label labels = 10;
   int64 created_at = 11;
   int64 updated_at = 12;
+  // SHA of the current HEAD commit on the PR branch.
+  string head_sha = 13;
 }
 
 message ListPullRequestsResponse {
@@ -149,6 +151,8 @@ message Review {
   ReviewState state = 3;
   string body = 4;
   int64 submitted_at = 5;
+  // SHA of the commit that was HEAD when this review was submitted.
+  string commit_id = 6;
 }
 
 message GetPullRequestResponse {
