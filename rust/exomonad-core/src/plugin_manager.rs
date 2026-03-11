@@ -252,18 +252,12 @@ impl PluginManager {
                 let data = current_input.clone();
                 let r = round;
                 let result_bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
-                    eprintln!(
-                        "[trampoline] round={r} func={func} calling WASM ({} bytes input)",
-                        data.len()
-                    );
+                    tracing::debug!(round = r, func = %func, input_bytes = data.len(), "[trampoline] calling WASM");
                     let mut plugin = plugin_lock
                         .write()
                         .map_err(|e| anyhow::anyhow!("Plugin lock poisoned: {}", e))?;
                     let result = plugin.call::<&[u8], Vec<u8>>(&func, &data);
-                    eprintln!(
-                        "[trampoline] round={r} func={func} WASM returned ({} bytes)",
-                        result.as_ref().map(|v| v.len()).unwrap_or(0)
-                    );
+                    tracing::debug!(round = r, func = %func, output_bytes = result.as_ref().map(|v| v.len()).unwrap_or(0), "[trampoline] WASM returned");
                     result
                 })
                 .await??;
