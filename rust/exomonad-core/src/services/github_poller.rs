@@ -597,7 +597,10 @@ impl GitHubPoller {
 
             // Check CI changes
             if ci_status != old_state.last_ci_status {
-                info!("[Poller] CI status changed for {}: {} -> {}", branch, old_state.last_ci_status, ci_status);
+                info!(
+                    "[Poller] CI status changed for {}: {} -> {}",
+                    branch, old_state.last_ci_status, ci_status
+                );
                 if let Ok(Some(action)) = self
                     .call_handle_event(
                         branch,
@@ -614,8 +617,14 @@ impl GitHubPoller {
                     self.handle_event_action(action, branch, agent_type, pr_number)
                         .await;
                 }
-                self.emit_event(branch, &ci_status, &format!("[CI STATUS: {}] {}", branch, ci_status), agent_type, Some(pr_number))
-                    .await;
+                self.emit_event(
+                    branch,
+                    &ci_status,
+                    &format!("[CI STATUS: {}] {}", branch, ci_status),
+                    agent_type,
+                    Some(pr_number),
+                )
+                .await;
                 old_state.last_ci_status = ci_status;
             }
 
