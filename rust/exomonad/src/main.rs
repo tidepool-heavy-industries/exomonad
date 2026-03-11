@@ -1263,7 +1263,12 @@ async fn main() -> Result<()> {
                 project_dir.clone(),
                 event_log.clone(),
             ));
-            builder = builder.with_handlers(exomonad_core::git_handlers(git, github, git_wt));
+            builder = builder.with_handlers(exomonad_core::git_handlers(
+                git,
+                github,
+                git_wt,
+                event_log.clone(),
+            ));
             let orch_handlers = exomonad_core::orchestration_handlers(
                 agent_control.clone(),
                 event_queue.clone(),
