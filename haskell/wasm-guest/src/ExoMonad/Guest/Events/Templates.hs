@@ -13,6 +13,7 @@ module ExoMonad.Guest.Events.Templates
   ( prReady,
     reviewTimeout,
     fixesPushed,
+    commitsPushed,
     copilotReviewReceived,
     siblingMerged,
     ciStatus,
@@ -87,3 +88,17 @@ ciStatus n status branch =
          "success" -> "\n\nCI passed."
          "failure" -> "\n\nCI failed. Check the logs and fix the issue before proceeding."
          _ -> ""
+
+-- | New commits pushed to a PR — informational notification to parent.
+--
+-- >>> commitsPushed 42 "success"
+-- "[COMMITS PUSHED] PR #42 \x2014 new commits pushed. CI passing."
+commitsPushed :: Int -> Text -> Text
+commitsPushed n ci =
+  "[COMMITS PUSHED] PR #" <> T.pack (show n)
+    <> " \x2014 new commits pushed."
+    <> case ci of
+         "success" -> " CI passing."
+         "pending" -> " CI running."
+         "failure" -> " CI failing."
+         _ -> " CI status: " <> ci <> "."

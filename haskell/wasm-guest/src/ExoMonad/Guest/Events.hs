@@ -37,6 +37,10 @@ data PRReviewEvent
       { prNumber :: Int,
         fpCiStatus :: Text
       }
+  | CommitsPushed
+      { prNumber :: Int,
+        cpCiStatus :: Text
+      }
   deriving (Show, Generic)
 
 instance FromJSON PRReviewEvent where
@@ -47,6 +51,7 @@ instance FromJSON PRReviewEvent where
       "approved" -> ReviewApproved <$> v .: "pr_number"
       "timeout" -> ReviewTimeout <$> v .: "pr_number" <*> v .: "minutes_elapsed"
       "fixes_pushed" -> FixesPushed <$> v .: "pr_number" <*> v .: "ci_status"
+      "commits_pushed" -> CommitsPushed <$> v .: "pr_number" <*> v .: "ci_status"
       other -> fail $ "Unknown PRReviewEvent kind: " <> show other
 
 instance ToJSON PRReviewEvent where
@@ -54,6 +59,7 @@ instance ToJSON PRReviewEvent where
   toJSON (ReviewApproved n) = object ["kind" .= ("approved" :: Text), "pr_number" .= n]
   toJSON (ReviewTimeout n m) = object ["kind" .= ("timeout" :: Text), "pr_number" .= n, "minutes_elapsed" .= m]
   toJSON (FixesPushed n ci) = object ["kind" .= ("fixes_pushed" :: Text), "pr_number" .= n, "ci_status" .= ci]
+  toJSON (CommitsPushed n ci) = object ["kind" .= ("commits_pushed" :: Text), "pr_number" .= n, "ci_status" .= ci]
 
 -- | CI status event
 data CIStatusEvent = CIStatusEvent
