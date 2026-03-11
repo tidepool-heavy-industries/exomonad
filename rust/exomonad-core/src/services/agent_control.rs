@@ -1965,7 +1965,11 @@ impl AgentControlService {
         // Rename pane via direct IPC
         let ipc = self.ipc()?;
         let pane_name = name.to_string();
-        let _ = tokio::task::spawn_blocking(move || ipc.rename_pane(&pane_name)).await;
+        match tokio::task::spawn_blocking(move || ipc.rename_pane(&pane_name)).await {
+            Ok(Err(e)) => tracing::warn!(error = %e, "Zellij pane rename failed"),
+            Err(e) => tracing::warn!(error = %e, "Zellij pane rename task panicked"),
+            Ok(Ok(())) => {}
+        }
 
         Ok(())
     }
@@ -2062,7 +2066,11 @@ impl AgentControlService {
             debug!(tab = %tn, "Switching to tab before spawning pane");
             let ipc = self.ipc()?;
             let tab = tn.to_string();
-            let _ = tokio::task::spawn_blocking(move || ipc.go_to_tab_name(&tab)).await;
+            match tokio::task::spawn_blocking(move || ipc.go_to_tab_name(&tab)).await {
+                Ok(Err(e)) => tracing::warn!(error = %e, "Zellij go-to-tab failed"),
+                Err(e) => tracing::warn!(error = %e, "Zellij go-to-tab task panicked"),
+                Ok(Ok(())) => {}
+            }
         }
 
         let full_command =
@@ -2083,7 +2091,11 @@ impl AgentControlService {
         // Rename pane via direct IPC
         let ipc = self.ipc()?;
         let rename_target = name.to_string();
-        let _ = tokio::task::spawn_blocking(move || ipc.rename_pane(&rename_target)).await;
+        match tokio::task::spawn_blocking(move || ipc.rename_pane(&rename_target)).await {
+            Ok(Err(e)) => tracing::warn!(error = %e, "Zellij pane rename failed"),
+            Err(e) => tracing::warn!(error = %e, "Zellij pane rename task panicked"),
+            Ok(Ok(())) => {}
+        }
 
         info!(name, "Successfully created Zellij pane");
         Ok(())
@@ -2147,11 +2159,16 @@ impl AgentControlService {
         // untracked file warnings (which force `git worktree remove --force`).
         let gitignore = target_dir.join(".gitignore");
         if !gitignore.exists() {
-            let _ = tokio::fs::write(&gitignore, "# Runtime artifacts\nserver.sock\nserver.pid\n")
-                .await;
+            if let Err(e) = tokio::fs::write(&gitignore, "# Runtime artifacts\nserver.sock\nserver.pid\n")
+                .await
+            {
+                tracing::warn!(path = %gitignore.display(), error = %e, "Failed to write .gitignore");
+            }
         }
 
-        let _ = tokio::fs::remove_file(&target).await;
+        if let Err(e) = tokio::fs::remove_file(&target).await {
+            tracing::debug!(path = %target.display(), error = %e, "Could not remove old socket symlink");
+        }
 
         match tokio::fs::symlink(&source, &target).await {
             Ok(()) => info!(
