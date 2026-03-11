@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::process::Command;
 use tokio::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::services::git_worktree::GitWorktreeService;
 
@@ -13,6 +13,7 @@ pub struct MergePROutput {
     pub success: bool,
     pub message: String,
     pub git_fetched: bool,
+    pub branch_name: String,
 }
 
 pub async fn merge_pr_async(
@@ -88,49 +89,12 @@ pub async fn merge_pr_async(
             success: false,
             message: format!("gh pr merge failed: {}", stderr),
             git_fetched: false,
+            branch_name,
         });
     }
 
     let merge_msg = String::from_utf8_lossy(&output.stdout).trim().to_string();
     info!(pr_number = pr_number.as_u64(), "PR merged successfully");
-
-    // Cleanup child worktree if it exists
-    if let Some((_, slug)) = branch_name.rsplit_once('.') {
-        let worktree_path = std::path::PathBuf::from(dir)
-            .join(".exo")
-            .join("worktrees")
-            .join(slug);
-
-        if worktree_path.exists() {
-            info!(
-                path = %worktree_path.display(),
-                slug = %slug,
-                "Cleaning up child worktree after successful merge"
-            );
-            let git_wt_clone = git_wt.clone();
-            let path_clone = worktree_path.clone();
-            let cleanup_result =
-                tokio::task::spawn_blocking(move || git_wt_clone.remove_workspace(&path_clone))
-                    .await;
-
-            match cleanup_result {
-                Ok(Ok(())) => info!(
-                    path = %worktree_path.display(),
-                    "Worktree cleaned up successfully"
-                ),
-                Ok(Err(e)) => warn!(
-                    error = %e,
-                    path = %worktree_path.display(),
-                    "Failed to clean up worktree (non-fatal)"
-                ),
-                Err(e) => warn!(
-                    error = %e,
-                    path = %worktree_path.display(),
-                    "Worktree cleanup task failed (non-fatal)"
-                ),
-            }
-        }
-    }
 
     // Step 2: git fetch (best-effort, pulls merged changes)
     let dir_path = std::path::PathBuf::from(dir);
@@ -160,5 +124,6 @@ pub async fn merge_pr_async(
             merge_msg
         },
         git_fetched,
+        branch_name,
     })
 }
