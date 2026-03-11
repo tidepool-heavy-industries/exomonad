@@ -77,6 +77,8 @@ tests/integration/external-consumer/result
 tests/integration/external-consumer/.exomonad/wasm/
 tests/integration/external-consumer/.exo/wasm/
 
+# Symlinked proto directory for Rust (deduplicated to root proto/)
+
 # Jujutsu state
 .jj/
 .gemini/settings.json

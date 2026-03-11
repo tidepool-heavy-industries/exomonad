@@ -9,9 +9,9 @@ rust/exomonad-proto/
 ├── Cargo.toml
 ├── CLAUDE.md
 ├── build.rs        # prost-build configuration
-├── proto/          # Vendored proto files (for crates.io publishing)
-│   ├── exomonad/   # Core types (ffi, common, hook, agent, popup)
-│   └── effects/    # Effect message types (git, github, agent, etc.)
+├── proto/          # Symlinked proto files (deduplicated to repo root)
+│   ├── exomonad/   # Symlink to ../../../proto/exomonad
+│   └── effects/    # Symlink to ../../../proto/effects
 └── src/
     └── lib.rs      # Module declarations and re-exports
 ```
@@ -20,20 +20,11 @@ Generated code goes to `$OUT_DIR/exomonad.*.rs`.
 
 ## Code Generation
 
-Types are generated at build time via `prost-build`:
+Types are generated at build time via `prost-build`.
 
-```rust
-// build.rs — uses vendored proto files within the crate
-config.compile_protos(&[
-    "proto/exomonad/ffi.proto",
-    "proto/exomonad/common.proto",
-    "proto/exomonad/hook.proto",
-    "proto/exomonad/agent.proto",
-    "proto/exomonad/popup.proto",
-], &["proto/"])?;
-```
+**Deduplication:** Proto files are symlinked from the repository root `proto/` directory to ensure a single source of truth.
 
-Proto files are vendored into `proto/` (copied from the repo root `proto/` directory) so that `cargo publish` can include them in the crate tarball.
+**Windows/Packaging Note:** If building on a platform that does not support symlinks, or when preparing for `cargo publish`, these symlinks should be replaced with actual copies of the `.proto` files.
 
 ## JSON Wire Format
 

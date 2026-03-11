@@ -62,6 +62,15 @@ prReviewHandler (FixesPushed n ci) = do
     }
   pure (NotifyParentAction (Tpl.fixesPushed n ci) n)
 
+prReviewHandler (CommitsPushed n ci) = do
+  void $ suspendEffect_ @Log.LogInfo $ Log.InfoRequest
+    { Log.infoRequestMessage = TL.fromStrict $
+        "[PRReviewHandler] New commits pushed on PR #" <> T.pack (show n)
+        <> ", CI: " <> ci
+    , Log.infoRequestFields = ""
+    }
+  pure (NotifyParentAction (Tpl.commitsPushed n ci) n)
+
 -- | Handle sibling merged events.
 siblingMergedHandler :: SiblingMergedEvent -> Eff HookEffects EventAction
 siblingMergedHandler (SiblingMergedEvent merged parent _prNum) = do

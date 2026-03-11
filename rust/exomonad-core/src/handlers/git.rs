@@ -119,8 +119,14 @@ impl GitEffects for GitHandler {
                 short_sha: c.hash.chars().take(7).collect(),
                 message: c.message,
                 author: c.author.clone(),
-                author_email: extract_email(&c.author).unwrap_or_default(),
-                timestamp: parse_git_date(&c.date).unwrap_or(0),
+                author_email: extract_email(&c.author).unwrap_or_else(|| {
+                    tracing::debug!(author = %c.author, "Could not extract email from git author");
+                    String::new()
+                }),
+                timestamp: parse_git_date(&c.date).unwrap_or_else(|| {
+                    tracing::debug!(date = %c.date, "Could not parse git date");
+                    0
+                }),
             })
             .collect();
 
@@ -184,8 +190,14 @@ impl GitEffects for GitHandler {
         info!(branch = %info.branch, "[Git] get_repo_info complete");
         Ok(GetRepoInfoResponse {
             branch: info.branch,
-            owner: info.owner.map(Into::into).unwrap_or_default(),
-            name: info.name.map(Into::into).unwrap_or_default(),
+            owner: info.owner.map(Into::into).unwrap_or_else(|| {
+                tracing::debug!("Could not determine repo owner from remote URL");
+                String::new()
+            }),
+            name: info.name.map(Into::into).unwrap_or_else(|| {
+                tracing::debug!("Could not determine repo name from remote URL");
+                String::new()
+            }),
         })
     }
 

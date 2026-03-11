@@ -612,14 +612,14 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
 
     // Preflight: warn if XDG_RUNTIME_DIR missing (SSH edge case)
     if std::env::var("XDG_RUNTIME_DIR").is_err() {
-        eprintln!("Warning: XDG_RUNTIME_DIR not set. Zellij may fail to find sessions.");
+        warn!("XDG_RUNTIME_DIR not set. Zellij may fail to find sessions.");
     }
 
     // Bootstrap: create .exo/config.toml if missing
     let cwd = std::env::current_dir()?;
     let config_path = cwd.join(".exo/config.toml");
     if !config_path.exists() {
-        eprintln!("Bootstrapping .exo/config.toml");
+        info!("Bootstrapping .exo/config.toml");
         std::fs::create_dir_all(cwd.join(".exo"))?;
         std::fs::write(
             &config_path,
@@ -641,7 +641,7 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     if !wasm_path.exists() {
         let roles_dir = cwd.join(".exo/roles");
         if roles_dir.is_dir() {
-            eprintln!("WASM not found at {}, building...", wasm_path.display());
+            info!(path = %wasm_path.display(), "WASM not found, building...");
             exomonad::recompile::run_recompile(
                 &config.wasm_name,
                 &cwd,
@@ -649,10 +649,9 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
             )
             .await?;
         } else {
-            eprintln!(
-                "Warning: No WASM at {} and no .exo/roles/ to build from.\n\
-                 Copy roles from exomonad: cp -r /path/to/exomonad/.exo/roles .exo/roles",
-                wasm_path.display()
+            warn!(
+                path = %wasm_path.display(),
+                "No WASM at path and no .exo/roles/ to build from. Copy roles from exomonad: cp -r /path/to/exomonad/.exo/roles .exo/roles"
             );
         }
     }
@@ -661,7 +660,7 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     let binary_path = exomonad_core::find_exomonad_binary();
     exomonad_core::hooks::HookConfig::write_persistent(&cwd, &binary_path, None)
         .context("Failed to write hook configuration")?;
-    eprintln!("Hook configuration written to .claude/settings.local.json");
+    info!("Hook configuration written to .claude/settings.local.json");
 
     // Write Gemini MCP configuration if root agent is Gemini
     if config.root_agent_type == AgentType::Gemini {
@@ -684,7 +683,7 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
 
         let settings = serde_json::json!({ "mcpServers": mcp_servers });
         std::fs::write(&settings_path, serde_json::to_string_pretty(&settings)?)?;
-        eprintln!("Gemini MCP configuration written to .gemini/settings.json");
+        info!("Gemini MCP configuration written to .gemini/settings.json");
     }
 
     // Query existing sessions
@@ -712,7 +711,7 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
                     use nix::unistd::Pid;
                     let pid = Pid::from_raw(pid as i32);
                     if signal::kill(pid, None).is_ok() {
-                        eprintln!("Stopping server (PID {})", pid);
+                        info!(pid = pid.as_raw(), "Stopping server");
                         let _ = signal::kill(pid, signal::Signal::SIGTERM);
                         // Wait briefly for graceful shutdown
                         for _ in 0..10 {
@@ -731,35 +730,35 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
             let _ = std::fs::remove_file(&sock);
         }
 
-        eprintln!("Deleting session (--recreate): {}", session);
+        info!(session = %session, "Deleting session (--recreate)");
         let status = std::process::Command::new("zellij")
             .args(["delete-session", "--force", &session])
             .status()
             .context("Failed to run zellij delete-session")?;
         if !status.success() {
-            eprintln!("Warning: zellij delete-session exited with {}", status);
+            warn!(status = %status, "zellij delete-session failed");
         }
     } else if session_alive {
         // Attach to running session (exec replaces process, releasing the binary)
-        eprintln!("Attaching to session: {}", session);
+        info!(session = %session, "Attaching to session");
         let err = std::process::Command::new("zellij")
             .args(["attach", &session])
             .exec();
         return Err(anyhow::anyhow!("exec zellij attach failed: {}", err));
     } else if session_exited {
         // Kill stale serialized state to prevent resurrection
-        eprintln!("Cleaning up exited session: {}", session);
+        info!(session = %session, "Cleaning up exited session");
         let status = std::process::Command::new("zellij")
             .args(["delete-session", &session])
             .status()
             .context("Failed to run zellij delete-session")?;
         if !status.success() {
-            eprintln!("Warning: zellij delete-session exited with {}", status);
+            warn!(status = %status, "zellij delete-session failed");
         }
     }
 
     // Create fresh session from layout
-    eprintln!("Creating session: {}", session);
+    info!(session = %session, "Creating session");
 
     // 1. Start server tab
     // Server tab runs the binary directly (no shell_command wrapper).
@@ -768,7 +767,7 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     // causing the health check to timeout.
     let server_layout_path = generate_server_layout(None)?;
 
-    eprintln!("Starting server...");
+    info!("Starting server...");
     // Create zellij session with server layout in background (fork, don't attach).
     // `-n` creates the session with the layout; spawning without waiting keeps it detached.
     let mut child = std::process::Command::new("zellij")
@@ -802,7 +801,7 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
         cwd.join(".mcp.json"),
         serde_json::to_string_pretty(&mcp_json)?,
     )?;
-    eprintln!("Wrote .mcp.json with stdio MCP config");
+    info!("Wrote .mcp.json with stdio MCP config");
 
     // 3. Start TL tab (only if one doesn't already exist)
     let tab_output = std::process::Command::new("zellij")
@@ -814,9 +813,9 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     let tl_tab_exists = tab_names.lines().any(|l| l.trim() == "TL");
 
     if tl_tab_exists {
-        eprintln!("TL tab already exists, skipping creation");
+        info!("TL tab already exists, skipping creation");
     } else {
-        eprintln!("Server healthy, starting TL tab...");
+        info!("Server healthy, starting TL tab...");
     }
 
     let tl_layout_path = generate_tl_tab_layout(
@@ -842,7 +841,7 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     }
 
     // 4. Attach (exec replaces process, releasing the binary for hot-swap)
-    eprintln!("Attaching to session: {}", session);
+    info!(session = %session, "Attaching to session");
     let err = std::process::Command::new("zellij")
         .args(["attach", &session])
         .exec();
@@ -886,7 +885,7 @@ fn ensure_gitignore(project_dir: &std::path::Path) -> Result<()> {
         writeln!(file, "{}", line)?;
     }
 
-    eprintln!("Updated .gitignore with .exo/ entries");
+    info!("Updated .gitignore with .exo/ entries");
     Ok(())
 }
 
@@ -896,7 +895,7 @@ async fn wait_for_server_socket(project_dir: &std::path::Path) -> Result<()> {
     let start = Instant::now();
     let timeout_dur = Duration::from_secs(30);
 
-    eprintln!("Waiting for server socket...");
+    debug!("Waiting for server socket...");
 
     // Phase 1: Wait for socket file to exist
     while start.elapsed() < timeout_dur {
@@ -1023,7 +1022,7 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let log_dir = PathBuf::from(".exo/logs");
     let file_ok = std::fs::create_dir_all(&log_dir).is_ok();
     if !file_ok {
-        eprintln!("Failed to create .exo/logs/. Falling back to stderr-only logging.");
+        warn!("Failed to create .exo/logs/. Falling back to stderr-only logging.");
     }
 
     let env_filter = tracing_subscriber::EnvFilter::from_default_env()
@@ -1263,7 +1262,12 @@ async fn main() -> Result<()> {
                 project_dir.clone(),
                 event_log.clone(),
             ));
-            builder = builder.with_handlers(exomonad_core::git_handlers(git, github, git_wt));
+            builder = builder.with_handlers(exomonad_core::git_handlers(
+                git,
+                github,
+                git_wt,
+                event_log.clone(),
+            ));
             let orch_handlers = exomonad_core::orchestration_handlers(
                 agent_control.clone(),
                 event_queue.clone(),
@@ -1683,7 +1687,7 @@ async fn main() -> Result<()> {
                 match found {
                     Some(s) => s,
                     None => {
-                        eprintln!(
+                        warn!(
                             "exomonad hook: server socket not found after {}s",
                             timeout_dur.as_secs()
                         );
@@ -1695,7 +1699,7 @@ async fn main() -> Result<()> {
                 match uds_client::find_server_socket() {
                     Ok(s) => s,
                     Err(e) => {
-                        eprintln!("exomonad hook: {}", e);
+                        warn!("exomonad hook: {}", e);
                         println!(r#"{{"continue":true}}"#);
                         return Ok(());
                     }
@@ -1708,7 +1712,7 @@ async fn main() -> Result<()> {
             let json_body: serde_json::Value = match serde_json::from_str(&body) {
                 Ok(v) => v,
                 Err(e) => {
-                    eprintln!("exomonad hook: invalid JSON: {}", e);
+                    warn!("exomonad hook: invalid JSON: {}", e);
                     println!(r#"{{"continue":true}}"#);
                     return Ok(());
                 }
@@ -1725,7 +1729,7 @@ async fn main() -> Result<()> {
                     }
                 }
                 Err(e) => {
-                    eprintln!("exomonad hook: {}", e);
+                    warn!("exomonad hook: {}", e);
                     println!(r#"{{"continue":true}}"#);
                 }
             }
