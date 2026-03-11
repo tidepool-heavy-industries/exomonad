@@ -68,7 +68,7 @@ pub async fn notify_parent_delivery(
 ) -> DeliveryResult {
     // 1. Log to event log
     if let Some(log) = event_log {
-        let _ = log.append(
+        if let Err(e) = log.append(
             "agent.notify_parent",
             agent_id,
             &serde_json::json!({
@@ -76,7 +76,9 @@ pub async fn notify_parent_delivery(
                 "status": status,
                 "message": message,
             }),
-        );
+        ) {
+            tracing::warn!(error = %e, "Failed to write notify_parent event");
+        }
     }
 
     // 2. Publish to event queue
@@ -117,14 +119,16 @@ pub async fn notify_parent_delivery(
             DeliveryResult::Zellij => "zellij_stdin",
             DeliveryResult::Failed => "failed",
         };
-        let _ = log.append(
+        if let Err(e) = log.append(
             "agent.message_delivered",
             agent_id,
             &serde_json::json!({
                 "parent": parent_session_id,
                 "method": delivery_method,
             }),
-        );
+        ) {
+            tracing::warn!(error = %e, "Failed to write message_delivered event");
+        }
     }
 
     delivery_result

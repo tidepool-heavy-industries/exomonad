@@ -275,7 +275,9 @@ impl HookConfig {
 
                         // Write back cleaned settings
                         if let Ok(cleaned) = serde_json::to_string_pretty(&settings) {
-                            fs::write(&self.settings_path, cleaned).ok();
+                            if let Err(e) = fs::write(&self.settings_path, cleaned) {
+                                tracing::warn!(path = %self.settings_path.display(), error = %e, "Failed to write cleaned settings");
+                            }
                         }
                     }
                 }
