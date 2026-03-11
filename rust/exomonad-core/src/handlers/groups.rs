@@ -46,11 +46,20 @@ pub fn git_handlers(
     git: Arc<GitService>,
     github: Option<GitHubService>,
     git_wt: Arc<GitWorktreeService>,
+    event_log: Option<Arc<EventLog>>,
 ) -> Vec<Box<dyn EffectHandler>> {
+    let mut file_pr_handler = FilePRHandler::new(git_wt.clone());
+    let mut merge_pr_handler = MergePRHandler::new(git_wt);
+
+    if let Some(ref log) = event_log {
+        file_pr_handler = file_pr_handler.with_event_log(log.clone());
+        merge_pr_handler = merge_pr_handler.with_event_log(log.clone());
+    }
+
     let mut handlers: Vec<Box<dyn EffectHandler>> = vec![
         Box::new(GitHandler::new(git)),
-        Box::new(FilePRHandler::new(git_wt.clone())),
-        Box::new(MergePRHandler::new(git_wt)),
+        Box::new(file_pr_handler),
+        Box::new(merge_pr_handler),
         Box::new(CopilotHandler::new()),
     ];
     if let Some(gh) = github {
@@ -138,7 +147,7 @@ mod tests {
         let git = Arc::new(GitService::new(Arc::new(MockExecutor)));
         let git_wt = Arc::new(GitWorktreeService::new(tmp.path().to_path_buf()));
 
-        let handlers = git_handlers(git, None, git_wt);
+        let handlers = git_handlers(git, None, git_wt, None);
         assert_eq!(handlers.len(), 4);
         let namespaces: Vec<_> = handlers.iter().map(|h| h.namespace()).collect();
         assert!(namespaces.contains(&"git"));
@@ -155,7 +164,7 @@ mod tests {
         let git_wt = Arc::new(GitWorktreeService::new(tmp.path().to_path_buf()));
         let github = GitHubService::new("test-token".to_string()).unwrap();
 
-        let handlers = git_handlers(git, Some(github), git_wt);
+        let handlers = git_handlers(git, Some(github), git_wt, None);
         assert_eq!(handlers.len(), 5);
         let namespaces: Vec<_> = handlers.iter().map(|h| h.namespace()).collect();
         assert!(namespaces.contains(&"github"));

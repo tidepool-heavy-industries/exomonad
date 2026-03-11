@@ -1,17 +1,27 @@
 use crate::effects::{dispatch_merge_pr_effect, EffectResult, MergePrEffects, ResultExt};
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::merge_pr;
+use crate::services::event_log::EventLog;
 use async_trait::async_trait;
 use exomonad_proto::effects::merge_pr::*;
 use std::sync::Arc;
 
 pub struct MergePRHandler {
     git_wt: Arc<GitWorktreeService>,
+    event_log: Option<Arc<EventLog>>,
 }
 
 impl MergePRHandler {
     pub fn new(git_wt: Arc<GitWorktreeService>) -> Self {
-        Self { git_wt }
+        Self {
+            git_wt,
+            event_log: None,
+        }
+    }
+
+    pub fn with_event_log(mut self, log: Arc<EventLog>) -> Self {
+        self.event_log = Some(log);
+        self
     }
 }
 
@@ -22,7 +32,7 @@ impl MergePrEffects for MergePRHandler {
     async fn merge_pr(
         &self,
         req: MergePrRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<MergePrResponse> {
         let pr_number = crate::domain::PRNumber::new(req.pr_number as u64);
         tracing::info!(pr_number = pr_number.as_u64(), strategy = %req.strategy, "[MergePR] merge_pr starting");
@@ -39,6 +49,23 @@ impl MergePrEffects for MergePRHandler {
             git_fetched = result.git_fetched,
             "[MergePR] merge_pr complete"
         );
+
+        if let Some(ref log) = self.event_log {
+            if result.success {
+                if let Err(e) = log.append(
+                    "pr.merged",
+                    &ctx.agent_name.to_string(),
+                    &serde_json::json!({
+                        "pr_number": pr_number.as_u64(),
+                        "strategy": req.strategy,
+                        "git_fetched": result.git_fetched,
+                    }),
+                ) {
+                    tracing::warn!(error = %e, "Failed to write event log");
+                }
+            }
+        }
+
         Ok(MergePrResponse {
             success: result.success,
             message: result.message,
