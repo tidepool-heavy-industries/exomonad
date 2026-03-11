@@ -10,6 +10,7 @@ module ExoMonad.Guest.Types.Permissions
   ) where
 
 import Data.Text (Text)
+import Data.Maybe (fromMaybe)
 import Data.Aeson (FromJSON(..), withObject, (.:?))
 import ExoMonad.Guest.Tool.Schema (JsonSchema(..))
 import GHC.Generics (Generic)
@@ -40,8 +41,8 @@ instance FromJSON ClaudePermissions where
     allow <- v .:? "allow"
     deny  <- v .:? "deny"
     pure $ ClaudePermissions
-      { cpAllow = map CustomPat (maybe [] id allow)
-      , cpDeny  = map CustomPat (maybe [] id deny)
+      { cpAllow = map CustomPat (fromMaybe [] allow)
+      , cpDeny  = map CustomPat (fromMaybe [] deny)
       }
 
 -- | Render a ToolPattern to the string format Claude Code expects.
