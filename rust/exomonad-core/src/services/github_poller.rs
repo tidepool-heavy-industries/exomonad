@@ -508,6 +508,25 @@ impl GitHubPoller {
                         self.handle_event_action(action, branch, agent_type, pr_number)
                             .await;
                     }
+                } else {
+                    // New commits pushed outside of a review-response cycle.
+                    // Notify parent so TL knows the agent is active.
+                    if let Ok(Some(action)) = self
+                        .call_handle_event(
+                            branch,
+                            agent_type,
+                            "pr_review",
+                            serde_json::json!({
+                                "kind": "commits_pushed",
+                                "pr_number": pr_number.as_u64(),
+                                "ci_status": ci_status,
+                            }),
+                        )
+                        .await
+                    {
+                        self.handle_event_action(action, branch, agent_type, pr_number)
+                            .await;
+                    }
                 }
             }
 
