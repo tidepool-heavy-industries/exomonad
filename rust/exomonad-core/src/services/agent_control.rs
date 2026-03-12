@@ -1962,15 +1962,6 @@ impl AgentControlService {
             .context("tokio task join error")?
             .context("Failed to create Zellij tab via IPC")?;
 
-        // Rename pane via direct IPC
-        let ipc = self.ipc()?;
-        let pane_name = name.to_string();
-        match tokio::task::spawn_blocking(move || ipc.rename_pane(&pane_name)).await {
-            Ok(Err(e)) => tracing::warn!(error = %e, "Zellij pane rename failed"),
-            Err(e) => tracing::warn!(error = %e, "Zellij pane rename task panicked"),
-            Ok(Ok(())) => {}
-        }
-
         Ok(())
     }
 
@@ -2087,15 +2078,6 @@ impl AgentControlService {
         .await
         .context("tokio task join error")?
         .context("zellij new-pane IPC failed")?;
-
-        // Rename pane via direct IPC
-        let ipc = self.ipc()?;
-        let rename_target = name.to_string();
-        match tokio::task::spawn_blocking(move || ipc.rename_pane(&rename_target)).await {
-            Ok(Err(e)) => tracing::warn!(error = %e, "Zellij pane rename failed"),
-            Err(e) => tracing::warn!(error = %e, "Zellij pane rename task panicked"),
-            Ok(Ok(())) => {}
-        }
 
         info!(name, "Successfully created Zellij pane");
         Ok(())
