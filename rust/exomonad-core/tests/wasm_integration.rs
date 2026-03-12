@@ -355,6 +355,7 @@ impl EffectHandler for MockMergePRHandler {
                 success: true,
                 message: "Merged PR #42".into(),
                 git_fetched: true,
+                branch_name: String::new(),
             }
             .encode_to_vec()),
             _ => Err(EffectError::not_found(format!(

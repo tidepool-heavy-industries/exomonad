@@ -135,29 +135,31 @@ fn create_pr(
     head: &str,
     dir: &str,
 ) -> Result<GhPr, FilePrError> {
-    // gh pr create outputs the PR URL to stdout on success (no --json support)
+    // gh pr create outputs the PR URL to stdout (no --json support)
     let url = cmd!(
         "gh", "pr", "create", "--title", title, "--body", body, "--base", base, "--head", head
     )
     .dir(dir)
     .read()
     .map_err(|e| FilePrError::Create(e.to_string()))?;
-    info!("[FilePR] Created PR: {}", url.trim());
+    let url = url.trim().to_string();
+    info!("[FilePR] Created PR: {}", url);
 
-    // Fetch structured PR data via `gh pr view` using the branch name (stable, no URL parsing)
-    let view_json = cmd!(
-        "gh",
-        "pr",
-        "view",
-        head,
-        "--json",
-        "number,url,headRefName,baseRefName"
-    )
-    .dir(dir)
-    .read()
-    .map_err(|e| FilePrError::Create(format!("gh pr view after create: {e}")))?;
+    let number = parse_pr_number_from_url(&url).ok_or_else(|| {
+        FilePrError::Create(format!("could not parse PR number from URL: {url}"))
+    })?;
 
-    serde_json::from_str(&view_json).map_err(|e| FilePrError::Create(format!("JSON parse: {e}")))
+    Ok(GhPr {
+        number,
+        url,
+        head_ref_name: head.to_string(),
+        base_ref_name: base.to_string(),
+    })
+}
+
+/// Parse a PR number from a GitHub PR URL (e.g., "https://github.com/.../pull/123" → 123).
+fn parse_pr_number_from_url(url: &str) -> Option<u64> {
+    url.rsplit('/').next().and_then(|s| s.parse().ok())
 }
 
 // ============================================================================
@@ -270,6 +272,24 @@ pub async fn file_pr_async(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_pr_number_from_url() {
+        assert_eq!(
+            parse_pr_number_from_url("https://github.com/owner/repo/pull/123"),
+            Some(123)
+        );
+        assert_eq!(
+            parse_pr_number_from_url("https://github.com/owner/repo/pull/1"),
+            Some(1)
+        );
+        assert_eq!(parse_pr_number_from_url("not-a-url"), None);
+        assert_eq!(parse_pr_number_from_url(""), None);
+        assert_eq!(
+            parse_pr_number_from_url("https://github.com/owner/repo/pull/abc"),
+            None
+        );
+    }
 
     #[test]
     fn test_detect_base_branch_explicit() {
