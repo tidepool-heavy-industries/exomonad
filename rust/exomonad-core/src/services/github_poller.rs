@@ -32,6 +32,7 @@ pub struct GitHubPoller {
 }
 
 /// A Copilot review comment with optional file context.
+#[derive(Clone, serde::Serialize)]
 struct CopilotComment {
     body: String,
     path: Option<String>,
@@ -39,6 +40,7 @@ struct CopilotComment {
 }
 
 /// A Copilot review with typed state.
+#[derive(Clone, serde::Serialize)]
 struct CopilotReview {
     body: String,
     state: ReviewState,
@@ -50,7 +52,8 @@ struct WorktreeBranch {
     agent_type: AgentType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 enum ReviewState {
     None,
     ChangesRequested,
@@ -486,6 +489,8 @@ impl GitHubPoller {
             EmitEvent {
                 status: String,
                 message: String,
+                comments: Option<Vec<CopilotComment>>,
+                reviews: Option<Vec<CopilotReview>>,
             },
         }
         let mut pending_actions = Vec::new();
@@ -536,6 +541,8 @@ impl GitHubPoller {
                         pending_actions.push(PendingAction::EmitEvent {
                             status: "copilot_review".to_string(),
                             message: message.clone(),
+                            comments: Some(copilot_comments.clone()),
+                            reviews: Some(copilot_reviews.clone()),
                         });
 
                         // Fire WASM event handler
@@ -602,6 +609,8 @@ impl GitHubPoller {
                     pending_actions.push(PendingAction::EmitEvent {
                         status: ci_status.clone(),
                         message: format!("[CI STATUS: {}] {}", branch, ci_status),
+                        comments: None,
+                        reviews: None,
                     });
                     old_state.last_ci_status = ci_status;
                 }
@@ -658,8 +667,8 @@ impl GitHubPoller {
                             .await;
                     }
                 }
-                PendingAction::EmitEvent { status, message } => {
-                    self.emit_event(branch, &status, &message, agent_type, Some(pr_number))
+                PendingAction::EmitEvent { status, message, comments, reviews } => {
+                    self.emit_event_with_reviews(branch, &status, &message, agent_type, Some(pr_number), comments, reviews)
                         .await;
                 }
             }
@@ -850,20 +859,34 @@ impl GitHubPoller {
         msg
     }
 
+    #[allow(dead_code)]
     async fn emit_event(
+        &self,
+        branch: &str,
+        status: &str,
+        message: &str,
+        agent_type: AgentType,
+        pr_number: Option<PRNumber>,
+    ) {
+        self.emit_event_with_reviews(branch, status, message, agent_type, pr_number, None, None)
+            .await;
+    }
+
+    async fn emit_event_with_reviews(
         &self,
         branch: &str,
         status: &str,
         message: &str,
         _agent_type: AgentType,
         _pr_number: Option<PRNumber>,
+        comments: Option<Vec<CopilotComment>>,
+        reviews: Option<Vec<CopilotReview>>,
     ) {
         info!(
             "Emitting event for branch {}: {} - {}",
             branch, status, message
         );
 
-        // Write to JSONL event log
         if let Some(ref log) = self.event_log {
             let event_type = match status {
                 "copilot_review" => "copilot.review",
@@ -872,17 +895,22 @@ impl GitHubPoller {
                 "pending" => "ci.status_changed",
                 other => other,
             };
-            let data = serde_json::json!({
+            let mut data = serde_json::json!({
                 "branch": branch,
                 "status": status,
                 "message": message,
             });
+            if let Some(comments) = comments {
+                data["comments"] = serde_json::to_value(&comments).unwrap_or_default();
+            }
+            if let Some(reviews) = reviews {
+                data["reviews"] = serde_json::to_value(&reviews).unwrap_or_default();
+            }
             if let Err(e) = log.append(event_type, branch, &data) {
                 warn!("Failed to write poller event to JSONL log: {}", e);
             }
         }
 
-        // Queue event to owning agent (branch name IS the agent's session_id)
         let event = Event {
             event_id: 0,
             event_type: Some(EventType::AgentMessage(AgentMessage {

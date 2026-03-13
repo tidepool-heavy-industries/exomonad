@@ -63,6 +63,17 @@ impl MergePrEffects for MergePRHandler {
                 ) {
                     tracing::warn!(error = %e, "Failed to write event log");
                 }
+            } else {
+                if let Err(e) = log.append(
+                    "pr.merge_failed",
+                    &ctx.agent_name.to_string(),
+                    &serde_json::json!({
+                        "pr_number": pr_number.as_u64(),
+                        "error": &result.message,
+                    }),
+                ) {
+                    tracing::warn!(error = %e, "Failed to write pr.merge_failed event");
+                }
             }
         }
 

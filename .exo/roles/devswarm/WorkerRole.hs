@@ -7,7 +7,8 @@
 module WorkerRole (config, Tools) where
 
 import ExoMonad
-import ExoMonad.Guest.Types (allowResponse, allowStopResponse, postToolUseResponse)
+import ExoMonad.Guest.Types (allowResponse, allowStopResponse)
+import Telemetry (telemetryPostToolUse)
 import ExoMonad.Types (HookConfig (..), defaultSessionStartHook)
 
 data Tools mode = Tools
@@ -30,7 +31,7 @@ config =
       hooks =
         HookConfig
           { preToolUse = \_ -> pure (allowResponse Nothing),
-            postToolUse = \_ -> pure (postToolUseResponse Nothing),
+            postToolUse = telemetryPostToolUse,
             onStop = \_ -> pure allowStopResponse,
             onSubagentStop = \_ -> pure allowStopResponse,
             onSessionStart = defaultSessionStartHook

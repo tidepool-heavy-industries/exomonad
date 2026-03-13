@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Kaizen: DuckDB-powered swarm analysis
+#
+# Usage:
+#   kaizen                    # interactive DuckDB with views loaded
+#   kaizen "SELECT ..."       # one-shot query
+#   kaizen summary            # shortcut for swarm_summary
+#   kaizen agents             # shortcut for agent_lifecycles
+#   kaizen prs                # shortcut for pr_pipeline
+#   kaizen tools              # shortcut for tool_summary
+#   kaizen reviews            # shortcut for copilot_reviews
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SQL_FILE="$SCRIPT_DIR/kaizen.sql"
+EVENTS_FILE="$SCRIPT_DIR/events.jsonl"
+
+if [ ! -f "$EVENTS_FILE" ]; then
+  echo "No event log found at $EVENTS_FILE" >&2
+  exit 1
+fi
+
+# SQL uses relative path '.exo/events.jsonl', so cd to repo root
+cd "$SCRIPT_DIR/.." || exit 1
+
+case "${1:-}" in
+  summary)  QUERY="SELECT * FROM swarm_summary" ;;
+  agents)   QUERY="SELECT * FROM agent_lifecycles ORDER BY spawned_at" ;;
+  prs)      QUERY="SELECT * FROM pr_pipeline ORDER BY filed_at" ;;
+  tools)    QUERY="SELECT * FROM tool_summary" ;;
+  reviews)  QUERY="SELECT * FROM copilot_reviews ORDER BY review_ts" ;;
+  "")       exec duckdb -init "$SQL_FILE" ;;
+  *)        QUERY="$1" ;;
+esac
+
+duckdb -init "$SQL_FILE" -c "$QUERY"

@@ -324,6 +324,7 @@ impl AgentEffects for AgentHandler {
                     "branch": &agent_info.branch_name,
                     "worktree": &agent_info.worktree_path,
                     "spawn_type": "subtree",
+                    "slug": agent_info.branch_name.rsplit_once('.').map(|(_, s)| s).unwrap_or(&agent_info.branch_name),
                 }),
             ) {
                 warn!(error = %e, "Failed to write agent.spawned event");
@@ -372,6 +373,7 @@ impl AgentEffects for AgentHandler {
                     "branch": &agent_info.branch_name,
                     "worktree": &agent_info.worktree_path,
                     "spawn_type": "leaf_subtree",
+                    "slug": agent_info.branch_name.rsplit_once('.').map(|(_, s)| s).unwrap_or(&agent_info.branch_name),
                 }),
             ) {
                 warn!(error = %e, "Failed to write agent.spawned event");
@@ -476,6 +478,7 @@ impl AgentEffects for AgentHandler {
                     "branch": &agent_info.branch_name,
                     "worktree": &agent_info.worktree_path,
                     "spawn_type": "acp",
+                    "slug": &agent_info.id,
                 }),
             ) {
                 warn!(error = %e, "Failed to write agent.spawned event");
