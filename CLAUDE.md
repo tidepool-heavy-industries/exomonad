@@ -251,6 +251,23 @@ This is **native Claude Code Teams integration**. Messages from child agents arr
 | **GitHub poller** (PR status → events) | Built. Background service polls PR/CI status, fires WASM event handlers, and injects notifications into agent panes. Tracks `first_seen`, `last_review_state`, and `notified_parent_timeout` per PR. |
 | **Event log** (JSONL structured events) | Built. `.exo/events.jsonl` — append-only JSONL. Query with `duckdb -c "SELECT * FROM read_json_auto('.exo/events.jsonl')"` (DuckDB available in dev shell). Events: `agent.spawned`, `agent.completed`, `tool.called`, `pr.filed`, `pr.merged`, `pr.merge_failed`, `copilot.review` (with structured `comments`/`reviews` arrays), `ci.status_changed`. Tool telemetry emitted via PostToolUse hook; spawn events include `slug` field. |
 | **Coordination mutexes** | Built. In-memory `MutexRegistry` with FIFO wait queues, TTL auto-expiry, idempotent acquire. Effect-only (`coordination.acquire_mutex`, `coordination.release_mutex`) — no MCP tool exposed. |
+| **Kaizen analysis** (DuckDB views) | Built. `.exo/kaizen.sql` defines views over event log. `.exo/bin/kaizen` wrapper for one-shot queries and interactive exploration. Views: `swarm_summary`, `agent_lifecycles`, `pr_pipeline`, `tool_usage`, `tool_summary`, `copilot_reviews`. |
+
+### Kaizen Analysis
+
+DuckDB-powered analysis of the event log (`.exo/events.jsonl`). No custom binary — SQL views over structured JSONL.
+
+```bash
+.exo/bin/kaizen summary     # one-row swarm overview
+.exo/bin/kaizen agents      # agent lifecycles with duration
+.exo/bin/kaizen prs         # PR pipeline (filed → merged)
+.exo/bin/kaizen tools       # tool usage summary
+.exo/bin/kaizen reviews     # Copilot review history
+.exo/bin/kaizen             # interactive DuckDB session
+.exo/bin/kaizen "SELECT agent_id, duration_ms/1000 AS secs FROM agent_lifecycles WHERE status='success' ORDER BY duration_ms"
+```
+
+Views are defined in `.exo/kaizen.sql`. Add new views there — they're available immediately.
 
 ---
 
