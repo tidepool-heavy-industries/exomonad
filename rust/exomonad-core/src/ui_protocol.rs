@@ -26,6 +26,11 @@ pub mod transport {
 
     /// Pipe name for renaming a pane via the plugin.
     pub const RENAME_PANE_PIPE: &str = "exomonad:rename-pane";
+
+    /// Pipe name for registering a stable slug→pane_id mapping in the plugin.
+    /// Sent at worker spawn time so the plugin can resolve the pane by slug
+    /// even after Gemini CLI renames it.
+    pub const REGISTER_PANE_PIPE: &str = "exomonad:register-pane";
 }
 
 // ============================================================================

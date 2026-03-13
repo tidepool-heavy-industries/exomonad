@@ -317,8 +317,8 @@ impl ZellijIpc {
     /// Routes rename through the plugin to avoid mode-switching corruption.
     pub fn rename_pane(&self, name: &str) -> Result<()> {
         debug!(name = %name, "[ZellijIpc] rename_pane");
-        let plugin_path = crate::layout::resolve_plugin_path()
-            .context("Zellij plugin not found")?;
+        let plugin_path =
+            crate::layout::resolve_plugin_path().context("Zellij plugin not found")?;
 
         let payload = serde_json::json!({
             "pane_name": name,

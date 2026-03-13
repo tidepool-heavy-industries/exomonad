@@ -145,9 +145,8 @@ fn create_pr(
     let url = url.trim().to_string();
     info!("[FilePR] Created PR: {}", url);
 
-    let number = parse_pr_number_from_url(&url).ok_or_else(|| {
-        FilePrError::Create(format!("could not parse PR number from URL: {url}"))
-    })?;
+    let number = parse_pr_number_from_url(&url)
+        .ok_or_else(|| FilePrError::Create(format!("could not parse PR number from URL: {url}")))?;
 
     Ok(GhPr {
         number,

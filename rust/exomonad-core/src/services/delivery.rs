@@ -5,7 +5,7 @@ use crate::services::team_registry::TeamRegistry;
 use crate::services::teams_mailbox;
 use crate::services::zellij_events;
 use agent_client_protocol::{Agent, PromptRequest};
-use exomonad_proto::effects::events::{event, Event, AgentMessage};
+use exomonad_proto::effects::events::{event, AgentMessage, Event};
 use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,7 +235,8 @@ pub async fn deliver_to_agent(
                     tokio::spawn(async move {
                         for attempt in 1..=3 {
                             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-                            let is_read = teams_mailbox::is_message_read(&team_name, &inbox_name, &timestamp);
+                            let is_read =
+                                teams_mailbox::is_message_read(&team_name, &inbox_name, &timestamp);
                             info!(
                                 agent = %agent,
                                 team = %team_name,
@@ -310,8 +311,34 @@ pub async fn deliver_to_agent(
         }
     }
 
-    // For worker agents, agent_key is the worker name which matches their pane title.
-    // Pass it as pane_name so the plugin can target the specific pane within a shared tab.
+    // For worker agents (panes in a shared tab), routing.json records the parent tab
+    // and pane display name written at spawn time. Use it if present — the computed
+    // zellij_tab_name is wrong for workers (no such tab exists).
+    let routing_path = project_dir
+        .join(".exo")
+        .join("agents")
+        .join(format!("{}-gemini", agent_key))
+        .join("routing.json");
+    if routing_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&routing_path) {
+            if let Ok(routing) = serde_json::from_str::<serde_json::Value>(&content) {
+                let parent_tab = routing["parent_tab"].as_str().unwrap_or("TL");
+                // slug_key is the stable identifier registered with the plugin at spawn time.
+                // It survives pane renames (e.g. Gemini CLI → "Ready (exomonad)").
+                let slug_key = routing["slug_key"].as_str().unwrap_or(agent_key);
+                info!(
+                    agent = %agent_key,
+                    parent_tab,
+                    slug_key,
+                    chars = message.len(),
+                    "Injecting message into worker pane via routing.json (slug_key)"
+                );
+                zellij_events::inject_input(parent_tab, Some(slug_key), message);
+                return DeliveryResult::Zellij;
+            }
+        }
+    }
+
     debug!(
         tab = %zellij_tab_name,
         agent = %agent_key,

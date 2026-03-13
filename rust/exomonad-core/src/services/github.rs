@@ -542,26 +542,21 @@ impl GitHubService {
             number, "GitHub API: Get PR reviews"
         );
 
-        let response: Vec<serde_json::Value> = timeout(
-            API_TIMEOUT,
-            self.client.get(&route, None::<&()>),
-        )
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "GitHub API get_pr_reviews timed out after {}s",
-                API_TIMEOUT.as_secs()
-            )
-        })??;
+        let response: Vec<serde_json::Value> =
+            timeout(API_TIMEOUT, self.client.get(&route, None::<&()>))
+                .await
+                .map_err(|_| {
+                    anyhow!(
+                        "GitHub API get_pr_reviews timed out after {}s",
+                        API_TIMEOUT.as_secs()
+                    )
+                })??;
 
         let reviews: Vec<Review> = response
             .into_iter()
             .map(|v| Review {
                 id: v["id"].as_u64().unwrap_or(0),
-                author: v["user"]["login"]
-                    .as_str()
-                    .unwrap_or("unknown")
-                    .to_string(),
+                author: v["user"]["login"].as_str().unwrap_or("unknown").to_string(),
                 state: v["state"].as_str().unwrap_or("").to_string(),
                 body: v["body"].as_str().unwrap_or("").to_string(),
                 commit_id: v["commit_id"].as_str().unwrap_or("").to_string(),

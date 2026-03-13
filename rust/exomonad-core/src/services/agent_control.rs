@@ -1069,6 +1069,24 @@ impl AgentControlService {
             let caller_worktree = resolve_agent_working_dir(ctx);
             let absolute_worktree = self.project_dir.join(caller_worktree);
 
+            // Build a stable slug key scoped to the parent's birth branch.
+            // Using birth_branch as prefix ensures uniqueness when multiple TLs
+            // spawn workers with the same name (e.g. "main/test-worker-gemini" vs
+            // "main.feature-a/test-worker-gemini").
+            let slug_key = format!("{}/{}", ctx.birth_branch, internal_name);
+
+            // Write routing info so send_message can target this pane correctly.
+            // Workers are panes in the parent's tab — slug_key is the stable identifier
+            // (survives Gemini CLI pane renaming); the plugin maps slug→pane_id at spawn.
+            let routing = serde_json::json!({
+                "parent_tab": &caller_tab,
+                "slug_key": &slug_key,
+            });
+            fs::write(
+                agent_config_dir.join("routing.json"),
+                serde_json::to_string_pretty(&routing)?,
+            ).await?;
+
             // Spawn pane in caller's tab, cwd = caller's worktree
             self.new_zellij_pane(
                 &display_name,
@@ -1080,6 +1098,11 @@ impl AgentControlService {
                 Some(&options.claude_flags),
             )
             .await?;
+
+            // Register the slug→pane_id mapping in the plugin immediately after spawn.
+            // The plugin resolves display_name → pane_id on first PaneUpdate and stores it
+            // under slug_key, so subsequent lookups by slug survive Gemini's pane rename.
+            super::zellij_events::register_worker_pane(&slug_key, &display_name);
 
             // Register as synthetic team member for Claude Teams messaging
             let team_name = format!("exo-{}", self.effective_birth_branch(Some(&ctx.birth_branch)));
@@ -2141,8 +2164,8 @@ impl AgentControlService {
         // untracked file warnings (which force `git worktree remove --force`).
         let gitignore = target_dir.join(".gitignore");
         if !gitignore.exists() {
-            if let Err(e) = tokio::fs::write(&gitignore, "# Runtime artifacts\nserver.sock\nserver.pid\n")
-                .await
+            if let Err(e) =
+                tokio::fs::write(&gitignore, "# Runtime artifacts\nserver.sock\nserver.pid\n").await
             {
                 tracing::warn!(path = %gitignore.display(), error = %e, "Failed to write .gitignore");
             }

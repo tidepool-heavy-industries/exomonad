@@ -35,15 +35,9 @@ impl std::fmt::Display for PluginState {
 #[serde(tag = "kind")]
 pub enum PluginMessage {
     #[serde(rename = "status")]
-    Status {
-        state: PluginState,
-        message: String,
-    },
+    Status { state: PluginState, message: String },
     #[serde(rename = "close_popup")]
     ClosePopup,
     #[serde(rename = "rename_pane")]
-    RenamePane {
-        pane_name: String,
-        new_name: String,
-    },
+    RenamePane { pane_name: String, new_name: String },
 }

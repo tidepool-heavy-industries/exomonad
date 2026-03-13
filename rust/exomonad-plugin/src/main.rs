@@ -1,13 +1,13 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
-use zellij_tile::prelude::*;
 use ratatui::{
     backend::WindowSize,
-    layout::{Constraint, Direction, Layout, Rect, Size, Position, Alignment},
+    layout::{Alignment, Constraint, Direction, Layout, Position, Rect, Size},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Clear, Padding},
+    widgets::{Block, Borders, Clear, List, ListItem, Padding, Paragraph},
     Terminal,
 };
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use zellij_tile::prelude::*;
 
 mod protocol;
 use exomonad_core::ui_protocol::{self, transport, AgentEvent, CoordinatorAgentState, StateUpdate};
@@ -89,26 +89,39 @@ impl ActiveForm {
         }
     }
 
-    fn compute_interactive_ids(components: &[ui_protocol::Component], state: &ui_protocol::PopupState) -> Vec<String> {
-        components.iter().filter(|c| {
-            // Must be visible
-            if !state.is_visible(c) {
-                return false;
-            }
-            // Must be interactive (not Text or Group)
-            !matches!(c, ui_protocol::Component::Text { .. } | ui_protocol::Component::Group { .. })
-        }).map(|c| c.id().to_string()).collect()
+    fn compute_interactive_ids(
+        components: &[ui_protocol::Component],
+        state: &ui_protocol::PopupState,
+    ) -> Vec<String> {
+        components
+            .iter()
+            .filter(|c| {
+                // Must be visible
+                if !state.is_visible(c) {
+                    return false;
+                }
+                // Must be interactive (not Text or Group)
+                !matches!(
+                    c,
+                    ui_protocol::Component::Text { .. } | ui_protocol::Component::Group { .. }
+                )
+            })
+            .map(|c| c.id().to_string())
+            .collect()
     }
 
     fn recompute_interactive_ids(&mut self) {
-        self.interactive_ids = Self::compute_interactive_ids(&self.definition.components, &self.state);
+        self.interactive_ids =
+            Self::compute_interactive_ids(&self.definition.components, &self.state);
         if self.focused_index >= self.interactive_ids.len() && !self.interactive_ids.is_empty() {
             self.focused_index = self.interactive_ids.len() - 1;
         }
     }
 
     fn focused_id(&self) -> Option<&str> {
-        self.interactive_ids.get(self.focused_index).map(|s| s.as_str())
+        self.interactive_ids
+            .get(self.focused_index)
+            .map(|s| s.as_str())
     }
 
     fn focused_component(&self) -> Option<&ui_protocol::Component> {
@@ -141,7 +154,11 @@ struct ActiveWizard {
 }
 
 impl ActiveWizard {
-    fn new(pipe_id: String, request_id: String, wizard: ui_protocol::WizardDefinition) -> Option<Self> {
+    fn new(
+        pipe_id: String,
+        request_id: String,
+        wizard: ui_protocol::WizardDefinition,
+    ) -> Option<Self> {
         let start_pane_name = wizard.start.clone();
         let pane = wizard.panes.get(&start_pane_name)?;
         let definition = ui_protocol::PopupDefinition {
@@ -162,7 +179,9 @@ impl ActiveWizard {
 
     /// Whether the current pane is terminal (no transition — submit ends the wizard).
     fn is_terminal(&self) -> bool {
-        self.wizard.panes.get(&self.current_pane)
+        self.wizard
+            .panes
+            .get(&self.current_pane)
             .map_or(true, |p| p.then_transition.is_none())
     }
 
@@ -175,7 +194,9 @@ impl ActiveWizard {
             ui_protocol::Transition::Branch(map) => {
                 for (field_id, value_map) in map {
                     // Check choice fields (by label)
-                    if let Some(label) = self.form.state
+                    if let Some(label) = self
+                        .form
+                        .state
                         .get_choice_label(field_id, &self.form.definition.components)
                     {
                         if let Some(target) = value_map.get(&label) {
@@ -198,10 +219,8 @@ impl ActiveWizard {
     /// Advance to a target pane, saving current pane values.
     fn advance_to(&mut self, target: &str) {
         // Collect current pane values
-        self.collected_values.insert(
-            self.current_pane.clone(),
-            self.form.state.to_json_values(),
-        );
+        self.collected_values
+            .insert(self.current_pane.clone(), self.form.state.to_json_values());
 
         if let Some(pane) = self.wizard.panes.get(target) {
             self.current_pane = target.to_string();
@@ -210,11 +229,7 @@ impl ActiveWizard {
                 title: pane.title.clone(),
                 components: pane.elements.clone(),
             };
-            self.form = ActiveForm::new(
-                self.pipe_id.clone(),
-                self.request_id.clone(),
-                definition,
-            );
+            self.form = ActiveForm::new(self.pipe_id.clone(), self.request_id.clone(), definition);
         }
     }
 
@@ -224,10 +239,8 @@ impl ActiveWizard {
             return false;
         }
         // Save current values
-        self.collected_values.insert(
-            self.current_pane.clone(),
-            self.form.state.to_json_values(),
-        );
+        self.collected_values
+            .insert(self.current_pane.clone(), self.form.state.to_json_values());
         // Pop current pane
         self.pane_history.pop();
         let prev = match self.pane_history.last() {
@@ -241,11 +254,7 @@ impl ActiveWizard {
                 title: pane.title.clone(),
                 components: pane.elements.clone(),
             };
-            self.form = ActiveForm::new(
-                self.pipe_id.clone(),
-                self.request_id.clone(),
-                definition,
-            );
+            self.form = ActiveForm::new(self.pipe_id.clone(), self.request_id.clone(), definition);
             // Restore previously collected values for this pane
             if let Some(prev_values) = self.collected_values.get(&prev) {
                 if let Some(obj) = prev_values.as_object() {
@@ -264,9 +273,8 @@ impl ActiveWizard {
                             }
                             serde_json::Value::Array(arr) => {
                                 // MultiChoice: array of bools
-                                let bools: Vec<bool> = arr.iter()
-                                    .map(|v| v.as_bool().unwrap_or(false))
-                                    .collect();
+                                let bools: Vec<bool> =
+                                    arr.iter().map(|v| v.as_bool().unwrap_or(false)).collect();
                                 if bools.iter().all(|_| true) {
                                     self.form.state.set_multichoice(k, bools);
                                 }
@@ -297,7 +305,8 @@ impl ActiveWizard {
 
     /// Build breadcrumb trail string from pane history.
     fn breadcrumbs(&self) -> String {
-        self.pane_history.iter()
+        self.pane_history
+            .iter()
             .enumerate()
             .map(|(i, name)| {
                 if i == self.pane_history.len() - 1 {
@@ -351,6 +360,14 @@ struct ExoMonadPlugin {
     /// Inject-input messages waiting for tab/pane state to be initialized.
     /// Flushed on TabUpdate/PaneUpdate when own_tab_name and tab_pane_map become available.
     pending_injections: Vec<PendingInjection>,
+    /// Stable slug_key → pane_id mapping, registered at worker spawn time.
+    /// Survives pane renames (e.g. Gemini CLI → "Ready (exomonad)") because
+    /// the mapping is resolved once from display_name and stored permanently.
+    slug_pane_map: HashMap<String, u32>,
+    /// Pending slug registrations awaiting PaneUpdate (display_name → slug_key).
+    /// When REGISTER_PANE_PIPE arrives before the pane appears in PaneUpdate,
+    /// the entry is parked here and resolved on the next PaneUpdate.
+    pending_slug_reg: HashMap<String, String>,
 }
 
 register_plugin!(ExoMonadPlugin);
@@ -443,19 +460,29 @@ impl ratatui::backend::Backend for ZellijBackend {
         Ok(())
     }
 
-    fn hide_cursor(&mut self) -> Result<(), std::io::Error> { Ok(()) }
-    fn show_cursor(&mut self) -> Result<(), std::io::Error> { Ok(()) }
-    fn get_cursor_position(&mut self) -> Result<Position, std::io::Error> { Ok(Position::new(0, 0)) }
-    fn set_cursor_position<P: Into<Position>>(&mut self, _pos: P) -> Result<(), std::io::Error> { Ok(()) }
-    fn clear(&mut self) -> Result<(), std::io::Error> { 
-        print!("\x1b[2J"); 
-        Ok(()) 
+    fn hide_cursor(&mut self) -> Result<(), std::io::Error> {
+        Ok(())
+    }
+    fn show_cursor(&mut self) -> Result<(), std::io::Error> {
+        Ok(())
+    }
+    fn get_cursor_position(&mut self) -> Result<Position, std::io::Error> {
+        Ok(Position::new(0, 0))
+    }
+    fn set_cursor_position<P: Into<Position>>(&mut self, _pos: P) -> Result<(), std::io::Error> {
+        Ok(())
+    }
+    fn clear(&mut self) -> Result<(), std::io::Error> {
+        print!("\x1b[2J");
+        Ok(())
     }
     // In this WASM/Zellij backend we don't have direct access to the real terminal size here.
     // The actual size is managed externally (the render loop resizes using rows/cols), but
     // ratatui may still call `size()` for layout calculations. Returning a non-zero fallback
     // avoids degenerate 0x0 layouts while keeping behavior predictable.
-    fn size(&self) -> Result<Size, std::io::Error> { Ok(Size::new(80, 24)) }
+    fn size(&self) -> Result<Size, std::io::Error> {
+        Ok(Size::new(80, 24))
+    }
     fn window_size(&mut self) -> Result<WindowSize, std::io::Error> {
         Ok(WindowSize {
             columns_rows: Size::new(80, 24),
@@ -463,7 +490,9 @@ impl ratatui::backend::Backend for ZellijBackend {
             pixels: Size::new(0, 0),
         })
     }
-    fn flush(&mut self) -> Result<(), std::io::Error> { Ok(()) }
+    fn flush(&mut self) -> Result<(), std::io::Error> {
+        Ok(())
+    }
 }
 
 fn color_to_ansi(color: Color, bg: bool) -> String {
@@ -505,16 +534,30 @@ impl ExoMonadPlugin {
         };
         for (tab_pos, panes) in &manifest.panes {
             if let Some(tab_name) = self.tab_names.get(tab_pos) {
-                for pane in panes.iter().filter(|p| !p.is_plugin && !p.is_floating && !p.exited) {
+                for pane in panes
+                    .iter()
+                    .filter(|p| !p.is_plugin && !p.is_floating && !p.exited)
+                {
                     // First terminal pane per tab is the tab-level target
                     self.tab_pane_map.entry(tab_name.clone()).or_insert(pane.id);
                     // All named panes indexed by title for direct targeting
                     if !pane.title.is_empty() {
                         self.pane_name_map.insert(pane.title.clone(), pane.id);
+                        // Resolve any pending slug registration for this display_name.
+                        if let Some(slug_key) = self.pending_slug_reg.remove(&pane.title) {
+                            eprintln!(
+                                "[exomonad-plugin] slug_pane_map: resolved '{}' → pane {} (display_name='{}')",
+                                slug_key, pane.id, pane.title
+                            );
+                            self.slug_pane_map.insert(slug_key, pane.id);
+                        }
                     }
                 }
                 // Determine which tab this plugin instance lives in
-                if panes.iter().any(|p| p.is_plugin && p.id == self.own_pane_id) {
+                if panes
+                    .iter()
+                    .any(|p| p.is_plugin && p.id == self.own_pane_id)
+                {
                     self.own_tab_name = Some(tab_name.clone());
                 }
             }
@@ -530,7 +573,11 @@ impl ExoMonadPlugin {
             );
             self.pending_injections.remove(0);
         }
-        self.pending_injections.push(PendingInjection { tab_name, pane_name, text });
+        self.pending_injections.push(PendingInjection {
+            tab_name,
+            pane_name,
+            text,
+        });
     }
 
     /// Flush buffered inject-input messages now that tab/pane state is available.
@@ -550,9 +597,13 @@ impl ExoMonadPlugin {
                 // Not our tab — another plugin instance will handle it
                 continue;
             }
-            // Prefer pane-name lookup (for workers sharing a tab), fall back to tab lookup.
+            // Resolution order: slug_pane_map (stable, survives renames) →
+            // pane_name_map (title-based, may be stale) → tab-level fallback.
             let pane_id = if let Some(ref pname) = injection.pane_name {
-                self.pane_name_map.get(pname).copied()
+                self.slug_pane_map
+                    .get(pname)
+                    .copied()
+                    .or_else(|| self.pane_name_map.get(pname).copied())
                     .or_else(|| self.tab_pane_map.get(&injection.tab_name).copied())
             } else {
                 self.tab_pane_map.get(&injection.tab_name).copied()
@@ -834,7 +885,8 @@ impl ZellijPlugin for ExoMonadPlugin {
                 }
 
                 // Try WizardRequest first (has "wizard" key)
-                if let Ok(req) = serde_json::from_str::<ui_protocol::WizardRequest>(trimmed_payload) {
+                if let Ok(req) = serde_json::from_str::<ui_protocol::WizardRequest>(trimmed_payload)
+                {
                     block_cli_pipe_input(&pipe_id);
                     show_self(true);
                     match ActiveWizard::new(pipe_id.clone(), req.request_id, req.wizard) {
@@ -845,7 +897,8 @@ impl ZellijPlugin for ExoMonadPlugin {
                         }
                         None => {
                             self.status_state = PluginState::Error;
-                            self.status_message = "Invalid wizard: start pane not found".to_string();
+                            self.status_message =
+                                "Invalid wizard: start pane not found".to_string();
                             cli_pipe_output(&pipe_id, "ERROR_INVALID_WIZARD\n");
                             unblock_cli_pipe_input(&pipe_id);
                         }
@@ -858,11 +911,8 @@ impl ZellijPlugin for ExoMonadPlugin {
                     Ok(req) => {
                         block_cli_pipe_input(&pipe_id);
                         show_self(true);
-                        self.active_form = Some(ActiveForm::new(
-                            pipe_id,
-                            req.request_id,
-                            req.definition,
-                        ));
+                        self.active_form =
+                            Some(ActiveForm::new(pipe_id, req.request_id, req.definition));
                         self.status_state = PluginState::Waiting;
                         self.status_message = "Waiting for input...".to_string();
                         return true;
@@ -899,7 +949,10 @@ impl ZellijPlugin for ExoMonadPlugin {
             if items.is_empty() {
                 self.status_state = PluginState::Error;
                 self.status_message = "Popup items cannot be empty".to_string();
-                cli_pipe_output(&pipe_id, &format!("{}:ERROR:No items provided\n", request_id));
+                cli_pipe_output(
+                    &pipe_id,
+                    &format!("{}:ERROR:No items provided\n", request_id),
+                );
                 unblock_cli_pipe_input(&pipe_id);
                 return true;
             }
@@ -945,14 +998,17 @@ impl ZellijPlugin for ExoMonadPlugin {
                         let text = match val["text"].as_str() {
                             Some(t) => t,
                             None => {
-                                eprintln!("[exomonad-plugin] inject-input: missing 'text' string field");
+                                eprintln!(
+                                    "[exomonad-plugin] inject-input: missing 'text' string field"
+                                );
                                 return true;
                             }
                         };
 
                         // Optional pane_name for targeting a specific pane within the tab
                         // (used for worker panes that share a tab with the TL agent).
-                        let pane_name: Option<String> = val["pane_name"].as_str().map(|s| s.to_string());
+                        let pane_name: Option<String> =
+                            val["pane_name"].as_str().map(|s| s.to_string());
 
                         // Dedup: only the instance in the target tab should process.
                         // If own_tab_name is not yet set (before first PaneUpdate),
@@ -965,10 +1021,13 @@ impl ZellijPlugin for ExoMonadPlugin {
                             }
                             Some(_) => {
                                 // This is our tab — attempt injection.
-                                // Prefer pane-name lookup for targeted delivery (workers),
-                                // fall back to first terminal pane in tab.
+                                // Resolution order: slug_pane_map (stable, survives renames) →
+                                // pane_name_map (title-based, may be stale) → tab-level fallback.
                                 let pane_id = if let Some(ref pname) = pane_name {
-                                    self.pane_name_map.get(pname).copied()
+                                    self.slug_pane_map
+                                        .get(pname)
+                                        .copied()
+                                        .or_else(|| self.pane_name_map.get(pname).copied())
                                         .or_else(|| self.tab_pane_map.get(tab_name).copied())
                                 } else {
                                     self.tab_pane_map.get(tab_name).copied()
@@ -987,13 +1046,18 @@ impl ZellijPlugin for ExoMonadPlugin {
                                 } else {
                                     // Tab is ours but pane not found — buffer for retry
                                     eprintln!(
-                                        "[exomonad-plugin] inject-input: tab '{}' pane {:?} not in map ({} tab entries, {} pane entries), buffering",
+                                        "[exomonad-plugin] inject-input: tab '{}' pane {:?} not in map ({} tab entries, {} pane entries, {} slug entries), buffering",
                                         tab_name,
                                         pane_name,
                                         self.tab_pane_map.len(),
                                         self.pane_name_map.len(),
+                                        self.slug_pane_map.len(),
                                     );
-                                    self.buffer_injection(tab_name.to_string(), pane_name.clone(), text.to_string());
+                                    self.buffer_injection(
+                                        tab_name.to_string(),
+                                        pane_name.clone(),
+                                        text.to_string(),
+                                    );
                                 }
                             }
                             None => {
@@ -1004,7 +1068,11 @@ impl ZellijPlugin for ExoMonadPlugin {
                                     tab_name,
                                     text.len()
                                 );
-                                self.buffer_injection(tab_name.to_string(), pane_name.clone(), text.to_string());
+                                self.buffer_injection(
+                                    tab_name.to_string(),
+                                    pane_name.clone(),
+                                    text.to_string(),
+                                );
                             }
                         }
                     }
@@ -1044,13 +1112,14 @@ impl ZellijPlugin for ExoMonadPlugin {
                         if let Some(pane_id) = self.pane_name_map.get(pane_name) {
                             eprintln!(
                                 "[exomonad-plugin] rename-pane: renaming pane '{}' (id={}) to '{}'",
-                                pane_name,
-                                pane_id,
-                                new_name
+                                pane_name, pane_id, new_name
                             );
                             rename_pane_with_id(PaneId::Terminal(*pane_id), new_name);
                         } else {
-                            eprintln!("[exomonad-plugin] rename-pane: pane '{}' not found in map", pane_name);
+                            eprintln!(
+                                "[exomonad-plugin] rename-pane: pane '{}' not found in map",
+                                pane_name
+                            );
                         }
                     }
                     Err(e) => {
@@ -1059,6 +1128,60 @@ impl ZellijPlugin for ExoMonadPlugin {
                 }
             }
             // Unblock CLI pipe if from CLI source
+            if let PipeSource::Cli(id) = &pipe_message.source {
+                unblock_cli_pipe_input(id);
+            }
+            return true;
+        }
+
+        // Handle register-pane requests: register a stable slug→pane_id mapping.
+        // Sent at worker spawn time so the plugin can resolve the pane by slug
+        // even after Gemini CLI renames it (e.g. to "Ready (exomonad)").
+        if pipe_message.name == transport::REGISTER_PANE_PIPE {
+            if let Some(payload) = pipe_message.payload {
+                match serde_json::from_str::<serde_json::Value>(&payload) {
+                    Ok(val) => {
+                        let slug_key = match val["slug_key"].as_str() {
+                            Some(s) => s.to_string(),
+                            None => {
+                                eprintln!("[exomonad-plugin] register-pane: missing 'slug_key' string field");
+                                if let PipeSource::Cli(id) = &pipe_message.source {
+                                    unblock_cli_pipe_input(id);
+                                }
+                                return true;
+                            }
+                        };
+                        let display_name = match val["display_name"].as_str() {
+                            Some(s) => s.to_string(),
+                            None => {
+                                eprintln!("[exomonad-plugin] register-pane: missing 'display_name' string field");
+                                if let PipeSource::Cli(id) = &pipe_message.source {
+                                    unblock_cli_pipe_input(id);
+                                }
+                                return true;
+                            }
+                        };
+                        // If the pane is already known by display_name, resolve immediately.
+                        // Otherwise park in pending_slug_reg for resolution on next PaneUpdate.
+                        if let Some(&pane_id) = self.pane_name_map.get(&display_name) {
+                            eprintln!(
+                                "[exomonad-plugin] register-pane: resolved immediately '{}' → pane {} (display_name='{}')",
+                                slug_key, pane_id, display_name
+                            );
+                            self.slug_pane_map.insert(slug_key, pane_id);
+                        } else {
+                            eprintln!(
+                                "[exomonad-plugin] register-pane: pane '{}' not yet in map, parking slug '{}' in pending",
+                                display_name, slug_key
+                            );
+                            self.pending_slug_reg.insert(display_name, slug_key);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[exomonad-plugin] register-pane: invalid JSON: {}", e);
+                    }
+                }
+            }
             if let PipeSource::Cli(id) = &pipe_message.source {
                 unblock_cli_pipe_input(id);
             }
@@ -1163,7 +1286,8 @@ impl ZellijPlugin for ExoMonadPlugin {
                             let response = serde_json::to_string(&serde_json::json!({
                                 "request_id": wizard.request_id,
                                 "result": result,
-                            })).unwrap_or_default();
+                            }))
+                            .unwrap_or_default();
                             cli_pipe_output(&wizard.pipe_id, &format!("{}\n", response));
                             unblock_cli_pipe_input(&wizard.pipe_id);
                             dismiss = true;
@@ -1175,7 +1299,8 @@ impl ZellijPlugin for ExoMonadPlugin {
                                 let response = serde_json::to_string(&serde_json::json!({
                                     "request_id": wizard.request_id,
                                     "result": result,
-                                })).unwrap_or_default();
+                                }))
+                                .unwrap_or_default();
                                 cli_pipe_output(&wizard.pipe_id, &format!("{}\n", response));
                                 unblock_cli_pipe_input(&wizard.pipe_id);
                                 dismiss = true;
@@ -1189,8 +1314,9 @@ impl ZellijPlugin for ExoMonadPlugin {
                         }
                         BareKey::Backspace => {
                             // Back navigation: only if not in a textbox
-                            let in_textbox = wizard.form.focused_component()
-                                .map_or(false, |c| matches!(c, ui_protocol::Component::Textbox { .. }));
+                            let in_textbox = wizard.form.focused_component().map_or(false, |c| {
+                                matches!(c, ui_protocol::Component::Textbox { .. })
+                            });
                             if !in_textbox {
                                 if wizard.go_back() {
                                     should_render = true;
@@ -1225,7 +1351,8 @@ impl ZellijPlugin for ExoMonadPlugin {
                             let response = serde_json::to_string(&ui_protocol::PopupResponse {
                                 request_id: form.request_id.clone(),
                                 result,
-                            }).unwrap_or_default();
+                            })
+                            .unwrap_or_default();
                             cli_pipe_output(&form.pipe_id, &format!("{}\n", response));
                             unblock_cli_pipe_input(&form.pipe_id);
                             dismiss = true;
@@ -1235,7 +1362,8 @@ impl ZellijPlugin for ExoMonadPlugin {
                             let response = serde_json::to_string(&ui_protocol::PopupResponse {
                                 request_id: form.request_id.clone(),
                                 result,
-                            }).unwrap_or_default();
+                            })
+                            .unwrap_or_default();
                             cli_pipe_output(&form.pipe_id, &format!("{}\n", response));
                             unblock_cli_pipe_input(&form.pipe_id);
                             dismiss = true;
@@ -1274,8 +1402,16 @@ impl ZellijPlugin for ExoMonadPlugin {
 
         if let Some(terminal) = &mut self.terminal {
             // Force size as we are in WASM and can't detect it reliably
-            let width_u16 = if cols > u16::MAX as usize { u16::MAX } else { cols as u16 };
-            let height_u16 = if rows > u16::MAX as usize { u16::MAX } else { rows as u16 };
+            let width_u16 = if cols > u16::MAX as usize {
+                u16::MAX
+            } else {
+                cols as u16
+            };
+            let height_u16 = if rows > u16::MAX as usize {
+                u16::MAX
+            } else {
+                rows as u16
+            };
             if let Err(e) = terminal.resize(Rect::new(0, 0, width_u16, height_u16)) {
                 eprintln!("Failed to resize terminal: {}", e);
                 return;
@@ -1297,14 +1433,14 @@ impl ZellijPlugin for ExoMonadPlugin {
                     .border_style(Style::default().fg(COLOR_BASE01))
                     .title(" ExoMonad ")
                     .title_style(Style::default().fg(COLOR_BASE1));
-                
+
                 let (status_color, status_icon) = match self.status_state {
                     PluginState::Error => (COLOR_RED, "●"),
                     PluginState::Thinking => (COLOR_YELLOW, "●"),
                     PluginState::Waiting => (COLOR_ORANGE, "●"),
                     PluginState::Idle => (COLOR_BLUE, "●"),
                 };
-                
+
                 let state_text = match self.status_state {
                     PluginState::Idle => "IDLE",
                     PluginState::Thinking => "THINKING",
@@ -1313,11 +1449,19 @@ impl ZellijPlugin for ExoMonadPlugin {
                 };
 
                 let status_text = Line::from(vec![
-                    Span::styled(format!(" {} ", status_icon), Style::default().fg(status_color)),
-                    Span::styled(format!("{}  ", state_text), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        format!(" {} ", status_icon),
+                        Style::default().fg(status_color),
+                    ),
+                    Span::styled(
+                        format!("{}  ", state_text),
+                        Style::default()
+                            .fg(status_color)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(&self.status_message, Style::default().fg(COLOR_BASE1)),
                 ]);
-                
+
                 let p = Paragraph::new(status_text).block(status_block);
                 f.render_widget(p, chunks[0]);
 
@@ -1327,29 +1471,88 @@ impl ZellijPlugin for ExoMonadPlugin {
                 // We intentionally iterate in reverse and take the first 20 elements so that the
                 // 20 most recent events are shown with the newest at the top of the list. This
                 // "newest-first" ordering is the intended UX for the events view.
-                let event_items: Vec<ListItem> = self.events.iter().rev().take(20).map(|e| {
-                    let (time, content, color) = match e {
-                        AgentEvent::AgentStarted { agent_id, timestamp } => (timestamp, format!("{} started", agent_id), COLOR_GREEN),
-                        AgentEvent::AgentStopped { agent_id, timestamp } => (timestamp, format!("{} done", agent_id), COLOR_BLUE),
-                        AgentEvent::StopHookBlocked { agent_id, reason, timestamp } => (timestamp, format!("{} blocked: {}", agent_id, reason), COLOR_RED),
-                        AgentEvent::HookReceived { agent_id, hook_type, timestamp } => (timestamp, format!("{} hook: {}", agent_id, hook_type), COLOR_CYAN),
-                        AgentEvent::PrFiled { agent_id, pr_number, timestamp } => (timestamp, format!("{} PR #{}", agent_id, pr_number), COLOR_MAGENTA),
-                        AgentEvent::CopilotReviewed { agent_id, comment_count, timestamp } => (timestamp, format!("{} copilot: {} comments", agent_id, comment_count), COLOR_YELLOW),
-                        AgentEvent::AgentStuck { agent_id, failed_stop_count, timestamp } => (timestamp, format!("{} ⚠ STUCK ({} failed stops)", agent_id, failed_stop_count), COLOR_RED),
-                    };
-                    
-                    ListItem::new(Line::from(vec![
-                        Span::styled(format!(" {} ", format_timestamp(time)), Style::default().fg(COLOR_BASE01)),
-                        Span::styled(content, Style::default().fg(color)),
-                    ]))
-                }).collect();
+                let event_items: Vec<ListItem> = self
+                    .events
+                    .iter()
+                    .rev()
+                    .take(20)
+                    .map(|e| {
+                        let (time, content, color) = match e {
+                            AgentEvent::AgentStarted {
+                                agent_id,
+                                timestamp,
+                            } => (timestamp, format!("{} started", agent_id), COLOR_GREEN),
+                            AgentEvent::AgentStopped {
+                                agent_id,
+                                timestamp,
+                            } => (timestamp, format!("{} done", agent_id), COLOR_BLUE),
+                            AgentEvent::StopHookBlocked {
+                                agent_id,
+                                reason,
+                                timestamp,
+                            } => (
+                                timestamp,
+                                format!("{} blocked: {}", agent_id, reason),
+                                COLOR_RED,
+                            ),
+                            AgentEvent::HookReceived {
+                                agent_id,
+                                hook_type,
+                                timestamp,
+                            } => (
+                                timestamp,
+                                format!("{} hook: {}", agent_id, hook_type),
+                                COLOR_CYAN,
+                            ),
+                            AgentEvent::PrFiled {
+                                agent_id,
+                                pr_number,
+                                timestamp,
+                            } => (
+                                timestamp,
+                                format!("{} PR #{}", agent_id, pr_number),
+                                COLOR_MAGENTA,
+                            ),
+                            AgentEvent::CopilotReviewed {
+                                agent_id,
+                                comment_count,
+                                timestamp,
+                            } => (
+                                timestamp,
+                                format!("{} copilot: {} comments", agent_id, comment_count),
+                                COLOR_YELLOW,
+                            ),
+                            AgentEvent::AgentStuck {
+                                agent_id,
+                                failed_stop_count,
+                                timestamp,
+                            } => (
+                                timestamp,
+                                format!(
+                                    "{} ⚠ STUCK ({} failed stops)",
+                                    agent_id, failed_stop_count
+                                ),
+                                COLOR_RED,
+                            ),
+                        };
 
-                let events_list = List::new(event_items)
-                    .block(Block::default()
+                        ListItem::new(Line::from(vec![
+                            Span::styled(
+                                format!(" {} ", format_timestamp(time)),
+                                Style::default().fg(COLOR_BASE01),
+                            ),
+                            Span::styled(content, Style::default().fg(color)),
+                        ]))
+                    })
+                    .collect();
+
+                let events_list = List::new(event_items).block(
+                    Block::default()
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(COLOR_BASE01))
                         .title(" Events ")
-                        .title_style(Style::default().fg(COLOR_BASE1)));
+                        .title_style(Style::default().fg(COLOR_BASE1)),
+                );
                 f.render_widget(events_list, chunks[1]);
 
                 // Determine which mode to render: wizard, form, or neither
@@ -1368,7 +1571,9 @@ impl ZellijPlugin for ExoMonadPlugin {
                     // Get title and form reference based on mode
                     let (title, breadcrumbs, is_terminal) = match &mode {
                         RenderMode::Wizard => {
-                            let Some(w) = self.active_wizard.as_ref() else { return };
+                            let Some(w) = self.active_wizard.as_ref() else {
+                                return;
+                            };
                             (
                                 format!("{} — {}", w.wizard.title, w.form.definition.title),
                                 Some(w.breadcrumbs()),
@@ -1376,15 +1581,20 @@ impl ZellijPlugin for ExoMonadPlugin {
                             )
                         }
                         RenderMode::Form => {
-                            let Some(f) = self.active_form.as_ref() else { return };
+                            let Some(f) = self.active_form.as_ref() else {
+                                return;
+                            };
                             (f.definition.title.clone(), None, true)
                         }
                     };
 
                     let block = Block::default()
-                        .title(Line::from(vec![
-                            Span::styled(format!(" {} ", title), Style::default().fg(COLOR_BASE3).add_modifier(Modifier::BOLD))
-                        ]))
+                        .title(Line::from(vec![Span::styled(
+                            format!(" {} ", title),
+                            Style::default()
+                                .fg(COLOR_BASE3)
+                                .add_modifier(Modifier::BOLD),
+                        )]))
                         .title_alignment(Alignment::Center)
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(COLOR_CYAN))
@@ -1405,7 +1615,9 @@ impl ZellijPlugin for ExoMonadPlugin {
                     if let Some(crumbs) = &breadcrumbs {
                         lines.push(Line::from(Span::styled(
                             format!("  {}", crumbs),
-                            Style::default().fg(COLOR_BASE01).add_modifier(Modifier::ITALIC),
+                            Style::default()
+                                .fg(COLOR_BASE01)
+                                .add_modifier(Modifier::ITALIC),
                         )));
                         lines.push(Line::from(""));
                     }
@@ -1413,11 +1625,15 @@ impl ZellijPlugin for ExoMonadPlugin {
                     // Get form reference for component rendering
                     let form = match &mode {
                         RenderMode::Wizard => {
-                            let Some(w) = self.active_wizard.as_ref() else { return };
+                            let Some(w) = self.active_wizard.as_ref() else {
+                                return;
+                            };
                             &w.form
                         }
                         RenderMode::Form => {
-                            let Some(f) = self.active_form.as_ref() else { return };
+                            let Some(f) = self.active_form.as_ref() else {
+                                return;
+                            };
                             f
                         }
                     };
@@ -1432,7 +1648,9 @@ impl ZellijPlugin for ExoMonadPlugin {
                         let is_focused = component.id() == focused_id;
                         let focus_indicator = if is_focused { "▸ " } else { "  " };
                         let label_style = if is_focused {
-                            Style::default().fg(COLOR_YELLOW).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(COLOR_YELLOW)
+                                .add_modifier(Modifier::BOLD)
                         } else {
                             Style::default().fg(COLOR_BASE1)
                         };
@@ -1451,10 +1669,15 @@ impl ZellijPlugin for ExoMonadPlugin {
                                 lines.push(Line::from(vec![
                                     Span::styled(
                                         format!("── {} ", label),
-                                        Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                                        Style::default()
+                                            .fg(COLOR_CYAN)
+                                            .add_modifier(Modifier::BOLD),
                                     ),
                                     Span::styled(
-                                        "─".repeat(inner_area.width.saturating_sub(label.len() as u16 + 5) as usize),
+                                        "─".repeat(
+                                            inner_area.width.saturating_sub(label.len() as u16 + 5)
+                                                as usize,
+                                        ),
                                         Style::default().fg(COLOR_BASE01),
                                     ),
                                 ]));
@@ -1473,7 +1696,13 @@ impl ZellijPlugin for ExoMonadPlugin {
                                     Span::styled(label.as_str(), label_style),
                                 ]));
                             }
-                            ui_protocol::Component::Slider { id, label, min, max, .. } => {
+                            ui_protocol::Component::Slider {
+                                id,
+                                label,
+                                min,
+                                max,
+                                ..
+                            } => {
                                 let val = form.state.get_number(id).unwrap_or(*min);
                                 let range = max - min;
                                 let bar_width = 20usize;
@@ -1489,14 +1718,25 @@ impl ZellijPlugin for ExoMonadPlugin {
                                 ]));
                                 lines.push(Line::from(vec![
                                     Span::raw("  ["),
-                                    Span::styled("=".repeat(filled), Style::default().fg(COLOR_BLUE)),
+                                    Span::styled(
+                                        "=".repeat(filled),
+                                        Style::default().fg(COLOR_BLUE),
+                                    ),
                                     Span::styled("|", Style::default().fg(COLOR_YELLOW)),
-                                    Span::styled("-".repeat(empty), Style::default().fg(COLOR_BASE01)),
+                                    Span::styled(
+                                        "-".repeat(empty),
+                                        Style::default().fg(COLOR_BASE01),
+                                    ),
                                     Span::raw("] "),
-                                    Span::styled(format!("{:.0}", val), Style::default().fg(COLOR_BASE3)),
+                                    Span::styled(
+                                        format!("{:.0}", val),
+                                        Style::default().fg(COLOR_BASE3),
+                                    ),
                                 ]));
                             }
-                            ui_protocol::Component::Choice { id, label, options, .. } => {
+                            ui_protocol::Component::Choice {
+                                id, label, options, ..
+                            } => {
                                 if !label.is_empty() {
                                     lines.push(Line::from(vec![
                                         Span::styled(focus_indicator, label_style),
@@ -1511,18 +1751,29 @@ impl ZellijPlugin for ExoMonadPlugin {
                                             Span::raw("  "),
                                             Span::styled(
                                                 format!(" {} ", option),
-                                                Style::default().bg(COLOR_BLUE).fg(COLOR_BASE3).add_modifier(Modifier::BOLD),
+                                                Style::default()
+                                                    .bg(COLOR_BLUE)
+                                                    .fg(COLOR_BASE3)
+                                                    .add_modifier(Modifier::BOLD),
                                             ),
                                         ]));
                                     } else {
                                         lines.push(Line::from(vec![
-                                            Span::styled(format!("  {}. ", i + 1), Style::default().fg(COLOR_BASE01)),
-                                            Span::styled(option.as_str(), Style::default().fg(COLOR_BASE1)),
+                                            Span::styled(
+                                                format!("  {}. ", i + 1),
+                                                Style::default().fg(COLOR_BASE01),
+                                            ),
+                                            Span::styled(
+                                                option.as_str(),
+                                                Style::default().fg(COLOR_BASE1),
+                                            ),
                                         ]));
                                     }
                                 }
                             }
-                            ui_protocol::Component::Multiselect { id, label, options, .. } => {
+                            ui_protocol::Component::Multiselect {
+                                id, label, options, ..
+                            } => {
                                 lines.push(Line::from(vec![
                                     Span::styled(focus_indicator, label_style),
                                     Span::styled(format!("{}:", label), label_style),
@@ -1534,7 +1785,9 @@ impl ZellijPlugin for ExoMonadPlugin {
                                     let is_highlighted = is_focused && i == highlighted;
                                     let check_char = if is_checked { "x" } else { " " };
                                     let style = if is_highlighted {
-                                        Style::default().fg(COLOR_BASE3).add_modifier(Modifier::BOLD)
+                                        Style::default()
+                                            .fg(COLOR_BASE3)
+                                            .add_modifier(Modifier::BOLD)
                                     } else if is_checked {
                                         Style::default().fg(COLOR_GREEN)
                                     } else {
@@ -1547,7 +1800,12 @@ impl ZellijPlugin for ExoMonadPlugin {
                                     ]));
                                 }
                             }
-                            ui_protocol::Component::Textbox { id, label, placeholder, .. } => {
+                            ui_protocol::Component::Textbox {
+                                id,
+                                label,
+                                placeholder,
+                                ..
+                            } => {
                                 lines.push(Line::from(vec![
                                     Span::styled(focus_indicator, label_style),
                                     Span::styled(format!("{}:", label), label_style),
@@ -1563,19 +1821,28 @@ impl ZellijPlugin for ExoMonadPlugin {
                                 } else {
                                     Style::default().fg(COLOR_BASE3)
                                 };
-                                let border_color = if is_focused { COLOR_CYAN } else { COLOR_BASE01 };
+                                let border_color =
+                                    if is_focused { COLOR_CYAN } else { COLOR_BASE01 };
 
                                 let box_width = inner_area.width.saturating_sub(4) as usize;
                                 lines.push(Line::from(Span::styled(
                                     format!("  ┌{}┐", "─".repeat(box_width)),
                                     Style::default().fg(border_color),
                                 )));
-                                let truncated: String = display_text.chars().take(box_width).collect();
-                                let padded: String = format!("{:width$}", truncated, width = box_width);
+                                let truncated: String =
+                                    display_text.chars().take(box_width).collect();
+                                let padded: String =
+                                    format!("{:width$}", truncated, width = box_width);
                                 lines.push(Line::from(vec![
-                                    Span::styled("  │".to_string(), Style::default().fg(border_color)),
+                                    Span::styled(
+                                        "  │".to_string(),
+                                        Style::default().fg(border_color),
+                                    ),
                                     Span::styled(padded, text_style),
-                                    Span::styled("│".to_string(), Style::default().fg(border_color)),
+                                    Span::styled(
+                                        "│".to_string(),
+                                        Style::default().fg(border_color),
+                                    ),
                                 ]));
                                 lines.push(Line::from(Span::styled(
                                     format!("  └{}┘", "─".repeat(box_width)),
@@ -1589,23 +1856,35 @@ impl ZellijPlugin for ExoMonadPlugin {
                     f.render_widget(paragraph, layout[0]);
 
                     // Help text with separator
-                    let separator = Block::default().borders(Borders::TOP).border_style(Style::default().fg(COLOR_BASE01));
+                    let separator = Block::default()
+                        .borders(Borders::TOP)
+                        .border_style(Style::default().fg(COLOR_BASE01));
                     let help_area = layout[1];
                     f.render_widget(separator, help_area);
 
-                    let help_text_area = Rect { y: help_area.y + 1, height: 1, ..help_area };
+                    let help_text_area = Rect {
+                        y: help_area.y + 1,
+                        height: 1,
+                        ..help_area
+                    };
 
-                    let key_style = Style::default().fg(COLOR_BASE1).add_modifier(Modifier::BOLD);
+                    let key_style = Style::default()
+                        .fg(COLOR_BASE1)
+                        .add_modifier(Modifier::BOLD);
                     let desc_style = Style::default().fg(COLOR_BASE01);
 
                     let help_text = match &mode {
                         RenderMode::Wizard => {
-                            let has_back = self.active_wizard.as_ref()
+                            let has_back = self
+                                .active_wizard
+                                .as_ref()
                                 .map_or(false, |w| w.pane_history.len() > 1);
                             let action = if is_terminal { "Submit" } else { "Next" };
                             let mut spans = vec![
-                                Span::styled("Enter", key_style), Span::styled(format!(": {}  ", action), desc_style),
-                                Span::styled("Esc", key_style), Span::styled(": Cancel  ", desc_style),
+                                Span::styled("Enter", key_style),
+                                Span::styled(format!(": {}  ", action), desc_style),
+                                Span::styled("Esc", key_style),
+                                Span::styled(": Cancel  ", desc_style),
                             ];
                             if has_back {
                                 spans.push(Span::styled("Bksp", key_style));
@@ -1615,17 +1894,22 @@ impl ZellijPlugin for ExoMonadPlugin {
                             spans.push(Span::styled(": Next field  ", desc_style));
                             Line::from(spans)
                         }
-                        RenderMode::Form => {
-                            Line::from(vec![
-                                Span::styled("Enter", key_style), Span::styled(": Submit  ", desc_style),
-                                Span::styled("Esc", key_style), Span::styled(": Cancel  ", desc_style),
-                                Span::styled("Tab", key_style), Span::styled(": Next  ", desc_style),
-                                Span::styled("↑↓", key_style), Span::styled(": Select", desc_style),
-                            ])
-                        }
+                        RenderMode::Form => Line::from(vec![
+                            Span::styled("Enter", key_style),
+                            Span::styled(": Submit  ", desc_style),
+                            Span::styled("Esc", key_style),
+                            Span::styled(": Cancel  ", desc_style),
+                            Span::styled("Tab", key_style),
+                            Span::styled(": Next  ", desc_style),
+                            Span::styled("↑↓", key_style),
+                            Span::styled(": Select", desc_style),
+                        ]),
                     };
 
-                    f.render_widget(Paragraph::new(help_text).alignment(Alignment::Center), help_text_area);
+                    f.render_widget(
+                        Paragraph::new(help_text).alignment(Alignment::Center),
+                        help_text_area,
+                    );
                 }
             });
 

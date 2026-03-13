@@ -167,7 +167,11 @@ impl GitHubEffects for GitHubHandler {
             Vec::new()
         };
 
-        tracing::info!(number = req.number, reviews = reviews.len(), "[GitHub] get_pull_request complete");
+        tracing::info!(
+            number = req.number,
+            reviews = reviews.len(),
+            "[GitHub] get_pull_request complete"
+        );
         Ok(GetPullRequestResponse {
             pull_request: Some(pull_request),
             reviews,

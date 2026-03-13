@@ -54,7 +54,6 @@ impl TeamRegistry {
         let map = self.inner.lock().await;
         map.get(key).cloned()
     }
-
 }
 
 #[cfg(test)]

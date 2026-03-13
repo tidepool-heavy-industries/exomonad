@@ -100,6 +100,64 @@ pub fn inject_input(tab_name: &str, pane_name: Option<&str>, text: &str) {
     });
 }
 
+/// Register a stable slug→pane_id mapping in the plugin.
+///
+/// Sent immediately after `new_zellij_pane` so the plugin can resolve the pane
+/// by slug key even after Gemini CLI renames its pane title. The plugin maps
+/// `slug_key → pane_id` once at spawn time and uses it forever.
+///
+/// Fire-and-forget: errors are logged, not propagated.
+pub fn register_worker_pane(slug_key: &str, display_name: &str) {
+    let plugin_path = match crate::layout::resolve_plugin_path() {
+        Some(p) => p,
+        None => {
+            warn!("[ZellijEvents] Plugin not found, skipping register_worker_pane");
+            return;
+        }
+    };
+
+    let session = match std::env::var("ZELLIJ_SESSION_NAME") {
+        Ok(s) => s,
+        Err(_) => {
+            warn!("[ZellijEvents] ZELLIJ_SESSION_NAME not set, skipping register_worker_pane");
+            return;
+        }
+    };
+
+    let payload = serde_json::json!({
+        "slug_key": slug_key,
+        "display_name": display_name,
+    })
+    .to_string();
+
+    info!(
+        "[ZellijEvents] Registering worker pane slug '{}' with display_name '{}'",
+        slug_key, display_name
+    );
+
+    let ipc = ZellijIpc::new(&session);
+    let pipe_name = transport::REGISTER_PANE_PIPE.to_string();
+
+    tokio::spawn(async move {
+        let result = tokio::task::spawn_blocking(move || {
+            ipc.pipe_to_plugin(&plugin_path, &pipe_name, &payload)
+        })
+        .await;
+
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => warn!(
+                "[ZellijEvents] register_worker_pane pipe_to_plugin failed: {}",
+                e
+            ),
+            Err(e) => warn!(
+                "[ZellijEvents] register_worker_pane spawn_blocking join error: {}",
+                e
+            ),
+        }
+    });
+}
+
 /// Helper to get current timestamp in ISO 8601 format.
 pub fn now_iso8601() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)

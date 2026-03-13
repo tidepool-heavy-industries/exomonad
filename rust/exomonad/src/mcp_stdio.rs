@@ -22,7 +22,9 @@ pub async fn run(role: &str, name: &str) -> Result<()> {
                 Err(_) => {
                     attempts += 1;
                     if attempts >= 30 {
-                        anyhow::bail!("Server socket not found after 15s. Is exomonad serve running?");
+                        anyhow::bail!(
+                            "Server socket not found after 15s. Is exomonad serve running?"
+                        );
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }

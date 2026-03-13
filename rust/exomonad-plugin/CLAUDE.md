@@ -213,6 +213,18 @@ The 100ms delay ensures the OS kernel flushes the text write before the CR byte 
 
 **This applies to ANY Ink-based application** (Claude Code, Gemini CLI, Wrangler, etc.) — not just our stack. The distinction is between `key.return` (physical Enter, byte 0x0D in isolation) and `key.enter` (newline, byte 0x0A) — only `key.return` triggers `onSubmit` in `ink-text-input`.
 
+## Worker Pane Routing (slug_pane_map)
+
+Worker agents (spawned via `spawn_workers`) are Zellij panes in the parent's tab. Gemini CLI renames its pane to `"Ready (exomonad)"` shortly after startup, breaking title-based lookup.
+
+The plugin maintains a stable `slug_key → pane_id` map:
+1. At spawn time, `agent_control.rs` calls `register_worker_pane(slug_key, display_name)` which sends `REGISTER_PANE_PIPE` to the plugin.
+2. The plugin resolves `display_name → pane_id` from `pane_name_map`. If the pane is already known, it maps immediately; otherwise it parks in `pending_slug_reg` for resolution on the next `PaneUpdate`.
+3. On `PaneUpdate`, `rebuild_tab_pane_map()` checks `pending_slug_reg` and promotes any matching entries to `slug_pane_map`.
+4. Injection resolution order: `slug_pane_map` → `pane_name_map` → `tab_pane_map` (first terminal pane).
+
+`slug_key` format: `"{parent_birth_branch}/{internal_name}"` (e.g. `"main/test-worker-gemini"`). Birth-branch scoping ensures uniqueness when multiple TLs spawn workers with the same name.
+
 ## Design Notes
 
 - **Single plugin**: Handles both status bar and popups (not separate plugins)

@@ -1,7 +1,7 @@
 use crate::effects::{dispatch_merge_pr_effect, EffectResult, MergePrEffects, ResultExt};
+use crate::services::event_log::EventLog;
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::merge_pr;
-use crate::services::event_log::EventLog;
 use async_trait::async_trait;
 use exomonad_proto::effects::merge_pr::*;
 use std::sync::Arc;

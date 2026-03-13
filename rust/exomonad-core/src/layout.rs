@@ -43,10 +43,7 @@ pub fn resolve_plugin_path() -> Option<String> {
 /// Uses `ZJSTATUS_PATH` env var or the default install location.
 /// Returns `None` if the WASM doesn't exist — templates fall back to `zellij:status-bar`.
 pub fn resolve_zjstatus_path() -> Option<String> {
-    resolve_wasm_path(
-        "ZJSTATUS_PATH",
-        "~/.config/zellij/plugins/zjstatus.wasm",
-    )
+    resolve_wasm_path("ZJSTATUS_PATH", "~/.config/zellij/plugins/zjstatus.wasm")
 }
 
 /// Parameters for generating an agent tab.

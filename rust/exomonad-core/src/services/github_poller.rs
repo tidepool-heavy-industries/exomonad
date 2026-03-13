@@ -7,7 +7,7 @@ use crate::services::event_queue::EventQueue;
 use crate::services::repo;
 use crate::services::team_registry::TeamRegistry;
 use anyhow::{Context, Result};
-use exomonad_proto::effects::events::{event::EventType, Event, AgentMessage};
+use exomonad_proto::effects::events::{event::EventType, AgentMessage, Event};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -531,7 +531,8 @@ impl GitHubPoller {
                 if copilot_count != old_state.last_copilot_comment_count {
                     if copilot_count > old_state.last_copilot_comment_count {
                         // New activity!
-                        let message = self.format_copilot_message(&copilot_comments, &copilot_reviews);
+                        let message =
+                            self.format_copilot_message(&copilot_comments, &copilot_reviews);
                         pending_actions.push(PendingAction::EmitEvent {
                             status: "copilot_review".to_string(),
                             message: message.clone(),
@@ -571,7 +572,8 @@ impl GitHubPoller {
                 let changes_requested = copilot_reviews
                     .iter()
                     .any(|r| r.state == ReviewState::ChangesRequested);
-                if changes_requested && old_state.last_review_state != ReviewState::ChangesRequested {
+                if changes_requested && old_state.last_review_state != ReviewState::ChangesRequested
+                {
                     old_state.last_review_state = ReviewState::ChangesRequested;
                     pending_actions.push(PendingAction::WasmEvent {
                         event_type: "pr_review",

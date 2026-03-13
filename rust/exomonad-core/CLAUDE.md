@@ -57,6 +57,8 @@ Two levels of abstraction for sending messages:
 | `deliver_to_agent()` | Low-level multi-channel delivery (Teams → ACP → UDS → Zellij) | Peer messaging (`send_message`), event handler `InjectMessage` |
 | `notify_parent_delivery()` | High-level parent notification: event log + EventQueue + `[from: id]`/`[FAILED: id]` prefix + `deliver_to_agent()` | `EventHandler::notify_parent` (agent-initiated), poller `NotifyParent` action (system-initiated) |
 
+**Worker pane delivery** (Zellij fallback for workers): `routing.json` stores `slug_key` (e.g. `"main/test-worker-gemini"`) rather than `pane_name`. The plugin maps `slug_key → pane_id` at spawn time via `REGISTER_PANE_PIPE`, surviving Gemini CLI's pane rename. `inject_input` passes `slug_key` as the `pane_name` argument; the plugin checks `slug_pane_map` before `pane_name_map`.
+
 All messages are prefixed with `[from: id]` (or `[FAILED: id]` for failures). Event handler messages include structural tags inside the body (e.g. `[from: leaf-id] [PR READY] PR #5 approved...`).
 
 **Rule**: Any code path that notifies a parent MUST use `notify_parent_delivery()`, never raw `deliver_to_agent()`. This ensures event log entries, EventQueue publication, and consistent `[from:]`/`[FAILED:]` formatting.
