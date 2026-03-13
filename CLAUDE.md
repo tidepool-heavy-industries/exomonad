@@ -105,19 +105,18 @@ gemini mcp add exomonad --command "exomonad mcp-stdio"
 
 ### Zero-Config for Consuming Repos
 
-New projects need only `.exo/roles/` and `.exo/lib/` copied from exomonad:
+After running `just install-all` (which installs WASM to `~/.exo/wasm/`), any project works out of the box:
 
 ```bash
 cd ~/new-project && git init
-cp -r /path/to/exomonad/.exo/roles .exo/roles
-cp -r /path/to/exomonad/.exo/lib .exo/lib
 exomonad init
 # → Bootstraps .exo/config.toml (empty, all defaults)
-# → Auto-detects role from .exo/roles/
-# → Builds WASM if missing
+# → Copies WASM from ~/.exo/wasm/ (global install)
 # → Starts server, registers Claude MCP via .mcp.json
 # → Creates Zellij session
 ```
+
+For custom roles, copy `.exo/roles/` and `.exo/lib/` from exomonad and `exomonad init` will build WASM from source instead.
 
 ### Building
 

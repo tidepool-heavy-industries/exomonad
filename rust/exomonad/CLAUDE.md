@@ -50,13 +50,13 @@ wasm_dir = ".exo/wasm"        # project-local default
 wasm_name = "devswarm"        # auto-detected from .exo/roles/ if exactly one exists
 ```
 
-**Bootstrap:** `exomonad init` auto-creates `.exo/config.toml` (empty, all defaults) and `.gitignore` entries if missing. Works in any project directory — just needs `.exo/roles/` and `.exo/lib/` present.
+**Bootstrap:** `exomonad init` auto-creates `.exo/config.toml` (empty, all defaults) and `.gitignore` entries if missing. Works in any project directory.
+
+**WASM resolution:** project `.exo/wasm/` → build from `.exo/roles/` → copy from `~/.exo/wasm/` (global install via `just install-all`).
 
 **Config hierarchy:**
 - `config.toml` uses `default_role` (project-wide default)
 - `config.local.toml` uses `role` (worktree-specific override)
-
-**WASM resolution:** `wasm_dir` in config > `.exo/wasm/` (project-local default)
 
 To update WASM, run `just wasm-all` or `exomonad recompile --role devswarm`.
 

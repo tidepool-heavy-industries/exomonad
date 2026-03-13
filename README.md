@@ -53,14 +53,12 @@ You're now in a Zellij session. Switch to the **TL tab** and run `claude`. ExoMo
 
 ### Use on any project
 
-ExoMonad works on any git repository. For a new project:
+ExoMonad works on any git repository. After installing, just init:
 
 ```bash
 cd ~/my-project
-cp -r /path/to/exomonad/.exo/roles .exo/roles
-cp -r /path/to/exomonad/.exo/lib .exo/lib
 exomonad init
-# → Server starts, MCP registered, Zellij session ready
+# → Copies WASM from ~/.exo/wasm/, starts server, MCP registered
 ```
 
 Or try it in a container with zero setup: see [try-exomonad/](try-exomonad/).

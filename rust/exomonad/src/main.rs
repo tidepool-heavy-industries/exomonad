@@ -634,10 +634,9 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     let config = config::Config::discover()?;
     let session = session_override.unwrap_or(config.zellij_session.clone());
 
-    // Auto-build WASM if it doesn't exist yet
-    let wasm_path = config
-        .wasm_dir
-        .join(format!("wasm-guest-{}.wasm", config.wasm_name));
+    // Auto-build or copy WASM if it doesn't exist yet
+    let wasm_filename = format!("wasm-guest-{}.wasm", config.wasm_name);
+    let wasm_path = config.wasm_dir.join(&wasm_filename);
     if !wasm_path.exists() {
         let roles_dir = cwd.join(".exo/roles");
         if roles_dir.is_dir() {
@@ -648,10 +647,28 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
                 config.flake_ref.as_deref(),
             )
             .await?;
+        } else if let Ok(home) = std::env::var("HOME") {
+            let home = PathBuf::from(home);
+            // Fall back to globally installed WASM from ~/.exo/wasm/
+            let global_wasm = home.join(".exo/wasm").join(&wasm_filename);
+            if global_wasm.exists() {
+                info!(
+                    src = %global_wasm.display(),
+                    dst = %wasm_path.display(),
+                    "Copying WASM from global install"
+                );
+                std::fs::create_dir_all(&config.wasm_dir)?;
+                std::fs::copy(&global_wasm, &wasm_path)?;
+            } else {
+                warn!(
+                    path = %wasm_path.display(),
+                    "No WASM found locally or at ~/.exo/wasm/. Run 'just install-all' in the exomonad repo, or copy roles: cp -r /path/to/exomonad/.exo/roles .exo/roles"
+                );
+            }
         } else {
             warn!(
                 path = %wasm_path.display(),
-                "No WASM at path and no .exo/roles/ to build from. Copy roles from exomonad: cp -r /path/to/exomonad/.exo/roles .exo/roles"
+                "No WASM found locally or at ~/.exo/wasm/. Run 'just install-all' in the exomonad repo, or copy roles: cp -r /path/to/exomonad/.exo/roles .exo/roles"
             );
         }
     }
