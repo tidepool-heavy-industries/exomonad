@@ -66,7 +66,7 @@
               ++ haskellPkgs "ghc912"
               ++ rustPkgs
               ++ orchestrationPkgs
-              ++ [ pkgs.sqlite ]
+              ++ [ pkgs.sqlite pkgs.duckdb ]
               ++ [ proto3SuitePkg ];  # For compile-proto-file (Haskell proto codegen)
 
             shellHook = ''
