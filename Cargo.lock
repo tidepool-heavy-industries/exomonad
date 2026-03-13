@@ -887,6 +887,7 @@ dependencies = [
  "dirs 6.0.0",
  "serde",
  "serde_json",
+ "serial_test",
  "tempfile",
  "tokio",
  "tracing",
