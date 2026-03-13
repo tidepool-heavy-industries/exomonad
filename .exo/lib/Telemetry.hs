@@ -11,8 +11,10 @@ import Control.Monad (void)
 import Control.Monad.Freer (Eff)
 import Data.Aeson ((.=), object, Value(..))
 import Data.Aeson qualified as Aeson
+import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KM
 import Data.ByteString.Lazy qualified as BSL
+import Data.Foldable (toList)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -50,16 +52,33 @@ telemetryPostToolUse hookInput = do
 -- | For spawn tools, extract branch_name/name and truncated task.
 extractSpawnMetadata :: Text -> Maybe Value -> Maybe Value
 extractSpawnMetadata toolName (Just (Object obj))
+  | toolName == "mcp__exomonad__spawn_workers" =
+      case KM.lookup "specs" obj of
+        Just (Array specs) ->
+          let specsList = toList specs
+              count = length specsList
+          in case specsList of
+               (Object sObj : _) ->
+                 let name = KM.lookup "name" sObj
+                     task = KM.lookup "task" sObj
+                     meta = [ "worker_count" .= count ]
+                            ++ [ "first_worker_name" .= n | Just (String n) <- [name] ]
+                            ++ [ "first_worker_task" .= T.take 200 t | Just (String t) <- [task] ]
+                 in Just (object meta)
+               (_ : _) -> Just (object ["worker_count" .= count])
+               [] -> Nothing
+        _ -> Nothing
   | isSpawnTool toolName =
-      let branchOrName = case KM.lookup "branch_name" obj of
+      let nameVal = case KM.lookup "branch_name" obj of
             Just (String b) -> Just ("branch_name" .= b)
             _ -> case KM.lookup "name" obj of
               Just (String n) -> Just ("name" .= n)
               _ -> Nothing
-          taskSnippet = case KM.lookup "task" obj of
-            Just (String t) -> Just ("task" .= T.take 200 t)
+          taskField = if toolName == "mcp__exomonad__spawn_acp" then "prompt" else "task"
+          taskVal = case KM.lookup (Key.fromText taskField) obj of
+            Just (String t) -> Just (Key.fromText taskField .= T.take 200 t)
             _ -> Nothing
-          pairs = [p | Just p <- [branchOrName, taskSnippet]]
+          pairs = [p | Just p <- [nameVal, taskVal]]
       in if null pairs then Nothing else Just (object pairs)
 extractSpawnMetadata _ _ = Nothing
 
