@@ -86,22 +86,16 @@ _install profile:
         LABEL="debug"
     fi
 
-    echo ">>> [1/4] Building Haskell WASM plugins (cabal cached if unchanged)..."
+    echo ">>> [1/3] Building Haskell WASM plugins (cabal cached if unchanged)..."
     just wasm-all
 
-    echo ">>> [2/4] Building Rust binary (${LABEL})..."
+    echo ">>> [2/3] Building Rust binary (${LABEL})..."
     cargo build ${CARGO_FLAGS} -p exomonad
 
-    echo ">>> [3/4] Building Zellij plugin (wasm32-wasip1, ${LABEL})..."
-    cd rust/exomonad-plugin && cargo build ${CARGO_FLAGS} --target wasm32-wasip1
-    cd ../..
-
-    echo ">>> [4/4] Installing binaries..."
+    echo ">>> [3/3] Installing binaries..."
     mkdir -p ~/.cargo/bin
-    mkdir -p ~/.config/zellij/plugins
     mkdir -p ~/.exo/wasm
     cp "target/${TARGET_DIR}/exomonad" ~/.cargo/bin/
-    cp "rust/exomonad-plugin/target/wasm32-wasip1/${TARGET_DIR}/exomonad-plugin.wasm" ~/.config/zellij/plugins/
     cp .exo/wasm/wasm-guest-devswarm.wasm ~/.exo/wasm/
 
     # macOS: remove quarantine and ad-hoc sign to avoid sandbox/Gatekeeper issues
@@ -114,7 +108,6 @@ _install profile:
     echo ""
     echo "Installed:"
     ls -lh ~/.cargo/bin/exomonad
-    ls -lh ~/.config/zellij/plugins/exomonad-plugin.wasm
     ls -lh .exo/wasm/wasm-guest-devswarm.wasm
 
 # Install everything: Rust binaries + WASM plugins (release build)
