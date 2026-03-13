@@ -4,7 +4,7 @@
 //! domain-typed REST calls against the UDS server.
 
 use crate::uds_client::{self, ServerClient, ToolCallRequest};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 

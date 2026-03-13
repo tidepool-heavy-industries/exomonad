@@ -565,7 +565,7 @@ impl AgentEffects for AgentHandler {
     ) -> EffectResult<CloseSelfResponse> {
         let slug_key = format!("{}/{}", ctx.birth_branch, ctx.agent_name);
 
-        crate::services::zellij_events::close_worker_pane(&slug_key);
+        crate::services::tmux_events::close_worker_pane(&slug_key);
 
         info!(slug_key = %slug_key, "Agent requested self-closure");
 

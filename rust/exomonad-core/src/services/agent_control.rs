@@ -21,11 +21,11 @@ use tracing::{debug, info, warn};
 use super::acp_registry::AcpRegistry;
 use super::git_worktree::GitWorktreeService;
 use super::github::{GitHubService, Repo};
-use super::zellij_events;
+use super::tmux_events;
 use std::sync::Arc;
 
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
-const ZELLIJ_TIMEOUT: Duration = Duration::from_secs(30);
+const TMUX_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Push the parent branch to the remote so child PRs can reference it as
 /// their base. Non-fatal: warns on failure (supports local/airgapped setups
@@ -450,10 +450,10 @@ pub struct AgentControlService {
     worktree_base: PathBuf,
     /// GitHub service for fetching issues
     github: Option<GitHubService>,
-    /// Zellij session name for event emission
-    zellij_session: Option<String>,
-    /// Direct Zellij IPC client (replaces subprocess calls).
-    zellij_ipc: Option<super::zellij_ipc::ZellijIpc>,
+    /// tmux session name for event emission
+    tmux_session: Option<String>,
+    /// Direct tmux IPC client.
+    tmux_ipc: Option<super::tmux_ipc::TmuxIpc>,
     /// This agent's birth-branch (git identity). Root TL = "main".
     birth_branch: BirthBranch,
     /// Git worktree service
@@ -474,8 +474,8 @@ impl AgentControlService {
             project_dir,
             worktree_base,
             github,
-            zellij_session: None,
-            zellij_ipc: None,
+            tmux_session: None,
+            tmux_ipc: None,
             birth_branch: BirthBranch::root(),
             git_wt,
             acp_registry: None,
@@ -494,10 +494,10 @@ impl AgentControlService {
         self
     }
 
-    /// Set the Zellij session name for event emission + direct IPC.
-    pub fn with_zellij_session(mut self, session: String) -> Self {
-        self.zellij_ipc = Some(super::zellij_ipc::ZellijIpc::new(&session));
-        self.zellij_session = Some(session);
+    /// Set the tmux session name for event emission + direct IPC.
+    pub fn with_tmux_session(mut self, session: String) -> Self {
+        self.tmux_ipc = Some(super::tmux_ipc::TmuxIpc::new(&session));
+        self.tmux_session = Some(session);
         self
     }
 
@@ -554,8 +554,8 @@ impl AgentControlService {
             project_dir: project_dir.clone(),
             worktree_base: project_dir.join(".exo/worktrees"),
             github,
-            zellij_session: None,
-            zellij_ipc: None,
+            tmux_session: None,
+            tmux_ipc: None,
             birth_branch: BirthBranch::root(),
             git_wt,
             acp_registry: None,
@@ -682,7 +682,7 @@ impl AgentControlService {
 
         let result = timeout(SPAWN_TIMEOUT, async {
             // Validate we're in Zellij
-            self.check_zellij_env()?;
+            self.check_tmux_env()?;
 
             // Resolve effective project dir.
             let effective_project_dir = self.effective_project_dir(options.subrepo.as_deref())?;
@@ -772,7 +772,7 @@ impl AgentControlService {
             );
 
             // Open Zellij tab with cwd = worktree_path
-            self.new_zellij_tab(
+            self.new_tmux_window(
                 &display_name,
                 &agent_dir,
                 options.agent_type,
@@ -855,7 +855,7 @@ impl AgentControlService {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_gemini_teammate");
 
         let result = timeout(SPAWN_TIMEOUT, async {
-            self.check_zellij_env()?;
+            self.check_tmux_env()?;
 
             let effective_project_dir = self.effective_project_dir(options.subrepo.as_deref())?;
 
@@ -866,7 +866,7 @@ impl AgentControlService {
             let display_name = format!("{} {}", options.agent_type.emoji(), slug);
 
             // Idempotency check: if Zellij tab is alive, return existing info
-            let tab_alive = self.is_zellij_tab_alive(&display_name).await;
+            let tab_alive = self.is_tmux_window_alive(&display_name).await;
 
             info!(
                 name = %options.name,
@@ -934,7 +934,7 @@ impl AgentControlService {
                 );
             }
 
-            self.new_zellij_tab(
+            self.new_tmux_window(
                 &display_name,
                 &worktree_path,
                 options.agent_type,
@@ -1019,7 +1019,7 @@ impl AgentControlService {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_worker");
 
         let result = timeout(SPAWN_TIMEOUT, async {
-            self.check_zellij_env()?;
+            self.check_tmux_env()?;
 
             // Sanitize name for internal use
             let slug = slugify(&options.name);
@@ -1088,7 +1088,7 @@ impl AgentControlService {
             ).await?;
 
             // Spawn pane in caller's tab, cwd = caller's worktree
-            self.new_zellij_pane(
+            self.new_tmux_pane(
                 &display_name,
                 &absolute_worktree,
                 AgentType::Gemini,
@@ -1098,11 +1098,6 @@ impl AgentControlService {
                 Some(&options.claude_flags),
             )
             .await?;
-
-            // Register the slug→pane_id mapping in the plugin immediately after spawn.
-            // The plugin resolves display_name → pane_id on first PaneUpdate and stores it
-            // under slug_key, so subsequent lookups by slug survive Gemini's pane rename.
-            super::zellij_events::register_worker_pane(&slug_key, &display_name);
 
             // Register as synthetic team member for Claude Teams messaging
             let team_name = format!("exo-{}", self.effective_birth_branch(Some(&ctx.birth_branch)));
@@ -1142,7 +1137,7 @@ impl AgentControlService {
         info!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_subtree");
 
         let result = timeout(SPAWN_TIMEOUT, async {
-            self.check_zellij_env()?;
+            self.check_tmux_env()?;
 
             let effective_birth = self.effective_birth_branch(Some(caller_bb));
 
@@ -1163,7 +1158,7 @@ impl AgentControlService {
             let display_name = format!("{} {}", agent_type.emoji(), slug);
 
             // Idempotency check: if Zellij tab is alive, return existing info
-            let tab_alive = self.is_zellij_tab_alive(&display_name).await;
+            let tab_alive = self.is_tmux_window_alive(&display_name).await;
             if tab_alive {
                 info!(slug = %slug, "Subtree already running, returning existing");
                 return Ok(SpawnResult {
@@ -1266,7 +1261,7 @@ impl AgentControlService {
             let fork_id = options.parent_session_id.as_ref().map(|id| id.as_str());
 
             // Open Zellij tab with cwd = worktree_path
-            self.new_zellij_tab_inner(
+            self.new_tmux_window_inner(
                 &display_name,
                 &worktree_path,
                 agent_type,
@@ -1305,7 +1300,7 @@ impl AgentControlService {
         info!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_leaf_subtree");
 
         let result = timeout(SPAWN_TIMEOUT, async {
-            self.check_zellij_env()?;
+            self.check_tmux_env()?;
 
             // No depth check for leaf nodes.
 
@@ -1323,7 +1318,7 @@ impl AgentControlService {
             let display_name = format!("{} {}", agent_type.emoji(), slug);
 
             // Idempotency check
-            let tab_alive = self.is_zellij_tab_alive(&display_name).await;
+            let tab_alive = self.is_tmux_window_alive(&display_name).await;
             if tab_alive {
                 info!(slug = %slug, "Leaf subtree already running, returning existing");
                 return Ok(SpawnResult {
@@ -1372,7 +1367,7 @@ impl AgentControlService {
 
             // Open Zellij TAB (not pane)
             // Task already includes leaf completion protocol — rendered by Haskell Prompt builder.
-            self.new_zellij_tab(
+            self.new_tmux_window(
                 &display_name,
                 &worktree_path,
                 agent_type,
@@ -1425,7 +1420,7 @@ impl AgentControlService {
             warn!(team = %team_name, member = %identifier, error = %e, "Failed to remove synthetic team member (non-fatal)");
         }
 
-        // Try to find agent in list (for metadata and tab matching).
+        // Try to find agent in list (for metadata and window matching).
         // Failure here is non-fatal to allow cleaning up worker panes (invisible to list_agents).
         let agents = self.list_agents().await.unwrap_or_default();
         let agent = agents.iter().find(|a| a.issue_id == identifier);
@@ -1436,7 +1431,7 @@ impl AgentControlService {
             "Initiating cleanup_agent"
         );
 
-        // Reconstruct names for paths and exact tab matching.
+        // Reconstruct names for paths and exact window matching.
         // If agent not found, assume gemini worker (Phase 1 convention).
         let (agent_type, display_name) = match agent {
             Some(a) => {
@@ -1449,13 +1444,13 @@ impl AgentControlService {
 
         let internal_name = format!("{}-{}", identifier, agent_type.suffix());
 
-        // Close Zellij tab if found in list
-        if let Some(target_tab) = display_name {
-            let tabs = self.get_zellij_tabs().await.unwrap_or_default();
-            for tab in &tabs {
-                if tab == &target_tab {
-                    if let Err(e) = self.close_zellij_tab(tab).await {
-                        warn!(tab_name = %tab, error = %e, "Failed to close Zellij tab (may not exist)");
+        // Close tmux window if found in list
+        if let Some(target_window) = display_name {
+            let windows = self.get_tmux_windows().await.unwrap_or_default();
+            for window in &windows {
+                if window == &target_window {
+                    if let Err(e) = self.close_tmux_window(window).await {
+                        warn!(window_name = %window, error = %e, "Failed to close tmux window (may not exist)");
                     }
                     break;
                 }
@@ -1519,13 +1514,13 @@ impl AgentControlService {
         }
 
         // Emit agent:stopped event
-        if let Some(ref session) = self.zellij_session {
+        if let Some(ref session) = self.tmux_session {
             if let Ok(agent_id) = crate::ui_protocol::AgentId::try_from(identifier.to_string()) {
                 let event = crate::ui_protocol::AgentEvent::AgentStopped {
                     agent_id,
-                    timestamp: zellij_events::now_iso8601(),
+                    timestamp: tmux_events::now_iso8601(),
                 };
-                if let Err(e) = zellij_events::emit_event(session, &event) {
+                if let Err(e) = tmux_events::emit_event(session, &event) {
                     warn!("Failed to emit agent:stopped event: {}", e);
                 }
             }
@@ -1612,18 +1607,18 @@ impl AgentControlService {
     // List Agents
     // ========================================================================
 
-    /// List all active agents by scanning the filesystem and verifying with Zellij.
+    /// List all active agents by scanning the filesystem and verifying with tmux.
     ///
     /// Discovery process:
     /// 1. Scan {worktree_base}/ for subtree agents (isolated worktrees)
     /// 2. Scan {project_dir}/.exo/agents/ for worker agents (shared worktree)
-    /// 3. Verify liveness by checking Zellij tabs/panes
+    /// 3. Verify liveness by checking tmux windows/panes
     #[tracing::instrument(skip(self))]
     pub async fn list_agents(&self) -> Result<Vec<AgentInfo>> {
         let mut agents = Vec::new();
 
-        // Get all Zellij tabs for liveness check
-        let tabs = self.get_zellij_tabs().await.unwrap_or_default();
+        // Get all tmux windows for liveness check
+        let windows = self.get_tmux_windows().await.unwrap_or_default();
 
         // 1. Scan worktree_base for subtree agents
         if self.worktree_base.exists() {
@@ -1645,7 +1640,7 @@ impl AgentControlService {
                         };
                         let display_name = format!("{} {}", agent_type.emoji(), name);
 
-                        let has_tab = tabs.iter().any(|t| t == &display_name);
+                        let has_tab = windows.iter().any(|t| t == &display_name);
                         let status = if has_tab {
                             AgentStatus::Running
                         } else {
@@ -1666,7 +1661,7 @@ impl AgentControlService {
                         // 2. Scan subtree's .exo/agents for workers
                         let subtree_agents_dir = path.join(".exo/agents");
                         if subtree_agents_dir.exists() {
-                            self.scan_workers(&subtree_agents_dir, &tabs, &mut agents)
+                            self.scan_workers(&subtree_agents_dir, &windows, &mut agents)
                                 .await?;
                         }
                     }
@@ -1677,7 +1672,7 @@ impl AgentControlService {
         // 3. Scan root .exo/agents for workers
         let root_agents_dir = self.project_dir.join(".exo/agents");
         if root_agents_dir.exists() {
-            self.scan_workers(&root_agents_dir, &tabs, &mut agents)
+            self.scan_workers(&root_agents_dir, &windows, &mut agents)
                 .await?;
         }
 
@@ -1688,7 +1683,7 @@ impl AgentControlService {
     async fn scan_workers(
         &self,
         dir: &Path,
-        tabs: &[String],
+        windows: &[String],
         agents: &mut Vec<AgentInfo>,
     ) -> Result<()> {
         let mut entries = fs::read_dir(dir).await?;
@@ -1702,10 +1697,9 @@ impl AgentControlService {
                     let base_name = name.strip_suffix("-gemini").unwrap_or(name);
                     let display_name = format!("{} {}", AgentType::Gemini.emoji(), base_name);
 
-                    // Liveness: for workers, they might be panes in a tab.
-                    // Currently list_agents only sees tabs. Zellij doesn't easily query pane names across tabs.
-                    // For now, if it's in a tab list, it's running.
-                    let has_tab = tabs.iter().any(|t| t == &display_name);
+                    // Liveness: for workers, they might be panes in a window.
+                    // Currently list_agents only sees windows.
+                    let has_tab = windows.iter().any(|t| t == &display_name);
                     let status = if has_tab {
                         AgentStatus::Running
                     } else {
@@ -1732,18 +1726,18 @@ impl AgentControlService {
     // Internal: Zellij
     // ========================================================================
 
-    fn check_zellij_env(&self) -> Result<String> {
-        std::env::var("ZELLIJ_SESSION_NAME")
-            .context("Not running inside a Zellij session (ZELLIJ_SESSION_NAME not set)")
+    fn check_tmux_env(&self) -> Result<String> {
+        std::env::var("EXOMONAD_TMUX_SESSION")
+            .context("Not running inside a tmux session (EXOMONAD_TMUX_SESSION not set)")
     }
 
-    /// Get the direct IPC client, falling back to creating one from env.
-    fn ipc(&self) -> Result<super::zellij_ipc::ZellijIpc> {
-        if let Some(ref ipc) = self.zellij_ipc {
+    /// Get the direct tmux IPC client, falling back to creating one from env.
+    fn tmux(&self) -> Result<super::tmux_ipc::TmuxIpc> {
+        if let Some(ref ipc) = self.tmux_ipc {
             return Ok(ipc.clone());
         }
-        let session = self.check_zellij_env()?;
-        Ok(super::zellij_ipc::ZellijIpc::new(&session))
+        let session = self.check_tmux_env()?;
+        Ok(super::tmux_ipc::TmuxIpc::new(&session))
     }
 
     /// Clean up an existing worktree (if present) and create a fresh one.
@@ -1820,24 +1814,23 @@ impl AgentControlService {
         env_vars
     }
 
-    /// Emit an agent:started event if zellij_session is configured.
+    /// Emit an agent:started event if tmux_session is configured.
     fn emit_agent_started(&self, internal_name: &str) -> Result<()> {
-        if let Some(ref session) = self.zellij_session {
+        if let Some(ref session) = self.tmux_session {
             let agent_id = crate::ui_protocol::AgentId::try_from(internal_name.to_string())
                 .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
             let event = crate::ui_protocol::AgentEvent::AgentStarted {
                 agent_id,
-                timestamp: zellij_events::now_iso8601(),
+                timestamp: tmux_events::now_iso8601(),
             };
-            if let Err(e) = zellij_events::emit_event(session, &event) {
+            if let Err(e) = tmux_events::emit_event(session, &event) {
                 warn!("Failed to emit agent:started event: {}", e);
             }
         }
         Ok(())
     }
 
-    #[tracing::instrument(skip(self, prompt, env_vars))]
-    async fn new_zellij_tab(
+    async fn new_tmux_window(
         &self,
         name: &str,
         cwd: &Path,
@@ -1845,7 +1838,7 @@ impl AgentControlService {
         prompt: Option<&str>,
         env_vars: HashMap<String, String>,
     ) -> Result<()> {
-        self.new_zellij_tab_inner(name, cwd, agent_type, prompt, env_vars, None, None)
+        self.new_tmux_window_inner(name, cwd, agent_type, prompt, env_vars, None, None)
             .await
     }
 
@@ -1933,8 +1926,7 @@ impl AgentControlService {
         }
     }
 
-    #[tracing::instrument(skip(self, prompt, env_vars, fork_session_id, claude_flags))]
-    async fn new_zellij_tab_inner(
+    async fn new_tmux_window_inner(
         &self,
         name: &str,
         cwd: &Path,
@@ -1944,115 +1936,102 @@ impl AgentControlService {
         fork_session_id: Option<&str>,
         claude_flags: Option<&ClaudeSpawnFlags>,
     ) -> Result<()> {
-        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating Zellij tab via direct IPC");
+        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating tmux window");
 
         let full_command = Self::build_agent_command(
-            agent_type,
-            prompt,
-            fork_session_id,
-            &env_vars,
-            cwd,
-            claude_flags,
+            agent_type, prompt, fork_session_id, &env_vars, cwd, claude_flags,
         );
-
-        // Escape the command for KDL string literal (escape backslashes, quotes, newlines)
-        let kdl_escaped_command = Self::escape_for_kdl(&full_command);
-
-        // Use login shell to ensure PATH is loaded (gemini, claude, etc.)
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let tmux = self.tmux()?;
+        let window_name = name.to_string();
+        let window_cwd = cwd.to_path_buf();
 
-        let params = crate::layout::AgentTabParams {
-            tab_name: name,
-            pane_name: name,
-            command: &kdl_escaped_command,
-            cwd,
-            shell: &shell,
-            focus: true,
-            close_on_exit: false,
-        };
-
-        let layout_content = crate::layout::generate_agent_layout(&params)
-            .context("Failed to generate Zellij layout")?;
-
-        let ipc = self.ipc()?;
-        let tab_name = name.to_string();
-        let layout_kdl = layout_content.clone();
-
-        // Direct IPC: parse KDL in-process and send NewTab action via socket.
-        // No temp file, no subprocess fork.
-        tokio::task::spawn_blocking(move || ipc.new_tab_with_layout(&layout_kdl, Some(&tab_name)))
-            .await
-            .context("tokio task join error")?
-            .context("Failed to create Zellij tab via IPC")?;
+        tokio::task::spawn_blocking(move || {
+            tmux.new_window(&window_name, &window_cwd, &shell, &full_command)
+        })
+        .await
+        .context("tokio task join error")?
+        .context("Failed to create tmux window")?;
 
         Ok(())
     }
 
-    #[tracing::instrument(skip(self))]
-    async fn get_zellij_tabs(&self) -> Result<Vec<String>> {
-        debug!("Querying Zellij tab names via direct IPC");
-        let ipc = match self.ipc() {
-            Ok(ipc) => ipc,
+    async fn get_tmux_windows(&self) -> Result<Vec<String>> {
+        debug!("Querying tmux window names via direct IPC");
+        let tmux = match self.tmux() {
+            Ok(t) => t,
             Err(e) => {
-                warn!("Failed to get IPC client for query-tab-names: {}", e);
+                warn!("Failed to get tmux IPC client for list-windows: {}", e);
                 return Ok(Vec::new());
             }
         };
 
         let result = timeout(
-            ZELLIJ_TIMEOUT,
-            tokio::task::spawn_blocking(move || ipc.query_tab_names()),
+            TMUX_TIMEOUT,
+            tokio::task::spawn_blocking(move || tmux.list_windows()),
         )
         .await
         .map_err(|_| {
             anyhow!(
-                "zellij query-tab-names timed out after {}s",
-                ZELLIJ_TIMEOUT.as_secs()
+                "tmux list-windows timed out after {}s",
+                TMUX_TIMEOUT.as_secs()
             )
         })?
         .context("tokio task join error")?;
 
         match result {
-            Ok(tabs) => Ok(tabs),
+            Ok(windows) => Ok(windows.into_iter().map(|w| w.window_name).collect()),
             Err(e) => {
-                warn!("zellij query-tab-names IPC failed, assuming no tabs: {}", e);
+                warn!("tmux list-windows IPC failed, assuming no windows: {}", e);
                 Ok(Vec::new())
             }
         }
     }
 
-    /// Check if a Zellij tab with the given display name exists.
-    async fn is_zellij_tab_alive(&self, display_name: &str) -> bool {
-        self.get_zellij_tabs()
+    /// Check if a tmux window with the given display name exists.
+    async fn is_tmux_window_alive(&self, display_name: &str) -> bool {
+        self.get_tmux_windows()
             .await
             .unwrap_or_default()
             .iter()
-            .any(|tab| tab == display_name)
+            .any(|window| window == display_name)
     }
 
-    async fn close_zellij_tab(&self, name: &str) -> Result<()> {
-        info!(name, "Closing Zellij tab via direct IPC");
+    async fn close_tmux_window(&self, name: &str) -> Result<()> {
+        info!(name, "Closing tmux window");
 
-        let ipc = self.ipc()?;
-        let tab_name = name.to_string();
+        let tmux = self.tmux()?;
+        let window_name = name.to_string();
 
+        let window_id = tokio::task::spawn_blocking(move || {
+            let windows = tmux.list_windows()?;
+            windows
+                .into_iter()
+                .find(|w| w.window_name == window_name)
+                .map(|w| w.window_id)
+                .ok_or_else(|| anyhow!("Window not found: {}", window_name))
+        })
+        .await
+        .context("tokio task join error")??;
+
+        let tmux = self.tmux()?;
         timeout(
-            ZELLIJ_TIMEOUT,
-            tokio::task::spawn_blocking(move || ipc.close_tab(&tab_name)),
+            TMUX_TIMEOUT,
+            tokio::task::spawn_blocking(move || tmux.kill_window(&window_id)),
         )
         .await
         .map_err(|_| {
             anyhow::Error::new(TimeoutError {
                 message: format!(
-                    "zellij close-tab timed out after {}s",
-                    ZELLIJ_TIMEOUT.as_secs()
+                    "tmux kill-window timed out after {}s",
+                    TMUX_TIMEOUT.as_secs()
                 ),
             })
         })?
         .context("tokio task join error")?
-        .context("zellij close-tab IPC failed")?;
+        .context("tmux kill-window failed")?;
 
-        info!(name, "zellij close-tab successful");
+        info!(name, "tmux kill-window successful");
         Ok(())
     }
 
@@ -2060,49 +2039,47 @@ impl AgentControlService {
     // Internal: Zellij Pane Creation
     // ========================================================================
 
-    /// Create a new Zellij pane in the current tab (for workers).
-    ///
-    /// Unlike `new_zellij_tab` which creates a full tab with KDL layout,
-    /// this creates a lightweight pane via direct IPC.
-    async fn new_zellij_pane(
+    async fn new_tmux_pane(
         &self,
         name: &str,
         cwd: &Path,
         agent_type: AgentType,
         prompt: Option<&str>,
         env_vars: HashMap<String, String>,
-        tab_name: Option<&str>,
+        parent_window_name: Option<&str>,
         claude_flags: Option<&ClaudeSpawnFlags>,
     ) -> Result<()> {
-        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, tab = ?tab_name, "Creating Zellij pane via direct IPC");
+        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, parent = ?parent_window_name, "Creating tmux pane");
 
-        if let Some(tn) = tab_name {
-            debug!(tab = %tn, "Switching to tab before spawning pane");
-            let ipc = self.ipc()?;
-            let tab = tn.to_string();
-            match tokio::task::spawn_blocking(move || ipc.go_to_tab_name(&tab)).await {
-                Ok(Err(e)) => tracing::warn!(error = %e, "Zellij go-to-tab failed"),
-                Err(e) => tracing::warn!(error = %e, "Zellij go-to-tab task panicked"),
-                Ok(Ok(())) => {}
-            }
-        }
-
-        let full_command =
-            Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd, claude_flags);
+        let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd, claude_flags);
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let tmux = self.tmux()?;
 
-        let ipc = self.ipc()?;
-        let pane_name = name.to_string();
+        // Find parent window ID by name
+        let target_window = if let Some(wname) = parent_window_name {
+            let wname = wname.to_string();
+            let t = tmux.clone();
+            let windows = tokio::task::spawn_blocking(move || t.list_windows())
+                .await
+                .context("tokio task join error")?
+                .context("Failed to list tmux windows")?;
+            windows.iter()
+                .find(|w| w.window_name == wname)
+                .map(|w| w.window_id.clone())
+                .unwrap_or_else(|| format!("{}:0", tmux.session_name()))
+        } else {
+            format!("{}:", tmux.session_name())
+        };
+
         let pane_cwd = cwd.to_path_buf();
-
         tokio::task::spawn_blocking(move || {
-            ipc.new_pane(&pane_name, &pane_cwd, &shell, &full_command)
+            tmux.split_window(&target_window, &pane_cwd, &shell, &full_command)
         })
         .await
         .context("tokio task join error")?
-        .context("zellij new-pane IPC failed")?;
+        .context("Failed to create tmux pane")?;
 
-        info!(name, "Successfully created Zellij pane");
+        info!(name, "Successfully created tmux pane");
         Ok(())
     }
 
@@ -2294,16 +2271,6 @@ impl AgentControlService {
         // Replace ' with '\'' (end quote, escaped quote, start quote)
         let escaped = s.replace('\'', r"'\''");
         format!("'{}'", escaped)
-    }
-
-    /// Escape a string for use inside a KDL string literal.
-    /// KDL strings use backslash escaping: \n for newline, \\ for backslash, \" for quote.
-    fn escape_for_kdl(s: &str) -> String {
-        s.replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('\t', "\\t")
     }
 }
 

@@ -5,7 +5,6 @@
 //! - Tool call types for WASM boundary (MCPCallInput/MCPCallOutput)
 
 use super::ToolDefinition;
-use crate::layout::resolve_plugin_path;
 use crate::PluginManager;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -82,13 +81,6 @@ pub async fn get_tool_definitions(
         .call("handle_list_tools", &serde_json::json!({"role": role}))
         .await
         .context("WASM handle_list_tools failed")?;
-
-    // Filter out popup tool when the Zellij plugin isn't installed
-    let tools = if resolve_plugin_path().is_none() {
-        tools.into_iter().filter(|t| t.name != "popup").collect()
-    } else {
-        tools
-    };
 
     debug!(count = tools.len(), role = %role, "Got tool definitions from WASM");
     Ok(tools)
