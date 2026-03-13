@@ -12,6 +12,7 @@ module ExoMonad.Types
     defaultHooks,
     defaultSessionStartHook,
     teamRegistrationPostToolUse,
+    andThenPostToolUse,
   )
 where
 
@@ -140,3 +141,13 @@ extractTeamName (Just (Aeson.Object obj)) =
       Just (Aeson.String name) -> Just name
       _ -> Nothing
 extractTeamName _ = Nothing
+
+-- | Compose two PostToolUse hooks sequentially.
+-- The first runs for side effects only; the second's output is returned.
+andThenPostToolUse :: (HookInput -> Eff HookEffects HookOutput)
+                   -> (HookInput -> Eff HookEffects HookOutput)
+                   -> HookInput
+                   -> Eff HookEffects HookOutput
+andThenPostToolUse first second input = do
+  _ <- first input
+  second input
