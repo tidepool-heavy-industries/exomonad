@@ -25,16 +25,16 @@ Auth is automatic: `~/.claude` and `~/.gemini` are mounted from the host, so the
 1. **`run.sh`** stages pre-built WASM artifacts from your host
 2. Builds a Docker image (cached after first run) with:
    - `exomonad` binary (compiled from source in a Rust builder stage)
-   - Zellij, gh CLI, Node.js, Claude Code
-   - Pre-built Haskell WASM plugin + Zellij plugins
+   - tmux, gh CLI, Node.js, Claude Code
+   - Pre-built Haskell WASM plugin
 3. Launches a container that clones the target repo
 4. **`bootstrap.sh`** copies WASM into the repo, configures git, runs `exomonad init`
-5. You land in a Zellij session with Server + TL tabs
+5. You land in a tmux session with Server + TL windows
 
 ## What You Can Do
 
-Once in the Zellij session:
-- **TL tab**: Run `claude` to start Claude Code with full MCP tool access
+Once in the tmux session:
+- **TL window**: Run `claude` to start Claude Code with full MCP tool access
 - **Spawn agents**: Use `spawn_leaf_subtree` to fork Gemini workers into worktrees
 - **File PRs**: Agents call `file_pr` to create pull requests
 - **Coordinate**: `notify_parent` delivers messages between agents via Teams inbox
@@ -45,9 +45,9 @@ Once in the Zellij session:
 |---|------|---------|
 | 1 | Binary runs | `exomonad --version` |
 | 2 | Server starts | `curl --unix-socket .exo/server.sock http://localhost/health` |
-| 3 | Zellij session | `exomonad init` shows Server + TL tabs |
+| 3 | tmux session | `exomonad init` shows Server + TL windows |
 | 4 | Tools listed | `curl --unix-socket .exo/server.sock http://localhost/agents/tl/root/tools` |
-| 5 | Spawn works | `spawn_leaf_subtree` in Claude TUI creates new tab |
+| 5 | Spawn works | `spawn_leaf_subtree` in Claude TUI creates new window |
 | 6 | Comms work | Agent calls `notify_parent` and message arrives in TL |
 | 7 | PR workflow | Agent calls `file_pr`, TL calls `merge_pr` |
 
@@ -59,7 +59,7 @@ Build artifacts first: `just install-all-dev` from the exomonad repo root.
 **Rust build fails in Docker:**
 The builder stage needs network access for crates.io. Check Docker's network settings.
 
-**Zellij doesn't render properly:**
+**tmux doesn't render properly:**
 Ensure your terminal supports 256 colors and you're running `docker run -it` (interactive + TTY).
 
 **Claude Code can't connect:**
@@ -79,7 +79,6 @@ Host (your machine)
         └── Container (Ubuntu 24.04, user: exo)
               ├── /usr/local/bin/exomonad     (Rust binary, built in Docker)
               ├── /opt/exomonad/wasm/         (pre-built Haskell WASM)
-              ├── ~/.config/zellij/plugins/   (Zellij plugins)
               └── /workspace/project/         (cloned target repo)
                     ├── .exo/wasm/            (WASM copied by bootstrap)
                     ├── .exo/server.sock      (MCP server socket)

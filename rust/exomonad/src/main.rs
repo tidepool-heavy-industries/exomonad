@@ -291,7 +291,7 @@ async fn emit_hook_span(
     }
 }
 
-/// Handle a hook request server-side. All WASM, OTel, and Zellij logic runs here.
+/// Handle a hook request server-side. All WASM, OTel, and tmux logic runs here.
 async fn handle_hook_request(
     axum::extract::Query(params): axum::extract::Query<HookQueryParams>,
     axum::extract::State(state): axum::extract::State<HookState>,

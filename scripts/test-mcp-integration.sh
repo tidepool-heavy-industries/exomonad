@@ -17,7 +17,7 @@ ln -s "$WASM_SRC" "$WORK_DIR/.exo/wasm"
 cat > "$WORK_DIR/.exo/config.toml" <<'EOF'
 default_role = "tl"
 project_dir = "."
-zellij_session = "test"
+tmux_session = "test"
 EOF
 
 git -C "$WORK_DIR" init -q

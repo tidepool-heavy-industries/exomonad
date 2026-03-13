@@ -2,7 +2,7 @@
 //!
 //! Manages active ACP (Agent Client Protocol) connections to spawned Gemini agents.
 //! Each connection allows structured messaging (prompts, notifications) instead of
-//! fragile Zellij STDIN injection.
+//! fragile tmux STDIN injection.
 
 use agent_client_protocol::{
     Agent, ClientSideConnection, Implementation, InitializeRequest, NewSessionRequest,

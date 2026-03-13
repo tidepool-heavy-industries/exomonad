@@ -10,7 +10,7 @@ ExoMonad is a heterogeneous LLM agent orchestration system. Haskell WASM defines
 
 1. **Haskell WASM guest** — All MCP tool definitions, hooks, and event handlers. Uses freer-simple for reified continuations (yield/resume across WASM FFI). Compiled to WASM32-WASI via GHC 9.12, loaded by Rust at runtime via Extism.
 
-2. **Rust host** — Executes effects yielded by the WASM guest. Effect handlers for Git, GitHub API, filesystem, Zellij IPC, agent spawning, PR workflows. All I/O happens here.
+2. **Rust host** — Executes effects yielded by the WASM guest. Effect handlers for Git, GitHub API, filesystem, tmux CLI, agent spawning, PR workflows. All I/O happens here.
 
 3. **Protobuf FFI boundary** — All WASM↔Rust communication uses protobuf binary encoding via a single `yield_effect` host function. Proto files in `proto/` are the source of truth for request/response types.
 
@@ -89,7 +89,6 @@ just wasm-all                 # Rebuild WASM only
 - **prost** — Protobuf codegen
 - **tokio** — Async runtime
 - **axum** — HTTP server (UDS)
-- **zellij-utils** — Direct Zellij IPC
 
 ## References
 

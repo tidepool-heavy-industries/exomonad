@@ -28,7 +28,7 @@ The xmonad pattern for LLM agents: users define agent roles in Haskell, compiled
 ```
 .exo/roles/devswarm/
 ├── AllRoles.hs     # Role registry: Map Text SomeRoleConfig
-├── TLRole.hs       # TL role config (spawn, PR, merge, popup, notify_parent, send_message)
+├── TLRole.hs       # TL role config (spawn, PR, merge, notify_parent, send_message)
 ├── DevRole.hs      # Dev role config (PR, notify_parent + permission cascade)
 ├── WorkerRole.hs   # Worker role config (notify_parent only, allow-all hooks)
 ├── Main.hs         # FFI exports that read role from input JSON
@@ -59,7 +59,6 @@ Each role is a `RoleConfig` selecting from pre-built tool records:
 -- .exo/roles/devswarm/TLRole.hs
 data Tools mode = Tools
   { spawn :: SpawnTools mode,
-    popups :: PopupTools mode,
     pr :: FilePRTools mode,
     mergePr :: mode :- MergePR,
     notifyParent :: mode :- NotifyParent,

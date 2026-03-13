@@ -220,7 +220,7 @@ impl EffectHandler for MockAgentHandler {
                     agent_type: 1,
                     role: 1,
                     status: 1,
-                    zellij_tab: "test-subtree".into(),
+                    mux_window: "test-subtree".into(),
                     error: String::new(),
                     pr_number: 0,
                     pr_url: String::new(),
@@ -237,7 +237,7 @@ impl EffectHandler for MockAgentHandler {
                     agent_type: 2,
                     role: 2,
                     status: 1,
-                    zellij_tab: "test-leaf".into(),
+                    mux_window: "test-leaf".into(),
                     error: String::new(),
                     pr_number: 0,
                     pr_url: String::new(),
@@ -254,7 +254,7 @@ impl EffectHandler for MockAgentHandler {
                     agent_type: 2,
                     role: 0,
                     status: 1,
-                    zellij_tab: "test-worker".into(),
+                    mux_window: "test-worker".into(),
                     error: String::new(),
                     pr_number: 0,
                     pr_url: String::new(),
@@ -857,7 +857,7 @@ async fn wasm_effect_handler_error_propagates() {
         ) -> EffectResult<Vec<u8>> {
             Err(EffectError::custom(
                 "spawn_failed",
-                "Zellij session not found",
+                "tmux session not found",
             ))
         }
     }
@@ -889,7 +889,7 @@ async fn wasm_effect_handler_error_propagates() {
     // Verify the error message propagated
     let error_msg = output["error"].as_str().unwrap_or_default();
     assert!(
-        error_msg.contains("spawn_failed") || error_msg.contains("Zellij session"),
+        error_msg.contains("spawn_failed") || error_msg.contains("tmux session"),
         "Error message should contain handler error info, got: {error_msg}"
     );
 }

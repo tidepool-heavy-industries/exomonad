@@ -19,7 +19,7 @@
 //! - **`runtime`** (default): Full runtime with WASM hosting, effect handlers, MCP server,
 //!   and all service integrations. This is what the `exomonad` binary uses.
 //! - Without `runtime`: Only lightweight UI protocol types (`ui_protocol` module).
-//!   Used by `exomonad-plugin` (Zellij WASM target) which can't link heavy native deps.
+//!   Used by WASM targets which can't link heavy native deps.
 //!
 //! # Usage
 //!

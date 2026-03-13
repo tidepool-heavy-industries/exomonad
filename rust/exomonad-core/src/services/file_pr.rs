@@ -235,7 +235,7 @@ pub async fn file_pr_async(
     .await
     .context("spawn_blocking failed")??;
 
-    // Emit pr:filed event (only if in Zellij session)
+    // Emit pr:filed event (only if in tmux session)
     if let Ok(session) = std::env::var("EXOMONAD_TMUX_SESSION") {
         if let Some(agent_id_str) = git::extract_agent_id(&head) {
             match crate::ui_protocol::AgentId::try_from(agent_id_str) {

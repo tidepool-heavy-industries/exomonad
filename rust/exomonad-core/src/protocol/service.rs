@@ -136,7 +136,7 @@ pub enum ServiceRequest {
         labels: HashMap<String, String>,
     },
 
-    // User Interaction (from Zellij plugin)
+    // User Interaction (from tmux CLI)
     UserInteraction {
         request_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]

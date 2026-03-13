@@ -44,7 +44,7 @@ let
 
   # Orchestration
   orchestrationPkgs = with pkgs; [
-    zellij
+    tmux
   ];
 
 in pkgs.mkShell {

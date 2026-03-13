@@ -35,16 +35,16 @@ Claude Code (hook or MCP call)
 
 ### Deployment
 
-**Local Zellij-based orchestration:**
+**Local tmux-based orchestration:**
 
 ```
-Human in Zellij session
-    └── Claude Code (main tab, role=tl)
+Human in tmux session
+    └── Claude Code (main window, role=tl)
             ├── MCP server: exomonad mcp-stdio
             ├── WASM: loaded from .exo/wasm/ at runtime
             └── spawn_subtree / spawn_leaf_subtree / spawn_workers creates:
-                ├── Tab subtree-1 (Claude, worktree off current branch, role=tl)
-                ├── Tab leaf-1 (Gemini, worktree off current branch, role=dev)
+                ├── Window subtree-1 (Claude, worktree off current branch, role=tl)
+                ├── Window leaf-1 (Gemini, worktree off current branch, role=dev)
                 ├── Pane worker-a (Gemini, in parent dir, ephemeral, role=dev)
                 └── ... (recursive tree of worktrees + workers)
 ```
@@ -56,15 +56,15 @@ Each subtree agent (`spawn_subtree`):
 - Claude-only, gets TL role (can spawn workers, depth-capped at 2)
 - Session ID = birth-branch (immutable, deterministic). Root TL = "root".
 - PRs target parent branch, not main — merged via recursive fold
-- Runs in Zellij tab with `claude 'task'` (positional arg), auto-closes on exit
+- Runs in tmux window with `claude 'task'` (positional arg), auto-closes on exit
 
 Each leaf subtree agent (`spawn_leaf_subtree`):
 - Same worktree isolation as `spawn_subtree` (own branch, own directory)
 - Gemini — dev role (no spawn tools)
-- Runs in Zellij tab, files PR against parent branch
+- Runs in tmux window, files PR against parent branch
 
 Each worker agent (`spawn_workers`):
-- Runs in a Zellij pane in the parent's directory (no branch, no worktree, ephemeral)
+- Runs in a tmux pane in the parent's directory (no branch, no worktree, ephemeral)
 - Always Gemini — lightweight, focused execution
 - MCP config in `.exo/agents/{name}/settings.json`, pointed via `GEMINI_CLI_SYSTEM_SETTINGS_PATH`
 
@@ -82,20 +82,14 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • MCP types (ToolDefinition, tools module)
 │   • Protocol types (hook, mcp, service)
 │   • Handlers: GitHandler, GitHubHandler, LogHandler, AgentHandler,
-│     FsHandler, PopupHandler, FilePRHandler, CopilotHandler
-│   • Services: GitService, GitHubService, AgentControlService, ZellijIpc, etc.
+│     FsHandler, FilePRHandler, CopilotHandler
+│   • Services: GitService, GitHubService, AgentControlService, TmuxIpc, etc.
 │   • External service clients: Anthropic, GitHub, Ollama, OTLP
-│   • UI protocol types (lightweight, available without runtime feature)
-│   • Layout generation (KDL layouts for Zellij)
-│   • Direct Zellij IPC (Unix socket, no subprocess)
+│   • tmux IPC (via `std::process::Command`, buffer pattern for input injection)
 │
-├── exomonad-proto/  ← Proto-generated types (prost)
-│   • FFI boundary types
-│   • Effect request/response messages
-│
-└── exomonad-plugin/CLAUDE.md  ← Zellij WASM plugin (built separately)
-    • Status display and popup UI rendering
-    • Depends on exomonad-core (default-features=false, ui_protocol only)
+└── exomonad-proto/  ← Proto-generated types (prost)
+    • FFI boundary types
+    • Effect request/response messages
 ```
 
 ## Workspace Members
@@ -106,15 +100,11 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 | exomonad-core | Library | Framework, handlers, services, protocol types, UI protocol |
 | exomonad-proto | Library | Proto-generated types (prost) for FFI + effects |
 
-**Note:** [exomonad-plugin](exomonad-plugin/CLAUDE.md) is built separately (wasm32-wasi target for Zellij) and not a workspace member. It depends on `exomonad-core` with `default-features = false` to get only the lightweight `ui_protocol` types.
-
 ### Feature Flags (exomonad-core)
 
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `runtime` | Yes | Full runtime: WASM hosting, effect handlers, services |
-
-Without `runtime`: only `ui_protocol` module is available (serde + serde_json deps only). Used by `exomonad-plugin` which targets wasm32-wasi.
 
 ## Quick Reference
 
@@ -164,14 +154,13 @@ All tools are defined in Haskell WASM and executed via host functions.
 
 | Tool | Role | Description |
 |------|------|-------------|
-| `spawn_subtree` | tl | Fork Claude agent into worktree + Zellij tab (TL role, can spawn children) |
-| `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree + Zellij tab (dev role, files PR) |
+| `spawn_subtree` | tl | Fork Claude agent into worktree + tmux window (TL role, can spawn children) |
+| `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree + tmux window (dev role, files PR) |
 | `spawn_workers` | tl | Spawn ephemeral Gemini agents as panes in parent dir (no branch, no worktree) |
 | `file_pr` | tl, dev | Create/update PR for current branch (auto-detects base branch from naming) |
 | `merge_pr` | tl | Merge child PR (gh pr merge + git fetch) |
-| `popup` | tl | Show interactive forms in a tiled split pane via ZellijIpc pipe |
-| `notify_parent` | all | Send message to parent agent (auto-routed via Teams inbox, ACP, or Zellij) |
-| `send_message` | all | Send message to another exomonad-spawned agent (routes via Teams inbox, ACP, UDS, or Zellij) |
+| `notify_parent` | all | Send message to parent agent (auto-routed via Teams inbox, ACP, or tmux) |
+| `send_message` | all | Send message to another exomonad-spawned agent (routes via Teams inbox, ACP, UDS, or tmux) |
 
 ## Effect System
 
@@ -206,7 +195,6 @@ Proto field helpers in `handlers/mod.rs`: `non_empty(String) → Option<String>`
 | `log.*` | LogHandler | info, error, emit_event |
 | `agent.*` | AgentHandler | spawn_subtree, spawn_leaf_subtree, spawn_workers, spawn_gemini_teammate, cleanup_merged |
 | `fs.*` | FsHandler | read_file, write_file |
-| `popup.*` | PopupHandler | show_popup |
 | `file_pr.*` | FilePRHandler | file_pr |
 | `copilot.*` | CopilotHandler | wait_for_copilot_review |
 | `kv.*` | KvHandler | get, set |
@@ -215,14 +203,12 @@ Proto field helpers in `handlers/mod.rs`: `non_empty(String) → Option<String>`
 | `merge_pr.*` | MergePRHandler | merge_pr (gh pr merge + git fetch) |
 | `coordination.*` | CoordinationHandler | acquire_mutex, release_mutex (in-memory mutex for parallel agents) |
 
-**Zellij Integration (Direct IPC):**
-- All Zellij communication uses direct Unix Domain Socket writes via `ZellijIpc` (`services/zellij_ipc.rs`)
-- Sends `ClientToServerMsg::Action(...)` via `IpcSenderWithContext` to the session socket — no subprocess forking
-- Socket path: `ZELLIJ_SOCK_DIR/{session_name}` (from `zellij_utils::consts`)
-- KDL layouts parsed in-process via `Layout::from_kdl()` — no temp files
-- Plugin communication via `Action::CliPipe` (replaces `zellij pipe --plugin ...` subprocess)
-- Tab queries via `Action::QueryTabNames` with `ServerToClientMsg::Log` response reading
-- Dependencies: `zellij-utils` (IPC types, layout parsing), `interprocess` (Unix socket streams)
+**tmux Integration (CLI-based):**
+- All tmux communication uses `std::process::Command::new("tmux")` — simple subprocess calls
+- Window management: `new-window`, `kill-window`, `list-windows` with `-F` format strings for deterministic parsing
+- Pane management: `split-window`, `kill-pane` for ephemeral workers
+- Input injection: buffer pattern (`load-buffer` + `paste-buffer -p`) for multiline safety
+- Stable addressing: `%N` pane IDs, `@N` window IDs via `-P -F "#{pane_id}"`
 
 ## Configuration
 
@@ -259,11 +245,10 @@ cargo test -p exomonad-proto            # Wire format compatibility tests
 | Single `yield_effect` host fn | One entry point, all effects dispatched by namespace via EffectRegistry |
 | Protobuf binary encoding | Type-safe FFI boundary, generated types on both sides |
 | `runtime` feature flag | Plugin consumers get lightweight types without heavy deps |
-| High-level effects | `SpawnAgent` not `CreateWorktree + OpenTab` |
-| Local Zellij orchestration | Git worktrees + Zellij tabs, no Docker containers |
-| Direct Zellij IPC | Unix socket writes instead of forking 19MB `zellij` binary per call |
+| High-level effects | `SpawnAgent` not `CreateWorktree + OpenWindow` |
+| Local tmux orchestration | Git worktrees + tmux windows, no Docker containers |
+| CLI-based tmux IPC | `std::process::Command` calls to `tmux` binary |
 | Extism runtime | Mature WASM runtime with host function support |
-| KDL layouts | Declarative tab creation with proper environment inheritance |
 | File-based devswarm WASM | Single WASM for all roles, loaded from disk, hot reload in serve mode |
 
 ## Related Documentation

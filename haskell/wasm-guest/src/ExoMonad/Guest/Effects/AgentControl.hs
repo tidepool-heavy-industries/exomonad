@@ -10,7 +10,7 @@
 -- | High-level agent control effects.
 --
 -- These effects provide semantic operations for agent lifecycle management.
--- The Rust host handles all I/O (git, zellij, filesystem) via yield_effect.
+-- The Rust host handles all I/O (git, tmux, filesystem) via yield_effect.
 module ExoMonad.Guest.Effects.AgentControl
   ( -- * Effect type
     AgentControl (..),

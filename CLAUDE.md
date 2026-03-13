@@ -1,6 +1,6 @@
 # ExoMonad
 
-Type-safe LLM agent orchestration. Haskell WASM defines all logic (tool schemas, handlers, decision trees). Rust executes I/O effects. Zellij provides isolation and multiplexing. Agents are IO-blind state machines that yield typed effects.
+Type-safe LLM agent orchestration. Haskell WASM defines all logic (tool schemas, handlers, decision trees). Rust executes I/O effects. tmux provides isolation and multiplexing. Agents are IO-blind state machines that yield typed effects.
 
 ---
 
@@ -30,7 +30,7 @@ This is the entire architectural premise. Haskell WASM is the single source of t
 
 When you learn something that applies to a crosscutting context (a programming language, a tool like git worktrees, a pattern that spans directories), **create or update a `.claude/rules/*.md` file** rather than documenting it in a directory-specific CLAUDE.md.
 
-Examples: language idioms (`.claude/rules/haskell.md`, `.claude/rules/rust.md`), tool usage patterns (git, cabal, cargo, zellij), architectural patterns that span the codebase.
+Examples: language idioms (`.claude/rules/haskell.md`, `.claude/rules/rust.md`), tool usage patterns (git, cabal, cargo, tmux), architectural patterns that span the codebase.
 
 Rules files use YAML frontmatter to scope when they load:
 ```yaml
@@ -75,16 +75,16 @@ if !status.success() {
 
 ### Session Entry Point
 
-**`exomonad init` is THE entry point for development sessions.** It creates a Zellij session with:
-- **Server tab**: Runs `exomonad serve` (the MCP server, binds to `.exo/server.sock`)
-- **TL tab**: Runs `nix develop` (where you launch `claude` or work directly)
+**`exomonad init` is THE entry point for development sessions.** It creates a tmux session with:
+- **Server window**: Runs `exomonad serve` (the MCP server, binds to `.exo/server.sock`)
+- **TL window**: Runs `nix develop` (where you launch `claude` or work directly)
 
 The server must be running before Claude Code or Gemini can use MCP tools. Without it, every tool call fails. Init also writes `.mcp.json` (MCP server config) and `.claude/settings.local.json` (hooks and session settings).
 
 ```bash
 cd exomonad/                  # Run from the project root
-exomonad init                 # Creates Zellij session, starts server
-# Then in the TL tab:
+exomonad init                 # Creates tmux session, starts server
+# Then in the TL window:
 claude                        # MCP tools available immediately
 ```
 
@@ -113,7 +113,7 @@ exomonad init
 # → Bootstraps .exo/config.toml (empty, all defaults)
 # → Copies WASM from ~/.exo/wasm/ (global install)
 # → Starts server, registers Claude MCP via .mcp.json
-# → Creates Zellij session
+# → Creates tmux session
 ```
 
 For custom roles, copy `.exo/roles/` and `.exo/lib/` from exomonad and `exomonad init` will build WASM from source instead.
@@ -145,7 +145,6 @@ cargo build -p exomonad
 1. Builds devswarm WASM plugin via nix
 2. Builds exomonad Rust binary (debug mode)
 3. Copies binary to `~/.cargo/bin/exomonad`
-4. Builds and installs Zellij plugins
 
 **WASM build pipeline:**
 1. Role configs in `.exo/roles/devswarm/` define tool composition per role (`TLRole.hs`, `DevRole.hs`)
@@ -194,9 +193,9 @@ What you can do with exomonad right now, end-to-end.
 
 Spawn heterogeneous agent teams as a recursive tree:
 
-- **`spawn_subtree`** — Fork a Claude agent into its own git worktree + Zellij tab. Gets TL role (can spawn its own children). Depth-capped at 2.
-- **`spawn_leaf_subtree`** — Fork a Gemini agent into its own git worktree + Zellij tab. Gets dev role, files PR when done.
-- **`spawn_workers`** — Spawn multiple Gemini agents as Zellij panes in the parent's directory. Ephemeral (no branch, no worktree). Config in `.exo/agents/{name}/`.
+- **`spawn_subtree`** — Fork a Claude agent into its own git worktree + tmux window. Gets TL role (can spawn its own children). Depth-capped at 2.
+- **`spawn_leaf_subtree`** — Fork a Gemini agent into its own git worktree + tmux window. Gets dev role, files PR when done.
+- **`spawn_workers`** — Spawn multiple Gemini agents as tmux panes in the parent's directory. Ephemeral (no branch, no worktree). Config in `.exo/agents/{name}/`.
 
 **Agent Types:** `Claude` (🤖), `Gemini` (💎), `Shoal` (🌊). Shoal is for custom binary agents that connect via rmcp MCP client and receive notifications via HTTP-over-Unix-domain-socket at `.exo/agents/{name}/notify.sock`.
 
@@ -219,33 +218,29 @@ Push-based parallel worker coordination via **Claude Code Teams inbox**:
 3. When worker completes, it calls `notify_parent`
 4. Server resolves parent agent from caller identity, writes to the parent's Teams inbox (`~/.claude/teams/{name}/inboxes/{inbox}.json`)
 5. Claude Code's InboxPoller detects the new message and delivers it as a native `<teammate-message>` in the parent's conversation
-6. TL sees the message and wakes up — no polling, no Zellij hacks
+6. TL sees the message and wakes up — no polling, no hacks
 
 This is **native Claude Code Teams integration**. Messages from child agents arrive exactly like messages from Claude Code teammates — structured, attributed, and delivered through the official inbox mechanism. The TL doesn't poll, doesn't block, and doesn't parse raw text. It gets a proper teammate notification.
 
 **Pipeline:** `notify_parent` → server resolves parent via `TeamRegistry` → `teams_mailbox::write_to_inbox()` → CC InboxPoller → `<teammate-message>` delivered to parent conversation.
 
-**Bidirectional Messaging:** The `send_message` tool enables arbitrary bidirectional messaging between any exomonad-spawned agents, routing via Teams inbox, ACP, UDS, or Zellij fallback depending on the target agent's type and connection status.
+**Bidirectional Messaging:** The `send_message` tool enables arbitrary bidirectional messaging between any exomonad-spawned agents, routing via Teams inbox, ACP, UDS, or tmux fallback depending on the target agent's type and connection status.
 
-**Fallback:** If Teams inbox delivery fails (no team registered, inbox write error), falls back to Zellij STDIN injection via the plugin pipe. The Ink paste problem applies to the fallback path only — see `rust/exomonad-plugin/CLAUDE.md` for details.
+**Fallback:** If Teams inbox delivery fails (no team registered, inbox write error), falls back to tmux STDIN injection via buffer pattern (`load-buffer` + `paste-buffer`).
 
 ### PR Workflow
 
 - **`file_pr`** — Create or update a PR for the current branch. Auto-detects base branch from dot-separated naming convention.
 - **`merge_pr`** — Merge a child's PR (`gh pr merge` + `git fetch` for auto-rebase). TL role only.
 
-### Interactive UI
-
-- **`popup`** — Show interactive forms in a tiled split pane via ZellijIpc pipe. Supports simple forms and multi-pane wizards.
-
 ### Built Infrastructure
 
 | Feature | Status |
 |---------|--------|
 | **Teams inbox delivery** | **Live.** `notify_parent` → Teams inbox → native `<teammate-message>` in parent conversation. Full E2E verified. |
-| **ACP messaging** (Gemini agents) | **Built.** Structured JSON-RPC messaging via Agent Client Protocol. `AcpRegistry` manages connections, `connect_and_prompt()` establishes ACP sessions. Delivery priority: Teams inbox → ACP prompt → HTTP-over-UDS → Zellij STDIN. Vendor SDK patched for Send safety. |
+| **ACP messaging** (Gemini agents) | **Built.** Structured JSON-RPC messaging via Agent Client Protocol. `AcpRegistry` manages connections, `connect_and_prompt()` establishes ACP sessions. Delivery priority: Teams inbox → ACP prompt → HTTP-over-UDS → tmux STDIN. Vendor SDK patched for Send safety. |
 | **HTTP-over-UDS delivery** (Shoal/custom agents) | **Built.** `notify_parent` → POST to `.exo/agents/{name}/notify.sock`. Fire-and-forget with 5s timeout. For custom binary agents that run their own HTTP server on a Unix socket. |
-| **Event router** (Zellij STDIN fallback) | Built. Fallback path: `notify_parent` → `inject_input` into parent pane via Zellij plugin pipe. |
+| **Event router** (tmux STDIN fallback) | Built. Fallback path: `notify_parent` → `inject_input` into parent pane via tmux buffer pattern. |
 | **Event handlers** (WASM dispatch for world events) | **Built.** Third dispatch category alongside tools and hooks. GitHub poller calls `handle_event` on agent's PluginManager for PR review events (reviews, approvals, timeouts) and **sibling merge events**. Handlers return `EventAction` (InjectMessage, NotifyParent, NoAction). |
 | **GitHub poller** (PR status → events) | Built. Background service polls PR/CI status, fires WASM event handlers, and injects notifications into agent panes. Tracks `first_seen`, `last_review_state`, and `notified_parent_timeout` per PR. |
 | **Event log** (JSONL structured events) | Built. `.exo/events.jsonl` — append-only JSONL. Query with `duckdb -c "SELECT * FROM read_json_auto('.exo/events.jsonl')"` (DuckDB available in dev shell). Events: `agent.spawned`, `agent.completed`, `tool.called`, `pr.filed`, `pr.merged`, `pr.merge_failed`, `copilot.review` (with structured `comments`/`reviews` arrays), `ci.status_changed`. Tool telemetry emitted via PostToolUse hook; spawn events include `slug` field. |
@@ -275,7 +270,7 @@ Views are defined in `.exo/kaizen.sql`. Add new views there — they're availabl
 ### Components
 
 ```
-Human in Zellij session
+Human in tmux session
     └── Claude Code + exomonad (Rust + Haskell WASM)
             ├── MCP tools via WASM (spawn_subtree, spawn_leaf_subtree, spawn_workers, file_pr, etc.)
             └── Agent tree:
@@ -294,14 +289,14 @@ Human in Zellij session
 - Hot reload: serve mode checks mtime per tool call
 
 **Rust = Runtime**
-- Hosts WASM plugin, executes all effects (git, GitHub API, filesystem, Zellij)
+- Hosts WASM plugin, executes all effects (git, GitHub API, filesystem, tmux)
 - Owns the process lifecycle
 - REST server on UDS (started by `exomonad init`), `mcp-stdio` translates MCP JSON-RPC to REST
 
-**Worktrees + Zellij = Isolation/Multiplexing**
+**Worktrees + tmux = Isolation/Multiplexing**
 - Git worktrees for code isolation (no Docker containers)
-- Zellij tabs for Claude subtrees, panes for Gemini workers
-- Each agent = worktree + tab (or pane), managed by Rust runtime
+- tmux windows for Claude subtrees, panes for Gemini workers
+- Each agent = worktree + window (or pane), managed by Rust runtime
 
 ### Data Flows
 
@@ -348,14 +343,13 @@ All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/To
 
 | Tool | Role | Description |
 |------|------|-------------|
-| `spawn_subtree` | tl | Fork Claude agent into worktree or standalone repo + Zellij tab (TL role, can spawn children). Supports `permissions` and `standalone_repo`. |
-| `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree or standalone repo + Zellij tab (dev role, files PR). Supports `standalone_repo`. |
-| `spawn_workers` | tl | Spawn Gemini agents as Zellij panes (ephemeral, no worktree) |
+| `spawn_subtree` | tl | Fork Claude agent into worktree or standalone repo + tmux window (TL role, can spawn children). Supports `permissions` and `standalone_repo`. |
+| `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree or standalone repo + tmux window (dev role, files PR). Supports `standalone_repo`. |
+| `spawn_workers` | tl | Spawn Gemini agents as tmux panes (ephemeral, no worktree) |
 | `file_pr` | tl, dev | Create/update PR (auto-detects base branch from naming) |
 | `merge_pr` | tl | Merge child PR (gh merge + git fetch) |
-| `popup` | tl | Show interactive forms in a tiled split pane via ZellijIpc pipe |
-| `notify_parent` | all | Send message to parent agent. Auto-routed via Teams inbox (primary) or Zellij STDIN (fallback) |
-| `send_message` | all | Send message to another exomonad-spawned agent (routes via Teams inbox, ACP, UDS, or Zellij) |
+| `notify_parent` | all | Send message to parent agent. Auto-routed via Teams inbox (primary) or tmux STDIN (fallback) |
+| `send_message` | all | Send message to another exomonad-spawned agent (routes via Teams inbox, ACP, UDS, or tmux) |
 | `shutdown` | dev, worker | Gracefully exit: notify parent, close own pane |
 
 **Note**: Git operations (`git status`, `git log`, etc.) and GitHub operations (`gh pr list`, etc.) use the Bash tool with `git` and `gh` commands, not MCP tools.
@@ -373,8 +367,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 ├── rust/CLAUDE.md             ← Rust workspace overview (3 crates)
 │   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (binary)
 │   ├── exomonad-core/CLAUDE.md ← Unified library: framework, handlers, services, protocol, UI types
-│   ├── exomonad-proto/     ← Proto-generated types (prost) for FFI + effects
-│   └── exomonad-plugin/CLAUDE.md   ← Zellij WASM plugin (status + popups)
+│   └── exomonad-proto/     ← Proto-generated types (prost) for FFI + effects
 ├── docs/decisions/            ← Architecture decision records (living docs)
 └── docs/audits/               ← Project audits and reports
 ```
@@ -388,8 +381,6 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Extend the effect framework | `rust/exomonad-core/` (effects/) |
 | Understand shared protocol types | `rust/exomonad-core/` (protocol/) |
 | Work with external service clients | `rust/exomonad-core/` (services/external/) |
-| Modify popup UI protocol | `rust/exomonad-core/` (ui_protocol.rs) |
-| Work on Zellij plugin | `rust/exomonad-plugin/CLAUDE.md` |
 | Work on WASM guest (MCP tools) | `haskell/wasm-guest/CLAUDE.md` |
 | Understand architectural decisions | `docs/decisions/` |
 

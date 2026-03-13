@@ -21,13 +21,13 @@ The guest exports MCP tools that agents can call. These are defined in `ExoMonad
 
 ### Events Tools (`ExoMonad.Guest.Tools.Events`)
 
-- **`notify_parent`**: Used by worker/subtree agents to send messages to their parent. Routes to parent via server — delivers as a native `<teammate-message>` through Claude Code's Teams inbox when a team is active, falls back to Zellij STDIN injection otherwise. Agent messages get `[from: id]` prefix; failure messages get `[FAILED: id]` prefix. Available as a bare field in both TL and dev roles.
+- **`notify_parent`**: Used by worker/subtree agents to send messages to their parent. Routes to parent via server — delivers as a native `<teammate-message>` through Claude Code's Teams inbox when a team is active, falls back to tmux STDIN injection otherwise. Agent messages get `[from: id]` prefix; failure messages get `[FAILED: id]` prefix. Available as a bare field in both TL and dev roles.
 - **`send_message`**: Tool for sending arbitrary messages between exomonad-spawned agents.
 
 ### Spawn Tools (`ExoMonad.Guest.Tools.Spawn`)
 
-- **`spawn_subtree`**: Fork a Claude agent in a new git worktree + Zellij tab (TL role, can further decompose). Supports `permissions` and `standalone_repo: true`.
-- **`spawn_leaf_subtree`**: Fork a Gemini agent in a new git worktree + Zellij tab (dev role, isolated, files PR). Supports `standalone_repo: true`.
+- **`spawn_subtree`**: Fork a Claude agent in a new git worktree + tmux window (TL role, can further decompose). Supports `permissions` and `standalone_repo: true`.
+- **`spawn_leaf_subtree`**: Fork a Gemini agent in a new git worktree + tmux window (dev role, isolated, files PR). Supports `standalone_repo: true`.
 - **`spawn_workers`**: Spawn ephemeral Gemini agents as panes in the parent directory (no branch, no worktree).
 
 **Standalone repo mode**: Both `spawn_subtree` and `spawn_leaf_subtree` accept `standalone_repo: true`. This creates a fresh `git init` repo instead of a worktree, providing stronger filesystem isolation for the subagent.
@@ -66,7 +66,6 @@ Pure Haskell prompt assembly for worker/leaf agents. Replaces the former templat
 ### Other Tools
 
 - `file_pr` (tl, dev roles)
-- `popup` (tl role)
 - `merge_pr` (tl role)
 - `notify_parent` (all roles)
 
@@ -74,7 +73,7 @@ Pure Haskell prompt assembly for worker/leaf agents. Replaces the former templat
 
 | Role | Tools | Spawned by |
 |------|-------|------------|
-| **tl** | spawn (3), merge_pr, file_pr, popup, notify_parent, send_message | `spawn_subtree` |
+| **tl** | spawn (3), merge_pr, file_pr, notify_parent, send_message | `spawn_subtree` |
 | **dev** | file_pr, notify_parent, send_message, shutdown | `spawn_leaf_subtree` |
 | **worker** | notify_parent, send_message, shutdown | `spawn_workers` |
 

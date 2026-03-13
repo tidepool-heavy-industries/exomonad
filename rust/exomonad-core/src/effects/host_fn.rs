@@ -252,7 +252,7 @@ mod tests {
             agent_type: 1, // CLAUDE
             role: 1,       // DEV
             status: 1,     // RUNNING
-            zellij_tab: "123-fix-bug".into(),
+            mux_window: "123-fix-bug".into(),
             error: String::new(),
             pr_number: 0,
             pr_url: String::new(),

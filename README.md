@@ -2,9 +2,9 @@
 
 ExoMonad stitches frontier model binaries together into reconfigurable agent swarms. It hooks into Claude Code and Gemini CLI, using their existing binaries and your existing subscription plans. Opus decomposes and dispatches. Gemini implements. Copilot reviews. Each model does what it's best at.
 
-All orchestration logic — tool dispatch, hooks, event handling, PR review routing — is defined in Haskell effects executed by a shared Rust server. Agents run in Zellij tabs and panes, isolated via git worktrees. No Docker, no web dashboard, no new UI to learn.
+All orchestration logic — tool dispatch, hooks, event handling, PR review routing — is defined in Haskell effects executed by a shared Rust server. Agents run in tmux windows and panes, isolated via git worktrees. No Docker, no web dashboard, no new UI to learn.
 
-![Zellij devswarm — TL dispatching to three Gemini workers in parallel, each in its own worktree. Bottom panes show workers mid-execution.](img/exomonad_zellij_devswarm.png)
+![tmux devswarm — TL dispatching to three Gemini workers in parallel, each in its own worktree. Bottom panes show workers mid-execution.](img/exomonad_tmux_devswarm.png)
 
 ## Try It
 
@@ -17,13 +17,13 @@ just install-all-dev                              # Build artifacts (first time 
 ./try-exomonad/run.sh https://github.com/user/repo
 ```
 
-This builds a Docker image with the correct Zellij version, pre-built WASM, and all dependencies. You land in a Zellij session with MCP tools ready. Auth is automatic — your `~/.claude` and `~/.gemini` credentials are mounted from the host.
+This builds a Docker image with the correct tmux version, pre-built WASM, and all dependencies. You land in a tmux session with MCP tools ready. Auth is automatic — your `~/.claude` and `~/.gemini` credentials are mounted from the host.
 
 See [try-exomonad/README.md](try-exomonad/README.md) for details.
 
 ## Install (Native)
 
-Requires [Nix](https://nixos.org/) and [Zellij](https://zellij.dev/) **0.43.x** (IPC is version-coupled — 0.42.x and 0.44.x will not work). If you hit Zellij issues, use the Docker path above instead.
+Requires [Nix](https://nixos.org/) and [tmux](https://github.com/tmux/tmux/wiki).
 
 ```bash
 git clone https://github.com/tidepool-heavy-industries/exomonad
@@ -33,18 +33,18 @@ just install-all      # Release build (optimized, slower compile)
 just install-all-dev  # Debug build (fast compile, good for development)
 ```
 
-This builds the Haskell WASM plugin (via Nix), the Rust binary, and the Zellij plugin, then installs everything to `~/.cargo/bin/` and `~/.config/zellij/plugins/`.
+This builds the Haskell WASM plugin (via Nix) and the Rust binary, then installs everything to `~/.cargo/bin/`.
 
 ## Getting Started
 
 ```bash
 cd your-project/
-exomonad init       # Creates Zellij session with Server + TL tabs
+exomonad init       # Creates tmux session with Server + TL windows
                     # Writes .mcp.json (auto-registers MCP tools)
                     # Starts background server on .exo/server.sock
 ```
 
-You're now in a Zellij session. Switch to the **TL tab** and run `claude`. ExoMonad's MCP tools are available immediately — Claude can spawn agents, file PRs, and coordinate work.
+You're now in a tmux session. Switch to the **TL window** and run `claude`. ExoMonad's MCP tools are available immediately — Claude can spawn agents, file PRs, and coordinate work.
 
 ### Use on any project
 
@@ -63,8 +63,8 @@ exomonad init
 | Layer | What | Why |
 |-------|------|-----|
 | **Haskell WASM** | Tool definitions, schemas, decision logic | Pure logic, no I/O, hot-reloadable |
-| **Rust runtime** | Executes effects (git, GitHub API, filesystem, Zellij IPC) | Performance, safety |
-| **Zellij** | Process isolation (tabs for subtrees, panes for workers) | Multiplexing without Docker |
+| **Rust runtime** | Executes effects (git, GitHub API, filesystem, tmux CLI) | Performance, safety |
+| **tmux** | Process isolation (windows for subtrees, panes for workers) | Multiplexing without Docker |
 
 Agents are IO-blind state machines compiled to WASM. They yield typed effects; Rust executes them. This means tool logic is deterministic, testable, and hot-reloadable — edit a Haskell tool, run `just wasm-all`, and the next MCP call picks up the change.
 
@@ -72,9 +72,9 @@ Agents are IO-blind state machines compiled to WASM. They yield typed effects; R
 
 | Spawn tool | Creates | Isolation | Use case |
 |------------|---------|-----------|----------|
-| `spawn_workers` | Gemini panes in your tab | Shared directory, no branch | Fast parallel tasks (10-30x cheaper than Opus) |
-| `spawn_leaf_subtree` | Gemini in own worktree + tab | Own branch, files PR | Independent features that need isolation |
-| `spawn_subtree` | Claude in own worktree + tab | Own branch, can spawn children | Complex decomposition (TL role, recursive) |
+| `spawn_workers` | Gemini panes in your window | Shared directory, no branch | Fast parallel tasks (10-30x cheaper than Opus) |
+| `spawn_leaf_subtree` | Gemini in own worktree + window | Own branch, files PR | Independent features that need isolation |
+| `spawn_subtree` | Claude in own worktree + window | Own branch, can spawn children | Complex decomposition (TL role, recursive) |
 
 **Communication:** Child agents call `notify_parent` when done. Messages arrive in your Claude conversation as native teammate notifications via the Teams inbox. No polling, no stdin hacks.
 
@@ -82,14 +82,14 @@ Agents are IO-blind state machines compiled to WASM. They yield typed effects; R
 
 | Tool | Role | Description |
 |------|------|-------------|
-| `spawn_subtree` | tl | Fork a Claude agent into a new worktree and Zellij tab |
-| `spawn_leaf_subtree` | tl | Fork a Gemini agent into a new worktree and Zellij tab |
+| `spawn_subtree` | tl | Fork a Claude agent into a new worktree and tmux window |
+| `spawn_leaf_subtree` | tl | Fork a Gemini agent into a new worktree and tmux window |
 | `spawn_workers` | tl | Spawn Gemini agents as panes (ephemeral, no branch) |
 | `file_pr` | tl, dev | Create or update a PR for the current branch |
 | `merge_pr` | tl | Merge a child agent's PR and fetch changes |
 | `popup` | tl | Show interactive forms in a tiled split pane |
 | `notify_parent` | all | Send message to parent agent via Teams inbox |
-| `send_message` | all | Send message to any agent (Teams, ACP, UDS, or Zellij) |
+| `send_message` | all | Send message to any agent (Teams, ACP, UDS, or tmux) |
 | `shutdown` | dev, worker | Gracefully exit: notify parent, close own pane |
 
 ## Development

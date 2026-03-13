@@ -25,16 +25,16 @@ exomonad hook pre-tool-use        # Handle Claude Code hook
 exomonad mcp-stdio                # Stdio MCP server (single agent)
 exomonad serve                    # UDS MCP server (multi-agent, hot reload)
 exomonad recompile [--role ROLE]  # Build WASM from Haskell source
-exomonad init [--session NAME]    # Initialize Zellij session (Server tab + TL tab)
+exomonad init [--session NAME]    # Initialize tmux session (Server window + TL window)
 exomonad reload                   # Clear WASM plugin cache (hot reload)
 exomonad shutdown                 # Gracefully shut down the running server
 ```
 
 ### Init Command
 
-`exomonad init` creates a two-tab Zellij session:
-- **Server tab**: Runs `exomonad serve` (stays open on exit, binds .exo/server.sock)
-- **TL tab**: Runs `nix develop` for the dev environment (focused by default)
+`exomonad init` creates a two-window tmux session:
+- **Server window**: Runs `exomonad serve` (binds .exo/server.sock)
+- **TL window**: Runs the configured shell command (focused by default)
 
 Claude MCP is auto-registered during init. For Gemini, register manually (`gemini mcp add ...`).
 
@@ -82,14 +82,13 @@ Register manually in `.mcp.json`:
 
 | Tool | Role | Description |
 |------|------|-------------|
-| `spawn_subtree` | tl | Fork Claude agent into worktree + Zellij tab (TL role) |
-| `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree + Zellij tab (dev role, files PR) |
+| `spawn_subtree` | tl | Fork Claude agent into worktree + tmux window (TL role) |
+| `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree + tmux window (dev role, files PR) |
 | `spawn_workers` | tl | Spawn Gemini agents as panes (ephemeral, no worktree) |
 | `file_pr` | tl, dev | Create/update PR for current branch |
 | `merge_pr` | tl | Merge child PR (gh merge + git fetch) |
-| `popup` | tl | Interactive UI in Zellij |
 | `notify_parent` | all | Send message to parent agent |
-| `send_message` | all | Send message to another agent (routes via Teams inbox / ACP / UDS / Zellij fallback) |
+| `send_message` | all | Send message to another agent (routes via Teams inbox / ACP / UDS / tmux fallback) |
 
 ### Debugging
 
@@ -124,10 +123,9 @@ All effects flow through a single `yield_effect` host function using protobuf bi
 |-----------|---------|----------------|
 | `git.*` | GitHandler | git subprocess |
 | `github.*` | GitHubHandler | HTTP API |
-| `agent.*` | AgentHandler | GitHub API + git worktree + Zellij |
+| `agent.*` | AgentHandler | GitHub API + git worktree + tmux |
 | `fs.*` | FsHandler | tokio::fs |
 | `log.*` | LogHandler | tracing |
-| `popup.*` | PopupHandler | Zellij plugin IPC |
 | `file_pr.*` | FilePRHandler | gh CLI |
 | `copilot.*` | CopilotHandler | GitHub API polling |
 | `events.*` | EventHandler | Event queue, notify_parent, send_message |

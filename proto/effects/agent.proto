@@ -321,7 +321,7 @@ message SpawnLeafSubtreeResponse {
 }
 
 // ============================================================================
-// SpawnAcp - Spawn a Gemini agent via ACP (headless, no Zellij)
+// SpawnAcp - Spawn a Gemini agent via ACP (headless, no tmux window)
 // ============================================================================
 
 message SpawnAcpRequest {

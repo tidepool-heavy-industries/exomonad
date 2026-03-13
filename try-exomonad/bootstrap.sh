@@ -28,7 +28,7 @@ fi
 # ---- Ensure Claude Code settings survive the ~/.claude/ mount ----
 # The host's ~/.claude/ is bind-mounted (rw), which may not have
 # skipDangerousModePermissionPrompt. Without it, the permissions dialog
-# hangs inside Zellij (stdin deadlock during Ink component transition).
+# hangs inside tmux (stdin deadlock during Ink component transition).
 SETTINGS="$HOME/.claude/settings.json"
 if [ -f "$SETTINGS" ]; then
     # Merge the flag into existing settings

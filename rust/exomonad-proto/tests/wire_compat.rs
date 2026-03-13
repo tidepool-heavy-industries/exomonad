@@ -252,7 +252,7 @@ mod binary {
                 agent_type: 1, // CLAUDE
                 role: 1,       // DEV
                 status: 1,     // RUNNING
-                zellij_tab: "433-fix-build".into(),
+                mux_window: "433-fix-build".into(),
                 error: String::new(),
                 pr_number: 0,
                 pr_url: String::new(),
@@ -274,7 +274,7 @@ mod binary {
         assert_eq!(agent.agent_type, 1);
         assert_eq!(agent.role, 1);
         assert_eq!(agent.status, 1);
-        assert_eq!(agent.zellij_tab, "433-fix-build");
+        assert_eq!(agent.mux_window, "433-fix-build");
     }
 
     #[test]
@@ -291,7 +291,7 @@ mod binary {
                     agent_type: 1,
                     role: 1,
                     status: 1,
-                    zellij_tab: "1-a".into(),
+                    mux_window: "1-a".into(),
                     error: String::new(),
                     pr_number: 0,
                     pr_url: String::new(),
@@ -305,7 +305,7 @@ mod binary {
                     agent_type: 2, // GEMINI
                     role: 1,
                     status: 1,
-                    zellij_tab: "2-b".into(),
+                    mux_window: "2-b".into(),
                     error: String::new(),
                     pr_number: 0,
                     pr_url: String::new(),
@@ -337,7 +337,7 @@ mod binary {
                 agent_type: 1,
                 role: 2,   // TL
                 status: 2, // STOPPED
-                zellij_tab: String::new(),
+                mux_window: String::new(),
                 error: String::new(),
                 pr_number: 42,
                 pr_url: "https://github.com/org/repo/pull/42".into(),
@@ -783,7 +783,7 @@ mod binary {
                 agent_type: 1,
                 role: 1,
                 status: 1,
-                zellij_tab: "t".into(),
+                mux_window: "t".into(),
                 error: String::new(),
                 pr_number: 0,
                 pr_url: String::new(),
@@ -842,7 +842,7 @@ mod binary {
                 agent_type: 1,
                 role: 1,
                 status: 1,
-                zellij_tab: "1-a".into(),
+                mux_window: "1-a".into(),
                 error: String::new(),
                 pr_number: 0,
                 pr_url: String::new(),
@@ -1196,7 +1196,7 @@ mod json_full {
             agent_type: 1,
             role: 2,
             status: 1,
-            zellij_tab: "42-feature-x".into(),
+            mux_window: "42-feature-x".into(),
             error: String::new(),
         };
         let json = serde_json::to_string(&original).unwrap();

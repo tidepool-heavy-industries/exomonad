@@ -210,7 +210,7 @@ pub async fn wait_for_copilot_review(
         if !comments.is_empty() {
             info!("[CopilotReview] Found {} Copilot comments", comments.len());
 
-            // Emit copilot:reviewed event (only if in Zellij session)
+            // Emit copilot:reviewed event (only if in tmux session)
             if let Ok(session) = std::env::var("EXOMONAD_TMUX_SESSION") {
                 if let Ok(branch) = git::get_current_branch() {
                     if let Some(agent_id_str) = git::extract_agent_id(&branch) {
@@ -246,7 +246,7 @@ pub async fn wait_for_copilot_review(
         if fetch_pr_reviews(&owner, &repo, input.pr_number).await? {
             info!("[CopilotReview] Found Copilot review (no inline comments)");
 
-            // Emit copilot:reviewed event with 0 comments (only if in Zellij session)
+            // Emit copilot:reviewed event with 0 comments (only if in tmux session)
             if let Ok(session) = std::env::var("EXOMONAD_TMUX_SESSION") {
                 if let Ok(branch) = git::get_current_branch() {
                     if let Some(agent_id_str) = git::extract_agent_id(&branch) {

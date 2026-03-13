@@ -61,7 +61,7 @@ config.field_attribute(
 ## Features
 
 - `default` - Only core FFI types
-- `full` - All proto modules (common, hook, agent, popup)
+- `full` - All proto modules (common, hook, agent)
 
 ## Module Reference
 
@@ -96,13 +96,6 @@ Agent management:
 - `AgentType` - Claude/Gemini
 - `AgentStatus` - Running/stopped/failed
 - `SpawnOptions`, `AgentInfo`, etc.
-
-### popup (feature = "full")
-
-UI popup protocol:
-- `PopupDefinition` - Dialog specification
-- `PopupComponent` - UI component (oneof)
-- Component types and responses
 
 ## Usage
 

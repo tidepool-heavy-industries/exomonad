@@ -1,3 +1,10 @@
+//! In-memory registry mapping agent identity to Claude Teams info.
+//!
+//! Populated by the SessionStart hook (via `session.register_team` effect)
+//! when a Claude agent creates its isolated team on startup.
+//! Queried by `notify_parent` and GitHub poller to route messages via
+//! Teams inbox instead of tmux STDIN injection.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;

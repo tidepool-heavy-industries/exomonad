@@ -1,5 +1,5 @@
 # ==========================================================================
-# Stage 1: Build Rust binaries (exomonad + Zellij plugin)
+# Stage 1: Build Rust binaries (exomonad)
 # ==========================================================================
 FROM rust:1.88-bookworm AS rust-builder
 
@@ -21,11 +21,7 @@ COPY proto/ proto/
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
     cargo build --release -p exomonad \
-    && cp target/release/exomonad /tmp/exomonad \
-    && rustup target add wasm32-wasip1 \
-    && cd rust/exomonad-plugin \
-    && cargo build --release --target wasm32-wasip1 \
-    && cp target/wasm32-wasip1/release/exomonad-plugin.wasm /tmp/exomonad-plugin.wasm
+    && cp target/release/exomonad /tmp/exomonad
 
 # ==========================================================================
 # Stage 2: Build Haskell WASM guest (via nix + GHC WASM cross-compiler)
@@ -88,6 +84,7 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     build-essential \
     jq \
+    tmux \
     && rm -rf /var/lib/apt/lists/*
 
 # gh CLI (GitHub's official apt repository)
@@ -97,10 +94,6 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
-
-# Zellij (must match zellij-utils = "0.43" in Cargo.toml)
-RUN curl -fsSL https://github.com/zellij-org/zellij/releases/download/v0.43.1/zellij-x86_64-unknown-linux-musl.tar.gz \
-    | tar xz -C /usr/local/bin
 
 # Node.js 22 LTS (needed for Gemini CLI)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
@@ -116,7 +109,7 @@ RUN npm install -g @google/gemini-cli
 # bind-mounted host files (~/.claude, ~/.gemini) are readable.
 # --------------------------------------------------------------------------
 RUN userdel -r ubuntu 2>/dev/null; useradd -m -s /bin/bash -u 1000 exo
-RUN mkdir -p /home/exo/.config/zellij/plugins /tmp/runtime \
+RUN mkdir -p /tmp/runtime \
     && chown -R exo:exo /home/exo /tmp/runtime
 
 # --------------------------------------------------------------------------
@@ -146,11 +139,9 @@ ENV PATH="/home/exo/.local/bin:${PATH}"
 # --------------------------------------------------------------------------
 USER root
 COPY --from=rust-builder /tmp/exomonad /usr/local/bin/exomonad
-COPY --from=rust-builder /tmp/exomonad-plugin.wasm /home/exo/.config/zellij/plugins/exomonad-plugin.wasm
 COPY --from=wasm-builder /tmp/wasm-guest-devswarm.wasm /opt/exomonad/wasm/
 COPY try-exomonad/bootstrap.sh /usr/local/bin/exomonad-bootstrap
-RUN chmod +x /usr/local/bin/exomonad-bootstrap \
-    && chown exo:exo /home/exo/.config/zellij/plugins/exomonad-plugin.wasm
+RUN chmod +x /usr/local/bin/exomonad-bootstrap
 USER exo
 
 WORKDIR /workspace

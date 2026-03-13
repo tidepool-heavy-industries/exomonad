@@ -11,7 +11,6 @@
 //! - `common.proto` - Shared primitives (SessionId, Role, etc.)
 //! - `hook.proto` - Claude Code hook types
 //! - `agent.proto` - Agent management types
-//! - `popup.proto` - UI popup types
 //!
 //! ### Effect types (effects/)
 //! Effect types use protobuf binary encoding (prost Message).
@@ -36,11 +35,6 @@ pub mod hook {
 #[cfg(feature = "full")]
 pub mod agent {
     include!(concat!(env!("OUT_DIR"), "/exomonad.agent.rs"));
-}
-
-#[cfg(feature = "full")]
-pub mod popup {
-    include!(concat!(env!("OUT_DIR"), "/exomonad.popup.rs"));
 }
 
 // ============================================================================

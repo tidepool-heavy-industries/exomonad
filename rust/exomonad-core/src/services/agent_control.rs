@@ -1,9 +1,9 @@
 //! High-level agent control service.
 //!
 //! Provides semantic operations for agent lifecycle management:
-//! - SpawnAgent: Create agent directory, open Zellij tab
+//! - SpawnAgent: Create agent directory, open tmux window
 //! - CleanupAgent: Close tab, remove per-agent config
-//! - ListAgents: Discover from Zellij tabs (source of truth for running agents)
+//! - ListAgents: Discover from tmux windows (source of truth for running agents)
 
 use crate::common::TimeoutError;
 use crate::domain::{AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, ItemState};
@@ -50,7 +50,7 @@ async fn ensure_branch_pushed(git_wt: &Arc<GitWorktreeService>, branch: &str, pr
 
 /// Agent type for spawned agents.
 ///
-/// Determines which CLI tool to use when spawning an agent in a Zellij tab.
+/// Determines which CLI tool to use when spawning an agent in a tmux window.
 /// Each type has different command names and prompt flags.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -117,12 +117,12 @@ impl AgentType {
     pub fn suffix(&self) -> &'static str {
         self.meta().suffix
     }
-    /// Emoji for display in Zellij tabs.
+    /// Emoji for display in tmux windows.
     pub fn emoji(&self) -> &'static str {
         self.meta().emoji
     }
 
-    /// Generate a display name for Zellij tabs.
+    /// Generate a display name for tmux windows.
     ///
     /// Format: "{emoji} gh-{issue_id}-{short_slug}"
     /// The slug is truncated to 20 chars for readability.
@@ -130,7 +130,7 @@ impl AgentType {
         format!("{} gh-{}-{}", self.emoji(), issue_id, slug)
     }
 
-    /// Zellij tab display name for an agent with this type and slug.
+    /// tmux window display name for an agent with this type and slug.
     pub fn tab_display_name(&self, slug: &str) -> String {
         format!("{} {}", self.emoji(), slug)
     }
@@ -147,7 +147,7 @@ impl AgentType {
     }
 }
 
-/// Resolve the Zellij tab name of THIS agent from structural identity.
+/// Resolve the tmux window name of THIS agent from structural identity.
 ///
 /// Root agent (no dots in birth_branch): "TL" tab (created by `exomonad init`).
 /// Spawned subtree: "{emoji} {slug}" where slug = last segment of birth_branch.
@@ -187,7 +187,7 @@ pub fn resolve_own_tab_name(ctx: &crate::effects::EffectContext) -> String {
     }
 }
 
-/// Resolve the Zellij tab name of the parent agent from structural identity.
+/// Resolve the tmux window name of the parent agent from structural identity.
 ///
 /// Workers (Gemini): parent derived from birth_branch (inherited).
 /// Subtree agents: parent is one dot-level up in branch hierarchy.
@@ -333,7 +333,7 @@ pub struct SpawnLeafOptions {
 pub struct SpawnResult {
     /// Path to the agent directory (.exo/agents/{agent_id}/)
     pub agent_dir: PathBuf,
-    /// Zellij tab name
+    /// tmux window name
     pub tab_name: String,
     /// Issue title
     pub issue_title: String,
@@ -396,7 +396,7 @@ impl Topology {
 pub struct AgentInfo {
     /// Issue ID (e.g., "123")
     pub issue_id: String,
-    /// Whether a Zellij tab exists for this agent
+    /// Whether a tmux window exists for this agent
     pub has_tab: bool,
     /// Status of the agent
     pub status: AgentStatus,
@@ -669,7 +669,7 @@ impl AgentControlService {
     /// 1. Fetches issue from GitHub
     /// 2. Creates agent directory (.exo/agents/{agent_id}/)
     /// 3. Writes .mcp.json pointing to the Unix socket server
-    /// 4. Opens Zellij tab with agent command (cwd = project_dir)
+    /// 4. Opens tmux window with agent command (cwd = project_dir)
     #[tracing::instrument(skip(self, options), fields(issue_id = %issue_number.as_u64()))]
     pub async fn spawn_agent(
         &self,
@@ -681,7 +681,7 @@ impl AgentControlService {
         info!(issue_id = %issue_id_log, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_agent");
 
         let result = timeout(SPAWN_TIMEOUT, async {
-            // Validate we're in Zellij
+            // Validate we're in tmux
             self.check_tmux_env()?;
 
             // Resolve effective project dir.
@@ -762,7 +762,7 @@ impl AgentControlService {
                 "Built initial prompt for agent"
             );
 
-            // Zellij display name (emoji + short format)
+            // tmux display name (emoji + short format)
             let display_name = options.agent_type.display_name(&issue_id, &slug);
 
             let env_vars = self.common_spawn_env(
@@ -771,7 +771,7 @@ impl AgentControlService {
                 role,
             );
 
-            // Open Zellij tab with cwd = worktree_path
+            // Open tmux window with cwd = worktree_path
             self.new_tmux_window(
                 &display_name,
                 &agent_dir,
@@ -843,9 +843,9 @@ impl AgentControlService {
     /// Spawn a named teammate with a direct prompt.
     ///
     /// Idempotent on teammate name: if already running, returns existing info.
-    /// If config entry exists but Zellij tab is dead, cleans stale entry and respawns.
+    /// If config entry exists but tmux window is dead, cleans stale entry and respawns.
     /// No per-agent directories or MCP configs — agents share the repo's config.
-    /// State lives in Teams config.json + Zellij tab only.
+    /// State lives in Teams config.json + tmux window only.
     #[tracing::instrument(skip(self, options), fields(name = %options.name.as_str()))]
     pub async fn spawn_gemini_teammate(
         &self,
@@ -865,7 +865,7 @@ impl AgentControlService {
             let internal_name = format!("{}-{}", slug, agent_suffix);
             let display_name = format!("{} {}", options.agent_type.emoji(), slug);
 
-            // Idempotency check: if Zellij tab is alive, return existing info
+            // Idempotency check: if tmux window is alive, return existing info
             let tab_alive = self.is_tmux_window_alive(&display_name).await;
 
             info!(
@@ -1157,7 +1157,7 @@ impl AgentControlService {
             let internal_name = format!("{}-{}", slug, agent_suffix);
             let display_name = format!("{} {}", agent_type.emoji(), slug);
 
-            // Idempotency check: if Zellij tab is alive, return existing info
+            // Idempotency check: if tmux window is alive, return existing info
             let tab_alive = self.is_tmux_window_alive(&display_name).await;
             if tab_alive {
                 info!(slug = %slug, "Subtree already running, returning existing");
@@ -1260,7 +1260,7 @@ impl AgentControlService {
             // Determine fork mode from parent_session_id
             let fork_id = options.parent_session_id.as_ref().map(|id| id.as_str());
 
-            // Open Zellij tab with cwd = worktree_path
+            // Open tmux window with cwd = worktree_path
             self.new_tmux_window_inner(
                 &display_name,
                 &worktree_path,
@@ -1365,7 +1365,7 @@ impl AgentControlService {
                 task.push_str("\n\nShared technical dependencies are available as read-only reference in `.exo/context/`. Do not modify files in this directory.");
             }
 
-            // Open Zellij TAB (not pane)
+            // Open tmux window (not pane)
             // Task already includes leaf completion protocol — rendered by Haskell Prompt builder.
             self.new_tmux_window(
                 &display_name,
@@ -1408,7 +1408,7 @@ impl AgentControlService {
 
     /// Clean up an agent by identifier (internal_name or issue_id).
     ///
-    /// Kills the Zellij tab, unregisters from Teams config.json,
+    /// Kills the tmux window, unregisters from Teams config.json,
     /// and removes per-agent config directory (`.exo/agents/{name}/`).
     #[tracing::instrument(skip(self))]
     pub async fn cleanup_agent(&self, identifier: &str) -> Result<()> {
@@ -1723,7 +1723,7 @@ impl AgentControlService {
     }
 
     // ========================================================================
-    // Internal: Zellij
+    // Internal: tmux
     // ========================================================================
 
     fn check_tmux_env(&self) -> Result<String> {
@@ -1845,7 +1845,7 @@ impl AgentControlService {
     /// Build the full shell command string for an agent.
     ///
     /// Handles: agent CLI + prompt/flags → env var prefix → nix develop wrapping.
-    /// Used by both `new_zellij_tab_inner` (KDL layout) and `new_zellij_pane` (CLI).
+    /// Used by both `new_tmux_window_inner` and `new_tmux_pane`.
     fn build_agent_command(
         agent_type: AgentType,
         prompt: Option<&str>,
@@ -2036,7 +2036,7 @@ impl AgentControlService {
     }
 
     // ========================================================================
-    // Internal: Zellij Pane Creation
+    // Internal: tmux Pane Creation
     // ========================================================================
 
     async fn new_tmux_pane(

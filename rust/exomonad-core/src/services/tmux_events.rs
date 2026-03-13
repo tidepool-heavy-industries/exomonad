@@ -1,6 +1,6 @@
 //! tmux event emission and input injection service.
 //!
-//! Replaces the former Zellij event system. Events are log-only (no sidebar).
+//! Replaces the original event system. Events are log-only (no sidebar).
 //! Input injection uses tmux buffer pattern for multiline safety.
 
 use crate::ui_protocol::AgentEvent;

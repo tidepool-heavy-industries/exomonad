@@ -3,7 +3,7 @@ use std::path::Path;
 
 fn main() -> Result<()> {
     // ========================================================================
-    // Part 1: Core exomonad types (ffi, common, hook, agent, popup)
+    // Part 1: Core exomonad types (ffi, common, hook, agent)
     // ========================================================================
     compile_core_protos()?;
 
@@ -98,7 +98,6 @@ fn compile_core_protos() -> Result<()> {
         "proto/exomonad/common.proto",
         "proto/exomonad/hook.proto",
         "proto/exomonad/agent.proto",
-        "proto/exomonad/popup.proto",
     ]
     .into_iter()
     .filter(|path| Path::new(path).exists())

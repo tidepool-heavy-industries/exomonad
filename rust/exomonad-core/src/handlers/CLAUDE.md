@@ -25,16 +25,16 @@ Handles effects in the `events.*` namespace, enabling synchronization between ag
 
 ### Capabilities
 
-- **`wait_for_event`**: Internal effect for blocking wait on event types. Not exposed as an MCP tool — parent notification uses Zellij STDIN injection instead.
+- **`wait_for_event`**: Internal effect for blocking wait on event types. Not exposed as an MCP tool — parent notification uses tmux STDIN injection instead.
 - **`notify_event`**: Publishes an event to a session queue.
 - **`notify_parent`**: Sends a message to the parent agent. Delegates to `delivery::notify_parent_delivery()` — the single codepath for all notify_parent operations (event log, EventQueue, `[from:]`/`[FAILED:]` formatting, multi-channel delivery).
-- **`send_message`**: Resolves recipients and delivers arbitrary messages between agents. Routes via Teams inbox, ACP, UDS, or Zellij fallback based on the recipient's type and capabilities.
+- **`send_message`**: Resolves recipients and delivers arbitrary messages between agents. Routes via Teams inbox, ACP, UDS, or tmux fallback based on the recipient's type and capabilities.
 
 ### Type Safety
 
 - `notified_agents` uses `HashSet<String>` for dedup
-- Parent tab name resolved via shared `resolve_parent_tab_name()` from `services::agent_control`
-- Tab display names computed via `AgentType::tab_display_name(slug)` — single source of truth
+- Parent window name resolved via shared `resolve_parent_window_name()` from `services::agent_control`
+- Window display names computed via `AgentType::window_display_name(slug)` — single source of truth
 - Agent identity resolved as `AgentName` from `EffectContext` (structural, baked into PluginManager)
 
 ### Session ID Resolution
@@ -61,8 +61,8 @@ Handles effects in the `agent.*` namespace.
 ### Capabilities
 
 - **`spawn_gemini_teammate`**: Spawns a Gemini worker pane in the parent directory.
-- **`spawn_subtree`**: Creates a Claude subtree in a new git worktree + Zellij tab.
-- **`spawn_leaf_subtree`**: Creates a Gemini leaf in a new git worktree + Zellij tab.
+- **`spawn_subtree`**: Creates a Claude subtree in a new git worktree + tmux window.
+- **`spawn_leaf_subtree`**: Creates a Gemini leaf in a new git worktree + tmux window.
 - **`cleanup_merged`**: Removes worktrees for merged branches.
 
 ### Type Safety
@@ -107,6 +107,8 @@ Two abstraction levels — choose the right one:
 
 Both the `notify_parent` effect handler and the poller's `NotifyParentAction` use `notify_parent_delivery()`. All messages get `[from: id]` prefix (or `[FAILED: id]` for failures). Event handler messages include structural tags inside the body (e.g. `[from: leaf-id] [PR READY] PR #5...`). Never use raw `deliver_to_agent()` for parent notifications.
 
+`deliver_to_agent()` is correct for peer-to-peer messaging (send_message, event handler InjectMessage).
+
 ## Shared Helpers (`handlers/mod.rs`)
 
 Proto3 uses empty strings/zero values as defaults. These helpers eliminate repetitive empty-check boilerplate at handler boundaries:
@@ -127,7 +129,7 @@ Proto3 uses empty strings/zero values as defaults. These helpers eliminate repet
 | `BirthBranch` | Branch-based agent identity | events, github_poller |
 | `BranchName` | Git branch name | file_pr, agent |
 | `PRNumber` | GitHub PR number (wraps u64) | file_pr, merge_pr, copilot, github_poller |
-| `AgentType` | Claude vs Gemini enum, provides `tab_display_name()` and `from_dir_name()` | agent, github_poller |
+| `AgentType` | Claude vs Gemini enum, provides `window_display_name()` and `from_dir_name()` | agent, github_poller |
 | `GithubOwner` / `GithubRepo` | GitHub repo coordinates | github_poller |
 
 ### Boundary Conversion Pattern
