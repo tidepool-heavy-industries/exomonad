@@ -49,8 +49,8 @@ message AgentInfo {
   exomonad.common.Role role = 6;
   // Current status.
   AgentStatus status = 7;
-  // Zellij tab name (if running).
-  string zellij_tab = 8;
+  // Multiplexer window name (if running).
+  string mux_window = 8;
   // Error message (if failed).
   string error = 9;
   // PR number if one was filed.

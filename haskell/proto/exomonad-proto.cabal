@@ -37,7 +37,6 @@ library
     ExoMonad.Common
     ExoMonad.Hook
     ExoMonad.Agent
-    ExoMonad.Popup
     -- Generated effect types (from proto/effects/*.proto)
     Effects.EffectError
     Effects.Envelope
@@ -46,7 +45,6 @@ library
     Effects.Log
     Effects.Fs
     Effects.Agent
-    Effects.Popup
     Effects.FilePr
     Effects.Coordination
     Effects.Copilot

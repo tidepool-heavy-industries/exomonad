@@ -6,7 +6,7 @@
 --
 -- 1. Check the agent's own permission set (auto-approve if within scope)
 -- 2. Escalate to TL (auto-approve within TL scope)
--- 3. Escalate to human (popup in Zellij)
+-- 3. Escalate to human (popup in multiplexer)
 --
 -- Permission types are ADTs — illegal states are unrepresentable.
 -- The actual checking logic starts as a passthrough and is built
@@ -81,8 +81,6 @@ data TLPermission
     TLDeleteMergedBranch BranchName
   | -- | Spawn sub-agents (spawn_subtree, spawn_worker)
     TLSpawnAgents
-  | -- | Show popup UI
-    TLShowPopup
   deriving (Show, Eq)
 
 -- | Check whether a tool call is within a role's permission set.
