@@ -6,7 +6,7 @@ use crate::effects::{dispatch_events_effect, EffectHandler, EffectResult, EventE
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::delivery::DeliveryResult;
 use crate::services::event_log::EventLog;
-use crate::services::team_registry::TeamRegistry;
+use claude_teams_bridge::TeamRegistry;
 use crate::services::EventQueue;
 use async_trait::async_trait;
 use exomonad_proto::effects::events::*;

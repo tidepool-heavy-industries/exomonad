@@ -5,7 +5,7 @@ use crate::services::agent_control::AgentType;
 use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
 use crate::services::repo;
-use crate::services::team_registry::TeamRegistry;
+use claude_teams_bridge::TeamRegistry;
 use anyhow::{Context, Result};
 use exomonad_proto::effects::events::{event::EventType, AgentMessage, Event};
 use serde::Deserialize;

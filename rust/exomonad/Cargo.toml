@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 exomonad-core = { path = "../exomonad-core", version = "0.1.0" }
+claude-teams-bridge = { path = "../claude-teams-bridge", version = "0.1.0" }
 axum = { version = "0.8" }
 tower-http = { workspace = true }
 clap = { workspace = true }

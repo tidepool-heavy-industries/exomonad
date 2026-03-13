@@ -46,6 +46,7 @@ runtime = [
     "dep:agent-client-protocol-schema",
     "dep:tokio-util",
     "dep:futures",
+    "dep:claude-teams-bridge",
 ]
 
 [dependencies]
@@ -85,6 +86,7 @@ shell-escape = { version = "0.1", optional = true }
 nix = { workspace = true, features = ["fs"], optional = true }
 
 # Runtime feature: handlers and services
+claude-teams-bridge = { path = "../claude-teams-bridge", optional = true }
 askama = { version = "0.12", optional = true }
 chrono = { version = "0.4", optional = true }
 dirs = { version = "5.0", optional = true }
