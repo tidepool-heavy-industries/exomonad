@@ -19,6 +19,9 @@ if [ ! -f "$EVENTS_FILE" ]; then
   exit 1
 fi
 
+# SQL uses relative path '.exo/events.jsonl', so cd to repo root
+cd "$SCRIPT_DIR/.." || exit 1
+
 case "${1:-}" in
   summary)  QUERY="SELECT * FROM swarm_summary" ;;
   agents)   QUERY="SELECT * FROM agent_lifecycles ORDER BY spawned_at" ;;

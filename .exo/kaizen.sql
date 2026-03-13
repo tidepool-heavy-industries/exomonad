@@ -29,14 +29,14 @@ SELECT
 FROM events s
 LEFT JOIN events c
   ON c.type = 'agent.completed'
-  AND c.data->>'agent_id' = s.data->>'child_agent'
+  AND c.agent_id = s.data->>'child_agent'
 WHERE s.type = 'agent.spawned';
 
 -- PR pipeline: filed → merged, with duration
 CREATE VIEW pr_pipeline AS
 SELECT
   CAST(f.data->>'pr_number' AS INTEGER) AS pr_number,
-  f.data->>'branch' AS branch,
+  f.data->>'head_branch' AS branch,
   f.agent_id,
   f.ts AS filed_at,
   m.ts AS merged_at,

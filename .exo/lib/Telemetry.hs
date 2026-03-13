@@ -52,7 +52,7 @@ telemetryPostToolUse hookInput = do
 -- | For spawn tools, extract branch_name/name and truncated task.
 extractSpawnMetadata :: Text -> Maybe Value -> Maybe Value
 extractSpawnMetadata toolName (Just (Object obj))
-  | toolName == "mcp__exomonad__spawn_workers" =
+  | toolName == "spawn_workers" =
       case KM.lookup "specs" obj of
         Just (Array specs) ->
           let specsList = toList specs
@@ -74,7 +74,7 @@ extractSpawnMetadata toolName (Just (Object obj))
             _ -> case KM.lookup "name" obj of
               Just (String n) -> Just ("name" .= n)
               _ -> Nothing
-          taskField = if toolName == "mcp__exomonad__spawn_acp" then "prompt" else "task"
+          taskField = if toolName == "spawn_acp" then "prompt" else "task"
           taskVal = case KM.lookup (Key.fromText taskField) obj of
             Just (String t) -> Just (Key.fromText taskField .= T.take 200 t)
             _ -> Nothing
@@ -84,8 +84,8 @@ extractSpawnMetadata _ _ = Nothing
 
 isSpawnTool :: Text -> Bool
 isSpawnTool t = t `elem`
-  [ "mcp__exomonad__spawn_subtree"
-  , "mcp__exomonad__spawn_leaf_subtree"
-  , "mcp__exomonad__spawn_workers"
-  , "mcp__exomonad__spawn_acp"
+  [ "spawn_subtree"
+  , "spawn_leaf_subtree"
+  , "spawn_workers"
+  , "spawn_acp"
   ]
