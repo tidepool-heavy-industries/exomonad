@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "rust/exomonad-proto",
+    "rust/claude-teams-bridge",
     "rust/exomonad-core",
     "rust/exomonad",
 ]
