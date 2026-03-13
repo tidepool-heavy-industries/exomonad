@@ -271,7 +271,7 @@ instance FromJSON SpawnWorkersArgs where
 instance MCPTool SpawnWorkers where
   type ToolArgs SpawnWorkers = SpawnWorkersArgs
   toolName = "spawn_workers"
-  toolDescription = "Spawn multiple Gemini worker agents in one call. Gemini agents are highly capable implementers and cost 10-30x less than Opus — use workers aggressively for implementation, research, and any parallelizable work to save token spend. Give them acceptance criteria, key file paths, and anti-patterns, not step-by-step code. Each gets a Zellij pane in YOUR tab, working in YOUR directory on YOUR branch (ephemeral, no isolation, no PR). Workers send messages via notify_parent. IMPORTANT: You MUST create a team using TeamCreate BEFORE calling any spawn tool — without a team, child agent messages will not be delivered to you. After spawning, return immediately — do not poll or wait."
+  toolDescription = "Spawn multiple Gemini worker agents in one call. PREFER WORKERS OVER DOING WORK YOURSELF — Gemini costs 10-30x less than your Opus tokens. Any task you can specify clearly (implementation, research, file edits, test writing) should be a worker. If it touches 2+ files or takes more than 5 tool calls, spawn a worker. Give them acceptance criteria, key file paths, and anti-patterns, not step-by-step code. Each gets a Zellij pane in YOUR tab, working in YOUR directory on YOUR branch (ephemeral, no isolation, no PR). Workers send messages via notify_parent. IMPORTANT: You MUST create a team using TeamCreate BEFORE calling any spawn tool — without a team, child agent messages will not be delivered to you. After spawning, return immediately — do not poll or wait."
   toolSchema =
     genericToolSchemaWith @SpawnWorkersArgs
       [ ("specs", "Array of worker specifications")
