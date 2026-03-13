@@ -139,18 +139,6 @@ Agents can always use the **Bash** tool when:
 - They need ad-hoc exploration
 - They're debugging a problem
 
-## Migration Strategy
-
-**Redesign, don't wrap.**
-
-Existing capability-oriented tools should be redesigned as workflows, not wrapped:
-
-- `exo_status` → `get_work_context` (status + analysis + next steps)
-- `file_pr` → Enhanced with auto-push, validation, issue links
-- `exo_complete` → `complete_and_cleanup` (mark closed + sync + cleanup)
-
-Don't create hybrid systems with both capabilities and workflows exposed. Commit to the workflow model.
-
 ## Guidance for Tool Design
 
 ### When to Create a New Tool

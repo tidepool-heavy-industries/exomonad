@@ -44,7 +44,7 @@ One host function (`yield_effect`) routes all effects. The `effect_type` string 
 | `github` | `ExoMonad.Effects.GitHub` | list_issues, get_issue, list_pull_requests, get_pull_request, get_pull_request_for_branch, create_pull_request |
 | `log` | `ExoMonad.Effects.Log` | info, error, debug, warn, emit_event |
 | `fs` | (proto defined, Haskell wrapper pending) | read_file, write_file, file_exists, list_directory, delete_file |
-| `agent` | (proto defined, Haskell wrapper pending) | spawn, spawn_batch, cleanup, cleanup_batch, cleanup_merged, list |
+| `agent` | `ExoMonad.Effects.Agent` | spawn_subtree, spawn_leaf_subtree, spawn_workers, cleanup_merged, close_self |
 
 ### Invoking Effects
 
@@ -164,7 +164,7 @@ RPC names are converted from PascalCase to snake_case for effect IDs.
 
 ```bash
 just proto-gen    # Haskell types via proto3-suite
-cargo build -p exomonad-proto --features effects   # Rust types via prost
+cargo build -p exomonad-proto   # Rust types via prost
 cargo build -p exomonad-core   # Rust trait + dispatch via build.rs
 ```
 
@@ -243,7 +243,7 @@ Add `Effects.Myns` to `exomonad-proto.cabal` if the codegen script didn't alread
 Create `rust/exomonad-core/src/handlers/myns.rs`:
 
 ```rust
-use crate::effects::{dispatch_myns_effect, EffectError, EffectHandler, EffectResult, MyEffects};
+use crate::effects::{dispatch_myns_effect, EffectContext, EffectError, EffectHandler, EffectResult, MyEffects};
 use async_trait::async_trait;
 use exomonad_proto::effects::myns::*;
 
@@ -263,7 +263,7 @@ impl EffectHandler for MyHandler {
         "myns"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
+    async fn handle(&self, effect_type: &str, payload: &[u8], _ctx: &EffectContext) -> EffectResult<Vec<u8>> {
         dispatch_myns_effect(self, effect_type, payload).await
     }
 }
@@ -378,7 +378,7 @@ build-depends:
 **Rust (runtime consumer):**
 ```toml
 [dependencies]
-exomonad-proto = { path = "../exomonad-proto", features = ["effects"] }
+exomonad-proto = { path = "../exomonad-proto" }
 async-trait = "0.1"
 prost = "0.13"
 ```
