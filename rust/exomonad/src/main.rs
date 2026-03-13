@@ -679,6 +679,33 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
         .context("Failed to write hook configuration")?;
     info!("Hook configuration written to .claude/settings.local.json");
 
+    // Copy Claude rules template if available and not already present
+    {
+        let rules_dest = cwd.join(".claude/rules/exomonad.md");
+        if !rules_dest.exists() {
+            // Resolution: project-local .exo/rules/ → global ~/.exo/rules/
+            let local_template = cwd.join(".exo/rules/exomonad.md");
+            let global_template = std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".exo/rules/exomonad.md"));
+
+            let source = if local_template.exists() {
+                Some(local_template)
+            } else {
+                global_template.filter(|p| p.exists())
+            };
+
+            if let Some(src) = source {
+                std::fs::create_dir_all(cwd.join(".claude/rules"))?;
+                std::fs::copy(&src, &rules_dest)?;
+                info!(
+                    src = %src.display(),
+                    "Copied Claude rules to .claude/rules/exomonad.md"
+                );
+            }
+        }
+    }
+
     // Write Gemini MCP configuration if root agent is Gemini
     if config.root_agent_type == AgentType::Gemini {
         let gemini_dir = cwd.join(".gemini");
@@ -840,10 +867,16 @@ fn ensure_gitignore(project_dir: &std::path::Path) -> Result<()> {
     };
 
     let has_line = |line: &str| content.lines().any(|l| l.trim() == line);
-    let needed: Vec<&str> = [".exo/*", "!.exo/config.toml", "!.exo/roles/", "!.exo/lib/"]
-        .into_iter()
-        .filter(|line| !has_line(line))
-        .collect();
+    let needed: Vec<&str> = [
+        ".exo/*",
+        "!.exo/config.toml",
+        "!.exo/roles/",
+        "!.exo/lib/",
+        "!.exo/rules/",
+    ]
+    .into_iter()
+    .filter(|line| !has_line(line))
+    .collect();
 
     if needed.is_empty() {
         return Ok(());
