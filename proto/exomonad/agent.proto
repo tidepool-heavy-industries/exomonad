@@ -38,7 +38,7 @@ message AgentInfo {
   AgentType agent_type = 3;
   exomonad.common.Role role = 4;
   AgentStatus status = 5;
-  string zellij_tab = 6;               // Zellij tab name if running
+  string mux_window = 6;               // Multiplexer window name if running
   string error = 7;                    // Error message if failed
 }
 

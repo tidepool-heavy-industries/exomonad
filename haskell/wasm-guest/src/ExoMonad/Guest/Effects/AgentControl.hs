@@ -276,7 +276,7 @@ protoAgentInfoToSpawnResult info =
   SpawnResult
     { worktreePath = toText (PA.agentInfoWorktreePath info),
       branchName = toText (PA.agentInfoBranchName info),
-      tabName = toText (PA.agentInfoZellijTab info),
+      tabName = toText (PA.agentInfoMuxWindow info),
       issueTitle = toText (PA.agentInfoIssue info),
       agentTypeResult = case PA.agentInfoAgentType info of
         Enumerated (Right PA.AgentTypeAGENT_TYPE_CLAUDE) -> "claude"

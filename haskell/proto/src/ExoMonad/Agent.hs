@@ -265,7 +265,7 @@ data AgentInfo
                agentInfoAgentType :: (HsProtobuf.Enumerated ExoMonad.Agent.AgentType),
                agentInfoRole :: (HsProtobuf.Enumerated ExoMonad.Common.Role),
                agentInfoStatus :: (HsProtobuf.Enumerated ExoMonad.Agent.AgentStatus),
-               agentInfoZellijTab :: Hs.Text,
+               agentInfoMuxWindow :: Hs.Text,
                agentInfoError :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData AgentInfo)
@@ -277,7 +277,7 @@ instance (HsProtobuf.Message AgentInfo) where
     _
     AgentInfo {agentInfoWorktreePath, agentInfoBranchName,
                agentInfoAgentType, agentInfoRole, agentInfoStatus,
-               agentInfoZellijTab, agentInfoError}
+               agentInfoMuxWindow, agentInfoError}
     = Hs.mappend
         (Hs.mappend
            (Hs.mappend
@@ -301,7 +301,7 @@ instance (HsProtobuf.Message AgentInfo) where
            (HsProtobuf.encodeMessageField
               (HsProtobuf.FieldNumber 6)
               ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                 agentInfoZellijTab)))
+                 agentInfoMuxWindow)))
         (HsProtobuf.encodeMessageField
            (HsProtobuf.FieldNumber 7)
            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) agentInfoError))
@@ -361,7 +361,7 @@ instance (HsProtobuf.Message AgentInfo) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 6)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "zellij_tab") [] "",
+         (HsProtobufAST.Single "mux_window") [] "",
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 7)
          (HsProtobufAST.Prim HsProtobufAST.String)
@@ -374,7 +374,7 @@ instance (HsJSONPB.ToJSONPB AgentInfo) where
          "branch_name"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "agent_type" .= f3, "role" .= f4, "status" .= f5,
-         "zellij_tab"
+         "mux_window"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6),
          "error" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f7)]
   toEncodingPB (AgentInfo f1 f2 f3 f4 f5 f6 f7)
@@ -384,7 +384,7 @@ instance (HsJSONPB.ToJSONPB AgentInfo) where
          "branch_name"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "agent_type" .= f3, "role" .= f4, "status" .= f5,
-         "zellij_tab"
+         "mux_window"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6),
          "error" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f7)]
 instance (HsJSONPB.FromJSONPB AgentInfo) where
@@ -404,7 +404,7 @@ instance (HsJSONPB.FromJSONPB AgentInfo) where
                 <*> obj .: "status"
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "zellij_tab"))
+                     (obj .: "mux_window"))
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
                      (obj .: "error")))
