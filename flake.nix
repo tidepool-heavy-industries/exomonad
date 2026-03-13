@@ -54,7 +54,7 @@
 
         # Orchestration tools
         orchestrationPkgs = with pkgs; [
-          zellij
+          tmux
           jujutsu  # jj
         ];
 
@@ -71,7 +71,7 @@
 
             shellHook = ''
               # nix mkShell overrides TMPDIR to /tmp/nix-shell.*, which breaks
-              # Zellij socket discovery (sockets live under macOS native TMPDIR).
+              # tmux and other tools socket discovery.
               # Restore native TMPDIR — devShells are interactive, not hermetic builds.
               if [[ "$TMPDIR" == /tmp/nix-shell.* ]]; then
                 export TMPDIR="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || echo /tmp)"
