@@ -1,30 +1,8 @@
 # ExoMonad
 
-You're in Claude Code. You need to implement a feature that touches 8 files across Rust and Haskell. Instead of doing it yourself, you describe three tasks and spawn Gemini workers. Three panes open in your Zellij session. Each worker implements its piece. Messages arrive in your conversation when they finish. You merge the results. Total cost: 10-30x less than doing it yourself in Opus.
+ExoMonad stitches frontier model binaries together into reconfigurable agent swarms. It hooks into Claude Code and Gemini CLI, using their existing binaries and your existing subscription plans. Opus decomposes and dispatches. Gemini implements. Copilot reviews. Each model does what it's best at.
 
-ExoMonad is an agent orchestration runtime that gives Claude Code (and Gemini CLI) the ability to spawn, coordinate, and manage teams of LLM agents. It integrates directly into your existing CLI workflow — no new UI, no web dashboard, no context switching.
-
-## What It Looks Like
-
-```
-You (in Claude Code):  "Implement close_self effect — proto, Rust handler, Haskell types, plugin"
-
-Claude spawns 3 Gemini workers:
-
-  ┌─ TL (Claude Opus) ──────────────────────────────────────────────┐
-  │  You: "implement the plan"                                      │
-  │  Claude: spawning 3 workers...                                  │
-  │                                                                 │
-  │  [from: rust-close-self] Done. cargo build passes.              │
-  │  [from: haskell-close-self] Done. cabal build passes.           │
-  │  [from: plugin-close-pane] Done. wasm32 build passes.           │
-  ├─────────────────────────────────────────────────────────────────┤
-  │ 💎 rust-close-self  │ 💎 haskell-close-self │ 💎 plugin-close  │
-  │ (working...)        │ (working...)          │ (working...)      │
-  └─────────────────────────────────────────────────────────────────┘
-```
-
-Workers run in parallel, notify you when done, and close their own panes.
+All orchestration logic — tool dispatch, hooks, event handling, PR review routing — is defined in Haskell effects executed by a shared Rust server. Agents run in Zellij tabs and panes, isolated via git worktrees. No Docker, no web dashboard, no new UI to learn.
 
 ## Install
 
