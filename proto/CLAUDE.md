@@ -10,8 +10,7 @@ proto/
 │   ├── ffi.proto       # Core FFI types (ErrorCode, FfiError, FfiResult)
 │   ├── common.proto    # Shared primitives (SessionId, Role, etc.)
 │   ├── hook.proto      # Claude Code hook types
-│   ├── agent.proto     # Agent management types (legacy)
-│   └── popup.proto     # UI popup types
+│   └── agent.proto     # Agent management types (legacy)
 └── effects/            # Extensible effects system (namespace-based)
     ├── agent.proto         # agent.* effects
     ├── copilot.proto       # copilot.* effects
@@ -25,7 +24,6 @@ proto/
     ├── kv.proto            # kv.* effects (Key-Value)
     ├── log.proto           # log.* effects
     ├── merge_pr.proto      # merge_pr.* effects
-    ├── popup.proto         # popup.* effects (UI)
     └── session.proto       # session.* effects
 ```
 
@@ -133,16 +131,6 @@ Agent management:
 - `CleanupAgentsRequest/Result`: Batch cleanup
 - `ListAgentsRequest/Response`: Active agent listing
 
-### popup.proto
-
-UI popup protocol:
-- `PopupDefinition`: Dialog specification
-- `PopupComponent`: UI component (oneof)
-- `TextInput`, `TextArea`, `Checkbox`, etc.
-- `FormSubmission`: User submission
-- `PopupResponse`: Response envelope
-- `VisibilityRule`: Conditional display
-
 ## Effects Proto Reference
 
 The `effects/` directory defines the extensible effects system. Each file defines effects for a namespace (e.g., `git.proto` defines `git.get_branch`, `git.get_status`, etc.). Proto `service` definitions are used by Rust codegen to generate typed traits and dispatch functions.
@@ -235,11 +223,6 @@ Logging and events (`log.*` namespace):
 PR merging (`merge_pr.*` namespace):
 - `MergePR`: Merge PR and fetch changes
 
-### effects/popup.proto
-
-UI popup interaction (`popup.*` namespace):
-- `ShowPopup`: Display interactive UI component
-
 ### effects/coordination.proto
 
 Coordination primitives (`coordination.*` namespace):
@@ -310,7 +293,6 @@ just proto-test  # Run wire format compatibility tests
 | common.proto | ✅ | ✅ | ✅ |
 | hook.proto | ✅ | ✅ | ✅ |
 | agent.proto | ✅ | ✅ | ✅ |
-| popup.proto | ✅ | ✅ | ✅ |
 
 ### Effects Types (effects/) — Protobuf binary wire format
 
@@ -330,7 +312,6 @@ just proto-test  # Run wire format compatibility tests
 | file_pr.proto | ✅ | ✅ | ✅ |
 | kv.proto | ✅ | ✅ | ✅ |
 | merge_pr.proto | ✅ | ✅ | ✅ |
-| popup.proto | ✅ | ✅ | ✅ |
 
 ## Related Files
 

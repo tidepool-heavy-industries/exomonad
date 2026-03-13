@@ -52,7 +52,7 @@ message SendMessageRequest {
 
 message SendMessageResponse {
   bool success = 1;
-  string delivery_method = 2;  // "teams_inbox", "unix_socket", "zellij_stdin", "failed"
+  string delivery_method = 2;  // "teams_inbox", "acp", "unix_socket", "tmux_stdin", "failed"
 }
 
 // ============================================================================
