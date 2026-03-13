@@ -23,8 +23,6 @@ pub mod popup;
 pub mod repo;
 pub mod secrets;
 pub mod synthetic_members;
-pub mod team_registry;
-pub mod teams_mailbox;
 pub mod zellij_events;
 pub mod zellij_ipc;
 

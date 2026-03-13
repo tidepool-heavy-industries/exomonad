@@ -1,8 +1,8 @@
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
-use crate::services::team_registry::TeamRegistry;
-use crate::services::teams_mailbox;
+use claude_teams_bridge::TeamRegistry;
+use claude_teams_bridge as teams_mailbox;
 use crate::services::zellij_events;
 use agent_client_protocol::{Agent, PromptRequest};
 use exomonad_proto::effects::events::{event, AgentMessage, Event};

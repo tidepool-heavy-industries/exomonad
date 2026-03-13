@@ -6,7 +6,7 @@
 use crate::domain::ClaudeSessionUuid;
 use crate::effects::{dispatch_session_effect, EffectResult, SessionEffects};
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
-use crate::services::team_registry::{TeamInfo, TeamRegistry};
+use claude_teams_bridge::{TeamInfo, TeamRegistry};
 use async_trait::async_trait;
 use exomonad_proto::effects::session::*;
 use std::sync::Arc;

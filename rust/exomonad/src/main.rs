@@ -1172,7 +1172,7 @@ async fn main() -> Result<()> {
             }
 
             let team_registry =
-                Arc::new(exomonad_core::services::team_registry::TeamRegistry::new());
+                Arc::new(claude_teams_bridge::TeamRegistry::new());
             let acp_registry = Arc::new(exomonad_core::services::acp_registry::AcpRegistry::new());
 
             let project_dir_for_services = project_dir.clone();

@@ -12,7 +12,7 @@ use crate::services::git::GitService;
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::github::GitHubService;
 use crate::services::mutex_registry::MutexRegistry;
-use crate::services::team_registry::TeamRegistry;
+use claude_teams_bridge::TeamRegistry;
 use crate::services::zellij_ipc::ZellijIpc;
 
 use super::{

@@ -11,7 +11,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
-use super::teams_mailbox::{inbox_path, TeamsMessage};
+use claude_teams_bridge::{inbox_path, TeamsMessage};
 use super::zellij_events::inject_input;
 
 /// Per-member watch state.
