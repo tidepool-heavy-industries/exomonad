@@ -2,7 +2,7 @@
 //!
 //! Polls inbox files for Gemini workers registered as synthetic team members.
 //! When new messages appear, injects their text into the Gemini agent's
-//! Zellij pane via `inject_input`.
+//! tmux pane via `inject_input`.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,16 +12,16 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use super::teams_mailbox::{inbox_path, TeamsMessage};
-use super::zellij_events::inject_input;
+use super::tmux_events::inject_input;
 
 /// Per-member watch state.
 struct WatchState {
     last_count: usize,
-    zellij_tab_name: String,
+    tmux_target: String,
     is_running: Arc<AtomicBool>,
 }
 
-/// Watches synthetic member inbox files and routes messages to Zellij panes.
+/// Watches synthetic member inbox files and routes messages to tmux panes.
 pub struct InboxWatcher {
     watches: Arc<Mutex<HashMap<String, WatchState>>>,
 }
@@ -44,7 +44,7 @@ impl InboxWatcher {
         &self,
         team_name: String,
         member_name: String,
-        zellij_tab_name: String,
+        tmux_target: String,
     ) {
         let mut watches = self.watches.lock().await;
         if watches.contains_key(&member_name) {
@@ -65,7 +65,7 @@ impl InboxWatcher {
             member_name.clone(),
             WatchState {
                 last_count,
-                zellij_tab_name: zellij_tab_name.clone(),
+                tmux_target: tmux_target.clone(),
                 is_running: is_running.clone(),
             },
         );
@@ -78,7 +78,7 @@ impl InboxWatcher {
             info!(
                 member = %member,
                 team = %team,
-                tab = %zellij_tab_name,
+                target = %tmux_target,
                 "InboxWatcher: starting poll loop"
             );
 
@@ -114,9 +114,9 @@ impl InboxWatcher {
                 if let Some(state) = watches.get_mut(&member) {
                     if msgs.len() > state.last_count {
                         let new_count = msgs.len() - state.last_count;
-                        info!(member = %member, new_messages = new_count, "InboxWatcher: routing to Zellij");
+                        info!(member = %member, new_messages = new_count, "InboxWatcher: routing to tmux");
                         for msg in &msgs[state.last_count..] {
-                            inject_input(&state.zellij_tab_name, None, &msg.text);
+                            inject_input(&state.tmux_target, None, &msg.text);
                         }
                         state.last_count = msgs.len();
                     }

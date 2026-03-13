@@ -26,8 +26,8 @@ pub struct RawConfig {
     /// Project-wide default role.
     pub default_role: Option<Role>,
 
-    /// Canonical Zellij session name for this project.
-    pub zellij_session: Option<String>,
+    /// Canonical tmux session name for this project.
+    pub tmux_session: Option<String>,
 
     /// Base directory for worktrees (default: .exo/worktrees).
     pub worktree_base: Option<PathBuf>,
@@ -60,8 +60,8 @@ pub struct RawConfig {
 pub struct Config {
     pub project_dir: PathBuf,
     pub role: Role,
-    /// Canonical Zellij session name (required after discovery).
-    pub zellij_session: String,
+    /// Canonical tmux session name (required after discovery).
+    pub tmux_session: String,
     /// Base directory for worktrees.
     pub worktree_base: PathBuf,
     /// Shell command to wrap environment (e.g. "nix develop").
@@ -128,10 +128,10 @@ impl Config {
             })
             .unwrap_or_else(|| project_root.clone());
 
-        // Resolve zellij_session: config > directory name
-        let zellij_session = local_raw
-            .zellij_session
-            .or(global_raw.zellij_session)
+        // Resolve tmux_session: config > directory name
+        let tmux_session = local_raw
+            .tmux_session
+            .or(global_raw.tmux_session)
             .unwrap_or_else(|| {
                 project_root
                     .file_name()
@@ -139,7 +139,7 @@ impl Config {
                     .unwrap_or("exomonad")
                     .to_string()
             });
-        let zellij_session = sanitize_session_name(zellij_session);
+        let tmux_session = sanitize_session_name(tmux_session);
 
         // Resolve worktree_base: global > local > default (.exo/worktrees)
         let worktree_base = global_raw
@@ -194,7 +194,7 @@ impl Config {
         Ok(Self {
             project_dir,
             role,
-            zellij_session,
+            tmux_session,
             worktree_base,
             shell_command,
             wasm_dir,
@@ -223,7 +223,7 @@ impl Default for Config {
         Self {
             project_dir: PathBuf::from("."),
             role: Role::tl(),
-            zellij_session: "default".to_string(),
+            tmux_session: "default".to_string(),
             worktree_base: PathBuf::from(".exo/worktrees"),
             shell_command: None,
             wasm_dir: PathBuf::from(".exo/wasm"),
@@ -273,7 +273,7 @@ fn detect_role_name(project_dir: &Path) -> Option<String> {
     }
 }
 
-/// Sanitize session name per Zellij constraints.
+/// Sanitize session name.
 /// - Max 36 characters
 /// - Replace . with _ (dots cause issues)
 fn sanitize_session_name(name: String) -> String {
@@ -346,12 +346,12 @@ mod tests {
     }
 
     #[test]
-    fn test_raw_config_parse_with_zellij_session() {
+    fn test_raw_config_parse_with_tmux_session() {
         let content = r#"
             default_role = "tl"
-            zellij_session = "exomonad"
+            tmux_session = "exomonad"
         "#;
         let raw: RawConfig = toml::from_str(content).unwrap();
-        assert_eq!(raw.zellij_session, Some("exomonad".to_string()));
+        assert_eq!(raw.tmux_session, Some("exomonad".to_string()));
     }
 }
