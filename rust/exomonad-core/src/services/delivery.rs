@@ -3,7 +3,7 @@ use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
 use claude_teams_bridge::TeamRegistry;
 use claude_teams_bridge as teams_mailbox;
-use crate::services::zellij_events;
+use crate::services::tmux_events;
 use agent_client_protocol::{Agent, PromptRequest};
 use exomonad_proto::effects::events::{event, AgentMessage, Event};
 use tracing::{debug, info, warn};
@@ -13,7 +13,7 @@ pub enum DeliveryResult {
     Teams,
     Acp,
     Uds,
-    Zellij,
+    Tmux,
     Failed,
 }
 
@@ -116,7 +116,7 @@ pub async fn notify_parent_delivery(
             DeliveryResult::Teams => "teams_inbox",
             DeliveryResult::Acp => "acp",
             DeliveryResult::Uds => "unix_socket",
-            DeliveryResult::Zellij => "zellij_stdin",
+            DeliveryResult::Tmux => "tmux_stdin",
             DeliveryResult::Failed => "failed",
         };
         if let Err(e) = log.append(
@@ -197,13 +197,13 @@ async fn deliver_via_uds(
 /// Tries Teams inbox delivery if a registry and agent key are provided.
 /// Attempts ACP prompt delivery if a registry is provided and agent is registered.
 /// Attempts HTTP-over-UDS delivery for custom binary agents (e.g., shoal-agent).
-/// Falls back to Zellij input injection if other delivery methods fail or are not available.
+/// Falls back to tmux input injection if other delivery methods fail or are not available.
 pub async fn deliver_to_agent(
     team_registry: Option<&TeamRegistry>,
     acp_registry: Option<&super::acp_registry::AcpRegistry>,
     project_dir: &std::path::Path,
     agent_key: &str,
-    zellij_tab_name: &str,
+    tmux_target: &str,
     from: &str,
     message: &str,
     summary: &str,
@@ -226,11 +226,11 @@ pub async fn deliver_to_agent(
                         "Wrote message to Teams inbox, spawning delivery verifier (30s)"
                     );
                     // Spawn background task to verify CC's InboxPoller read the message.
-                    // If not read within 30s, fall back to Zellij STDIN injection.
+                    // If not read within 30s, fall back to tmux STDIN injection.
                     let team_name = team_info.team_name.clone();
                     let inbox_name = team_info.inbox_name.clone();
                     let agent = agent_key.to_string();
-                    let tab = zellij_tab_name.to_string();
+                    let target = tmux_target.to_string();
                     let msg = message.to_string();
                     tokio::spawn(async move {
                         for attempt in 1..=3 {
@@ -253,10 +253,10 @@ pub async fn deliver_to_agent(
                         warn!(
                             agent = %agent,
                             team = %team_name,
-                            tab = %tab,
-                            "Teams inbox message not read after 30s, falling back to Zellij injection"
+                            target = %target,
+                            "Teams inbox message not read after 30s, falling back to tmux injection"
                         );
-                        zellij_events::inject_input(&tab, Some(&agent), &msg);
+                        tmux_events::inject_input(&target, Some(&agent), &msg);
                     });
                     return DeliveryResult::Teams;
                 }
@@ -264,7 +264,7 @@ pub async fn deliver_to_agent(
                     warn!(
                         agent = %agent_key,
                         error = %e,
-                        "Teams inbox write failed, falling back to ACP/Zellij"
+                        "Teams inbox write failed, falling back to ACP/tmux"
                     );
                 }
             }
@@ -290,7 +290,7 @@ pub async fn deliver_to_agent(
                     warn!(
                         agent = %agent_key,
                         error = ?e,
-                        "ACP prompt failed, falling back to Zellij"
+                        "ACP prompt failed, falling back to tmux"
                     );
                 }
             }
@@ -306,14 +306,14 @@ pub async fn deliver_to_agent(
                 return DeliveryResult::Uds;
             }
             Err(e) => {
-                warn!(agent = %agent_key, error = %e, "UDS delivery failed, falling back to Zellij");
+                warn!(agent = %agent_key, error = %e, "UDS delivery failed, falling back to tmux");
             }
         }
     }
 
     // For worker agents (panes in a shared tab), routing.json records the parent tab
     // and pane display name written at spawn time. Use it if present — the computed
-    // zellij_tab_name is wrong for workers (no such tab exists).
+    // tmux_target is wrong for workers (no such tab exists).
     let routing_path = project_dir
         .join(".exo")
         .join("agents")
@@ -323,8 +323,8 @@ pub async fn deliver_to_agent(
         if let Ok(content) = std::fs::read_to_string(&routing_path) {
             if let Ok(routing) = serde_json::from_str::<serde_json::Value>(&content) {
                 let parent_tab = routing["parent_tab"].as_str().unwrap_or("TL");
-                // slug_key is the stable identifier registered with the plugin at spawn time.
-                // It survives pane renames (e.g. Gemini CLI → "Ready (exomonad)").
+                // slug_key is the stable identifier — tmux uses pane_id, but the deliver_to_agent
+                // caller passes the window/session-relative target.
                 let slug_key = routing["slug_key"].as_str().unwrap_or(agent_key);
                 info!(
                     agent = %agent_key,
@@ -333,20 +333,20 @@ pub async fn deliver_to_agent(
                     chars = message.len(),
                     "Injecting message into worker pane via routing.json (slug_key)"
                 );
-                zellij_events::inject_input(parent_tab, Some(slug_key), message);
-                return DeliveryResult::Zellij;
+                tmux_events::inject_input(parent_tab, Some(slug_key), message);
+                return DeliveryResult::Tmux;
             }
         }
     }
 
     debug!(
-        tab = %zellij_tab_name,
+        target = %tmux_target,
         agent = %agent_key,
         chars = message.len(),
-        "Injecting message into agent pane via Zellij"
+        "Injecting message into agent pane via tmux"
     );
-    zellij_events::inject_input(zellij_tab_name, Some(agent_key), message);
-    DeliveryResult::Zellij
+    tmux_events::inject_input(tmux_target, Some(agent_key), message);
+    DeliveryResult::Tmux
 }
 
 #[cfg(test)]
@@ -385,13 +385,13 @@ mod tests {
 
     #[test]
     fn test_delivery_result_variants_distinct() {
-        assert_ne!(DeliveryResult::Teams, DeliveryResult::Zellij);
+        assert_ne!(DeliveryResult::Teams, DeliveryResult::Tmux);
         assert_ne!(DeliveryResult::Teams, DeliveryResult::Failed);
-        assert_ne!(DeliveryResult::Zellij, DeliveryResult::Failed);
+        assert_ne!(DeliveryResult::Tmux, DeliveryResult::Failed);
     }
 
     #[tokio::test]
-    async fn test_deliver_no_registry_returns_zellij() {
+    async fn test_deliver_no_registry_returns_tmux() {
         let result = deliver_to_agent(
             None,
             None,
@@ -403,6 +403,6 @@ mod tests {
             "summary",
         )
         .await;
-        assert_eq!(result, DeliveryResult::Zellij);
+        assert_eq!(result, DeliveryResult::Tmux);
     }
 }

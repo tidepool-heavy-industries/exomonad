@@ -1,9 +1,0 @@
-    tab name="{{ tab_name }}"{% if focus %} focus=true{% endif %} {
-        pane name="{{ pane_name }}" focus=true {
-            command "{{ shell }}"
-            args "-l" "-c" "{{ command }}"
-            cwd "{{ cwd }}"
-            start_suspended false
-{% if close_on_exit %}            close_on_exit true
-{% endif %}        }
-    }

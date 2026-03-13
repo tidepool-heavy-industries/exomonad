@@ -13,11 +13,10 @@ use crate::services::git_worktree::GitWorktreeService;
 use crate::services::github::GitHubService;
 use crate::services::mutex_registry::MutexRegistry;
 use claude_teams_bridge::TeamRegistry;
-use crate::services::zellij_ipc::ZellijIpc;
 
 use super::{
     AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
-    GitHandler, GitHubHandler, KvHandler, LogHandler, MergePRHandler, PopupHandler, SessionHandler,
+    GitHandler, GitHubHandler, KvHandler, LogHandler, MergePRHandler, SessionHandler,
 };
 
 /// Core handlers every consumer needs: logging, key-value store, filesystem.
@@ -77,7 +76,7 @@ pub fn git_handlers(
 pub fn orchestration_handlers(
     agent_control: Arc<AgentControlService>,
     event_queue: Arc<EventQueue>,
-    zellij_session: Option<String>,
+    _tmux_session: Option<String>,
     project_dir: PathBuf,
     event_queue_scope: Option<String>,
     claude_session_registry: Arc<ClaudeSessionRegistry>,
@@ -100,11 +99,8 @@ pub fn orchestration_handlers(
         event_handler = event_handler.with_event_log(log.clone());
     }
 
-    let zellij_ipc = zellij_session.map(|s| ZellijIpc::new(&s));
-
     vec![
         Box::new(agent_handler),
-        Box::new(PopupHandler::new(zellij_ipc)),
         Box::new(event_handler),
         Box::new(SessionHandler::new(claude_session_registry).with_team_registry(team_registry)),
         Box::new(CoordinationHandler::new(mutex_registry)),

@@ -19,12 +19,11 @@ pub mod local;
 pub mod log;
 pub mod merge_pr;
 pub mod mutex_registry;
-pub mod popup;
 pub mod repo;
 pub mod secrets;
 pub mod synthetic_members;
-pub mod zellij_events;
-pub mod zellij_ipc;
+pub mod tmux_events;
+pub mod tmux_ipc;
 
 pub use self::acp_registry::AcpRegistry;
 pub use self::agent_control::{

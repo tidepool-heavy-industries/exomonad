@@ -29,7 +29,6 @@ runtime = [
     "dep:exomonad-proto",
     "dep:shell-escape",
     "dep:nix",
-    "dep:askama",
     "dep:chrono",
     "dep:dirs",
     "dep:octocrab",
@@ -40,8 +39,6 @@ runtime = [
     "dep:axum",
     "dep:tower-http",
     "dep:futures-util",
-    "dep:zellij-utils",
-    "dep:interprocess",
     "dep:agent-client-protocol",
     "dep:agent-client-protocol-schema",
     "dep:tokio-util",
@@ -87,7 +84,6 @@ nix = { workspace = true, features = ["fs"], optional = true }
 
 # Runtime feature: handlers and services
 claude-teams-bridge = { path = "../claude-teams-bridge", optional = true }
-askama = { version = "0.12", optional = true }
 chrono = { version = "0.4", optional = true }
 dirs = { version = "5.0", optional = true }
 octocrab = { version = "0.38", optional = true }
@@ -98,10 +94,6 @@ url = { version = "2", optional = true }
 # Runtime feature: HTTP transport
 axum = { version = "0.8", optional = true }
 tower-http = { version = "0.6", features = ["cors"], optional = true }
-
-# Runtime feature: Direct Zellij IPC (replaces subprocess calls)
-zellij-utils = { version = "0.43", optional = true, default-features = false }
-interprocess = { version = "1.2", optional = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }

@@ -228,7 +228,7 @@ impl EventEffects for EventHandler {
             DeliveryResult::Teams => "teams_inbox",
             DeliveryResult::Acp => "acp",
             DeliveryResult::Uds => "unix_socket",
-            DeliveryResult::Zellij => "zellij_stdin",
+            DeliveryResult::Tmux => "tmux_stdin",
             DeliveryResult::Failed => "failed",
         };
 

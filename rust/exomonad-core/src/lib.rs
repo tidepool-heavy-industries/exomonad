@@ -73,8 +73,6 @@ pub mod util;
 #[cfg(feature = "runtime")]
 pub mod handlers;
 #[cfg(feature = "runtime")]
-pub mod layout;
-#[cfg(feature = "runtime")]
 pub mod services;
 
 // --- Framework re-exports ---
@@ -117,7 +115,7 @@ pub use handlers::groups::{core_handlers, git_handlers, orchestration_handlers};
 #[cfg(feature = "runtime")]
 pub use handlers::{
     AgentHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler, GitHandler,
-    GitHubHandler, KvHandler, LogHandler, MergePRHandler, PopupHandler,
+    GitHubHandler, KvHandler, LogHandler, MergePRHandler,
 };
 #[cfg(feature = "runtime")]
 pub use services::{validate_gh_cli, validate_git};

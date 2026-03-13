@@ -17,7 +17,7 @@ use clap::{Parser, Subcommand};
 use exomonad_core::protocol::{Runtime as HookRuntime, ServiceRequest};
 use exomonad_core::services::external::otel::OtelService;
 use exomonad_core::services::external::ExternalService;
-use exomonad_core::services::{git, zellij_events, AgentType};
+use exomonad_core::services::{git, tmux_events, AgentType};
 use std::time::{Duration, Instant};
 
 use axum::response::IntoResponse;
@@ -61,10 +61,10 @@ enum Commands {
         runtime: HookRuntime,
     },
 
-    /// Initialize Zellij session for this project.
+    /// Initialize tmux session for this project.
     ///
-    /// Creates a new session with TL layout if none exists, or attaches to existing.
-    /// Session name is read from .exo/config.toml zellij_session field.
+    /// Creates a new session if none exists, or attaches to existing.
+    /// Session name is read from .exo/config.toml tmux_session field.
     Init {
         /// Optionally override session name (default: from config)
         #[arg(long)]
@@ -96,7 +96,7 @@ enum Commands {
         name: String,
     },
 
-    /// Reply to a UI request (sent by Zellij plugin)
+    /// Reply to a UI request
     Reply {
         /// Request ID
         #[arg(long)]
@@ -243,7 +243,7 @@ struct HookState {
     registry: Arc<exomonad_core::effects::EffectRegistry>,
     wasm_path: PathBuf,
     otel: Option<Arc<OtelService>>,
-    zellij_session: String,
+    tmux_session: String,
     default_role: exomonad_core::Role,
 }
 
@@ -334,7 +334,7 @@ async fn handle_hook_inner(
         "Received hook event via HTTP"
     );
 
-    // Emit HookReceived Zellij event
+    // Emit HookReceived tmux event
     if let Ok(branch) = git::get_current_branch() {
         if let Some(agent_id_str) = git::extract_agent_id(&branch) {
             match exomonad_core::ui_protocol::AgentId::try_from(agent_id_str.clone()) {
@@ -342,9 +342,9 @@ async fn handle_hook_inner(
                     let event = exomonad_core::ui_protocol::AgentEvent::HookReceived {
                         agent_id,
                         hook_type: event_type.to_string(),
-                        timestamp: zellij_events::now_iso8601(),
+                        timestamp: tmux_events::now_iso8601(),
                     };
-                    if let Err(e) = zellij_events::emit_event(&state.zellij_session, &event) {
+                    if let Err(e) = tmux_events::emit_event(&state.tmux_session, &event) {
                         warn!("Failed to emit hook:received event: {}", e);
                     }
                 }
@@ -507,7 +507,7 @@ async fn handle_hook_inner(
                 .await;
             }
 
-            // Emit StopHookBlocked Zellij event
+            // Emit StopHookBlocked tmux event
             if internal_output.decision == StopDecision::Block
                 && event_type == HookEventType::SubagentStop
             {
@@ -523,10 +523,10 @@ async fn handle_hook_inner(
                                     exomonad_core::ui_protocol::AgentEvent::StopHookBlocked {
                                         agent_id,
                                         reason,
-                                        timestamp: zellij_events::now_iso8601(),
+                                        timestamp: tmux_events::now_iso8601(),
                                     };
                                 if let Err(e) =
-                                    zellij_events::emit_event(&state.zellij_session, &event)
+                                    tmux_events::emit_event(&state.tmux_session, &event)
                                 {
                                     warn!("Failed to emit stop_hook:blocked event: {}", e);
                                 }
@@ -598,22 +598,16 @@ async fn handle_hook_inner(
 // Init Command
 // ============================================================================
 
-/// Run the init command: create or attach to Zellij session.
+/// Run the init command: create or attach to tmux session.
 ///
 /// Three-way session handling:
 /// - Session alive → attach
-/// - Session EXITED → delete stale state, create fresh from layout
-/// - No session → create fresh from layout
+/// - No session → create fresh
 ///
 /// With `--recreate`: delete any existing session (even alive), then create fresh.
 ///
 async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()> {
-    use std::os::unix::process::CommandExt;
-
-    // Preflight: warn if XDG_RUNTIME_DIR missing (SSH edge case)
-    if std::env::var("XDG_RUNTIME_DIR").is_err() {
-        warn!("XDG_RUNTIME_DIR not set. Zellij may fail to find sessions.");
-    }
+    use exomonad_core::services::tmux_ipc::TmuxIpc;
 
     // Bootstrap: create .exo/config.toml if missing
     let cwd = std::env::current_dir()?;
@@ -632,7 +626,7 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
 
     // Resolve config
     let config = config::Config::discover()?;
-    let session = session_override.unwrap_or(config.zellij_session.clone());
+    let session = session_override.unwrap_or(config.tmux_session.clone());
 
     // Auto-build or copy WASM if it doesn't exist yet
     let wasm_filename = format!("wasm-guest-{}.wasm", config.wasm_name);
@@ -703,22 +697,9 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
         info!("Gemini MCP configuration written to .gemini/settings.json");
     }
 
-    // Query existing sessions
-    let output = std::process::Command::new("zellij")
-        .args(["list-sessions", "--short"])
-        .output()
-        .context("Failed to run zellij list-sessions")?;
+    let session_alive = TmuxIpc::has_session(&session)?;
 
-    let sessions_str = String::from_utf8_lossy(&output.stdout);
-
-    // `zellij list-sessions --short` outputs lines like:
-    //   "my-session" (alive) or "my-session (EXITED ...)" (dead)
-    let session_alive = sessions_str.lines().any(|l| l.trim() == session);
-    let session_exited = sessions_str
-        .lines()
-        .any(|l| l.starts_with(&session) && l.contains("EXITED"));
-
-    if recreate && (session_alive || session_exited) {
+    if recreate && session_alive {
         // Kill the running server process before tearing down the session
         let pid_path = cwd.join(".exo/server.pid");
         if let Ok(content) = std::fs::read_to_string(&pid_path) {
@@ -748,33 +729,14 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
         }
 
         info!(session = %session, "Deleting session (--recreate)");
-        let status = std::process::Command::new("zellij")
-            .args(["delete-session", "--force", &session])
-            .status()
-            .context("Failed to run zellij delete-session")?;
-        if !status.success() {
-            warn!(status = %status, "zellij delete-session failed");
-        }
+        TmuxIpc::kill_session(&session)?;
     } else if session_alive {
         // Attach to running session (exec replaces process, releasing the binary)
         info!(session = %session, "Attaching to session");
-        let err = std::process::Command::new("zellij")
-            .args(["attach", &session])
-            .exec();
-        return Err(anyhow::anyhow!("exec zellij attach failed: {}", err));
-    } else if session_exited {
-        // Kill stale serialized state to prevent resurrection
-        info!(session = %session, "Cleaning up exited session");
-        let status = std::process::Command::new("zellij")
-            .args(["delete-session", &session])
-            .status()
-            .context("Failed to run zellij delete-session")?;
-        if !status.success() {
-            warn!(status = %status, "zellij delete-session failed");
-        }
+        return TmuxIpc::attach_session(&session);
     }
 
-    // Create fresh session from layout
+    // Create fresh session
     info!(session = %session, "Creating session");
 
     // 1. Write .mcp.json BEFORE session starts (Claude Code reads it at startup)
@@ -793,41 +755,50 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     )?;
     info!("Wrote .mcp.json with stdio MCP config");
 
-    // 2. Generate combined layout with Server + TL tabs in one session.
-    // This avoids `zellij action new-tab` which can hang in containerized environments.
-    let layout_path = generate_init_layout(
-        config.shell_command.as_deref(),
-        config.root_agent_type,
-        config.initial_prompt.as_deref(),
-    )?;
+    // 2. Create session in background
+    TmuxIpc::new_session(&session, &cwd)?;
 
-    eprintln!("Starting session...");
-    // Create zellij session with combined layout in background.
-    // Null stdio causes zellij to run as daemon (no terminal to attach to).
-    let mut child = std::process::Command::new("zellij")
-        .args(["-s", &session, "-n"])
-        .arg(&layout_path)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .context("Failed to start Zellij session")?;
+    // 3. Setup windows
+    let ipc = TmuxIpc::new(&session);
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
 
-    // Give zellij a moment to create the session
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    // Reap the background process (zellij daemon detaches, this child exits)
-    let _ = child.try_wait();
+    // Window 0 is created by new-session. Rename it to "Server" and run exomonad serve.
+    std::process::Command::new("tmux")
+        .args(["rename-window", "-t", &format!("{}:0", session), "Server"])
+        .status()?;
+    std::process::Command::new("tmux")
+        .args(["send-keys", "-t", &format!("{}:0", session), "exomonad serve", "Enter"])
+        .status()?;
 
-    // 3. Poll for server socket
+    // Create "TL" window
+    let base_command = match (config.root_agent_type, config.initial_prompt.as_deref()) {
+        (AgentType::Claude, _) => "claude --dangerously-skip-permissions -c || claude --dangerously-skip-permissions; echo; echo [Claude Code exited]; exec bash -l".to_string(),
+        (AgentType::Gemini, Some(prompt)) => {
+            format!(
+                "gemini --prompt-interactive '{}'",
+                prompt.replace('\'', "'\\''")
+            )
+        }
+        (AgentType::Gemini, None) => "gemini".to_string(),
+        (AgentType::Shoal, Some(prompt)) => {
+            format!("shoal-agent --prompt '{}'", prompt.replace('\'', "'\\''"))
+        }
+        (AgentType::Shoal, None) => "shoal-agent".to_string(),
+    };
+
+    let tl_command = match config.shell_command {
+        Some(sc) => format!("{} -c '{}'", sc, base_command),
+        None => base_command,
+    };
+
+    ipc.new_window("TL", &cwd, &shell, &tl_command)?;
+
+    // 4. Poll for server socket
     wait_for_server_socket(&cwd).await?;
 
-    // 4. Attach (exec replaces process, releasing the binary for hot-swap)
-    // TL tab gets focus via layout focus=true attribute.
+    // 5. Attach
     info!(session = %session, "Attaching to session");
-    let err = std::process::Command::new("zellij")
-        .args(["attach", &session])
-        .exec();
-    Err(anyhow::anyhow!("exec zellij attach failed: {}", err))
+    TmuxIpc::attach_session(&session)
 }
 
 /// Ensure .gitignore has entries for .exo/ (track config, ignore the rest).
@@ -906,76 +877,6 @@ async fn wait_for_server_socket(project_dir: &std::path::Path) -> Result<()> {
     Err(anyhow::anyhow!(
         "Server socket exists but health check failed. Check the Server tab for errors."
     ))
-}
-
-/// Generate a combined Zellij layout with Server + TL tabs for `exomonad init`.
-///
-/// Both tabs are created in a single layout, avoiding `zellij action new-tab`
-/// which can hang in containerized environments where the session runs headless.
-fn generate_init_layout(
-    shell_command: Option<&str>,
-    root_agent_type: AgentType,
-    initial_prompt: Option<&str>,
-) -> Result<std::path::PathBuf> {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let cwd = std::env::current_dir()?;
-
-    // Server tab runs the binary directly (no shell_command wrapper).
-    // shell_command (e.g. "nix develop") is only for the interactive TL tab.
-    // Wrapping the server in nix develop adds 15-30s startup on macOS.
-    let serve_command = "exomonad serve".to_string();
-
-    let base_command = match (root_agent_type, initial_prompt) {
-        // Shell fallback: if claude exits (crash or /exit), show a message and
-        // drop to an interactive shell so the user can debug or restart.
-        // Ink (Claude's TUI) clears the screen on exit, so without this the pane is blank.
-        (AgentType::Claude, _) => "claude --dangerously-skip-permissions -c || claude --dangerously-skip-permissions; echo; echo [Claude Code exited]; exec bash -l".to_string(),
-        (AgentType::Gemini, Some(prompt)) => {
-            format!(
-                "gemini --prompt-interactive '{}'",
-                prompt.replace('\'', "'\\''")
-            )
-        }
-        (AgentType::Gemini, None) => "gemini".to_string(),
-        (AgentType::Shoal, Some(prompt)) => {
-            format!("shoal-agent --prompt '{}'", prompt.replace('\'', "'\\''"))
-        }
-        (AgentType::Shoal, None) => "shoal-agent".to_string(),
-    };
-
-    let tl_command = match shell_command {
-        Some(sc) => format!("{} -c '{}'", sc, base_command),
-        None => base_command,
-    };
-
-    let tabs = vec![
-        exomonad_core::layout::AgentTabParams {
-            tab_name: "Server",
-            pane_name: "exomonad-serve",
-            command: &serve_command,
-            cwd: &cwd,
-            shell: &shell,
-            focus: false,
-            close_on_exit: false,
-        },
-        exomonad_core::layout::AgentTabParams {
-            tab_name: "TL",
-            pane_name: "Main",
-            command: &tl_command,
-            cwd: &cwd,
-            shell: &shell,
-            focus: true,
-            close_on_exit: false,
-        },
-    ];
-
-    let layout = exomonad_core::layout::generate_main_layout(tabs)
-        .context("Failed to generate init layout")?;
-
-    let layout_path = std::env::temp_dir().join("exomonad-init-layout.kdl");
-    std::fs::write(&layout_path, layout)?;
-
-    Ok(layout_path)
 }
 
 // ============================================================================
@@ -1186,7 +1087,7 @@ async fn main() -> Result<()> {
             let worktree_base = config.worktree_base;
             agent_control = agent_control.with_worktree_base(worktree_base.clone());
             agent_control = agent_control.with_birth_branch(exomonad_core::BirthBranch::root());
-            agent_control = agent_control.with_zellij_session(config.zellij_session.clone());
+            agent_control = agent_control.with_tmux_session(config.tmux_session.clone());
             let event_session_id = uuid::Uuid::new_v4().to_string();
             let agent_control = Arc::new(agent_control);
 
@@ -1214,7 +1115,6 @@ async fn main() -> Result<()> {
                     "fs".to_string(),
                     "git".to_string(),
                     "agent".to_string(),
-                    "popup".to_string(),
                     "events".to_string(),
                     "session".to_string(),
                     "coordination".to_string(),
@@ -1246,7 +1146,7 @@ async fn main() -> Result<()> {
             let orch_handlers = exomonad_core::orchestration_handlers(
                 agent_control.clone(),
                 event_queue.clone(),
-                Some(config.zellij_session.clone()),
+                Some(config.tmux_session.clone()),
                 project_dir.clone(),
                 Some(event_session_id),
                 claude_session_registry,
@@ -1469,7 +1369,7 @@ async fn main() -> Result<()> {
                 registry: rt_registry.clone(),
                 wasm_path: wasm_path.clone(),
                 otel: OtelService::from_env().ok().map(Arc::new),
-                zellij_session: config.zellij_session.clone(),
+                tmux_session: config.tmux_session.clone(),
                 default_role: config.role,
             };
 
