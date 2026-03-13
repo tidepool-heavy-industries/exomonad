@@ -183,11 +183,20 @@ impl TmuxIpc {
 
     // -- Input injection (buffer pattern for multiline safety) --
 
+    /// Inject text into a target pane via tmux buffer pattern.
+    ///
+    /// Uses load-buffer → paste-buffer → send-keys Enter. The text is written
+    /// without a trailing newline so that send-keys Enter is the sole execution
+    /// trigger (avoids double-submit). No bracketed paste (-p) — Claude Code's
+    /// Ink TUI and Gemini CLI's readline can't handle the escape sequences.
     pub fn inject_input(&self, target: &str, text: &str) -> Result<()> {
         let buf_name = format!("exo_{}", uuid::Uuid::new_v4().as_simple());
         let tmp_path = format!("/tmp/exomonad_buf_{}", buf_name);
 
-        std::fs::write(&tmp_path, text).context("Failed to write temp buffer file")?;
+        // Strip trailing newlines so paste-buffer doesn't trigger submission;
+        // send-keys Enter below is the sole execution trigger.
+        let payload = text.trim_end_matches('\n').trim_end_matches('\r');
+        std::fs::write(&tmp_path, payload).context("Failed to write temp buffer file")?;
 
         let load_result = std::process::Command::new("tmux")
             .args(["load-buffer", "-b", &buf_name, &tmp_path])
@@ -201,8 +210,11 @@ impl TmuxIpc {
             anyhow::bail!("tmux load-buffer failed: {}", String::from_utf8_lossy(&load_output.stderr));
         }
 
+        // No -p flag: bracketed paste (\e[200~...\e[201~) crashes Claude Code's
+        // Ink TUI and breaks Gemini CLI's readline. Plain paste streams bytes
+        // as standard keyboard input.
         let paste_output = std::process::Command::new("tmux")
-            .args(["paste-buffer", "-p", "-b", &buf_name, "-t", target])
+            .args(["paste-buffer", "-b", &buf_name, "-t", target])
             .output()
             .context("Failed to run tmux paste-buffer")?;
 
@@ -215,7 +227,7 @@ impl TmuxIpc {
             anyhow::bail!("tmux paste-buffer failed: {}", String::from_utf8_lossy(&paste_output.stderr));
         }
 
-        // Send Enter to execute
+        // Sole execution trigger — decoupled from data injection
         let _ = std::process::Command::new("tmux")
             .args(["send-keys", "-t", target, "Enter"])
             .output();
