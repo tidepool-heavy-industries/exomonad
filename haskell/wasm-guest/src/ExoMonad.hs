@@ -7,7 +7,6 @@ module ExoMonad
 
     -- * Tool Records
     module ExoMonad.Guest.Records.FilePR,
-    module ExoMonad.Guest.Records.Popup,
     module ExoMonad.Guest.Records.Events,
     module ExoMonad.Guest.Records.Spawn,
 
@@ -28,7 +27,6 @@ where
 import ExoMonad.Guest.Effect
 import ExoMonad.Guest.Records.Events
 import ExoMonad.Guest.Records.FilePR
-import ExoMonad.Guest.Records.Popup
 import ExoMonad.Guest.Records.Spawn
 import ExoMonad.Guest.SpawnSpec.Types as ExoMonad.Guest.SpawnSpec.Types
 import ExoMonad.Guest.Tool.Class
