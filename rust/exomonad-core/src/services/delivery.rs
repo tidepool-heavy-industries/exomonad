@@ -322,18 +322,18 @@ pub async fn deliver_to_agent(
     if routing_path.exists() {
         if let Ok(content) = std::fs::read_to_string(&routing_path) {
             if let Ok(routing) = serde_json::from_str::<serde_json::Value>(&content) {
-                let parent_tab = routing["parent_tab"].as_str().unwrap_or("TL");
-                // slug_key is the stable identifier — tmux uses pane_id, but the deliver_to_agent
-                // caller passes the window/session-relative target.
-                let slug_key = routing["slug_key"].as_str().unwrap_or(agent_key);
+                // Use pane_id (%N) for direct tmux targeting
+                let target = routing["pane_id"]
+                    .as_str()
+                    .or_else(|| routing["parent_tab"].as_str())
+                    .unwrap_or("TL");
                 info!(
                     agent = %agent_key,
-                    parent_tab,
-                    slug_key,
+                    target,
                     chars = message.len(),
-                    "Injecting message into worker pane via routing.json (slug_key)"
+                    "Injecting message into worker pane via routing.json"
                 );
-                tmux_events::inject_input(parent_tab, Some(slug_key), message);
+                tmux_events::inject_input(target, None, message);
                 return DeliveryResult::Tmux;
             }
         }

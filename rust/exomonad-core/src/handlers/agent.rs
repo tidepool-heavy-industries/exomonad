@@ -566,11 +566,24 @@ impl AgentEffects for AgentHandler {
         _req: CloseSelfRequest,
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<CloseSelfResponse> {
-        let slug_key = format!("{}/{}", ctx.birth_branch, ctx.agent_name);
+        let agent_key = format!("{}-gemini", ctx.agent_name);
+        let routing_path = std::path::Path::new(".exo/agents").join(&agent_key).join("routing.json");
 
-        crate::services::tmux_events::close_worker_pane(&slug_key);
+        let pane_target = if let Ok(content) = std::fs::read_to_string(&routing_path) {
+            serde_json::from_str::<serde_json::Value>(&content)
+                .ok()
+                .and_then(|r| r["pane_id"].as_str().map(String::from))
+        } else {
+            None
+        };
 
-        info!(slug_key = %slug_key, "Agent requested self-closure");
+        if let Some(pane_id) = &pane_target {
+            crate::services::tmux_events::close_worker_pane(pane_id);
+        } else {
+            warn!(agent = %ctx.agent_name, "No pane_id in routing.json, cannot close pane");
+        }
+
+        info!(agent = %ctx.agent_name, pane = ?pane_target, "Agent requested self-closure");
 
         Ok(CloseSelfResponse {
             success: true,

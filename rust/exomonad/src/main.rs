@@ -758,17 +758,45 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     // 2. Create session in background
     TmuxIpc::new_session(&session, &cwd)?;
 
+    // Set EXOMONAD_TMUX_SESSION in the tmux session environment so all
+    // windows/panes inherit it (used by tmux_events, agent_control, etc.)
+    let set_env_output = std::process::Command::new("tmux")
+        .args(["set-environment", "-t", &session, "EXOMONAD_TMUX_SESSION", &session])
+        .output()
+        .context("Failed to set EXOMONAD_TMUX_SESSION in tmux environment")?;
+    if !set_env_output.status.success() {
+        anyhow::bail!(
+            "tmux set-environment failed: {}",
+            String::from_utf8_lossy(&set_env_output.stderr)
+        );
+    }
+
     // 3. Setup windows
     let ipc = TmuxIpc::new(&session);
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
 
     // Window 0 is created by new-session. Rename it to "Server" and run exomonad serve.
-    std::process::Command::new("tmux")
-        .args(["rename-window", "-t", &format!("{}:0", session), "Server"])
-        .status()?;
-    std::process::Command::new("tmux")
-        .args(["send-keys", "-t", &format!("{}:0", session), "exomonad serve", "Enter"])
-        .status()?;
+    let server_target = format!("{}:0", session);
+    let rename_output = std::process::Command::new("tmux")
+        .args(["rename-window", "-t", &server_target, "Server"])
+        .output()
+        .context("Failed to run tmux rename-window")?;
+    if !rename_output.status.success() {
+        anyhow::bail!(
+            "tmux rename-window failed: {}",
+            String::from_utf8_lossy(&rename_output.stderr)
+        );
+    }
+    let send_output = std::process::Command::new("tmux")
+        .args(["send-keys", "-t", &server_target, "exomonad serve", "Enter"])
+        .output()
+        .context("Failed to run tmux send-keys")?;
+    if !send_output.status.success() {
+        anyhow::bail!(
+            "tmux send-keys failed: {}",
+            String::from_utf8_lossy(&send_output.stderr)
+        );
+    }
 
     // Create "TL" window
     let base_command = match (config.root_agent_type, config.initial_prompt.as_deref()) {

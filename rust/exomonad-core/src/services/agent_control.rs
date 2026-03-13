@@ -682,7 +682,7 @@ impl AgentControlService {
 
         let result = timeout(SPAWN_TIMEOUT, async {
             // Validate we're in tmux
-            self.check_tmux_env()?;
+            self.resolve_tmux_session()?;
 
             // Resolve effective project dir.
             let effective_project_dir = self.effective_project_dir(options.subrepo.as_deref())?;
@@ -855,7 +855,7 @@ impl AgentControlService {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_gemini_teammate");
 
         let result = timeout(SPAWN_TIMEOUT, async {
-            self.check_tmux_env()?;
+            self.resolve_tmux_session()?;
 
             let effective_project_dir = self.effective_project_dir(options.subrepo.as_deref())?;
 
@@ -1019,7 +1019,7 @@ impl AgentControlService {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_worker");
 
         let result = timeout(SPAWN_TIMEOUT, async {
-            self.check_tmux_env()?;
+            self.resolve_tmux_session()?;
 
             // Sanitize name for internal use
             let slug = slugify(&options.name);
@@ -1077,18 +1077,8 @@ impl AgentControlService {
 
             // Write routing info so send_message can target this pane correctly.
             // Workers are panes in the parent's tab — slug_key is the stable identifier
-            // (survives Gemini CLI pane renaming); the plugin maps slug→pane_id at spawn.
-            let routing = serde_json::json!({
-                "parent_tab": &caller_tab,
-                "slug_key": &slug_key,
-            });
-            fs::write(
-                agent_config_dir.join("routing.json"),
-                serde_json::to_string_pretty(&routing)?,
-            ).await?;
-
             // Spawn pane in caller's tab, cwd = caller's worktree
-            self.new_tmux_pane(
+            let pane_id = self.new_tmux_pane(
                 &display_name,
                 &absolute_worktree,
                 AgentType::Gemini,
@@ -1098,6 +1088,17 @@ impl AgentControlService {
                 Some(&options.claude_flags),
             )
             .await?;
+
+            // Store pane_id for message delivery and cleanup
+            let routing = serde_json::json!({
+                "parent_tab": &caller_tab,
+                "slug_key": &slug_key,
+                "pane_id": &pane_id,
+            });
+            fs::write(
+                agent_config_dir.join("routing.json"),
+                serde_json::to_string_pretty(&routing)?,
+            ).await?;
 
             // Register as synthetic team member for Claude Teams messaging
             let team_name = format!("exo-{}", self.effective_birth_branch(Some(&ctx.birth_branch)));
@@ -1137,7 +1138,7 @@ impl AgentControlService {
         info!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_subtree");
 
         let result = timeout(SPAWN_TIMEOUT, async {
-            self.check_tmux_env()?;
+            self.resolve_tmux_session()?;
 
             let effective_birth = self.effective_birth_branch(Some(caller_bb));
 
@@ -1300,7 +1301,7 @@ impl AgentControlService {
         info!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_leaf_subtree");
 
         let result = timeout(SPAWN_TIMEOUT, async {
-            self.check_tmux_env()?;
+            self.resolve_tmux_session()?;
 
             // No depth check for leaf nodes.
 
@@ -1726,17 +1727,20 @@ impl AgentControlService {
     // Internal: tmux
     // ========================================================================
 
-    fn check_tmux_env(&self) -> Result<String> {
+    fn resolve_tmux_session(&self) -> Result<String> {
+        if let Some(ref session) = self.tmux_session {
+            return Ok(session.clone());
+        }
         std::env::var("EXOMONAD_TMUX_SESSION")
-            .context("Not running inside a tmux session (EXOMONAD_TMUX_SESSION not set)")
+            .context("No tmux session configured (set EXOMONAD_TMUX_SESSION or call with_tmux_session)")
     }
 
-    /// Get the direct tmux IPC client, falling back to creating one from env.
+    /// Get the direct tmux IPC client, falling back to creating one from config or env.
     fn tmux(&self) -> Result<super::tmux_ipc::TmuxIpc> {
         if let Some(ref ipc) = self.tmux_ipc {
             return Ok(ipc.clone());
         }
-        let session = self.check_tmux_env()?;
+        let session = self.resolve_tmux_session()?;
         Ok(super::tmux_ipc::TmuxIpc::new(&session))
     }
 
@@ -2048,7 +2052,7 @@ impl AgentControlService {
         env_vars: HashMap<String, String>,
         parent_window_name: Option<&str>,
         claude_flags: Option<&ClaudeSpawnFlags>,
-    ) -> Result<()> {
+    ) -> Result<String> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, parent = ?parent_window_name, "Creating tmux pane");
 
         let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd, claude_flags);
@@ -2072,15 +2076,15 @@ impl AgentControlService {
         };
 
         let pane_cwd = cwd.to_path_buf();
-        tokio::task::spawn_blocking(move || {
+        let pane_id = tokio::task::spawn_blocking(move || {
             tmux.split_window(&target_window, &pane_cwd, &shell, &full_command)
         })
         .await
         .context("tokio task join error")?
         .context("Failed to create tmux pane")?;
 
-        info!(name, "Successfully created tmux pane");
-        Ok(())
+        info!(name, pane_id = %pane_id, "Successfully created tmux pane");
+        Ok(pane_id)
     }
 
     // ========================================================================
