@@ -313,34 +313,38 @@ pub async fn deliver_to_agent(
         }
     }
 
-    // For worker agents (panes in a shared tab), routing.json records the parent tab
-    // and pane display name written at spawn time. Use it if present — the computed
-    // tmux_target is wrong for workers (no such tab exists).
-    let routing_path = project_dir
-        .join(".exo")
-        .join("agents")
-        .join(format!("{}-gemini", agent_key))
-        .join("routing.json");
-    if routing_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&routing_path) {
-            if let Ok(routing) = serde_json::from_str::<serde_json::Value>(&content) {
-                // Use pane_id (%N) for direct tmux targeting
-                let target = routing["pane_id"]
-                    .as_str()
-                    .or_else(|| routing["parent_tab"].as_str())
-                    .unwrap_or("TL");
-                info!(
-                    agent = %agent_key,
-                    target,
-                    chars = message.len(),
-                    "Injecting message into worker pane via routing.json"
-                );
-                if let Err(e) = tmux_events::inject_input(target, message).await {
-                    warn!(target = %target, error = %e, "tmux inject_input failed (routing.json)");
-                }
-                return DeliveryResult::Tmux;
-            }
+    // routing.json records tmux identifiers at spawn time: pane_id (%N) for
+    // workers, window_id (@N) for subtrees/leaves. Use slug (last dot-segment)
+    // since agent_control writes routing under the slug, not the full branch name.
+    let slug = agent_key.rsplit_once('.').map(|(_, s)| s).unwrap_or(agent_key);
+    let routing_target = ["gemini", "claude"].iter().find_map(|suffix| {
+        let path = project_dir
+            .join(".exo/agents")
+            .join(format!("{}-{}", slug, suffix))
+            .join("routing.json");
+        if !path.exists() {
+            return None;
         }
+        let content = std::fs::read_to_string(&path).ok()?;
+        let routing: serde_json::Value = serde_json::from_str(&content).ok()?;
+        // Prefer pane_id (workers), then window_id (subtrees/leaves), then parent_tab
+        routing["pane_id"]
+            .as_str()
+            .or_else(|| routing["window_id"].as_str())
+            .or_else(|| routing["parent_tab"].as_str())
+            .map(|s| s.to_string())
+    });
+    if let Some(target) = routing_target {
+        info!(
+            agent = %agent_key,
+            target = %target,
+            chars = message.len(),
+            "Injecting message via routing.json"
+        );
+        if let Err(e) = tmux_events::inject_input(&target, message).await {
+            warn!(target = %target, error = %e, "tmux inject_input failed (routing.json)");
+        }
+        return DeliveryResult::Tmux;
     }
 
     debug!(

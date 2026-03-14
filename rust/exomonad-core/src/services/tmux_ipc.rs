@@ -335,9 +335,18 @@ impl TmuxIpc {
     /// without a trailing newline so that send-keys Enter is the sole execution
     /// trigger (avoids double-submit). No bracketed paste (-p) — Claude Code's
     /// Ink TUI and Gemini CLI's readline can't handle the escape sequences.
+    ///
+    /// The target is session-qualified (`{session}:{target}`) to ensure all
+    /// commands resolve to the same pane. Without qualification, tmux resolves
+    /// display-name targets against the "most recently used" session, which is
+    /// nondeterministic for subprocess calls.
     pub fn inject_input(&self, target: &str, text: &str) -> Result<()> {
         let buf_name = format!("exo_{}", uuid::Uuid::new_v4().as_simple());
         let tmp_path = format!("/tmp/exomonad_buf_{}", buf_name);
+
+        // Session-qualify the target so paste-buffer and send-keys resolve
+        // to the same pane deterministically.
+        let qualified_target = format!("{}:{}", self.session_name, target);
 
         // Strip trailing newlines so paste-buffer doesn't trigger submission;
         // send-keys Enter below is the sole execution trigger.
@@ -363,7 +372,7 @@ impl TmuxIpc {
         // Ink TUI and breaks Gemini CLI's readline. Plain paste streams bytes
         // as standard keyboard input.
         let paste_output = std::process::Command::new("tmux")
-            .args(["paste-buffer", "-b", &buf_name, "-t", target])
+            .args(["paste-buffer", "-b", &buf_name, "-t", &qualified_target])
             .output()
             .context("Failed to run tmux paste-buffer")?;
 
@@ -393,7 +402,7 @@ impl TmuxIpc {
 
         // Sole execution trigger — decoupled from data injection
         let send_output = std::process::Command::new("tmux")
-            .args(["send-keys", "-t", target, "Enter"])
+            .args(["send-keys", "-t", &qualified_target, "Enter"])
             .output()
             .context("Failed to run tmux send-keys")?;
 
@@ -404,7 +413,7 @@ impl TmuxIpc {
             );
         }
 
-        debug!(target, chars = text.len(), "Injected input via tmux buffer");
+        debug!(target = %qualified_target, chars = text.len(), "Injected input via tmux buffer");
         Ok(())
     }
 
