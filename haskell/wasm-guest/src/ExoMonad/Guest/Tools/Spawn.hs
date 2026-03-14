@@ -7,6 +7,7 @@ module ExoMonad.Guest.Tools.Spawn
     SpawnLeafSubtreeArgs (..),
     SpawnWorkersArgs (..),
     WorkerSpec (..),
+    WorkerType (..),
     SpawnAcp,
     SpawnAcpArgs (..),
   )
@@ -14,7 +15,7 @@ where
 
 import Control.Monad (forM, void)
 import Control.Monad.Freer (Eff)
-import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
+import Data.Aeson (FromJSON, object, withObject, withText, (.:), (.:?), (.=))
 import Data.Maybe (fromMaybe)
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as BSL
@@ -183,6 +184,16 @@ instance MCPTool SpawnLeafSubtree where
 
 data SpawnWorkers
 
+-- | Worker type determines the completion protocol and allowed operations.
+data WorkerType = Implementation | Research
+  deriving (Show, Eq)
+
+instance FromJSON WorkerType where
+  parseJSON = withText "WorkerType" $ \case
+    "implementation" -> pure Implementation
+    "research" -> pure Research
+    t -> fail $ "Unknown worker type: " <> T.unpack t
+
 data WorkerSpec = WorkerSpec
   { wsName :: Text,
     wsTask :: Text,
@@ -196,6 +207,7 @@ data WorkerSpec = WorkerSpec
     wsProfiles :: Maybe [Text],
     wsContextFiles :: Maybe [Text],
     wsVerifyTemplates :: Maybe [Text],
+    wsType :: Maybe WorkerType,
     wsPermissionMode :: Maybe Text,
     wsAllowedTools :: Maybe [Text],
     wsDisallowedTools :: Maybe [Text]
@@ -218,6 +230,7 @@ instance JsonSchema WorkerSpec where
         ("profiles", "Template profiles to include (e.g., 'general', 'haskell', 'rust')"),
         ("context_files", "Paths to files to include in context"),
         ("verify_templates", "Verification script templates"),
+        ("type", "Worker type: 'implementation' (default) or 'research'. Research workers are read-only — they explore, search, and report findings via notify_parent."),
         ("permission_mode", "Permission mode for the agent. Omit for --dangerously-skip-permissions."),
         ("allowed_tools", "Tool patterns to allow. Omit for no restriction."),
         ("disallowed_tools", "Tool patterns to disallow. Omit for no restriction.")
@@ -238,6 +251,7 @@ instance FromJSON WorkerSpec where
       <*> v .:? "profiles"
       <*> v .:? "context_files"
       <*> v .:? "verify_templates"
+      <*> v .:? "type"
       <*> v .:? "permission_mode"
       <*> v .:? "allowed_tools"
       <*> v .:? "disallowed_tools"
@@ -254,7 +268,7 @@ instance FromJSON SpawnWorkersArgs where
 instance MCPTool SpawnWorkers where
   type ToolArgs SpawnWorkers = SpawnWorkersArgs
   toolName = "spawn_workers"
-  toolDescription = "Spawn multiple Gemini worker agents in one call. PREFER WORKERS OVER DOING WORK YOURSELF — Gemini costs 10-30x less than your Opus tokens. Any task you can specify clearly (implementation, research, file edits, test writing) should be a worker. If it touches 2+ files or takes more than 5 tool calls, spawn a worker. Give them acceptance criteria, key file paths, and anti-patterns, not step-by-step code. Each gets a tmux pane in YOUR window, working in YOUR directory on YOUR branch (ephemeral, no isolation, no PR). Workers send messages via notify_parent. IMPORTANT: You MUST create a team using TeamCreate BEFORE calling any spawn tool — without a team, child agent messages will not be delivered to you. After spawning, return immediately — do not poll or wait."
+  toolDescription = "Spawn multiple Gemini worker agents in one call. PREFER WORKERS OVER DOING WORK YOURSELF — Gemini costs 10-30x less than your Opus tokens. Any task you can specify clearly (implementation, research, file edits, test writing) should be a worker. If it touches 2+ files or takes more than 5 tool calls, spawn a worker. Give them acceptance criteria, key file paths, and anti-patterns, not step-by-step code. Each gets a tmux pane in YOUR window, working in YOUR directory on YOUR branch (ephemeral, no isolation, no PR). Workers send messages via notify_parent. Set type to 'research' for read-only exploration workers that search, read, and report findings without modifying anything. IMPORTANT: You MUST create a team using TeamCreate BEFORE calling any spawn tool — without a team, child agent messages will not be delivered to you. After spawning, return immediately — do not poll or wait."
   toolSchema =
     genericToolSchemaWith @SpawnWorkersArgs
       [ ("specs", "Array of worker specifications")
@@ -382,7 +396,12 @@ renderWorkerPrompt spec =
     <> maybe [] (\t -> if T.null t then [] else ["## CONTEXT\n" <> t]) (wsContext spec)
     <> maybe [] (\items -> ["## VERIFY\n" <> T.intercalate "\n" (map (\c -> "- `" <> c <> "`") items)]) (wsVerify spec)
     <> maybe [] (\items -> ["## DONE CRITERIA\n" <> T.intercalate "\n" (map ("- " <>) items)]) (wsDoneCriteria spec)
-    <> [workerProfileText]
+    <> [profileTextFor (fromMaybe Implementation (wsType spec))]
+
+-- | Select the profile text for a worker type.
+profileTextFor :: WorkerType -> Text
+profileTextFor Implementation = workerProfileText
+profileTextFor Research = researchProfileText
 
 -- | Pre-rendered leaf profile text.
 leafProfileText :: Text
@@ -391,3 +410,7 @@ leafProfileText = "## Completion Protocol (Leaf Subtree)\nYou are a **leaf agent
 -- | Pre-rendered worker profile text. Same WASM workaround.
 workerProfileText :: Text
 workerProfileText = "## Completion Protocol (Worker)\nYou are an **ephemeral worker** \x2014 you run in the parent's directory on the parent's branch. You do NOT have your own worktree or branch.\n\nWhen you are done:\n\n1. **Call `notify_parent`** with status `success` and a DETAILED message containing your complete findings.\n   - Include FULL code snippets, exact file paths with line numbers, and concrete data.\n   - Your parent CANNOT see your terminal output. `notify_parent` is your ONLY communication channel.\n   - A terse summary like \"Task complete\" is useless \x2014 include everything the parent needs to act on your findings.\n   - For research tasks: include the actual code/data you found, not just \"I found it.\"\n   - For implementation tasks: describe exactly what you changed and how to verify it.\n2. If you failed after multiple attempts, call `notify_parent` with status `failure` and explain what went wrong.\n\n**DO NOT:**\n- Commit, push, or file PRs (you are ephemeral \x2014 the parent owns the branch)\n- Create new branches\n- Run `git checkout` or `git switch`\n- Print findings to stdout instead of sending them via `notify_parent`"
+
+-- | Pre-rendered research worker profile text. Same WASM workaround.
+researchProfileText :: Text
+researchProfileText = "## Completion Protocol (Research Worker)\nYou are a **research worker** \x2014 your job is to explore, read, search, and synthesize. You do NOT modify anything.\n\nYour workflow:\n\n1. **Read files** (`Read`, `Glob`, `Grep`) to understand code structure and patterns.\n2. **Search broadly** \x2014 check multiple files, grep for patterns, follow imports and references.\n3. **Synthesize findings** into a clear, structured report.\n4. **Call `notify_parent`** with status `success` and your findings.\n   - Structure your report with headings, bullet points, and code references (file:line).\n   - Lead with the answer, then supporting evidence.\n   - If you cannot find what was asked, call `notify_parent` with status `failure` explaining what you searched and what was missing.\n\n**DO NOT:**\n- Edit, write, or create any files\n- Run git commands (commit, push, checkout, branch)\n- File PRs or run build commands\n- Make changes to the codebase in any way"
