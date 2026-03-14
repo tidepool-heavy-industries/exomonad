@@ -111,6 +111,8 @@ Handles effects in the `merge_pr.*` namespace.
 
 `gh pr merge` runs WITHOUT `--delete-branch` because worktree branches cannot be deleted while checked out. Branch cleanup happens via `cleanup_merged` instead.
 
+Post-merge, the Haskell tool handler runs `git pull` via `process.run` to fast-forward the local branch. If pull fails, the tool response includes guidance to run `git pull --rebase' manually.
+
 ## Delivery Pipeline (`services/delivery.rs`)
 
 Two abstraction levels — choose the right one:

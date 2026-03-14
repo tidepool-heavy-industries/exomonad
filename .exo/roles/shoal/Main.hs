@@ -156,7 +156,10 @@ dispatchHook cfg hookInput =
       result <- statusToWasmResult status
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
-    WorkerExit -> handleWorkerExit hookInput
+    WorkerExit -> do
+      result <- handleWorkerExit hookInput
+      output (BSL.toStrict $ Aeson.encode result)
+      pure 0
   where
     runStopHook hook = do
       status <- runM $ runC (hook hookInput)

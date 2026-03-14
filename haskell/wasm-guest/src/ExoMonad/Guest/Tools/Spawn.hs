@@ -228,7 +228,9 @@ data SpawnWorkers
 
 -- | Worker type determines the completion protocol and allowed operations.
 data WorkerType = Implementation | Research
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
+
+instance JsonSchema WorkerType
 
 instance FromJSON WorkerType where
   parseJSON = withText "WorkerType" $ \case

@@ -12,6 +12,7 @@ where
 import Control.Monad (void)
 import Control.Monad.Freer (Eff)
 import Data.Maybe (fromMaybe)
+import Data.Map qualified as Map
 import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as BSL
@@ -23,11 +24,13 @@ import Effects.Git qualified as Git
 import Effects.Github qualified as GH
 import Effects.Log qualified as Log
 import Effects.MergePr qualified as MP
+import Effects.Process qualified as Proc
 import Effects.Agent qualified as Agent
 import ExoMonad.Effects.Agent (AgentCleanup)
 import ExoMonad.Effects.Git (GitGetRepoInfo)
 import ExoMonad.Effects.GitHub (GitHubGetPullRequest)
 import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
+import ExoMonad.Effects.Process (ProcessRun)
 import ExoMonad.Effects.MergePR (MergePRMergePr)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), ToolEffects, errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
@@ -193,7 +196,7 @@ doMerge args = do
               }
       void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: " <> mpoMessage output), Log.infoRequestFields = ""})
 
-      if mpoSuccess output
+      pullOk <- if mpoSuccess output
         then do
           let eventPayload = BSL.toStrict $ Aeson.encode $ object
                 [ "pr_number" .= mprPrNumber args,
@@ -204,6 +207,20 @@ doMerge args = do
               Log.emitEventRequestPayload = eventPayload,
               Log.emitEventRequestTimestamp = 0
             })
+
+          -- Fast-forward local branch after merge
+          pullOkStatus <- do
+            let pullReq = Proc.RunRequest
+                  { Proc.runRequestCommand = "git"
+                  , Proc.runRequestArgs = V.fromList ["pull"]
+                  , Proc.runRequestWorkingDir = maybe "" TL.fromStrict (mprWorkingDir args)
+                  , Proc.runRequestEnv = Map.empty
+                  , Proc.runRequestTimeoutMs = 30000
+                  }
+            pullResult <- suspendEffect @ProcessRun pullReq
+            case pullResult of
+              Left _ -> pure False
+              Right pullResp -> pure (Proc.runResponseExitCode pullResp == 0)
 
           -- Auto-cleanup: close agent tab, remove worktree, unregister
           let branchName = TL.toStrict (MP.mergePrResponseBranchName resp)
@@ -225,12 +242,16 @@ doMerge args = do
                   , Log.infoRequestFields = ""
                   })
             Nothing -> pure ()
-        else pure ()
+
+          pure pullOkStatus
+        else pure True
 
       pure $ successResult $
         object
           [ "success" .= mpoSuccess output,
             "message" .= mpoMessage output,
             "git_fetched" .= mpoGitFetched output,
-            "next" .= ("Verify build: cargo check --workspace. Especially important after parallel merges — changes may interact." :: Text)
+            "next" .= (if pullOk
+              then "Verify build: cargo check --workspace. Especially important after parallel merges — changes may interact." :: Text
+              else "git pull failed — run 'git pull --rebase' manually to sync your local branch. Then verify build: cargo check --workspace." :: Text)
           ]
