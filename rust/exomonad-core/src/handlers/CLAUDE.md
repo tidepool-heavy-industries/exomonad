@@ -19,6 +19,21 @@ Handles effects in the `coordination.*` namespace, providing in-memory mutual ex
 - Background expiry task checks every 1s for expired locks
 - Effect-only — no MCP tool exposed. Haskell tool handlers use it internally.
 
+## ProcessHandler (`handlers/process.rs`)
+
+Handles effects in the `process.*` namespace, providing ad-hoc process execution.
+
+### Capabilities
+
+- **`run`**: Execute an arbitrary command with args, env vars, working dir, and optional timeout. Stdout/stderr captured as strings. Working dir is required (empty = error), resolved relative to agent worktree.
+
+### Design
+
+- No service layer — `tokio::process::Command` is simple enough to inline
+- Working dir resolution reuses `resolve_agent_working_dir()` from `services::agent_control`
+- Timeout via `tokio::time::timeout` wrapping `.output()`
+- No command allowlist — trusts WASM author
+
 ## EventEffects Handler (`handlers/events.rs`)
 
 Handles effects in the `events.*` namespace, enabling synchronization between agents and the orchestration layer.

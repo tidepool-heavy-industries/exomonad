@@ -1,0 +1,20 @@
+syntax = "proto3";
+package exomonad.effects.process;
+
+message RunRequest {
+  string command = 1;
+  repeated string args = 2;
+  string working_dir = 3;
+  map<string, string> env = 4;
+  uint64 timeout_ms = 5;
+}
+
+message RunResponse {
+  int32 exit_code = 1;
+  string stdout = 2;
+  string stderr = 3;
+}
+
+service ProcessEffects {
+  rpc Run(RunRequest) returns (RunResponse);
+}

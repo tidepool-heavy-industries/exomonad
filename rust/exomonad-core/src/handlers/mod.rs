@@ -28,6 +28,7 @@ pub mod groups;
 pub mod kv;
 pub mod log;
 pub mod merge_pr;
+pub mod process;
 pub mod session;
 pub use agent::AgentHandler;
 pub use coordination::CoordinationHandler;
@@ -42,6 +43,7 @@ pub use groups::{core_handlers, git_handlers, orchestration_handlers};
 pub use kv::KvHandler;
 pub use log::LogHandler;
 pub use merge_pr::MergePRHandler;
+pub use process::ProcessHandler;
 pub use session::SessionHandler;
 
 // ============================================================================

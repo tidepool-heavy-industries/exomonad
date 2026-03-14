@@ -16,7 +16,7 @@ use claude_teams_bridge::TeamRegistry;
 
 use super::{
     AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
-    GitHandler, GitHubHandler, KvHandler, LogHandler, MergePRHandler, SessionHandler,
+    GitHandler, GitHubHandler, KvHandler, LogHandler, MergePRHandler, ProcessHandler, SessionHandler,
 };
 
 /// Core handlers every consumer needs: logging, key-value store, filesystem.
@@ -34,6 +34,7 @@ pub fn core_handlers(
         Box::new(FsHandler::new(Arc::new(FileSystemService::new(
             project_dir,
         )))),
+        Box::new(ProcessHandler::new()),
     ]
 }
 
@@ -130,11 +131,12 @@ mod tests {
     fn test_core_handlers() {
         let tmp = tempdir().unwrap();
         let handlers = core_handlers(tmp.path().to_path_buf(), None);
-        assert_eq!(handlers.len(), 3);
+        assert_eq!(handlers.len(), 4);
         let namespaces: Vec<_> = handlers.iter().map(|h| h.namespace()).collect();
         assert!(namespaces.contains(&"log"));
         assert!(namespaces.contains(&"kv"));
         assert!(namespaces.contains(&"fs"));
+        assert!(namespaces.contains(&"process"));
     }
 
     #[test]
