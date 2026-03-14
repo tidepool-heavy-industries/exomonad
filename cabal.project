@@ -15,7 +15,7 @@ optimization: 0
 package *
   ghc-options: -XImportQualifiedPost
 
--- Use nix zlib (compatible with nix GHC toolchain)
+-- nix zlib is provided via nix shell environment (PKG_CONFIG_PATH)
 
 -- Vendored forks:
 -- - ginger: typed templates + dependency tracking (tree API)
