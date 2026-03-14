@@ -465,7 +465,81 @@ impl TmuxIpc {
             anyhow::bail!("send-keys Enter failed after 3 attempts: {}", err);
         }
 
+        // Wake the target pane's TUI event loop via SIGWINCH so it processes
+        // the injected input. Non-fatal \u{2014} input was already delivered.
+        if let Err(e) = self.wake_pane(target) {
+            warn!(target = %qualified_target, error = %e, "SIGWINCH wake failed (non-fatal)");
+        }
+
         debug!(target = %qualified_target, chars = text.len(), "Injected input via tmux buffer");
+        Ok(())
+    }
+
+    /// Trigger SIGWINCH in the target pane by briefly resizing its window.
+    ///
+    /// TUI frameworks (Ink, readline) in non-focused panes may not poll stdin
+    /// until a terminal event arrives. A +1/-1 column resize triggers SIGWINCH,
+    /// which wakes the event loop to process buffered input.
+    pub fn wake_pane(&self, target: &str) -> Result<()> {
+        let qualified = format!("{}:{}", self.session_name, target);
+
+        // Read current window dimensions
+        let output = std::process::Command::new("tmux")
+            .args([
+                "display-message",
+                "-t",
+                &qualified,
+                "-p",
+                "#{window_width} #{window_height}",
+            ])
+            .output()
+            .context("Failed to query window dimensions")?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux display-message failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let dims = String::from_utf8_lossy(&output.stdout);
+        let dims = dims.trim();
+        let parts: Vec<&str> = dims.split_whitespace().collect();
+        if parts.len() != 2 {
+            anyhow::bail!("Unexpected dimension format: {}", dims);
+        }
+        let width: u32 = parts[0].parse().context("Failed to parse window width")?;
+        let height: u32 = parts[1].parse().context("Failed to parse window height")?;
+
+        // Resize +1 column
+        let _ = std::process::Command::new("tmux")
+            .args([
+                "resize-window",
+                "-t",
+                &qualified,
+                "-x",
+                &(width + 1).to_string(),
+                "-y",
+                &height.to_string(),
+            ])
+            .output();
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Restore original size
+        let _ = std::process::Command::new("tmux")
+            .args([
+                "resize-window",
+                "-t",
+                &qualified,
+                "-x",
+                &width.to_string(),
+                "-y",
+                &height.to_string(),
+            ])
+            .output();
+
+        debug!(target = %qualified, "SIGWINCH wake: resized {}x{} \u{2192} {}x{} \u{2192} {}x{}", width, height, width + 1, height, width, height);
         Ok(())
     }
 
@@ -641,5 +715,17 @@ mod tests {
 
         h1.join().unwrap();
         h2.join().unwrap();
+    }
+
+    #[test]
+    fn test_wake_pane_requires_session() {
+        // wake_pane runs tmux commands that will fail without a real tmux session,
+        // but it should not panic — it returns a Result
+        let ipc = TmuxIpc::new("nonexistent-test-session");
+        let result = ipc.wake_pane("test-target");
+        assert!(
+            result.is_err(),
+            "wake_pane should fail without a real tmux session"
+        );
     }
 }
