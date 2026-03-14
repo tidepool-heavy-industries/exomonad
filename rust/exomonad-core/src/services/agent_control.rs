@@ -1254,7 +1254,7 @@ impl AgentControlService {
             info!(worktree = %worktree_path.display(), "Wrote hook configuration for spawned Claude agent");
 
             // Symlink Claude project dir so child can discover parent's sessions for --fork-session.
-            // Claude Code stores sessions at ~/.claude/projects/{path-encoded}/ where / becomes -.
+            // Claude Code encodes paths via [^a-zA-Z0-9] → '-' (lossy regex replacement).
             // Without this symlink, --resume --fork-session fails with "no conversation ID found".
             {
                 let claude_projects_dir = dirs::home_dir()
@@ -2808,5 +2808,32 @@ mod tests {
         assert!(link.exists(), "Symlink should exist");
         let target = tokio::fs::read_link(&link).await.unwrap();
         assert_eq!(target, project_dir.join(".exo/server.sock"));
+    }
+
+    #[test]
+    fn test_claude_project_path_encoding() {
+        // Claude Code encodes paths via [^a-zA-Z0-9] → '-'
+        let encode = |s: &str| -> String {
+            s.chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect()
+        };
+
+        assert_eq!(
+            encode("/home/user/project"),
+            "-home-user-project"
+        );
+        assert_eq!(
+            encode("/home/user/my.project"),
+            "-home-user-my-project"
+        );
+        assert_eq!(
+            encode("/home/user/path with spaces"),
+            "-home-user-path-with-spaces"
+        );
+        assert_eq!(
+            encode("/home/user/.exo/worktrees/feature-a"),
+            "-home-user--exo-worktrees-feature-a"
+        );
     }
 }
