@@ -128,15 +128,12 @@ checkCopilotReadiness prNum = do
           -- Filter to Copilot reviews (author login contains "copilot")
           let copilotReviews = filter isCopilotReview reviews
 
-          if null copilotReviews
-            then pure $ NotReady $ "No Copilot review yet on PR #" <> T.pack (show prNum)
+          case reverse copilotReviews of
+            [] -> pure $ NotReady $ "No Copilot review yet on PR #" <> T.pack (show prNum)
                   <> ". Wait for [PR READY] or [REVIEW TIMEOUT] from the event system."
-            else do
+            (latest:_) -> do
               -- Check the latest Copilot review
-              let latest = case reverse copilotReviews of
-                    (l:_) -> l
-                    [] -> error "unreachable"
-                  reviewSha = TL.toStrict (GH.reviewCommitId latest)
+              let reviewSha = TL.toStrict (GH.reviewCommitId latest)
                   state = GH.reviewState latest
               case state of
                 Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_APPROVED) ->
