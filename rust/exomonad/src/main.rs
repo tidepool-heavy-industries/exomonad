@@ -834,12 +834,12 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
 
     // 3. Setup windows
     let ipc = TmuxIpc::new(&session);
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
 
     // Rename initial window to "Server" using stable @N ID (base-index immune)
     let server_target = server_window_id;
     let status = std::process::Command::new("tmux")
-        .args(["rename-window", "-t", &server_target, "Server"])
+        .args(["rename-window", "-t", server_target.as_str(), "Server"])
         .status()
         .context("Failed to run tmux rename-window")?;
     if !status.success() {
@@ -847,7 +847,7 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     }
     let serve_cmd = format!("EXOMONAD_TMUX_SESSION={} exomonad serve", &session);
     let status = std::process::Command::new("tmux")
-        .args(["send-keys", "-t", &server_target, &serve_cmd, "Enter"])
+        .args(["send-keys", "-t", server_target.as_str(), &serve_cmd, "Enter"])
         .status()
         .context("Failed to run tmux send-keys")?;
     if !status.success() {

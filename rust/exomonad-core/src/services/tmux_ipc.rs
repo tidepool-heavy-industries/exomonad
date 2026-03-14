@@ -1,11 +1,42 @@
-//! tmux CLI wrapper for session, window, and pane management.
-//!
-//! All methods are synchronous (blocking `Command::new("tmux")`).
-//! Callers wrap in `tokio::task::spawn_blocking` as needed.
-
 use anyhow::{Context, Result};
 use std::path::Path;
 use tracing::{debug, info, warn};
+
+/// Stable tmux window identifier (@N format, base-index immune).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WindowId(String);
+
+impl WindowId {
+    pub fn parse(s: &str) -> Result<Self> {
+        anyhow::ensure!(s.starts_with('@'), "WindowId must start with '@': {}", s);
+        Ok(Self(s.to_string()))
+    }
+    pub fn as_str(&self) -> &str { &self.0 }
+}
+
+impl std::fmt::Display for WindowId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Tmux pane identifier (%N format).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PaneId(String);
+
+impl PaneId {
+    pub fn parse(s: &str) -> Result<Self> {
+        anyhow::ensure!(s.starts_with('%'), "PaneId must start with '%': {}", s);
+        Ok(Self(s.to_string()))
+    }
+    pub fn as_str(&self) -> &str { &self.0 }
+}
+
+impl std::fmt::Display for PaneId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 /// tmux CLI wrapper for a specific session.
 #[derive(Debug, Clone)]
@@ -15,9 +46,9 @@ pub struct TmuxIpc {
 
 /// Information about a tmux window.
 pub struct WindowInfo {
-    pub window_id: String,
+    pub window_id: WindowId,
     pub window_name: String,
-    pub pane_id: String,
+    pub pane_id: PaneId,
 }
 
 impl TmuxIpc {
@@ -34,7 +65,7 @@ impl TmuxIpc {
     // -- Session management (static, no &self) --
 
     /// Create a new tmux session. Returns the stable window ID (@N) of the initial window.
-    pub fn new_session(name: &str, cwd: &Path) -> Result<String> {
+    pub fn new_session(name: &str, cwd: &Path) -> Result<WindowId> {
         let output = std::process::Command::new("tmux")
             .args(["new-session", "-d", "-s", name, "-P", "-F", "#{window_id}", "-c", &cwd.to_string_lossy()])
             .output()
@@ -42,7 +73,8 @@ impl TmuxIpc {
         if !output.status.success() {
             anyhow::bail!("tmux new-session failed: {}", String::from_utf8_lossy(&output.stderr));
         }
-        let window_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let window_id = WindowId::parse(&raw)?;
         info!(session = %name, window = %window_id, "Created tmux session");
         Ok(window_id)
     }
@@ -79,7 +111,7 @@ impl TmuxIpc {
     // -- Window management --
 
     /// Create a new window. Returns window_id (@N).
-    pub fn new_window(&self, name: &str, cwd: &Path, shell: &str, command: &str) -> Result<String> {
+    pub fn new_window(&self, name: &str, cwd: &Path, shell: &str, command: &str) -> Result<WindowId> {
         let output = std::process::Command::new("tmux")
             .args([
                 "new-window", "-P", "-F", "#{window_id}",
@@ -93,7 +125,8 @@ impl TmuxIpc {
         if !output.status.success() {
             anyhow::bail!("tmux new-window failed: {}", String::from_utf8_lossy(&output.stderr));
         }
-        let window_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let window_id = WindowId::parse(&raw)?;
         info!(session = %self.session_name, window = %window_id, name, "Created tmux window");
         Ok(window_id)
     }
@@ -115,9 +148,9 @@ impl TmuxIpc {
                 let parts: Vec<&str> = line.split('\t').collect();
                 if parts.len() >= 3 {
                     Some(WindowInfo {
-                        window_id: parts[0].to_string(),
+                        window_id: WindowId::parse(parts[0]).ok()?,
                         window_name: parts[1].to_string(),
-                        pane_id: parts[2].to_string(),
+                        pane_id: PaneId::parse(parts[2]).ok()?,
                     })
                 } else {
                     None
@@ -127,9 +160,9 @@ impl TmuxIpc {
         Ok(windows)
     }
 
-    pub fn kill_window(&self, window_id: &str) -> Result<()> {
+    pub fn kill_window(&self, window_id: &WindowId) -> Result<()> {
         let output = std::process::Command::new("tmux")
-            .args(["kill-window", "-t", window_id])
+            .args(["kill-window", "-t", window_id.as_str()])
             .output()
             .context("Failed to run tmux kill-window")?;
         if !output.status.success() {
@@ -139,9 +172,9 @@ impl TmuxIpc {
         Ok(())
     }
 
-    pub fn select_window(&self, window_id: &str) -> Result<()> {
+    pub fn select_window(&self, window_id: &WindowId) -> Result<()> {
         let output = std::process::Command::new("tmux")
-            .args(["select-window", "-t", window_id])
+            .args(["select-window", "-t", window_id.as_str()])
             .output()
             .context("Failed to run tmux select-window")?;
         if !output.status.success() {
@@ -153,11 +186,11 @@ impl TmuxIpc {
     // -- Pane management --
 
     /// Split the window to create a new pane. Returns pane_id (%N).
-    pub fn split_window(&self, window_id: &str, cwd: &Path, shell: &str, command: &str) -> Result<String> {
+    pub fn split_window(&self, window_id: &WindowId, cwd: &Path, shell: &str, command: &str) -> Result<PaneId> {
         let output = std::process::Command::new("tmux")
             .args([
                 "split-window", "-P", "-F", "#{pane_id}",
-                "-t", window_id,
+                "-t", window_id.as_str(),
                 "-c", &cwd.to_string_lossy(),
                 shell, "-l", "-c", command,
             ])
@@ -166,14 +199,15 @@ impl TmuxIpc {
         if !output.status.success() {
             anyhow::bail!("tmux split-window failed: {}", String::from_utf8_lossy(&output.stderr));
         }
-        let pane_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let pane_id = PaneId::parse(&raw)?;
         info!(window = %window_id, pane = %pane_id, "Created tmux pane");
         Ok(pane_id)
     }
 
-    pub fn kill_pane(&self, pane_id: &str) -> Result<()> {
+    pub fn kill_pane(&self, pane_id: &PaneId) -> Result<()> {
         let output = std::process::Command::new("tmux")
-            .args(["kill-pane", "-t", pane_id])
+            .args(["kill-pane", "-t", pane_id.as_str()])
             .output()
             .context("Failed to run tmux kill-pane")?;
         if !output.status.success() {
@@ -254,9 +288,9 @@ impl TmuxIpc {
 
     // -- Query --
 
-    pub fn pane_exists(&self, pane_id: &str) -> Result<bool> {
+    pub fn pane_exists(&self, pane_id: &PaneId) -> Result<bool> {
         let status = std::process::Command::new("tmux")
-            .args(["display-message", "-t", pane_id, "-p", ""])
+            .args(["display-message", "-t", pane_id.as_str(), "-p", ""])
             .status()
             .context("Failed to run tmux display-message")?;
         Ok(status.success())
@@ -271,5 +305,49 @@ mod tests {
     fn test_session_name() {
         let ipc = TmuxIpc::new("test-session");
         assert_eq!(ipc.session_name(), "test-session");
+    }
+
+    #[test]
+    fn test_window_id_parse_valid() {
+        let id = WindowId::parse("@0").unwrap();
+        assert_eq!(id.as_str(), "@0");
+        let id = WindowId::parse("@42").unwrap();
+        assert_eq!(id.as_str(), "@42");
+    }
+
+    #[test]
+    fn test_window_id_parse_invalid() {
+        assert!(WindowId::parse("0").is_err());
+        assert!(WindowId::parse("%0").is_err());
+        assert!(WindowId::parse("").is_err());
+        assert!(WindowId::parse("window").is_err());
+    }
+
+    #[test]
+    fn test_pane_id_parse_valid() {
+        let id = PaneId::parse("%0").unwrap();
+        assert_eq!(id.as_str(), "%0");
+        let id = PaneId::parse("%99").unwrap();
+        assert_eq!(id.as_str(), "%99");
+    }
+
+    #[test]
+    fn test_pane_id_parse_invalid() {
+        assert!(PaneId::parse("0").is_err());
+        assert!(PaneId::parse("@0").is_err());
+        assert!(PaneId::parse("").is_err());
+        assert!(PaneId::parse("pane").is_err());
+    }
+
+    #[test]
+    fn test_window_id_display() {
+        let id = WindowId::parse("@5").unwrap();
+        assert_eq!(format!("{}", id), "@5");
+    }
+
+    #[test]
+    fn test_pane_id_display() {
+        let id = PaneId::parse("%12").unwrap();
+        assert_eq!(format!("{}", id), "%12");
     }
 }

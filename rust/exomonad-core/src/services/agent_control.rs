@@ -1086,7 +1086,7 @@ impl AgentControlService {
             // Store pane_id for message delivery and cleanup
             let routing = serde_json::json!({
                 "parent_tab": &caller_tab,
-                "pane_id": &pane_id,
+                "pane_id": pane_id.as_str(),
             });
             fs::write(
                 agent_config_dir.join("routing.json"),
@@ -1835,7 +1835,7 @@ impl AgentControlService {
         agent_type: AgentType,
         prompt: Option<&str>,
         env_vars: HashMap<String, String>,
-    ) -> Result<()> {
+    ) -> Result<super::tmux_ipc::WindowId> {
         self.new_tmux_window_inner(name, cwd, agent_type, prompt, env_vars, None, None)
             .await
     }
@@ -1933,25 +1933,25 @@ impl AgentControlService {
         env_vars: HashMap<String, String>,
         fork_session_id: Option<&str>,
         claude_flags: Option<&ClaudeSpawnFlags>,
-    ) -> Result<()> {
+    ) -> Result<super::tmux_ipc::WindowId> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating tmux window");
 
         let full_command = Self::build_agent_command(
             agent_type, prompt, fork_session_id, &env_vars, cwd, claude_flags,
         );
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         let tmux = self.tmux()?;
         let window_name = name.to_string();
         let window_cwd = cwd.to_path_buf();
 
-        tokio::task::spawn_blocking(move || {
+        let window_id = tokio::task::spawn_blocking(move || {
             tmux.new_window(&window_name, &window_cwd, &shell, &full_command)
         })
         .await
         .context("tokio task join error")?
         .context("Failed to create tmux window")?;
 
-        Ok(())
+        Ok(window_id)
     }
 
     async fn get_tmux_windows(&self) -> Result<Vec<String>> {
@@ -2046,11 +2046,11 @@ impl AgentControlService {
         env_vars: HashMap<String, String>,
         parent_window_name: Option<&str>,
         claude_flags: Option<&ClaudeSpawnFlags>,
-    ) -> Result<String> {
+    ) -> Result<super::tmux_ipc::PaneId> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, parent = ?parent_window_name, "Creating tmux pane");
 
         let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd, claude_flags);
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         let tmux = self.tmux()?;
 
         // Find parent window ID by name
@@ -2066,7 +2066,15 @@ impl AgentControlService {
                 .map(|w| w.window_id.clone())
                 .ok_or_else(|| anyhow::anyhow!("No tmux window found matching '{}' — cannot create pane", wname))?
         } else {
-            format!("{}:", tmux.session_name())
+            // Find first window of the session
+            let t = tmux.clone();
+            let windows = tokio::task::spawn_blocking(move || t.list_windows())
+                .await
+                .context("tokio task join error")?
+                .context("Failed to list tmux windows")?;
+            windows.first()
+                .map(|w| w.window_id.clone())
+                .ok_or_else(|| anyhow!("No windows in session"))?
         };
 
         let pane_cwd = cwd.to_path_buf();
