@@ -121,7 +121,7 @@ Both the `notify_parent` effect handler and the poller's `NotifyParentAction` us
 
 `TmuxIpc::inject_input` serializes calls to the same target via a per-target `std::sync::Mutex`. This prevents concurrent callers (github_poller InjectMessage, delivery.rs, event handlers) from interleaving `paste-buffer` and `send-keys` commands, which garbles input. Different targets are independent — locking `@1` does not block injection into `@2`.
 
-A 150ms debounce between `paste-buffer` and `send-keys Enter` gives complex TUIs (Claude Code's Ink renderer, Gemini CLI's readline) time to process pasted text before submission.
+A 150ms debounce between `paste-buffer` and `send-keys Enter` gives complex TUIs (Claude Code's Ink renderer, Gemini CLI's readline) time to process pasted text before submission. The Enter keystroke is retried up to 3 times with 200ms between attempts to handle dropped keystrokes. Before injection, copy/scroll mode is detected via `#{pane_in_mode}` and cancelled to prevent silent paste failures.
 
 ## Shared Helpers (`handlers/mod.rs`)
 

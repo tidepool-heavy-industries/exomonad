@@ -362,6 +362,20 @@ impl TmuxIpc {
         };
         let _guard = target_lock.lock().expect("per-target injection lock poisoned");
 
+        // Exit copy/scroll mode if active — copy mode intercepts input,
+        // preventing paste-buffer from reaching the underlying process.
+        let mode_output = std::process::Command::new("tmux")
+            .args(["display-message", "-p", "-t", &qualified_target, "#{pane_in_mode}"])
+            .output();
+        if let Ok(output) = mode_output {
+            if output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "1" {
+                let _ = std::process::Command::new("tmux")
+                    .args(["send-keys", "-t", &qualified_target, "-X", "cancel"])
+                    .output();
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+
         let buf_name = format!("exo_{}", uuid::Uuid::new_v4().as_simple());
         let tmp_path = format!("/tmp/exomonad_buf_{}", buf_name);
 
@@ -421,17 +435,34 @@ impl TmuxIpc {
         // the pasted text before sending Enter.
         std::thread::sleep(std::time::Duration::from_millis(150));
 
-        // Sole execution trigger — decoupled from data injection
-        let send_output = std::process::Command::new("tmux")
-            .args(["send-keys", "-t", &qualified_target, "Enter"])
-            .output()
-            .context("Failed to run tmux send-keys")?;
-
-        if !send_output.status.success() {
-            anyhow::bail!(
-                "tmux send-keys failed: {}",
-                String::from_utf8_lossy(&send_output.stderr)
-            );
+        // Submit with retry — TUIs may drop the first Enter keystroke
+        // if still processing pasted text.
+        let mut last_err = None;
+        for attempt in 0..3 {
+            if attempt > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            match std::process::Command::new("tmux")
+                .args(["send-keys", "-t", &qualified_target, "Enter"])
+                .output()
+            {
+                Ok(output) if output.status.success() => {
+                    last_err = None;
+                    break;
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                    warn!(target = %qualified_target, attempt, "send-keys Enter failed: {}", stderr);
+                    last_err = Some(stderr);
+                }
+                Err(e) => {
+                    warn!(target = %qualified_target, attempt, "send-keys Enter error: {}", e);
+                    last_err = Some(e.to_string());
+                }
+            }
+        }
+        if let Some(err) = last_err {
+            anyhow::bail!("send-keys Enter failed after 3 attempts: {}", err);
         }
 
         debug!(target = %qualified_target, chars = text.len(), "Injected input via tmux buffer");
