@@ -117,6 +117,12 @@ Both the `notify_parent` effect handler and the poller's `NotifyParentAction` us
 
 `TmuxIpc::inject_input` session-qualifies all targets (`{session}:{target}`) to ensure `paste-buffer` and `send-keys` resolve to the same pane deterministically. Without qualification, tmux resolves display-name targets against the "most recently used" session, which is nondeterministic for subprocess calls.
 
+### Injection Locking
+
+`TmuxIpc::inject_input` serializes calls to the same target via a per-target `std::sync::Mutex`. This prevents concurrent callers (github_poller InjectMessage, delivery.rs, event handlers) from interleaving `paste-buffer` and `send-keys` commands, which garbles input. Different targets are independent — locking `@1` does not block injection into `@2`.
+
+A 150ms debounce between `paste-buffer` and `send-keys Enter` gives complex TUIs (Claude Code's Ink renderer, Gemini CLI's readline) time to process pasted text before submission.
+
 ## Shared Helpers (`handlers/mod.rs`)
 
 Proto3 uses empty strings/zero values as defaults. These helpers eliminate repetitive empty-check boilerplate at handler boundaries:
