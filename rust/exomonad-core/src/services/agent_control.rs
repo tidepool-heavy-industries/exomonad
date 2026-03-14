@@ -7,6 +7,7 @@
 
 use crate::common::TimeoutError;
 use crate::domain::{AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, ItemState};
+use crate::effects::EffectError;
 use crate::ffi::FFIBoundary;
 use crate::{GithubOwner, GithubRepo, IssueNumber};
 use anyhow::{anyhow, Context, Result};
@@ -38,7 +39,12 @@ async fn ensure_branch_pushed(git_wt: &Arc<GitWorktreeService>, branch: &str, pr
     match tokio::task::spawn_blocking(move || git_wt.push_bookmark(&dir, &bookmark)).await {
         Ok(Ok(())) => info!(branch = %branch, "Branch pushed successfully"),
         Ok(Err(e)) => {
-            warn!(branch = %branch, error = %e, "Failed to push parent branch (non-fatal, PRs may not work)")
+            let anyhow_err = anyhow::Error::from(EffectError::from(e));
+            warn!(
+                branch = %branch,
+                error = %anyhow_err,
+                "Failed to push parent branch (non-fatal, PRs may not work)"
+            )
         }
         Err(e) => warn!(branch = %branch, error = %e, "Push task panicked (non-fatal)"),
     }
@@ -1904,7 +1910,10 @@ impl AgentControlService {
 
         match result {
             Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(e).context("Failed to create git worktree"),
+            Ok(Err(e)) => {
+                return Err(anyhow::Error::from(EffectError::from(e)))
+                    .context("Failed to create git worktree")
+            }
             Err(panic_val) => {
                 let msg = panic_val
                     .downcast_ref::<String>()

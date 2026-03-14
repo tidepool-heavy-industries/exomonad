@@ -5,6 +5,7 @@
 use crate::domain::{AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid};
 use crate::effects::{
     dispatch_agent_effect, AgentEffects, EffectError, EffectHandler, EffectResult, ResultExt,
+    ResultExtPreserve,
 };
 
 use super::non_empty;
@@ -134,7 +135,7 @@ impl AgentEffects for AgentHandler {
             .service
             .spawn_agent(issue_number, &options, &ctx.birth_branch)
             .await
-            .effect_err("agent")?;
+            .effect_err_preserve("agent")?;
 
         Ok(SpawnResponse {
             agent: Some(spawn_result_to_proto(&req.issue, &result)),
@@ -196,7 +197,7 @@ impl AgentEffects for AgentHandler {
             .service
             .spawn_gemini_teammate(&options, &ctx.birth_branch)
             .await
-            .effect_err("agent")?;
+            .effect_err_preserve("agent")?;
 
         Ok(SpawnGeminiTeammateResponse {
             agent: Some(teammate_result_to_proto(&req.name, &result)),
@@ -222,7 +223,7 @@ impl AgentEffects for AgentHandler {
             .service
             .spawn_worker(&options, ctx)
             .await
-            .effect_err("agent")?;
+            .effect_err_preserve("agent")?;
 
         let agent_info = worker_result_to_proto(&req.name, &result);
 
@@ -310,7 +311,7 @@ impl AgentEffects for AgentHandler {
             .service
             .spawn_subtree(&options, &ctx.birth_branch)
             .await
-            .effect_err("agent")?;
+            .effect_err_preserve("agent")?;
 
         let agent_info = subtree_result_to_proto(&req.branch_name, &result);
 
@@ -359,7 +360,7 @@ impl AgentEffects for AgentHandler {
             .service
             .spawn_leaf_subtree(&options, &ctx.birth_branch)
             .await
-            .effect_err("agent")?;
+            .effect_err_preserve("agent")?;
 
         let agent_info = leaf_subtree_result_to_proto(&req.branch_name, &result);
 

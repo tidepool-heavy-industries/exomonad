@@ -3,9 +3,53 @@
 //! All operations shell out to git.
 
 use crate::domain::BranchName;
-use anyhow::{Context, Result};
+use crate::effects::EffectError;
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 use tracing::{error, info, warn};
+
+/// Custom error type for git worktree operations.
+#[derive(Debug, Error)]
+pub enum WorktreeError {
+    #[error("Branch already exists: {branch}")]
+    BranchExists { branch: String },
+    #[error("Path already exists: {path}")]
+    PathExists { path: String },
+    #[error("Base branch not found: {branch}")]
+    BaseBranchNotFound { branch: String },
+    #[error("Git lock file conflict: {message}")]
+    LockFileConflict { message: String },
+    #[error("Push rejected (non-fast-forward?): {message}")]
+    PushRejected { message: String },
+    #[error("Git error: {message}")]
+    GitError { message: String },
+}
+
+impl From<WorktreeError> for EffectError {
+    fn from(err: WorktreeError) -> Self {
+        match err {
+            WorktreeError::BranchExists { branch } => EffectError::custom(
+                "worktree.branch_exists",
+                format!("Branch already exists: {}", branch),
+            ),
+            WorktreeError::PathExists { path } => EffectError::custom(
+                "worktree.path_exists",
+                format!("Path already exists: {}", path),
+            ),
+            WorktreeError::BaseBranchNotFound { branch } => EffectError::custom(
+                "worktree.base_branch_not_found",
+                format!("Base branch not found: {}", branch),
+            ),
+            WorktreeError::LockFileConflict { message } => {
+                EffectError::custom("worktree.lock_conflict", message)
+            }
+            WorktreeError::PushRejected { message } => {
+                EffectError::custom("worktree.push_rejected", message)
+            }
+            WorktreeError::GitError { message } => EffectError::custom("worktree.git_error", message),
+        }
+    }
+}
 
 /// Service for git worktree operations via git CLI.
 pub struct GitWorktreeService {
@@ -25,7 +69,7 @@ impl GitWorktreeService {
         path: &Path,
         branch: &BranchName,
         base: &BranchName,
-    ) -> Result<()> {
+    ) -> Result<(), WorktreeError> {
         info!(path = %path.display(), branch = %branch, base = %base, "Creating git worktree");
 
         let output = std::process::Command::new("git")
@@ -39,12 +83,14 @@ impl GitWorktreeService {
             ])
             .current_dir(&self.project_dir)
             .output()
-            .context("Failed to run git worktree add")?;
+            .map_err(|e| WorktreeError::GitError {
+                message: format!("Failed to run git worktree add: {}", e),
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             error!(stderr = %stderr, "git worktree add failed");
-            return Err(anyhow::anyhow!("git worktree add failed: {}", stderr));
+            return Err(self.parse_git_stderr(&stderr));
         }
 
         info!(path = %path.display(), branch = %branch, "Worktree created successfully");
@@ -54,22 +100,24 @@ impl GitWorktreeService {
     /// Remove a git worktree.
     ///
     /// Equivalent to: `git worktree remove --force {path}`
-    pub fn remove_workspace(&self, path: &Path) -> Result<()> {
+    pub fn remove_workspace(&self, path: &Path) -> Result<(), WorktreeError> {
         info!(path = %path.display(), "Removing git worktree");
 
         let output = std::process::Command::new("git")
             .args(["worktree", "remove", "--force", &path.to_string_lossy()])
             .current_dir(&self.project_dir)
             .output()
-            .context("Failed to run git worktree remove")?;
+            .map_err(|e| WorktreeError::GitError {
+                message: format!("Failed to run git worktree remove: {}", e),
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             // If the worktree dir doesn't exist, git worktree remove fails — clean up manually
             if path.exists() {
                 warn!(stderr = %stderr, "git worktree remove failed, removing directory manually");
-                std::fs::remove_dir_all(path).with_context(|| {
-                    format!("Failed to remove worktree dir: {}", path.display())
+                std::fs::remove_dir_all(path).map_err(|e| WorktreeError::GitError {
+                    message: format!("Failed to remove worktree dir {}: {}", path.display(), e),
                 })?;
             } else {
                 warn!(stderr = %stderr, "git worktree remove failed (directory already gone)");
@@ -88,19 +136,25 @@ impl GitWorktreeService {
     /// Push a branch to the remote.
     ///
     /// Equivalent to: `git push origin {branch}` (run in workspace_path)
-    pub fn push_bookmark(&self, workspace_path: &Path, branch: &BranchName) -> Result<()> {
+    pub fn push_bookmark(
+        &self,
+        workspace_path: &Path,
+        branch: &BranchName,
+    ) -> Result<(), WorktreeError> {
         info!(branch = %branch, path = %workspace_path.display(), "Pushing branch");
 
         let output = std::process::Command::new("git")
             .args(["push", "origin", branch.as_str()])
             .current_dir(workspace_path)
             .output()
-            .context("Failed to run git push")?;
+            .map_err(|e| WorktreeError::GitError {
+                message: format!("Failed to run git push: {}", e),
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             error!(stderr = %stderr, "git push failed");
-            return Err(anyhow::anyhow!("git push failed: {}", stderr));
+            return Err(self.parse_git_stderr(&stderr));
         }
 
         info!(branch = %branch, "Branch pushed successfully");
@@ -110,19 +164,21 @@ impl GitWorktreeService {
     /// Fetch from remote.
     ///
     /// Equivalent to: `git fetch` (run in workspace_path)
-    pub fn fetch(&self, workspace_path: &Path) -> Result<()> {
+    pub fn fetch(&self, workspace_path: &Path) -> Result<(), WorktreeError> {
         info!(path = %workspace_path.display(), "git fetch");
 
         let output = std::process::Command::new("git")
             .args(["fetch"])
             .current_dir(workspace_path)
             .output()
-            .context("Failed to run git fetch")?;
+            .map_err(|e| WorktreeError::GitError {
+                message: format!("Failed to run git fetch: {}", e),
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             error!(stderr = %stderr, "git fetch failed");
-            return Err(anyhow::anyhow!("git fetch failed: {}", stderr));
+            return Err(self.parse_git_stderr(&stderr));
         }
 
         info!("git fetch succeeded");
@@ -132,12 +188,17 @@ impl GitWorktreeService {
     /// Get the current branch name in a workspace.
     ///
     /// Equivalent to: `git rev-parse --abbrev-ref HEAD`
-    pub fn get_workspace_bookmark(&self, workspace_path: &Path) -> Result<Option<String>> {
+    pub fn get_workspace_bookmark(
+        &self,
+        workspace_path: &Path,
+    ) -> Result<Option<String>, WorktreeError> {
         let output = std::process::Command::new("git")
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
             .current_dir(workspace_path)
             .output()
-            .context("Failed to run git rev-parse")?;
+            .map_err(|e| WorktreeError::GitError {
+                message: format!("Failed to run git rev-parse: {}", e),
+            })?;
 
         if output.status.success() {
             let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -151,19 +212,21 @@ impl GitWorktreeService {
     /// Delete a local branch.
     ///
     /// Equivalent to: `git branch -D {name}` (from project_dir)
-    pub fn delete_bookmark(&self, name: &BranchName) -> Result<()> {
+    pub fn delete_bookmark(&self, name: &BranchName) -> Result<(), WorktreeError> {
         info!(branch = %name, "Deleting local branch");
 
         let output = std::process::Command::new("git")
             .args(["branch", "-D", name.as_str()])
             .current_dir(&self.project_dir)
             .output()
-            .context("Failed to run git branch -D")?;
+            .map_err(|e| WorktreeError::GitError {
+                message: format!("Failed to run git branch -D: {}", e),
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             error!(stderr = %stderr, "git branch -D failed");
-            return Err(anyhow::anyhow!("git branch -D failed: {}", stderr));
+            return Err(self.parse_git_stderr(&stderr));
         }
 
         info!(branch = %name, "Branch deleted");
@@ -178,7 +241,7 @@ impl GitWorktreeService {
         workspace_path: &Path,
         name: &BranchName,
         revision: Option<&crate::domain::Revision>,
-    ) -> Result<()> {
+    ) -> Result<(), WorktreeError> {
         info!(branch = %name, revision = ?revision, path = %workspace_path.display(), "Creating local branch");
 
         let mut args = vec!["branch", name.as_str()];
@@ -192,15 +255,206 @@ impl GitWorktreeService {
             .args(&args)
             .current_dir(workspace_path)
             .output()
-            .context("Failed to run git branch")?;
+            .map_err(|e| WorktreeError::GitError {
+                message: format!("Failed to run git branch: {}", e),
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             error!(stderr = %stderr, "git branch failed");
-            return Err(anyhow::anyhow!("git branch failed: {}", stderr));
+            return Err(self.parse_git_stderr(&stderr));
         }
 
         info!(branch = %name, "Branch created");
         Ok(())
+    }
+
+    /// Parse git stderr into a WorktreeError.
+    fn parse_git_stderr(&self, stderr: &str) -> WorktreeError {
+        if stderr.contains("already exists") {
+            if stderr.contains("branch named") {
+                let branch = stderr.split('\'').nth(1).unwrap_or("unknown").to_string();
+                WorktreeError::BranchExists { branch }
+            } else {
+                let path = stderr
+                    .trim_start_matches("fatal: ")
+                    .trim_end_matches(" already exists")
+                    .to_string();
+                WorktreeError::PathExists { path }
+            }
+        } else if stderr.contains("not a valid object") || stderr.contains("not a commit") {
+            let branch = stderr.split('\'').nth(1).unwrap_or("unknown").to_string();
+            WorktreeError::BaseBranchNotFound { branch }
+        } else if stderr.contains(".lock") {
+            WorktreeError::LockFileConflict {
+                message: stderr.trim().to_string(),
+            }
+        } else if stderr.contains("non-fast-forward") || stderr.contains("rejected") {
+            WorktreeError::PushRejected {
+                message: stderr.trim().to_string(),
+            }
+        } else {
+            WorktreeError::GitError {
+                message: stderr.trim().to_string(),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    fn init_test_repo() -> (TempDir, GitWorktreeService) {
+        let temp = TempDir::new().expect("failed to create temp dir");
+        let repo_dir = temp.path();
+
+        let run = |args: &[&str]| {
+            let status = Command::new("git")
+                .args(args)
+                .current_dir(repo_dir)
+                .status()
+                .expect("failed to run git command");
+            assert!(status.success(), "git command failed: {:?}", args);
+        };
+
+        run(&["init"]);
+        run(&["config", "user.email", "test@example.com"]);
+        run(&["config", "user.name", "Test User"]);
+        run(&["commit", "--allow-empty", "-m", "Initial commit"]);
+
+        let service = GitWorktreeService::new(repo_dir.to_path_buf());
+        (temp, service)
+    }
+
+    fn get_default_branch(repo_dir: &std::path::Path) -> String {
+        let output = Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(repo_dir)
+            .output()
+            .expect("failed to get default branch");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn test_create_workspace_happy_path() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+        let worktree_path = temp.path().join("worktree-1");
+        let branch = BranchName::from("test-branch");
+        let base = BranchName::from(default_branch.as_str());
+
+        service
+            .create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+
+        assert!(worktree_path.exists());
+        assert!(worktree_path.join(".git").exists());
+    }
+
+    #[test]
+    fn test_remove_workspace_happy_path() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+        let worktree_path = temp.path().join("worktree-1");
+        let branch = BranchName::from("test-branch");
+        let base = BranchName::from(default_branch.as_str());
+
+        service
+            .create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+        assert!(worktree_path.exists());
+
+        service.remove_workspace(&worktree_path).unwrap();
+        assert!(!worktree_path.exists());
+    }
+
+    #[test]
+    fn test_create_bookmark_delete_bookmark_roundtrip() {
+        let (temp, service) = init_test_repo();
+        let branch = BranchName::from("test-branch");
+
+        service.create_bookmark(temp.path(), &branch, None).unwrap();
+
+        let output = Command::new("git")
+            .args(["branch", "--list", "test-branch"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&output.stdout).contains("test-branch"));
+
+        service.delete_bookmark(&branch).unwrap();
+
+        let output = Command::new("git")
+            .args(["branch", "--list", "test-branch"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("test-branch"));
+    }
+
+    #[test]
+    fn test_get_workspace_bookmark() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+        let worktree_path = temp.path().join("worktree-1");
+        let branch = BranchName::from("test-branch");
+        let base = BranchName::from(default_branch.as_str());
+
+        service
+            .create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+
+        let current = service.get_workspace_bookmark(&worktree_path).unwrap();
+        assert_eq!(current, Some("test-branch".to_string()));
+    }
+
+    #[test]
+    fn test_create_workspace_duplicate_branch() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+        let branch = BranchName::from("test-branch");
+        let base = BranchName::from(default_branch.as_str());
+
+        service
+            .create_workspace(&temp.path().join("wt1"), &branch, &base)
+            .unwrap();
+        let result = service.create_workspace(&temp.path().join("wt2"), &branch, &base);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_create_workspace_non_existent_base() {
+        let (temp, service) = init_test_repo();
+        let worktree_path = temp.path().join("worktree-1");
+        let branch = BranchName::from("test-branch");
+        let base = BranchName::from("nonexistent-base-xyz");
+
+        let result = service.create_workspace(&worktree_path, &branch, &base);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_remove_workspace_non_existent_path() {
+        let (_temp, service) = init_test_repo();
+        let path = std::path::Path::new("/tmp/nonexistent-path-xyz-123");
+
+        // Should succeed (idempotent)
+        service.remove_workspace(path).unwrap();
+    }
+
+    #[test]
+    fn test_push_bookmark_without_remote() {
+        let (temp, service) = init_test_repo();
+        let branch = BranchName::from("test-branch");
+        service.create_bookmark(temp.path(), &branch, None).unwrap();
+
+        let result = service.push_bookmark(temp.path(), &branch);
+
+        assert!(result.is_err());
     }
 }

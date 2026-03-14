@@ -43,6 +43,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Vector qualified as V
 import Effects.Agent qualified as PA
+import Effects.EffectError (EffectError (..), EffectErrorKind (..), InvalidInput (..))
 import ExoMonad.Effects.Agent qualified as Agent
 import ExoMonad.Guest.Proto (fromText, toText)
 import ExoMonad.Guest.Tool.Suspend.Types (SuspendYield)
@@ -157,22 +158,22 @@ data SpawnAcpConfig = SpawnAcpConfig
 
 -- | Agent control effect for spawning agents.
 data AgentControl a where
-  SpawnSubtreeC :: SpawnSubtreeConfig -> AgentControl (Either Text SpawnResult)
-  SpawnLeafSubtreeC :: SpawnLeafSubtreeConfig -> AgentControl (Either Text SpawnResult)
-  SpawnWorkerC :: SpawnWorkerConfig -> AgentControl (Either Text SpawnResult)
-  SpawnAcpC :: SpawnAcpConfig -> AgentControl (Either Text SpawnResult)
+  SpawnSubtreeC :: SpawnSubtreeConfig -> AgentControl (Either EffectError SpawnResult)
+  SpawnLeafSubtreeC :: SpawnLeafSubtreeConfig -> AgentControl (Either EffectError SpawnResult)
+  SpawnWorkerC :: SpawnWorkerConfig -> AgentControl (Either EffectError SpawnResult)
+  SpawnAcpC :: SpawnAcpConfig -> AgentControl (Either EffectError SpawnResult)
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
-spawnSubtree :: (Member AgentControl r) => SpawnSubtreeConfig -> Eff r (Either Text SpawnResult)
+spawnSubtree :: (Member AgentControl r) => SpawnSubtreeConfig -> Eff r (Either EffectError SpawnResult)
 spawnSubtree cfg = send (SpawnSubtreeC cfg)
 
-spawnLeafSubtree :: (Member AgentControl r) => SpawnLeafSubtreeConfig -> Eff r (Either Text SpawnResult)
+spawnLeafSubtree :: (Member AgentControl r) => SpawnLeafSubtreeConfig -> Eff r (Either EffectError SpawnResult)
 spawnLeafSubtree cfg = send (SpawnLeafSubtreeC cfg)
 
-spawnWorker :: (Member AgentControl r) => SpawnWorkerConfig -> Eff r (Either Text SpawnResult)
+spawnWorker :: (Member AgentControl r) => SpawnWorkerConfig -> Eff r (Either EffectError SpawnResult)
 spawnWorker cfg = send (SpawnWorkerC cfg)
 
-spawnAcp :: (Member AgentControl r) => SpawnAcpConfig -> Eff r (Either Text SpawnResult)
+spawnAcp :: (Member AgentControl r) => SpawnAcpConfig -> Eff r (Either EffectError SpawnResult)
 spawnAcp cfg = send (SpawnAcpC cfg)
 
 -- ============================================================================
@@ -202,9 +203,9 @@ runAgentControlSuspend = interpret $ \case
             }
     result <- suspendEffect @Agent.AgentSpawnSubtree req
     pure $ case result of
-      Left err -> Left (T.pack (show err))
+      Left err -> Left err
       Right resp -> case PA.spawnSubtreeResponseAgent resp of
-        Nothing -> Left "SpawnSubtree succeeded but no agent info returned"
+        Nothing -> Left (EffectError (Just (EffectErrorKindInvalidInput (InvalidInput "SpawnSubtree succeeded but no agent info returned"))))
         Just info -> Right (protoAgentInfoToSpawnResult info)
   SpawnLeafSubtreeC cfg -> do
     let req =
@@ -221,9 +222,9 @@ runAgentControlSuspend = interpret $ \case
             }
     result <- suspendEffect @Agent.AgentSpawnLeafSubtree req
     pure $ case result of
-      Left err -> Left (T.pack (show err))
+      Left err -> Left err
       Right resp -> case PA.spawnLeafSubtreeResponseAgent resp of
-        Nothing -> Left "SpawnLeafSubtree succeeded but no agent info returned"
+        Nothing -> Left (EffectError (Just (EffectErrorKindInvalidInput (InvalidInput "SpawnLeafSubtree succeeded but no agent info returned"))))
         Just info -> Right (protoAgentInfoToSpawnResult info)
   SpawnWorkerC cfg -> do
     let req =
@@ -236,9 +237,9 @@ runAgentControlSuspend = interpret $ \case
             }
     result <- suspendEffect @Agent.AgentSpawnWorker req
     pure $ case result of
-      Left err -> Left (T.pack (show err))
+      Left err -> Left err
       Right resp -> case PA.spawnWorkerResponseAgent resp of
-        Nothing -> Left "SpawnWorker succeeded but no agent info returned"
+        Nothing -> Left (EffectError (Just (EffectErrorKindInvalidInput (InvalidInput "SpawnWorker succeeded but no agent info returned"))))
         Just info -> Right (protoAgentInfoToSpawnResult info)
   SpawnAcpC cfg -> do
     let req =
@@ -251,9 +252,9 @@ runAgentControlSuspend = interpret $ \case
             }
     result <- suspendEffect @Agent.AgentSpawnAcp req
     pure $ case result of
-      Left err -> Left (T.pack (show err))
+      Left err -> Left err
       Right resp -> case PA.spawnAcpResponseAgent resp of
-        Nothing -> Left "SpawnAcp succeeded but no agent info returned"
+        Nothing -> Left (EffectError (Just (EffectErrorKindInvalidInput (InvalidInput "SpawnAcp succeeded but no agent info returned"))))
         Just info -> Right (protoAgentInfoToSpawnResult info)
 
 -- ============================================================================

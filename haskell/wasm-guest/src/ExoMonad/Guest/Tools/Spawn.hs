@@ -21,6 +21,8 @@ import Data.ByteString.Lazy qualified as BSL
 import Data.Either (partitionEithers)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Lazy qualified as TL
+import Effects.EffectError (Custom (..), EffectError (..), EffectErrorKind (..), InvalidInput (..), NetworkError (..), NotFound (..), PermissionDenied (..), Timeout (..))
 import Effects.Log qualified as Log
 import ExoMonad.Effects.Log (LogEmitEvent)
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
@@ -29,6 +31,30 @@ import ExoMonad.Guest.Tool.Schema (JsonSchema (..), genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
 import ExoMonad.Guest.Types.Permissions
 import GHC.Generics (Generic)
+
+-- ============================================================================
+-- Helpers
+-- ============================================================================
+
+-- | Helper to convert EffectError to a human-readable message.
+spawnErrorMessage :: EffectError -> Text
+spawnErrorMessage (EffectError kind) = case kind of
+  Just (EffectErrorKindCustom c) -> case customCode c of
+    "worktree.branch_exists" -> "Branch already exists. Try a different branch_name suffix."
+    "worktree.push_rejected" -> "Push rejected (non-fast-forward). Remote branch has diverged."
+    "worktree.lock_conflict" -> "Git lock file conflict - another git operation may be in progress. Retry in a few seconds."
+    _ -> TL.toStrict (customMessage c)
+  Just (EffectErrorKindNotFound n) -> "Not found: " <> TL.toStrict (notFoundResource n)
+  Just (EffectErrorKindInvalidInput i) -> "Invalid input: " <> TL.toStrict (invalidInputMessage i)
+  Just (EffectErrorKindNetworkError n) -> "Network error: " <> TL.toStrict (networkErrorMessage n)
+  Just (EffectErrorKindPermissionDenied p) -> "Permission denied: " <> TL.toStrict (permissionDeniedMessage p)
+  Just (EffectErrorKindTimeout t) -> "Timeout: " <> TL.toStrict (timeoutMessage t)
+  Nothing -> "Unknown effect error"
+
+-- | Helper to check if an EffectError has a specific custom code.
+hasCustomCode :: Text -> EffectError -> Bool
+hasCustomCode code (EffectError (Just (EffectErrorKindCustom c))) = customCode c == TL.fromStrict code
+hasCustomCode _ _ = False
 
 -- ============================================================================
 -- SpawnSubtree
@@ -103,7 +129,15 @@ instance MCPTool SpawnSubtree where
           }
     result <- AC.spawnSubtree cfg
     case result of
-      Left err -> pure $ errorResult err
+      Left err | hasCustomCode "worktree.branch_exists" err -> do
+        let cfg' = cfg { AC.stcBranchName = AC.stcBranchName cfg <> "-2" }
+        result' <- AC.spawnSubtree cfg'
+        case result' of
+          Left err' -> pure $ errorResult (spawnErrorMessage err')
+          Right spawnResult -> do
+            emitSpawnEvent (AC.stcBranchName cfg') "claude" (ssTask args)
+            pure $ successResult $ Aeson.toJSON spawnResult
+      Left err -> pure $ errorResult (spawnErrorMessage err)
       Right spawnResult -> do
         emitSpawnEvent (ssBranchName args) "claude" (ssTask args)
         pure $ successResult $ Aeson.toJSON spawnResult
@@ -172,7 +206,15 @@ instance MCPTool SpawnLeafSubtree where
           }
     result <- AC.spawnLeafSubtree cfg
     case result of
-      Left err -> pure $ errorResult err
+      Left err | hasCustomCode "worktree.branch_exists" err -> do
+        let cfg' = cfg { AC.slcBranchName = AC.slcBranchName cfg <> "-2" }
+        result' <- AC.spawnLeafSubtree cfg'
+        case result' of
+          Left err' -> pure $ errorResult (spawnErrorMessage err')
+          Right spawnResult -> do
+            emitSpawnEvent (AC.slcBranchName cfg') "gemini" (slsTask args)
+            pure $ successResult $ Aeson.toJSON spawnResult
+      Left err -> pure $ errorResult (spawnErrorMessage err)
       Right spawnResult -> do
         emitSpawnEvent (slsBranchName args) "gemini" (slsTask args)
         pure $ successResult $ Aeson.toJSON spawnResult
@@ -285,7 +327,7 @@ instance MCPTool SpawnWorkers where
       successResult $
         object
           [ "spawned" .= map Aeson.toJSON successes,
-            "errors" .= map Aeson.String errs
+            "errors" .= map (Aeson.String . spawnErrorMessage) errs
           ]
 
 -- ============================================================================
@@ -338,7 +380,7 @@ instance MCPTool SpawnAcp where
           }
     result <- AC.spawnAcp cfg
     case result of
-      Left err -> pure $ errorResult err
+      Left err -> pure $ errorResult (spawnErrorMessage err)
       Right spawnResult -> do
         emitSpawnEvent (saName args) "gemini-acp" (saName args)
         pure $ successResult $ Aeson.toJSON spawnResult

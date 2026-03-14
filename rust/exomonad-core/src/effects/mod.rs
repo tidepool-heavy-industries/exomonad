@@ -45,7 +45,7 @@
 pub mod error;
 pub mod host_fn;
 
-pub use error::{spawn_blocking_effect, EffectError, ResultExt};
+pub use error::{spawn_blocking_effect, EffectError, ResultExt, ResultExtPreserve};
 
 use async_trait::async_trait;
 use std::collections::HashMap;

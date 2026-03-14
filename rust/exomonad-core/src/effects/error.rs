@@ -149,6 +149,39 @@ where
         .map_err(|e| EffectError::custom(format!("{}_error", ns), e.to_string()))
 }
 
+/// Extension trait for converting `Result<T, E>` into `Result<T, EffectError>`,
+/// preserving the error if it is already an `EffectError`.
+pub trait ResultExtPreserve<T> {
+    /// Convert error to `EffectError`. If the error is already an `EffectError` (or can be
+    /// downcast to one from `anyhow::Error`), it is preserved. Otherwise, it is wrapped
+    /// in `EffectError::Custom` with `{namespace}_error` code.
+    fn effect_err_preserve(self, namespace: &str) -> Result<T, EffectError>;
+}
+
+impl<T> ResultExtPreserve<T> for Result<T, anyhow::Error> {
+    fn effect_err_preserve(self, namespace: &str) -> Result<T, EffectError> {
+        match self {
+            Ok(t) => Ok(t),
+            Err(e) => {
+                if let Some(err) = e.downcast_ref::<EffectError>() {
+                    Err(err.clone())
+                } else {
+                    Err(EffectError::custom(
+                        format!("{}_error", namespace),
+                        e.to_string(),
+                    ))
+                }
+            }
+        }
+    }
+}
+
+impl<T, E: Into<EffectError>> ResultExtPreserve<T> for Result<T, E> {
+    fn effect_err_preserve(self, _namespace: &str) -> Result<T, EffectError> {
+        self.map_err(|e| e.into())
+    }
+}
+
 impl EffectError {
     /// Create a not found error.
     pub fn not_found(resource: impl Into<String>) -> Self {
