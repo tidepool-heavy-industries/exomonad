@@ -404,7 +404,7 @@ mod tests {
 
         if let Err(ref e) = result {
             let err_msg = e.to_string();
-            assert!(err_msg.contains("push"), "Expected push error, got: {}", err_msg);
+            assert!(err_msg.contains("push failed"), "Expected push failed error, got: {}", err_msg);
         } else {
             panic!("Expected file_pr_async to fail on push, but it succeeded?!");
         }

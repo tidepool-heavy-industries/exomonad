@@ -163,14 +163,17 @@ impl<T> ResultExtPreserve<T> for Result<T, anyhow::Error> {
         match self {
             Ok(t) => Ok(t),
             Err(e) => {
-                if let Some(err) = e.downcast_ref::<EffectError>() {
-                    Err(err.clone())
-                } else {
-                    Err(EffectError::custom(
-                        format!("{}_error", namespace),
-                        e.to_string(),
-                    ))
+                // Scan the full error chain for an EffectError, not just the outer error.
+                // This ensures structured errors survive anyhow::Context wrapping.
+                for cause in e.chain() {
+                    if let Some(err) = cause.downcast_ref::<EffectError>() {
+                        return Err(err.clone());
+                    }
                 }
+                Err(EffectError::custom(
+                    format!("{}_error", namespace),
+                    e.to_string(),
+                ))
             }
         }
     }

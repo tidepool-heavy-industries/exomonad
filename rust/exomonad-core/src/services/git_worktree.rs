@@ -282,7 +282,7 @@ impl GitWorktreeService {
                     .to_string();
                 WorktreeError::PathExists { path }
             }
-        } else if stderr.contains("not a valid object") || stderr.contains("not a commit") {
+        } else if stderr.contains("not a valid object") || stderr.contains("not a commit") || stderr.contains("invalid reference") {
             let branch = stderr.split('\'').nth(1).unwrap_or("unknown").to_string();
             WorktreeError::BaseBranchNotFound { branch }
         } else if stderr.contains(".lock") {
@@ -423,7 +423,11 @@ mod tests {
             .unwrap();
         let result = service.create_workspace(&temp.path().join("wt2"), &branch, &base);
 
-        assert!(result.is_err());
+        assert!(
+            matches!(result, Err(WorktreeError::BranchExists { .. })),
+            "Expected BranchExists, got: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -435,16 +439,20 @@ mod tests {
 
         let result = service.create_workspace(&worktree_path, &branch, &base);
 
-        assert!(result.is_err());
+        assert!(
+            matches!(result, Err(WorktreeError::BaseBranchNotFound { .. })),
+            "Expected BaseBranchNotFound, got: {:?}",
+            result
+        );
     }
 
     #[test]
     fn test_remove_workspace_non_existent_path() {
-        let (_temp, service) = init_test_repo();
-        let path = std::path::Path::new("/tmp/nonexistent-path-xyz-123");
+        let (temp, service) = init_test_repo();
+        let path = temp.path().join("nonexistent-worktree-xyz");
 
         // Should succeed (idempotent)
-        service.remove_workspace(path).unwrap();
+        service.remove_workspace(&path).unwrap();
     }
 
     #[test]
