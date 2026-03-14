@@ -109,6 +109,14 @@ Both the `notify_parent` effect handler and the poller's `NotifyParentAction` us
 
 `deliver_to_agent()` is correct for peer-to-peer messaging (send_message, event handler InjectMessage).
 
+### Routing Resolution
+
+`deliver_to_agent()` resolves the agent's routing.json using the **slug** (last dot-segment of the branch name), not the full branch name. This matches how `agent_control` writes routing.json at `.exo/agents/{slug}-{suffix}/routing.json`. The lookup tries both `-gemini` and `-claude` suffixes, and reads `pane_id` (workers), `window_id` (subtrees/leaves), or `parent_tab` (fallback).
+
+### Session-Qualified Targets
+
+`TmuxIpc::inject_input` session-qualifies all targets (`{session}:{target}`) to ensure `paste-buffer` and `send-keys` resolve to the same pane deterministically. Without qualification, tmux resolves display-name targets against the "most recently used" session, which is nondeterministic for subprocess calls.
+
 ## Shared Helpers (`handlers/mod.rs`)
 
 Proto3 uses empty strings/zero values as defaults. These helpers eliminate repetitive empty-check boilerplate at handler boundaries:
