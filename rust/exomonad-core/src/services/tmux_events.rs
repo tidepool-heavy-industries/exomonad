@@ -7,7 +7,7 @@ use crate::ui_protocol::AgentEvent;
 use anyhow::{Context, Result};
 use tracing::{info, warn};
 
-use super::tmux_ipc::TmuxIpc;
+use super::tmux_ipc::{TmuxIpc, PaneId};
 
 /// Emit an agent event. Log-only — no tmux interaction.
 /// Keeps function signature for callers.
@@ -70,7 +70,10 @@ pub fn close_worker_pane(pane_id: &str) {
     let pane = pane_id.to_string();
 
     tokio::spawn(async move {
-        let result = tokio::task::spawn_blocking(move || ipc.kill_pane(&pane)).await;
+        let result = tokio::task::spawn_blocking(move || {
+            let pid = PaneId::parse(&pane)?;
+            ipc.kill_pane(&pid)
+        }).await;
         match result {
             Ok(Ok(())) => {}
             Ok(Err(e)) => warn!("[TmuxEvents] kill_pane failed: {}", e),
