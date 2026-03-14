@@ -875,7 +875,7 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
         None => base_command,
     };
 
-    ipc.new_window("TL", &cwd, &shell, &tl_command)?;
+    let _ = ipc.new_window("TL", &cwd, &shell, &tl_command)?;
 
     // 4. Poll for server socket
     wait_for_server_socket(&cwd).await?;
