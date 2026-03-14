@@ -20,6 +20,7 @@ result
 
 # WASM freeze files
 cabal.project.wasm.freeze
+cabal.project.local
 
 # Generated dev project file (incremental WASM builds)
 cabal.project.wasm.dev

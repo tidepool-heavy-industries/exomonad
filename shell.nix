@@ -1,6 +1,10 @@
 # Legacy nix-shell support
 # For flakes, use: nix develop
 #
+# NOTE: This shell.nix uses GHC 9.10. The canonical dev environment is
+# `nix develop` (flake.nix) which uses GHC 9.12. Use `nix develop` for
+# all development work; this file exists for non-flake nix compatibility.
+#
 # This shell provides the default development environment.
 # For WASM or worker-specific shells, use the flake:
 #   nix develop .#wasm

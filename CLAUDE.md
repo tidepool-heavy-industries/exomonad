@@ -368,8 +368,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (binary)
 │   ├── exomonad-core/CLAUDE.md ← Unified library: framework, handlers, services, protocol, UI types
 │   └── exomonad-proto/     ← Proto-generated types (prost) for FFI + effects
-├── docs/decisions/            ← Architecture decision records (living docs)
-└── docs/audits/               ← Project audits and reports
+└── docs/decisions/            ← Architecture decision records (living docs)
 ```
 
 | I want to... | Read this |
