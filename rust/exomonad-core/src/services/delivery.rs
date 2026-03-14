@@ -65,6 +65,7 @@ pub async fn notify_parent_delivery(
     status: &str,
     message: &str,
     summary: Option<&str>,
+    source: &str,
 ) -> DeliveryResult {
     // 1. Log to event log
     if let Some(log) = event_log {
@@ -75,6 +76,7 @@ pub async fn notify_parent_delivery(
                 "parent": parent_session_id,
                 "status": status,
                 "message": message,
+                "source": source,
             }),
         ) {
             tracing::warn!(error = %e, "Failed to write notify_parent event");
@@ -101,6 +103,7 @@ pub async fn notify_parent_delivery(
     let delivery_result = deliver_to_agent(
         team_registry,
         acp_registry,
+        event_log,
         project_dir,
         parent_session_id,
         parent_tab_name,
@@ -109,27 +112,6 @@ pub async fn notify_parent_delivery(
         summary,
     )
     .await;
-
-    // 4. Log delivery result
-    if let Some(log) = event_log {
-        let delivery_method = match delivery_result {
-            DeliveryResult::Teams => "teams_inbox",
-            DeliveryResult::Acp => "acp",
-            DeliveryResult::Uds => "unix_socket",
-            DeliveryResult::Tmux => "tmux_stdin",
-            DeliveryResult::Failed => "failed",
-        };
-        if let Err(e) = log.append(
-            "agent.message_delivered",
-            agent_id,
-            &serde_json::json!({
-                "parent": parent_session_id,
-                "method": delivery_method,
-            }),
-        ) {
-            tracing::warn!(error = %e, "Failed to write message_delivered event");
-        }
-    }
 
     delivery_result
 }
@@ -201,6 +183,7 @@ async fn deliver_via_uds(
 pub async fn deliver_to_agent(
     team_registry: Option<&TeamRegistry>,
     acp_registry: Option<&super::acp_registry::AcpRegistry>,
+    event_log: Option<&EventLog>,
     project_dir: &std::path::Path,
     agent_key: &str,
     tmux_target: &str,
@@ -225,6 +208,20 @@ pub async fn deliver_to_agent(
                         timestamp = %timestamp,
                         "Wrote message to Teams inbox, spawning delivery verifier (30s)"
                     );
+
+                    if let Some(log) = event_log {
+                        let _ = log.append(
+                            "message.delivery",
+                            from,
+                            &serde_json::json!({
+                                "recipient": agent_key,
+                                "method": "teams_inbox",
+                                "outcome": "success",
+                                "detail": format!("{}/{}", team_info.team_name, team_info.inbox_name),
+                            }),
+                        );
+                    }
+
                     // Spawn background task to verify CC's InboxPoller read the message.
                     // If not read within 30s, fall back to tmux STDIN injection.
                     let team_name = team_info.team_name.clone();
@@ -268,6 +265,18 @@ pub async fn deliver_to_agent(
                         error = %e,
                         "Teams inbox write failed, falling back to ACP/tmux"
                     );
+                    if let Some(log) = event_log {
+                        let _ = log.append(
+                            "message.delivery",
+                            from,
+                            &serde_json::json!({
+                                "recipient": agent_key,
+                                "method": "teams_inbox",
+                                "outcome": "failed",
+                                "detail": e.to_string(),
+                            }),
+                        );
+                    }
                 }
             }
         }
@@ -286,6 +295,18 @@ pub async fn deliver_to_agent(
             {
                 Ok(_) => {
                     info!(agent = %agent_key, "Delivered message via ACP prompt");
+                    if let Some(log) = event_log {
+                        let _ = log.append(
+                            "message.delivery",
+                            from,
+                            &serde_json::json!({
+                                "recipient": agent_key,
+                                "method": "acp",
+                                "outcome": "success",
+                                "detail": conn.session_id,
+                            }),
+                        );
+                    }
                     return DeliveryResult::Acp;
                 }
                 Err(e) => {
@@ -294,6 +315,18 @@ pub async fn deliver_to_agent(
                         error = ?e,
                         "ACP prompt failed, falling back to tmux"
                     );
+                    if let Some(log) = event_log {
+                        let _ = log.append(
+                            "message.delivery",
+                            from,
+                            &serde_json::json!({
+                                "recipient": agent_key,
+                                "method": "acp",
+                                "outcome": "failed",
+                                "detail": format!("{:?}", e),
+                            }),
+                        );
+                    }
                 }
             }
         }
@@ -305,10 +338,34 @@ pub async fn deliver_to_agent(
         match deliver_via_uds(&socket_path, from, message, summary).await {
             Ok(()) => {
                 info!(agent = %agent_key, socket = %socket_path.display(), "Delivered message via Unix socket");
+                if let Some(log) = event_log {
+                    let _ = log.append(
+                        "message.delivery",
+                        from,
+                        &serde_json::json!({
+                            "recipient": agent_key,
+                            "method": "unix_socket",
+                            "outcome": "success",
+                            "detail": socket_path.to_string_lossy(),
+                        }),
+                    );
+                }
                 return DeliveryResult::Uds;
             }
             Err(e) => {
                 warn!(agent = %agent_key, error = %e, "UDS delivery failed, falling back to tmux");
+                if let Some(log) = event_log {
+                    let _ = log.append(
+                        "message.delivery",
+                        from,
+                        &serde_json::json!({
+                            "recipient": agent_key,
+                            "method": "unix_socket",
+                            "outcome": "failed",
+                            "detail": e.to_string(),
+                        }),
+                    );
+                }
             }
         }
     }
@@ -356,8 +413,24 @@ pub async fn deliver_to_agent(
             chars = message.len(),
             "Injecting message via routing.json"
         );
-        if let Err(e) = tmux_events::inject_input(&target, message).await {
-            warn!(target = %target, error = %e, "tmux inject_input failed (routing.json)");
+        let outcome = match tmux_events::inject_input(&target, message).await {
+            Ok(()) => "success",
+            Err(e) => {
+                warn!(target = %target, error = %e, "tmux inject_input failed (routing.json)");
+                "failed"
+            }
+        };
+        if let Some(log) = event_log {
+            let _ = log.append(
+                "message.delivery",
+                from,
+                &serde_json::json!({
+                    "recipient": agent_key,
+                    "method": "tmux_routing",
+                    "outcome": outcome,
+                    "detail": target,
+                }),
+            );
         }
         return DeliveryResult::Tmux;
     }
@@ -368,8 +441,24 @@ pub async fn deliver_to_agent(
         chars = message.len(),
         "Injecting message into agent pane via tmux"
     );
-    if let Err(e) = tmux_events::inject_input(tmux_target, message).await {
-        warn!(target = %tmux_target, error = %e, "tmux inject_input failed (fallback)");
+    let outcome = match tmux_events::inject_input(tmux_target, message).await {
+        Ok(()) => "success",
+        Err(e) => {
+            warn!(target = %tmux_target, error = %e, "tmux inject_input failed (fallback)");
+            "failed"
+        }
+    };
+    if let Some(log) = event_log {
+        let _ = log.append(
+            "message.delivery",
+            from,
+            &serde_json::json!({
+                "recipient": agent_key,
+                "method": "tmux_fallback",
+                "outcome": outcome,
+                "detail": tmux_target,
+            }),
+        );
     }
     DeliveryResult::Tmux
 }
@@ -418,6 +507,7 @@ mod tests {
     #[tokio::test]
     async fn test_deliver_no_registry_returns_tmux() {
         let result = deliver_to_agent(
+            None,
             None,
             None,
             std::path::Path::new("/tmp/nonexistent"),

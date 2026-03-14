@@ -200,8 +200,8 @@ mod tests {
     #[test]
     fn test_log_handler_with_event_log() {
         let tmp = tempfile::tempdir().unwrap();
-        let log_path = tmp.path().join("events.jsonl");
-        let event_log = Arc::new(EventLog::open(log_path).unwrap());
+        let log_dir = tmp.path().join("logs");
+        let event_log = Arc::new(EventLog::open(log_dir).unwrap());
         let handler = LogHandler::new().with_event_log(event_log.clone());
 
         assert!(handler.event_log.is_some());

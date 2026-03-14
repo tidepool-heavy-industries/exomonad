@@ -245,6 +245,7 @@ struct HookState {
     otel: Option<Arc<OtelService>>,
     tmux_session: String,
     default_role: exomonad_core::Role,
+    event_log: Option<Arc<exomonad_core::services::EventLog>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -487,6 +488,18 @@ async fn handle_hook_inner(
                 StopDecision::Allow => "allow",
                 StopDecision::Block => "block",
             };
+
+            if let Some(ref log) = state.event_log {
+                let _ = log.append(
+                    "hook.stop",
+                    agent_name_for_hook.as_str(),
+                    &serde_json::json!({
+                        "event_type": event_type,
+                        "decision": decision_str,
+                        "reason": internal_output.reason,
+                    }),
+                );
+            }
 
             if let Some(ref otel) = state.otel {
                 let mut extra_attributes = HashMap::new();
@@ -1213,10 +1226,10 @@ async fn main() -> Result<()> {
                 ]);
             // Create structured event log (JSONL)
             let event_log = match exomonad_core::services::EventLog::open(
-                project_dir.join(".exo/events.jsonl"),
+                project_dir.join(".exo/logs"),
             ) {
                 Ok(el) => {
-                    info!(path = %project_dir.join(".exo/events.jsonl").display(), "Event log opened");
+                    info!(path = %project_dir.join(".exo/logs").display(), "Event log opened");
                     Some(Arc::new(el))
                 }
                 Err(e) => {
@@ -1381,6 +1394,7 @@ async fn main() -> Result<()> {
                 let wasm_dir_for_handler = wasm_dir.clone();
                 let wasm_name_for_handler = wasm_name.clone();
                 let wb = worktree_base.clone();
+                let event_log_for_tools = event_log.clone();
                 move |axum::extract::Path((role, name)): axum::extract::Path<(String, String)>,
                       axum::extract::Json(body): axum::extract::Json<ToolCallRequest>| {
                     let plugins = plugins.clone();
@@ -1389,47 +1403,93 @@ async fn main() -> Result<()> {
                     let wasm_dir_for_handler = wasm_dir_for_handler.clone();
                     let wasm_name_for_handler = wasm_name_for_handler.clone();
                     let wb = wb.clone();
+                    let event_log = event_log_for_tools.clone();
                     async move {
                         let wasm_path_for_handler = resolve_wasm_path_for_role(
-                            &wasm_dir_for_handler, &role, &wasm_name_for_handler
-                        ).unwrap_or_else(|| wasm_path_default.clone());
+                            &wasm_dir_for_handler,
+                            &role,
+                            &wasm_name_for_handler,
+                        )
+                        .unwrap_or_else(|| wasm_path_default.clone());
 
                         let plugin = match resolve_plugin(
-                            &plugins, &registry, &wb, &name, &wasm_path_for_handler
-                        ).await {
+                            &plugins,
+                            &registry,
+                            &wb,
+                            &name,
+                            &wasm_path_for_handler,
+                        )
+                        .await
+                        {
                             Ok(p) => p,
                             Err(e) => {
                                 tracing::error!(role = %role, name = %name, error = %e, "Failed to resolve plugin");
                                 return (
                                     axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                                     axum::Json(serde_json::json!({"error": e.to_string()})),
-                                ).into_response();
+                                )
+                                    .into_response();
                             }
                         };
 
                         tracing::info!(tool = %body.name, role = %role, agent = %name, "Executing tool");
 
                         let input = exomonad_core::mcp::tools::MCPCallInput::new(
-                            role, body.name.clone(), body.arguments,
+                            role.clone(),
+                            body.name.clone(),
+                            body.arguments,
                         );
 
-                        let output: exomonad_core::mcp::tools::MCPCallOutput = match plugin.call("handle_mcp_call", &input).await {
+                        let start = std::time::Instant::now();
+                        let result: Result<exomonad_core::mcp::tools::MCPCallOutput, anyhow::Error> = plugin.call("handle_mcp_call", &input).await;
+                        let duration_ms = start.elapsed().as_millis() as u64;
+
+                        let output = match result {
                             Ok(o) => o,
                             Err(e) => {
                                 tracing::error!(tool = %body.name, error = %e, "WASM call failed");
+                                if let Some(ref log) = event_log {
+                                    let _ = log.append(
+                                        "tool.called",
+                                        &name,
+                                        &serde_json::json!({
+                                            "tool_name": body.name,
+                                            "role": role,
+                                            "duration_ms": duration_ms,
+                                            "success": false,
+                                            "error": e.to_string(),
+                                        }),
+                                    );
+                                }
                                 return axum::Json(serde_json::json!({
                                     "success": false,
                                     "result": null,
                                     "error": format!("WASM call failed: {}", e)
-                                })).into_response();
+                                }))
+                                .into_response();
                             }
                         };
+
+                        if let Some(ref log) = event_log {
+                            let _ = log.append(
+                                "tool.called",
+                                &name,
+                                &serde_json::json!({
+                                    "tool_name": body.name,
+                                    "role": role,
+                                    "duration_ms": duration_ms,
+                                    "success": output.success,
+                                    "error": output.error,
+                                }),
+                            );
+                        }
 
                         axum::Json(serde_json::json!({
                             "success": output.success,
                             "result": output.result,
                             "error": output.error,
-                        })).into_response()
+                        }))
+                        .into_response()
                     }
                 }
             };
@@ -1463,6 +1523,7 @@ async fn main() -> Result<()> {
                 otel: OtelService::from_env().ok().map(Arc::new),
                 tmux_session: config.tmux_session.clone(),
                 default_role: config.role,
+                event_log: event_log.clone(),
             };
 
             // Shutdown signal for graceful shutdown via /shutdown endpoint

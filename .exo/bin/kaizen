@@ -9,17 +9,21 @@
 #   kaizen prs                # shortcut for pr_pipeline
 #   kaizen tools              # shortcut for tool_summary
 #   kaizen reviews            # shortcut for copilot_reviews
+#   kaizen tree               # shortcut for agent_tree
+#   kaizen timeline           # shortcut for swarm_timeline
+#   kaizen delivery           # shortcut for delivery_audit
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SQL_FILE="$SCRIPT_DIR/kaizen.sql"
-EVENTS_FILE="$SCRIPT_DIR/events.jsonl"
+LOG_DIR="$SCRIPT_DIR/logs"
 
-if [ ! -f "$EVENTS_FILE" ]; then
-  echo "No event log found at $EVENTS_FILE" >&2
+# Ensure log directory exists and has at least one jsonl file
+if [ ! -d "$LOG_DIR" ] || [ -z "$(ls "$LOG_DIR"/*.jsonl 2>/dev/null)" ]; then
+  echo "No event logs found in $LOG_DIR" >&2
   exit 1
 fi
 
-# SQL uses relative path '.exo/events.jsonl', so cd to repo root
+# SQL uses relative path '.exo/logs/*.jsonl', so cd to repo root
 cd "$SCRIPT_DIR/.." || exit 1
 
 case "${1:-}" in
@@ -28,6 +32,9 @@ case "${1:-}" in
   prs)      QUERY="SELECT * FROM pr_pipeline ORDER BY filed_at" ;;
   tools)    QUERY="SELECT * FROM tool_summary" ;;
   reviews)  QUERY="SELECT * FROM copilot_reviews ORDER BY review_ts" ;;
+  tree)     QUERY="SELECT * FROM agent_tree" ;;
+  timeline) QUERY="SELECT * FROM swarm_timeline ORDER BY ts" ;;
+  delivery) QUERY="SELECT * FROM delivery_audit ORDER BY ts" ;;
   "")       exec duckdb -init "$SQL_FILE" ;;
   *)        QUERY="$1" ;;
 esac

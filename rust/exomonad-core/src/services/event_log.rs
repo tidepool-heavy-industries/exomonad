@@ -3,7 +3,7 @@
 //! Writes one JSON line per event to `.exo/events.jsonl` for post-hoc
 //! reconstruction of agent runs. Query with DuckDB or jq.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 /// Append-only JSONL event log.
@@ -12,18 +12,16 @@ use std::sync::Mutex;
 /// The `Mutex` serializes concurrent tokio tasks. `O_APPEND` provides additional
 /// safety at the OS level for writes <4KB.
 pub struct EventLog {
-    path: PathBuf,
+    dir: PathBuf,
     lock: Mutex<()>,
 }
 
 impl EventLog {
-    /// Open (or create) the event log at `path`.
-    pub fn open(path: PathBuf) -> std::io::Result<Self> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+    /// Open (or create) the event log directory at `dir`.
+    pub fn open(dir: PathBuf) -> std::io::Result<Self> {
+        std::fs::create_dir_all(&dir)?;
         Ok(Self {
-            path,
+            dir,
             lock: Mutex::new(()),
         })
     }
@@ -46,21 +44,24 @@ impl EventLog {
             "data": data,
         });
 
+        let sanitized_id = agent_id.replace(['/', '\\', '\0'], "_");
+        let path = self.dir.join(format!("{}.jsonl", sanitized_id));
+
         let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
 
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&self.path)?;
+            .open(&path)?;
         writeln!(file, "{}", line)?;
 
         Ok(event_id)
     }
 
-    /// Path to the JSONL file.
-    pub fn path(&self) -> &std::path::Path {
-        &self.path
+    /// Path to the log directory.
+    pub fn dir(&self) -> &Path {
+        &self.dir
     }
 }
 
@@ -71,13 +72,13 @@ mod tests {
     #[test]
     fn test_append_and_read_back() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("events.jsonl");
-        let log = EventLog::open(path.clone()).unwrap();
+        let log = EventLog::open(dir.path().to_path_buf()).unwrap();
 
         let data = serde_json::json!({"slug": "feature-a", "agent_type": "claude"});
         let id = log.append("agent.spawned", "root", &data).unwrap();
         assert!(!id.is_empty());
 
+        let path = dir.path().join("root.jsonl");
         let content = std::fs::read_to_string(&path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(content.trim()).unwrap();
         assert_eq!(parsed["type"], "agent.spawned");
@@ -90,14 +91,31 @@ mod tests {
     #[test]
     fn test_multiple_appends() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("events.jsonl");
-        let log = EventLog::open(path.clone()).unwrap();
+        let log = EventLog::open(dir.path().to_path_buf()).unwrap();
 
-        log.append("a", "x", &serde_json::json!({})).unwrap();
-        log.append("b", "y", &serde_json::json!({})).unwrap();
+        log.append("a", "agent-x", &serde_json::json!({})).unwrap();
+        log.append("b", "agent-y", &serde_json::json!({})).unwrap();
 
-        let content = std::fs::read_to_string(&path).unwrap();
-        let lines: Vec<&str> = content.trim().lines().collect();
-        assert_eq!(lines.len(), 2);
+        let path_x = dir.path().join("agent-x.jsonl");
+        let path_y = dir.path().join("agent-y.jsonl");
+
+        assert!(path_x.exists());
+        assert!(path_y.exists());
+
+        let content_x = std::fs::read_to_string(&path_x).unwrap();
+        let content_y = std::fs::read_to_string(&path_y).unwrap();
+
+        assert_eq!(content_x.trim().lines().count(), 1);
+        assert_eq!(content_y.trim().lines().count(), 1);
+    }
+
+    #[test]
+    fn test_agent_id_sanitization() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = EventLog::open(dir.path().to_path_buf()).unwrap();
+
+        log.append("a", "feature/bug", &serde_json::json!({})).unwrap();
+        let path = dir.path().join("feature_bug.jsonl");
+        assert!(path.exists());
     }
 }

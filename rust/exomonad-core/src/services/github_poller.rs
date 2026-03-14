@@ -191,6 +191,23 @@ impl GitHubPoller {
         {
             Ok(action) => {
                 info!("[EventDispatch] handle_event returned: {:?}", action);
+
+                if let Some(ref log) = self.event_log {
+                    let action_str = match action {
+                        EventActionResponse::InjectMessage { .. } => "inject_message",
+                        EventActionResponse::NotifyParent { .. } => "notify_parent",
+                        EventActionResponse::NoAction => "no_action",
+                    };
+                    let _ = log.append(
+                        "event.dispatched",
+                        agent_name,
+                        &serde_json::json!({
+                            "event_type": event_type,
+                            "action": action_str,
+                        }),
+                    );
+                }
+
                 Ok(Some(action))
             }
             Err(e) => {
@@ -198,6 +215,18 @@ impl GitHubPoller {
                     "[EventDispatch] handle_event failed for {}: {}",
                     agent_name, e
                 );
+
+                if let Some(ref log) = self.event_log {
+                    let _ = log.append(
+                        "event.dispatch_failed",
+                        agent_name,
+                        &serde_json::json!({
+                            "event_type": event_type,
+                            "error": e.to_string(),
+                        }),
+                    );
+                }
+
                 Ok(None)
             }
         }
@@ -217,6 +246,7 @@ impl GitHubPoller {
                 crate::services::delivery::deliver_to_agent(
                     self.team_registry.as_deref(),
                     self.acp_registry.as_deref(),
+                    self.event_log.as_deref(),
                     &self.project_dir,
                     branch,
                     &tab_name,
@@ -259,6 +289,7 @@ impl GitHubPoller {
                     "success",
                     &message,
                     Some(&summary),
+                    "event_handler",
                 )
                 .await;
             }

@@ -193,6 +193,7 @@ impl EventEffects for EventHandler {
             &req.status,
             &req.message,
             None,
+            "agent",
         )
         .await;
 
@@ -215,6 +216,7 @@ impl EventEffects for EventHandler {
         let delivery_result = crate::services::delivery::deliver_to_agent(
             self.team_registry.as_deref(),
             self.acp_registry.as_deref(),
+            self.event_log.as_deref(),
             &self.project_dir,
             &req.recipient,
             &tab_name,
