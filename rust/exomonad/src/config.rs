@@ -53,6 +53,10 @@ pub struct RawConfig {
 
     /// Initial prompt for the root agent (used with `gemini --prompt-interactive`).
     pub initial_prompt: Option<String>,
+
+    /// When true, spawned Gemini agents receive `--yolo` flag.
+    #[serde(default)]
+    pub yolo: bool,
 }
 
 /// Final resolved configuration.
@@ -78,6 +82,8 @@ pub struct Config {
     pub extra_mcp_servers: std::collections::HashMap<String, McpServerConfig>,
     /// Initial prompt for the root agent.
     pub initial_prompt: Option<String>,
+    /// When true, spawned Gemini agents receive `--yolo` flag.
+    pub yolo: bool,
 }
 
 impl Config {
@@ -191,6 +197,9 @@ impl Config {
 
         let initial_prompt = local_raw.initial_prompt.or(global_raw.initial_prompt);
 
+        // Resolve yolo: local > global > false
+        let yolo = local_raw.yolo || global_raw.yolo;
+
         Ok(Self {
             project_dir,
             role,
@@ -203,6 +212,7 @@ impl Config {
             wasm_name,
             extra_mcp_servers,
             initial_prompt,
+            yolo,
         })
     }
 
@@ -232,6 +242,7 @@ impl Default for Config {
             wasm_name: "devswarm".to_string(),
             extra_mcp_servers: std::collections::HashMap::new(),
             initial_prompt: None,
+            yolo: false,
         }
     }
 }

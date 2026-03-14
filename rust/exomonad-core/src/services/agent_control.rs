@@ -460,6 +460,8 @@ pub struct AgentControlService {
     git_wt: Arc<GitWorktreeService>,
     /// ACP connection registry for Gemini agents.
     pub acp_registry: Option<Arc<AcpRegistry>>,
+    /// When true, spawned Gemini agents receive `--yolo` flag.
+    yolo: bool,
 }
 
 impl AgentControlService {
@@ -479,6 +481,7 @@ impl AgentControlService {
             birth_branch: BirthBranch::root(),
             git_wt,
             acp_registry: None,
+            yolo: false,
         }
     }
 
@@ -504,6 +507,12 @@ impl AgentControlService {
     /// Set the birth-branch (git identity) for this agent.
     pub fn with_birth_branch(mut self, branch: BirthBranch) -> Self {
         self.birth_branch = branch;
+        self
+    }
+
+    /// Enable `--yolo` flag for spawned Gemini agents.
+    pub fn with_yolo(mut self, yolo: bool) -> Self {
+        self.yolo = yolo;
         self
     }
 
@@ -559,6 +568,7 @@ impl AgentControlService {
             birth_branch: BirthBranch::root(),
             git_wt,
             acp_registry: None,
+            yolo: false,
         })
     }
 
@@ -1851,6 +1861,7 @@ impl AgentControlService {
         env_vars: &HashMap<String, String>,
         cwd: &Path,
         claude_flags: Option<&ClaudeSpawnFlags>,
+        yolo: bool,
     ) -> String {
         let cmd = agent_type.command();
 
@@ -1878,7 +1889,10 @@ impl AgentControlService {
                 }
                 flags
             }
-            AgentType::Gemini | AgentType::Shoal => String::new(),
+            AgentType::Gemini => {
+                if yolo { " --yolo".to_string() } else { String::new() }
+            }
+            AgentType::Shoal => String::new(),
         };
 
         let agent_command = match (prompt, fork_session_id) {
@@ -1937,7 +1951,7 @@ impl AgentControlService {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating tmux window");
 
         let full_command = Self::build_agent_command(
-            agent_type, prompt, fork_session_id, &env_vars, cwd, claude_flags,
+            agent_type, prompt, fork_session_id, &env_vars, cwd, claude_flags, self.yolo,
         );
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
         let tmux = self.tmux()?;
@@ -2049,7 +2063,7 @@ impl AgentControlService {
     ) -> Result<String> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, parent = ?parent_window_name, "Creating tmux pane");
 
-        let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd, claude_flags);
+        let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd, claude_flags, self.yolo);
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
         let tmux = self.tmux()?;
 

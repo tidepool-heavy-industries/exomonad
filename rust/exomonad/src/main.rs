@@ -1147,6 +1147,7 @@ async fn main() -> Result<()> {
             agent_control = agent_control.with_worktree_base(worktree_base.clone());
             agent_control = agent_control.with_birth_branch(exomonad_core::BirthBranch::root());
             agent_control = agent_control.with_tmux_session(config.tmux_session.clone());
+            agent_control = agent_control.with_yolo(config.yolo);
             let event_session_id = uuid::Uuid::new_v4().to_string();
             let agent_control = Arc::new(agent_control);
 
