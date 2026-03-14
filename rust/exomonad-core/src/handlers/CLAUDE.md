@@ -111,7 +111,7 @@ Both the `notify_parent` effect handler and the poller's `NotifyParentAction` us
 
 ### Routing Resolution
 
-`deliver_to_agent()` resolves the agent's routing.json using the **slug** (last dot-segment of the branch name), not the full branch name. This matches how `agent_control` writes routing.json at `.exo/agents/{slug}-{suffix}/routing.json`. The lookup tries both `-gemini` and `-claude` suffixes, and reads `pane_id` (workers), `window_id` (subtrees/leaves), or `parent_tab` (fallback).
+`deliver_to_agent()` resolves the agent's routing.json by trying multiple path candidates: first the direct `agent_key` directory, then slug (last dot-segment) and full `agent_key` with `-gemini`, `-claude`, and `-shoal` suffixes. This handles both peer messaging (where `agent_key` is already the directory name) and parent notification (where `agent_key` is a dotted branch name). Reads `pane_id` (workers), `window_id` (subtrees/leaves), or `parent_tab` (fallback).
 
 ### Session-Qualified Targets
 
@@ -119,7 +119,7 @@ Both the `notify_parent` effect handler and the poller's `NotifyParentAction` us
 
 ### Injection Locking
 
-`TmuxIpc::inject_input` serializes calls to the same target via a per-target `std::sync::Mutex`. This prevents concurrent callers (github_poller InjectMessage, delivery.rs, event handlers) from interleaving `paste-buffer` and `send-keys` commands, which garbles input. Different targets are independent — locking `@1` does not block injection into `@2`.
+`TmuxIpc::inject_input` serializes calls to the same target via a per-target `std::sync::Mutex` stored as `Weak` references in a static map. Entries are pruned on each lookup, preventing unbounded growth from ephemeral worker panes. Different targets are independent — locking `@1` does not block injection into `@2`.
 
 A 150ms debounce between `paste-buffer` and `send-keys Enter` gives complex TUIs (Claude Code's Ink renderer, Gemini CLI's readline) time to process pasted text before submission. The Enter keystroke is retried up to 3 times with 200ms between attempts to handle dropped keystrokes. Before injection, copy/scroll mode is detected via `#{pane_in_mode}` and cancelled to prevent silent paste failures.
 

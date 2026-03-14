@@ -316,24 +316,28 @@ pub async fn deliver_to_agent(
     // routing.json records tmux identifiers at spawn time: pane_id (%N) for
     // workers, window_id (@N) for subtrees/leaves. Use slug (last dot-segment)
     // since agent_control writes routing under the slug, not the full branch name.
+    // Try direct agent_key path first (for peer messaging where key is already
+    // the directory name), then slug with all agent type suffixes.
     let slug = agent_key.rsplit_once('.').map(|(_, s)| s).unwrap_or(agent_key);
-    let routing_target = ["gemini", "claude"].iter().find_map(|suffix| {
-        let path = project_dir
-            .join(".exo/agents")
-            .join(format!("{}-{}", slug, suffix))
-            .join("routing.json");
-        if !path.exists() {
-            return None;
-        }
-        let content = std::fs::read_to_string(&path).ok()?;
-        let routing: serde_json::Value = serde_json::from_str(&content).ok()?;
-        // Prefer pane_id (workers), then window_id (subtrees/leaves), then parent_tab
-        routing["pane_id"]
-            .as_str()
-            .or_else(|| routing["window_id"].as_str())
-            .or_else(|| routing["parent_tab"].as_str())
-            .map(|s| s.to_string())
-    });
+    let agents_dir = project_dir.join(".exo/agents");
+    let routing_target = std::iter::once(agent_key.to_string())
+        .chain(["gemini", "claude", "shoal"].iter().flat_map(|suffix| {
+            [
+                format!("{}-{}", slug, suffix),
+                format!("{}-{}", agent_key, suffix),
+            ]
+        }))
+        .find_map(|dir_name| {
+            let path = agents_dir.join(&dir_name).join("routing.json");
+            let content = std::fs::read_to_string(&path).ok()?;
+            let routing: serde_json::Value = serde_json::from_str(&content).ok()?;
+            // Prefer pane_id (workers), then window_id (subtrees/leaves), then parent_tab
+            routing["pane_id"]
+                .as_str()
+                .or_else(|| routing["window_id"].as_str())
+                .or_else(|| routing["parent_tab"].as_str())
+                .map(|s| s.to_string())
+        });
     if let Some(target) = routing_target {
         info!(
             agent = %agent_key,

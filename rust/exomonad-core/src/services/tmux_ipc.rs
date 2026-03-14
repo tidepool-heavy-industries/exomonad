@@ -12,7 +12,9 @@ use tracing::{debug, info, warn};
 
 /// Per-target injection lock. Serializes inject_input calls to the same
 /// tmux target, preventing concurrent paste-buffer/send-keys interleaving.
-static INJECTION_LOCKS: std::sync::LazyLock<StdMutex<HashMap<String, std::sync::Arc<StdMutex<()>>>>> =
+/// Per-target injection locks. Uses Weak references so entries are automatically
+/// reclaimable when no inject_input call holds the Arc.
+static INJECTION_LOCKS: std::sync::LazyLock<StdMutex<HashMap<String, std::sync::Weak<StdMutex<()>>>>> =
     std::sync::LazyLock::new(|| StdMutex::new(HashMap::new()));
 
 /// Stable tmux window identifier (@N format, base-index immune).
@@ -353,12 +355,20 @@ impl TmuxIpc {
         let qualified_target = format!("{}:{}", self.session_name, target);
 
         // Serialize injections to the same target to prevent interleaving.
-        // We lock on qualified_target to ensure session-specific serialization.
+        // Uses Weak refs so lock entries are reclaimed when not in use.
         let target_lock = {
             let mut map = INJECTION_LOCKS.lock().expect("injection lock map poisoned");
-            map.entry(qualified_target.clone())
-                .or_insert_with(|| std::sync::Arc::new(StdMutex::new(())))
-                .clone()
+            // Prune dead entries opportunistically
+            map.retain(|_, weak| weak.strong_count() > 0);
+            let arc = map
+                .get(&qualified_target)
+                .and_then(|w| w.upgrade())
+                .unwrap_or_else(|| {
+                    let arc = std::sync::Arc::new(StdMutex::new(()));
+                    map.insert(qualified_target.clone(), std::sync::Arc::downgrade(&arc));
+                    arc
+                });
+            arc
         };
         let _guard = target_lock.lock().expect("per-target injection lock poisoned");
 
@@ -656,9 +666,14 @@ mod tests {
                 barrier.wait();
                 let lock = {
                     let mut map = INJECTION_LOCKS.lock().unwrap();
-                    map.entry("test-target".to_string())
-                        .or_insert_with(|| Arc::new(StdMutex::new(())))
-                        .clone()
+                    map.retain(|_, weak| weak.strong_count() > 0);
+                    map.get("test-serialization-target")
+                        .and_then(|w| w.upgrade())
+                        .unwrap_or_else(|| {
+                            let arc = Arc::new(StdMutex::new(()));
+                            map.insert("test-serialization-target".to_string(), Arc::downgrade(&arc));
+                            arc
+                        })
                 };
                 let _guard = lock.lock().unwrap();
                 // Simulate work under lock
@@ -680,41 +695,32 @@ mod tests {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
 
-        let both_held = Arc::new(AtomicBool::new(false));
+        // Verify two different targets can be locked concurrently (no deadlock,
+        // and both threads reach the barrier while holding their respective locks).
+        let both_reached_barrier = Arc::new(AtomicBool::new(false));
         let barrier = Arc::new(std::sync::Barrier::new(2));
 
-        let both_held_clone = both_held.clone();
-        let barrier_clone = barrier.clone();
+        let flag = both_reached_barrier.clone();
+        let b1 = barrier.clone();
 
         let h1 = std::thread::spawn(move || {
-            let lock = {
-                let mut map = INJECTION_LOCKS.lock().unwrap();
-                map.entry("target-a".to_string())
-                    .or_insert_with(|| Arc::new(StdMutex::new(())))
-                    .clone()
-            };
+            let lock = Arc::new(StdMutex::new(()));
             let _guard = lock.lock().unwrap();
-            barrier_clone.wait();
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            both_held_clone.store(true, Ordering::SeqCst);
+            // Both threads wait here — if locks were shared (same target),
+            // the second thread would block on lock() and never reach the barrier.
+            b1.wait();
+            flag.store(true, Ordering::SeqCst);
         });
 
         let h2 = std::thread::spawn(move || {
-            let lock = {
-                let mut map = INJECTION_LOCKS.lock().unwrap();
-                map.entry("target-b".to_string())
-                    .or_insert_with(|| Arc::new(StdMutex::new(())))
-                    .clone()
-            };
+            let lock = Arc::new(StdMutex::new(()));
             let _guard = lock.lock().unwrap();
             barrier.wait();
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            // Both locks should be holdable concurrently
-            assert!(both_held.load(Ordering::SeqCst) || true); // just verify no deadlock
         });
 
         h1.join().unwrap();
         h2.join().unwrap();
+        assert!(both_reached_barrier.load(Ordering::SeqCst), "Both threads should hold independent locks concurrently");
     }
 
     #[test]
