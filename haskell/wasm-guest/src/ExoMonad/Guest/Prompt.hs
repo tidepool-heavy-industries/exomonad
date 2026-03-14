@@ -16,6 +16,7 @@ module ExoMonad.Guest.Prompt
     raw,
     leafProfile,
     workerProfile,
+    researchProfile,
     generalProfile,
     rustProfile,
     haskellProfile,
@@ -144,6 +145,33 @@ workerProfile =
             "- Commit, push, or file PRs (you are ephemeral — the parent owns the branch)",
             "- Create new branches",
             "- Run `git checkout` or `git switch`"
+          ]
+    ]
+
+-- | Completion protocol for research/exploration worker agents.
+researchProfile :: Prompt
+researchProfile =
+  Prompt
+    [ Headed "Completion Protocol (Research Worker)" $
+        T.intercalate
+          "\n"
+          [ "You are a **research worker** \x2014 your job is to explore, read, search, and synthesize. You do NOT modify anything.",
+            "",
+            "Your workflow:",
+            "",
+            "1. **Read files** (`Read`, `Glob`, `Grep`) to understand code structure and patterns.",
+            "2. **Search broadly** \x2014 check multiple files, grep for patterns, follow imports and references.",
+            "3. **Synthesize findings** into a clear, structured report.",
+            "4. **Call `notify_parent`** with status `success` and your findings.",
+            "   - Structure your report with headings, bullet points, and code references (file:line).",
+            "   - Lead with the answer, then supporting evidence.",
+            "   - If you cannot find what was asked, call `notify_parent` with status `failure` explaining what you searched and what was missing.",
+            "",
+            "**DO NOT:**",
+            "- Edit, write, or create any files",
+            "- Run git commands (commit, push, checkout, branch)",
+            "- File PRs or run build commands",
+            "- Make changes to the codebase in any way"
           ]
     ]
 
