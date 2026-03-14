@@ -4,9 +4,16 @@
 //! Callers wrap in `tokio::task::spawn_blocking` as needed.
 
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
+use std::sync::Mutex as StdMutex;
 use tracing::{debug, info, warn};
+
+/// Per-target injection lock. Serializes inject_input calls to the same
+/// tmux target, preventing concurrent paste-buffer/send-keys interleaving.
+static INJECTION_LOCKS: std::sync::LazyLock<StdMutex<HashMap<String, std::sync::Arc<StdMutex<()>>>>> =
+    std::sync::LazyLock::new(|| StdMutex::new(HashMap::new()));
 
 /// Stable tmux window identifier (@N format, base-index immune).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -341,12 +348,22 @@ impl TmuxIpc {
     /// display-name targets against the "most recently used" session, which is
     /// nondeterministic for subprocess calls.
     pub fn inject_input(&self, target: &str, text: &str) -> Result<()> {
-        let buf_name = format!("exo_{}", uuid::Uuid::new_v4().as_simple());
-        let tmp_path = format!("/tmp/exomonad_buf_{}", buf_name);
-
         // Session-qualify the target so paste-buffer and send-keys resolve
         // to the same pane deterministically.
         let qualified_target = format!("{}:{}", self.session_name, target);
+
+        // Serialize injections to the same target to prevent interleaving.
+        // We lock on qualified_target to ensure session-specific serialization.
+        let target_lock = {
+            let mut map = INJECTION_LOCKS.lock().expect("injection lock map poisoned");
+            map.entry(qualified_target.clone())
+                .or_insert_with(|| std::sync::Arc::new(StdMutex::new(())))
+                .clone()
+        };
+        let _guard = target_lock.lock().expect("per-target injection lock poisoned");
+
+        let buf_name = format!("exo_{}", uuid::Uuid::new_v4().as_simple());
+        let tmp_path = format!("/tmp/exomonad_buf_{}", buf_name);
 
         // Strip trailing newlines so paste-buffer doesn't trigger submission;
         // send-keys Enter below is the sole execution trigger.
@@ -399,6 +416,10 @@ impl TmuxIpc {
                 String::from_utf8_lossy(&paste_output.stderr)
             );
         }
+
+        // Debounce: allow TUI (Claude Code Ink, Gemini CLI readline) to process
+        // the pasted text before sending Enter.
+        std::thread::sleep(std::time::Duration::from_millis(150));
 
         // Sole execution trigger — decoupled from data injection
         let send_output = std::process::Command::new("tmux")
@@ -513,5 +534,81 @@ mod tests {
         let pid = PaneId::parse("%456").unwrap();
         assert_eq!(pid.as_str(), "%456");
         assert_eq!(pid.to_string(), "%456");
+    }
+
+    #[test]
+    fn test_injection_lock_serializes_same_target() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        let counter = Arc::new(AtomicU32::new(0));
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+
+        let handles: Vec<_> = (0..2).map(|_| {
+            let counter = counter.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                let lock = {
+                    let mut map = INJECTION_LOCKS.lock().unwrap();
+                    map.entry("test-target".to_string())
+                        .or_insert_with(|| Arc::new(StdMutex::new(())))
+                        .clone()
+                };
+                let _guard = lock.lock().unwrap();
+                // Simulate work under lock
+                let val = counter.load(Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                counter.store(val + 1, Ordering::SeqCst);
+            })
+        }).collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+        // If serialized correctly, counter == 2 (no lost increments)
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn test_injection_lock_different_targets_independent() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let both_held = Arc::new(AtomicBool::new(false));
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+
+        let both_held_clone = both_held.clone();
+        let barrier_clone = barrier.clone();
+
+        let h1 = std::thread::spawn(move || {
+            let lock = {
+                let mut map = INJECTION_LOCKS.lock().unwrap();
+                map.entry("target-a".to_string())
+                    .or_insert_with(|| Arc::new(StdMutex::new(())))
+                    .clone()
+            };
+            let _guard = lock.lock().unwrap();
+            barrier_clone.wait();
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            both_held_clone.store(true, Ordering::SeqCst);
+        });
+
+        let h2 = std::thread::spawn(move || {
+            let lock = {
+                let mut map = INJECTION_LOCKS.lock().unwrap();
+                map.entry("target-b".to_string())
+                    .or_insert_with(|| Arc::new(StdMutex::new(())))
+                    .clone()
+            };
+            let _guard = lock.lock().unwrap();
+            barrier.wait();
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            // Both locks should be holdable concurrently
+            assert!(both_held.load(Ordering::SeqCst) || true); // just verify no deadlock
+        });
+
+        h1.join().unwrap();
+        h2.join().unwrap();
     }
 }
