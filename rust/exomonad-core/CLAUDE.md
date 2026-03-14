@@ -57,7 +57,7 @@ Two levels of abstraction for sending messages:
 | `deliver_to_agent()` | Low-level multi-channel delivery (Teams → ACP → UDS → tmux) | Peer messaging (`send_message`), event handler `InjectMessage` |
 | `notify_parent_delivery()` | High-level parent notification: event log + EventQueue + `[from: id]`/`[FAILED: id]` prefix + `deliver_to_agent()` | `EventHandler::notify_parent` (agent-initiated), poller `NotifyParent` action (system-initiated) |
 
-**Worker pane delivery** (tmux fallback for workers): `routing.json` stores `slug_key` (e.g. `"main/test-worker-gemini"`) rather than `pane_id`. `inject_input` passes `slug_key` as the `target` argument.
+**Worker pane delivery** (tmux fallback for workers): `routing.json` stores `pane_id` (e.g. `%42`) for direct tmux targeting. `inject_input` passes `pane_id` as the `target` argument.
 
 All messages are prefixed with `[from: id]` (or `[FAILED: id]` for failures). Event handler messages include structural tags inside the body (e.g. `[from: leaf-id] [PR READY] PR #5 approved...`).
 

@@ -87,7 +87,6 @@ Agents are IO-blind state machines compiled to WASM. They yield typed effects; R
 | `spawn_workers` | tl | Spawn Gemini agents as panes (ephemeral, no branch) |
 | `file_pr` | tl, dev | Create or update a PR for the current branch |
 | `merge_pr` | tl | Merge a child agent's PR and fetch changes |
-| `popup` | tl | Show interactive forms in a tiled split pane |
 | `notify_parent` | all | Send message to parent agent via Teams inbox |
 | `send_message` | all | Send message to any agent (Teams, ACP, UDS, or tmux) |
 | `shutdown` | dev, worker | Gracefully exit: notify parent, close own pane |

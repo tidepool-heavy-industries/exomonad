@@ -41,7 +41,6 @@ async fn build_test_runtime() -> exomonad_core::Runtime {
         .with_effect_handler(MockFsHandler)
         .with_effect_handler(MockFilePRHandler)
         .with_effect_handler(MockMergePRHandler)
-        .with_effect_handler(MockPopupHandler)
         .with_effect_handler(MockEventsHandler)
         .with_effect_handler(MockSessionHandler)
         .with_effect_handler(MockKvHandler)
@@ -361,33 +360,6 @@ impl EffectHandler for MockMergePRHandler {
             _ => Err(EffectError::not_found(format!(
                 "mock_merge_pr/{effect_type}"
             ))),
-        }
-    }
-}
-
-struct MockPopupHandler;
-
-#[async_trait]
-impl EffectHandler for MockPopupHandler {
-    fn namespace(&self) -> &str {
-        "popup"
-    }
-
-    async fn handle(
-        &self,
-        effect_type: &str,
-        _payload: &[u8],
-        _ctx: &exomonad_core::effects::EffectContext,
-    ) -> EffectResult<Vec<u8>> {
-        use exomonad_proto::effects::popup::*;
-
-        match effect_type {
-            "popup.show_popup" => Ok(ShowPopupResponse {
-                button: "submit".into(),
-                values: b"{}".to_vec(),
-            }
-            .encode_to_vec()),
-            _ => Err(EffectError::not_found(format!("mock_popup/{effect_type}"))),
         }
     }
 }
