@@ -2064,7 +2064,7 @@ impl AgentControlService {
             windows.iter()
                 .find(|w| w.window_name == wname)
                 .map(|w| w.window_id.clone())
-                .unwrap_or_else(|| format!("{}:0", tmux.session_name()))
+                .ok_or_else(|| anyhow::anyhow!("No tmux window found matching '{}' — cannot create pane", wname))?
         } else {
             format!("{}:", tmux.session_name())
         };

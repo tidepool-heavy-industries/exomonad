@@ -33,16 +33,18 @@ impl TmuxIpc {
 
     // -- Session management (static, no &self) --
 
-    pub fn new_session(name: &str, cwd: &Path) -> Result<()> {
+    /// Create a new tmux session. Returns the stable window ID (@N) of the initial window.
+    pub fn new_session(name: &str, cwd: &Path) -> Result<String> {
         let output = std::process::Command::new("tmux")
-            .args(["new-session", "-d", "-s", name, "-c", &cwd.to_string_lossy()])
+            .args(["new-session", "-d", "-s", name, "-P", "-F", "#{window_id}", "-c", &cwd.to_string_lossy()])
             .output()
             .context("Failed to run tmux new-session")?;
         if !output.status.success() {
             anyhow::bail!("tmux new-session failed: {}", String::from_utf8_lossy(&output.stderr));
         }
-        info!(session = %name, "Created tmux session");
-        Ok(())
+        let window_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        info!(session = %name, window = %window_id, "Created tmux session");
+        Ok(window_id)
     }
 
     pub fn has_session(name: &str) -> Result<bool> {

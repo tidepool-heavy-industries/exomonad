@@ -785,8 +785,8 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     )?;
     info!("Wrote .mcp.json with stdio MCP config");
 
-    // 2. Create session in background
-    TmuxIpc::new_session(&session, &cwd)?;
+    // 2. Create session in background (returns stable @N window ID)
+    let server_window_id = TmuxIpc::new_session(&session, &cwd)?;
 
     // Set EXOMONAD_TMUX_SESSION in the tmux session environment so all
     // windows/panes inherit it (used by tmux_events, agent_control, etc.)
@@ -805,8 +805,8 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     let ipc = TmuxIpc::new(&session);
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
 
-    // Window 0 is created by new-session. Rename it to "Server" and run exomonad serve.
-    let server_target = format!("{}:0", session);
+    // Rename initial window to "Server" using stable @N ID (base-index immune)
+    let server_target = server_window_id;
     let status = std::process::Command::new("tmux")
         .args(["rename-window", "-t", &server_target, "Server"])
         .status()
