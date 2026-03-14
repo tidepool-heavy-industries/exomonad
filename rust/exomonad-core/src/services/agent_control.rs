@@ -1260,7 +1260,7 @@ impl AgentControlService {
             info!(worktree = %worktree_path.display(), "Wrote hook configuration for spawned Claude agent");
 
             // Symlink Claude project dir so child can discover parent's sessions for --fork-session.
-            // Claude Code stores sessions at ~/.claude/projects/{path-encoded}/ where / becomes -.
+            // Claude Code encodes paths via [^a-zA-Z0-9] → '-' (lossy regex replacement).
             // Without this symlink, --resume --fork-session fails with "no conversation ID found".
             {
                 let claude_projects_dir = dirs::home_dir()
@@ -1268,7 +1268,10 @@ impl AgentControlService {
                     .join(".claude")
                     .join("projects");
                 let encode_path = |p: &Path| -> String {
-                    p.to_string_lossy().replace('/', "-")
+                    p.to_string_lossy()
+                        .chars()
+                        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                        .collect()
                 };
                 let parent_encoded = encode_path(&self.project_dir);
                 let worktree_encoded = encode_path(&worktree_path);
@@ -2814,5 +2817,42 @@ mod tests {
         assert!(link.exists(), "Symlink should exist");
         let target = tokio::fs::read_link(&link).await.unwrap();
         assert_eq!(target, project_dir.join(".exo/server.sock"));
+    }
+
+    #[test]
+    fn test_claude_project_path_encoding() {
+        // Claude Code encodes paths via [^a-zA-Z0-9] → '-'
+        // Verified against actual ~/.claude/projects/ directory names.
+        let encode = |s: &str| -> String {
+            s.chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect()
+        };
+
+        // Basic path
+        assert_eq!(
+            encode("/home/inanna/dev/exomonad"),
+            "-home-inanna-dev-exomonad"
+        );
+        // Worktree path (dots and hyphens in segments)
+        assert_eq!(
+            encode("/home/inanna/dev/exomonad/.exo/worktrees/fork-session"),
+            "-home-inanna-dev-exomonad--exo-worktrees-fork-session"
+        );
+        // Hidden dir (leading dot → double dash after parent separator)
+        assert_eq!(
+            encode("/home/inanna/.config/home-manager"),
+            "-home-inanna--config-home-manager"
+        );
+        // Deep nested path with hyphens
+        assert_eq!(
+            encode("/home/inanna/dev/aegis-binder-diagnostic-framework"),
+            "-home-inanna-dev-aegis-binder-diagnostic-framework"
+        );
+        // Path with spaces
+        assert_eq!(
+            encode("/home/user/My Projects/app"),
+            "-home-user-My-Projects-app"
+        );
     }
 }
