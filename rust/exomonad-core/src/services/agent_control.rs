@@ -1069,14 +1069,8 @@ impl AgentControlService {
             let caller_worktree = resolve_agent_working_dir(ctx);
             let absolute_worktree = self.project_dir.join(caller_worktree);
 
-            // Build a stable slug key scoped to the parent's birth branch.
-            // Using birth_branch as prefix ensures uniqueness when multiple TLs
-            // spawn workers with the same name (e.g. "main/test-worker-gemini" vs
-            // "main.feature-a/test-worker-gemini").
-            let slug_key = format!("{}/{}", ctx.birth_branch, internal_name);
-
             // Write routing info so send_message can target this pane correctly.
-            // Workers are panes in the parent's tab — slug_key is the stable identifier
+            // Workers are panes in the parent's tab — pane_id is the stable identifier
             // Spawn pane in caller's tab, cwd = caller's worktree
             let pane_id = self.new_tmux_pane(
                 &display_name,
@@ -1092,7 +1086,6 @@ impl AgentControlService {
             // Store pane_id for message delivery and cleanup
             let routing = serde_json::json!({
                 "parent_tab": &caller_tab,
-                "slug_key": &slug_key,
                 "pane_id": &pane_id,
             });
             fs::write(
@@ -1728,11 +1721,9 @@ impl AgentControlService {
     // ========================================================================
 
     fn resolve_tmux_session(&self) -> Result<String> {
-        if let Some(ref session) = self.tmux_session {
-            return Ok(session.clone());
-        }
-        std::env::var("EXOMONAD_TMUX_SESSION")
-            .context("No tmux session configured (set EXOMONAD_TMUX_SESSION or call with_tmux_session)")
+        self.tmux_session
+            .clone()
+            .ok_or_else(|| anyhow!("No tmux session configured (call with_tmux_session)"))
     }
 
     /// Get the direct tmux IPC client, falling back to creating one from config or env.

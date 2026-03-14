@@ -71,7 +71,7 @@ pub fn git_handlers(
     handlers
 }
 
-/// Orchestration handlers for agent spawning, messaging, events, popups.
+/// Orchestration handlers for agent spawning, messaging, and events.
 #[allow(clippy::too_many_arguments)]
 pub fn orchestration_handlers(
     agent_control: Arc<AgentControlService>,

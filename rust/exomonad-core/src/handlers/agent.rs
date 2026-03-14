@@ -566,7 +566,7 @@ impl AgentEffects for AgentHandler {
         _req: CloseSelfRequest,
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<CloseSelfResponse> {
-        let agent_key = format!("{}-gemini", ctx.agent_name);
+        let agent_key = ctx.agent_name.to_string();
         let routing_path = std::path::Path::new(".exo/agents").join(&agent_key).join("routing.json");
 
         let pane_target = if let Ok(content) = std::fs::read_to_string(&routing_path) {

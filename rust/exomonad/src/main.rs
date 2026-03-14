@@ -777,25 +777,19 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
 
     // Window 0 is created by new-session. Rename it to "Server" and run exomonad serve.
     let server_target = format!("{}:0", session);
-    let rename_output = std::process::Command::new("tmux")
+    let status = std::process::Command::new("tmux")
         .args(["rename-window", "-t", &server_target, "Server"])
-        .output()
+        .status()
         .context("Failed to run tmux rename-window")?;
-    if !rename_output.status.success() {
-        anyhow::bail!(
-            "tmux rename-window failed: {}",
-            String::from_utf8_lossy(&rename_output.stderr)
-        );
+    if !status.success() {
+        warn!("tmux rename-window failed with status: {}", status);
     }
-    let send_output = std::process::Command::new("tmux")
+    let status = std::process::Command::new("tmux")
         .args(["send-keys", "-t", &server_target, "exomonad serve", "Enter"])
-        .output()
+        .status()
         .context("Failed to run tmux send-keys")?;
-    if !send_output.status.success() {
-        anyhow::bail!(
-            "tmux send-keys failed: {}",
-            String::from_utf8_lossy(&send_output.stderr)
-        );
+    if !status.success() {
+        warn!("tmux send-keys failed with status: {}", status);
     }
 
     // Create "TL" window
@@ -815,7 +809,7 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
     };
 
     let tl_command = match config.shell_command {
-        Some(sc) => format!("{} -c '{}'", sc, base_command),
+        Some(sc) => format!("{} -c \"{}\"", sc, base_command.replace('"', "\\\"")),
         None => base_command,
     };
 

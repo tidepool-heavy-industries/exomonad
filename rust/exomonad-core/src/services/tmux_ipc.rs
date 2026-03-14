@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use std::path::Path;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// tmux CLI wrapper for a specific session.
 #[derive(Debug, Clone)]
@@ -219,18 +219,32 @@ impl TmuxIpc {
             .context("Failed to run tmux paste-buffer")?;
 
         // Delete the named buffer
-        let _ = std::process::Command::new("tmux")
+        match std::process::Command::new("tmux")
             .args(["delete-buffer", "-b", &buf_name])
-            .output();
+            .output()
+        {
+            Ok(output) if !output.status.success() => {
+                warn!("tmux delete-buffer failed: {}", String::from_utf8_lossy(&output.stderr));
+            }
+            Err(e) => {
+                warn!("failed to run tmux delete-buffer: {}", e);
+            }
+            _ => {}
+        }
 
         if !paste_output.status.success() {
             anyhow::bail!("tmux paste-buffer failed: {}", String::from_utf8_lossy(&paste_output.stderr));
         }
 
         // Sole execution trigger — decoupled from data injection
-        let _ = std::process::Command::new("tmux")
+        let send_output = std::process::Command::new("tmux")
             .args(["send-keys", "-t", target, "Enter"])
-            .output();
+            .output()
+            .context("Failed to run tmux send-keys")?;
+
+        if !send_output.status.success() {
+            anyhow::bail!("tmux send-keys failed: {}", String::from_utf8_lossy(&send_output.stderr));
+        }
 
         debug!(target, chars = text.len(), "Injected input via tmux buffer");
         Ok(())
