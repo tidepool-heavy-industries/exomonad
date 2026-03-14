@@ -49,6 +49,7 @@ library
     Effects.Coordination
     Effects.Copilot
     Effects.Kv
+    Effects.Process
 
     Effects.Events
     Effects.MergePr

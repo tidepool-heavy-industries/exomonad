@@ -31,6 +31,7 @@ haskell/proto/
         ├── Log.hs           # Generated from effects/log.proto
         ├── MergePr.hs       # Generated from effects/merge_pr.proto
         ├── Popup.hs         # Generated from effects/popup.proto
+        ├── Process.hs       # Generated from effects/process.proto
         └── Session.hs       # Generated from effects/session.proto
 ```
 

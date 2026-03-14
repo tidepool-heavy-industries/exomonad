@@ -204,6 +204,7 @@ Proto field helpers in `handlers/mod.rs`: `non_empty(String) → Option<String>`
 | `session.*` | SessionHandler | register_claude_id, register_team |
 | `events.*` | EventHandler | wait_for_event (internal), notify_event, notify_parent, send_message |
 | `merge_pr.*` | MergePRHandler | merge_pr (gh pr merge + git fetch) |
+| `process.*` | ProcessHandler | run (execute command with args, env, working dir, timeout) |
 | `coordination.*` | CoordinationHandler | acquire_mutex, release_mutex (in-memory mutex for parallel agents) |
 
 **tmux Integration (CLI-based):**

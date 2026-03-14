@@ -24,6 +24,7 @@ proto/
     ├── kv.proto            # kv.* effects (Key-Value)
     ├── log.proto           # log.* effects
     ├── merge_pr.proto      # merge_pr.* effects
+    ├── process.proto       # process.* effects
     └── session.proto       # session.* effects
 ```
 
@@ -223,6 +224,11 @@ Logging and events (`log.*` namespace):
 PR merging (`merge_pr.*` namespace):
 - `MergePR`: Merge PR and fetch changes
 
+### effects/process.proto
+
+Process execution (`process.*` namespace):
+- `Run`: Execute command with args, env, working dir, timeout
+
 ### effects/coordination.proto
 
 Coordination primitives (`coordination.*` namespace):
@@ -312,6 +318,7 @@ just proto-test  # Run wire format compatibility tests
 | file_pr.proto | ✅ | ✅ | ✅ |
 | kv.proto | ✅ | ✅ | ✅ |
 | merge_pr.proto | ✅ | ✅ | ✅ |
+| process.proto | ✅ | ✅ | ❌ |
 
 ## Related Files
 

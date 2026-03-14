@@ -14,6 +14,7 @@ These are defined in `ExoMonad.Effects.*` and interpreted by the Rust host.
 - `Log`: Logging to the host console.
 - `FS`: File system access.
 - `Agent`: Agent lifecycle management.
+- `Process`: Ad-hoc process execution (run commands with args, env, timeout).
 
 ## MCP Tools
 
