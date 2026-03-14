@@ -109,6 +109,20 @@ Both the `notify_parent` effect handler and the poller's `NotifyParentAction` us
 
 `deliver_to_agent()` is correct for peer-to-peer messaging (send_message, event handler InjectMessage).
 
+### Routing Resolution
+
+`deliver_to_agent()` resolves the agent's routing.json by trying multiple path candidates: first the direct `agent_key` directory, then slug (last dot-segment) and full `agent_key` with `-gemini`, `-claude`, and `-shoal` suffixes. This handles both peer messaging (where `agent_key` is already the directory name) and parent notification (where `agent_key` is a dotted branch name). Reads `pane_id` (workers), `window_id` (subtrees/leaves), or `parent_tab` (fallback).
+
+### Session-Qualified Targets
+
+`TmuxIpc::inject_input` session-qualifies all targets (`{session}:{target}`) to ensure `paste-buffer` and `send-keys` resolve to the same pane deterministically. Without qualification, tmux resolves display-name targets against the "most recently used" session, which is nondeterministic for subprocess calls.
+
+### Injection Locking
+
+`TmuxIpc::inject_input` serializes calls to the same target via a per-target `std::sync::Mutex` stored as `Weak` references in a static map. Entries are pruned on each lookup, preventing unbounded growth from ephemeral worker panes. Different targets are independent — locking `@1` does not block injection into `@2`.
+
+A 150ms debounce between `paste-buffer` and `send-keys Enter` gives complex TUIs (Claude Code's Ink renderer, Gemini CLI's readline) time to process pasted text before submission. The Enter keystroke is retried up to 3 times with 200ms between attempts to handle dropped keystrokes. Before injection, copy/scroll mode is detected via `#{pane_in_mode}` and cancelled to prevent silent paste failures.
+
 ## Shared Helpers (`handlers/mod.rs`)
 
 Proto3 uses empty strings/zero values as defaults. These helpers eliminate repetitive empty-check boilerplate at handler boundaries:

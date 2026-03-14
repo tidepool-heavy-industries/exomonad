@@ -578,7 +578,9 @@ impl AgentEffects for AgentHandler {
         };
 
         if let Some(pane_id) = &pane_target {
-            crate::services::tmux_events::close_worker_pane(pane_id);
+            if let Err(e) = crate::services::tmux_events::close_worker_pane(pane_id).await {
+                warn!(agent = %ctx.agent_name, pane_id = %pane_id, error = %e, "Failed to close worker pane");
+            }
         } else {
             warn!(agent = %ctx.agent_name, "No pane_id in routing.json, cannot close pane");
         }

@@ -256,7 +256,9 @@ pub async fn deliver_to_agent(
                             target = %target,
                             "Teams inbox message not read after 30s, falling back to tmux injection"
                         );
-                        tmux_events::inject_input(&target, Some(&agent), &msg);
+                        if let Err(e) = tmux_events::inject_input(&target, &msg).await {
+                            warn!(target = %target, error = %e, "tmux inject_input failed (Teams fallback)");
+                        }
                     });
                     return DeliveryResult::Teams;
                 }
@@ -311,32 +313,42 @@ pub async fn deliver_to_agent(
         }
     }
 
-    // For worker agents (panes in a shared tab), routing.json records the parent tab
-    // and pane display name written at spawn time. Use it if present — the computed
-    // tmux_target is wrong for workers (no such tab exists).
-    let routing_path = project_dir
-        .join(".exo")
-        .join("agents")
-        .join(format!("{}-gemini", agent_key))
-        .join("routing.json");
-    if routing_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&routing_path) {
-            if let Ok(routing) = serde_json::from_str::<serde_json::Value>(&content) {
-                // Use pane_id (%N) for direct tmux targeting
-                let target = routing["pane_id"]
-                    .as_str()
-                    .or_else(|| routing["parent_tab"].as_str())
-                    .unwrap_or("TL");
-                info!(
-                    agent = %agent_key,
-                    target,
-                    chars = message.len(),
-                    "Injecting message into worker pane via routing.json"
-                );
-                tmux_events::inject_input(target, None, message);
-                return DeliveryResult::Tmux;
-            }
+    // routing.json records tmux identifiers at spawn time: pane_id (%N) for
+    // workers, window_id (@N) for subtrees/leaves. Use slug (last dot-segment)
+    // since agent_control writes routing under the slug, not the full branch name.
+    // Try direct agent_key path first (for peer messaging where key is already
+    // the directory name), then slug with all agent type suffixes.
+    let slug = agent_key.rsplit_once('.').map(|(_, s)| s).unwrap_or(agent_key);
+    let agents_dir = project_dir.join(".exo/agents");
+    let routing_target = std::iter::once(agent_key.to_string())
+        .chain(["gemini", "claude", "shoal"].iter().flat_map(|suffix| {
+            [
+                format!("{}-{}", slug, suffix),
+                format!("{}-{}", agent_key, suffix),
+            ]
+        }))
+        .find_map(|dir_name| {
+            let path = agents_dir.join(&dir_name).join("routing.json");
+            let content = std::fs::read_to_string(&path).ok()?;
+            let routing: serde_json::Value = serde_json::from_str(&content).ok()?;
+            // Prefer pane_id (workers), then window_id (subtrees/leaves), then parent_tab
+            routing["pane_id"]
+                .as_str()
+                .or_else(|| routing["window_id"].as_str())
+                .or_else(|| routing["parent_tab"].as_str())
+                .map(|s| s.to_string())
+        });
+    if let Some(target) = routing_target {
+        info!(
+            agent = %agent_key,
+            target = %target,
+            chars = message.len(),
+            "Injecting message via routing.json"
+        );
+        if let Err(e) = tmux_events::inject_input(&target, message).await {
+            warn!(target = %target, error = %e, "tmux inject_input failed (routing.json)");
         }
+        return DeliveryResult::Tmux;
     }
 
     debug!(
@@ -345,7 +357,9 @@ pub async fn deliver_to_agent(
         chars = message.len(),
         "Injecting message into agent pane via tmux"
     );
-    tmux_events::inject_input(tmux_target, Some(agent_key), message);
+    if let Err(e) = tmux_events::inject_input(tmux_target, message).await {
+        warn!(target = %tmux_target, error = %e, "tmux inject_input failed (fallback)");
+    }
     DeliveryResult::Tmux
 }
 
