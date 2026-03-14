@@ -210,7 +210,7 @@ Proto field helpers in `handlers/mod.rs`: `non_empty(String) → Option<String>`
 - All tmux communication uses `std::process::Command::new("tmux")` — simple subprocess calls
 - Window management: `new-window`, `kill-window`, `list-windows` with `-F` format strings for deterministic parsing
 - Pane management: `split-window`, `kill-pane` for ephemeral workers
-- Input injection: buffer pattern (`load-buffer` + `paste-buffer` + `send-keys Enter`), session-qualified targets (`{session}:{target}`)
+- Input injection: buffer pattern (`load-buffer` + `paste-buffer` + 150ms debounce + `send-keys Enter`), session-qualified targets (`{session}:{target}`), per-target `Mutex` serialization
 - Stable addressing: `%N` pane IDs, `@N` window IDs via `-P -F "#{pane_id}"`
 
 ## Configuration
