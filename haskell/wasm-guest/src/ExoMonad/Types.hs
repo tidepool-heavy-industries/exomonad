@@ -67,13 +67,29 @@ defaultHooks =
       onSessionStart = defaultSessionStartHook
     }
 
--- | Default SessionStart hook: registers Claude session UUID,
+-- | Extract the conversation UUID from the transcript path.
+-- The transcript path is e.g. "/home/user/.claude/projects/-home-user-project/abc123-def456.jsonl"
+-- The UUID is the basename minus the .jsonl extension.
+extractUuidFromTranscriptPath :: Text -> Maybe Text
+extractUuidFromTranscriptPath path =
+  let basename = T.takeWhileEnd (/= '/') path
+   in case T.stripSuffix ".jsonl" basename of
+        Just uuid | not (T.null uuid) -> Just uuid
+        _ -> Nothing
+
+-- | Default SessionStart hook: registers Claude conversation UUID,
 -- then instructs Claude to create a team via TeamCreate.
 -- Team name registration happens in PostToolUse (teamRegistrationPostToolUse)
 -- after TeamCreate returns the actual auto-generated name.
+--
+-- Uses transcript_path (the .jsonl filename) as the true conversation UUID.
+-- The session_id field is an ephemeral execution token that does NOT correspond
+-- to the .jsonl file needed for --resume --fork-session.
 defaultSessionStartHook :: HookInput -> Eff HookEffects HookOutput
 defaultSessionStartHook hookInput = do
-  let claudeUuid = hiSessionId hookInput
+  let claudeUuid = case hiTranscriptPath hookInput >>= extractUuidFromTranscriptPath of
+        Just uuid -> uuid
+        Nothing -> hiSessionId hookInput
   void $ suspendEffect_ @Session.SessionRegisterClaudeId
     (Session.RegisterClaudeSessionRequest { Session.registerClaudeSessionRequestClaudeSessionId = TL.fromStrict claudeUuid })
   let instruction = "Create a team using TeamCreate before proceeding."

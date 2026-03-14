@@ -1262,7 +1262,10 @@ impl AgentControlService {
                     .join(".claude")
                     .join("projects");
                 let encode_path = |p: &Path| -> String {
-                    p.to_string_lossy().replace('/', "-")
+                    p.to_string_lossy()
+                        .chars()
+                        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                        .collect()
                 };
                 let parent_encoded = encode_path(&self.project_dir);
                 let worktree_encoded = encode_path(&worktree_path);

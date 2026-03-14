@@ -114,7 +114,10 @@ data HookInput = HookInput
     hiExomonadSessionId :: Maybe Text,
     hiExitStatus :: Maybe Text,
     hiRuntime :: Maybe Runtime,
-    hiCwd :: Maybe Text
+    hiCwd :: Maybe Text,
+    -- | Absolute path to the active .jsonl transcript file.
+    -- The basename (minus .jsonl) is the true conversation UUID for --resume --fork-session.
+    hiTranscriptPath :: Maybe Text
   }
   deriving (Show, Generic)
 
@@ -135,6 +138,7 @@ instance FromJSON HookInput where
       <*> v .:? "exit_status"
       <*> v .:? "runtime"
       <*> v .:? "cwd"
+      <*> v .:? "transcript_path"
 
 -- | Output from a hook handler.
 data HookOutput = HookOutput
