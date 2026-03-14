@@ -724,6 +724,29 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
         info!("Gemini MCP configuration written to .gemini/settings.json");
     }
 
+    // Validate tmux is available
+    let tmux_check = std::process::Command::new("tmux")
+        .arg("-V")
+        .output();
+    match tmux_check {
+        Ok(output) if output.status.success() => {
+            let version = String::from_utf8_lossy(&output.stdout);
+            info!("tmux version: {}", version.trim());
+        }
+        Ok(output) => {
+            anyhow::bail!(
+                "tmux -V failed (status {}). Is tmux installed correctly?",
+                output.status
+            );
+        }
+        Err(e) => {
+            anyhow::bail!(
+                "tmux not found: {}. Install tmux before running exomonad init.",
+                e
+            );
+        }
+    }
+
     let session_alive = TmuxIpc::has_session(&session)?;
 
     if recreate {
@@ -787,6 +810,14 @@ async fn run_init(session_override: Option<String>, recreate: bool) -> Result<()
 
     // 2. Create session in background (returns stable @N window ID)
     let server_window_id = TmuxIpc::new_session(&session, &cwd)?;
+
+    // Verify session is usable
+    if !TmuxIpc::has_session(&session)? {
+        anyhow::bail!(
+            "tmux session '{}' was created but is not responding. Check tmux server status.",
+            session
+        );
+    }
 
     // Set EXOMONAD_TMUX_SESSION in the tmux session environment so all
     // windows/panes inherit it (used by tmux_events, agent_control, etc.)
@@ -934,7 +965,8 @@ async fn wait_for_server_socket(project_dir: &std::path::Path) -> Result<()> {
     }
 
     Err(anyhow::anyhow!(
-        "Server socket exists but health check failed. Check the Server tab for errors."
+        "Server socket exists but health check failed after {:.1}s. Check the Server tab for errors.",
+        start.elapsed().as_secs_f64()
     ))
 }
 
