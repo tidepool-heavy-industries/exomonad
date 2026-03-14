@@ -104,16 +104,7 @@ instance MCPTool SpawnSubtree where
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
-        let eventPayload = BSL.toStrict $ Aeson.encode $ object
-              [ "slug" .= ssBranchName args,
-                "agent_type" .= ("claude" :: Text),
-                "task_summary" .= ssTask args
-              ]
-        void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
-          { Log.emitEventRequestEventType = "agent.spawned",
-            Log.emitEventRequestPayload = eventPayload,
-            Log.emitEventRequestTimestamp = 0
-          })
+        emitSpawnEvent (ssBranchName args) "claude" (ssTask args)
         pure $ successResult $ Aeson.toJSON spawnResult
 
 -- ============================================================================
@@ -182,16 +173,7 @@ instance MCPTool SpawnLeafSubtree where
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
-        let eventPayload = BSL.toStrict $ Aeson.encode $ object
-              [ "slug" .= slsBranchName args,
-                "agent_type" .= ("gemini" :: Text),
-                "task_summary" .= slsTask args
-              ]
-        void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
-          { Log.emitEventRequestEventType = "agent.spawned",
-            Log.emitEventRequestPayload = eventPayload,
-            Log.emitEventRequestTimestamp = 0
-          })
+        emitSpawnEvent (slsBranchName args) "gemini" (slsTask args)
         pure $ successResult $ Aeson.toJSON spawnResult
 
 -- ============================================================================
@@ -294,17 +276,7 @@ instance MCPTool SpawnWorkers where
             }
       r <- AC.spawnWorker cfg
       case r of
-        Right _ -> do
-          let eventPayload = BSL.toStrict $ Aeson.encode $ object
-                [ "slug" .= wsName spec,
-                  "agent_type" .= ("gemini-worker" :: Text),
-                  "task_summary" .= wsTask spec
-                ]
-          void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
-            { Log.emitEventRequestEventType = "agent.spawned",
-              Log.emitEventRequestPayload = eventPayload,
-              Log.emitEventRequestTimestamp = 0
-            })
+        Right _ -> emitSpawnEvent (wsName spec) "gemini-worker" (wsTask spec)
         Left _ -> pure ()
       pure r
     let (errs, successes) = partitionEithers results
@@ -365,20 +337,24 @@ instance MCPTool SpawnAcp where
           }
     result <- AC.spawnAcp cfg
     case result of
-
       Left err -> pure $ errorResult err
       Right spawnResult -> do
-        let eventPayload = BSL.toStrict $ Aeson.encode $ object
-              [ "slug" .= saName args,
-                "agent_type" .= ("gemini-acp" :: Text),
-                "task_summary" .= saName args
-              ]
-        void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
-          { Log.emitEventRequestEventType = "agent.spawned",
-            Log.emitEventRequestPayload = eventPayload,
-            Log.emitEventRequestTimestamp = 0
-          })
+        emitSpawnEvent (saName args) "gemini-acp" (saName args)
         pure $ successResult $ Aeson.toJSON spawnResult
+
+-- | Helper to emit 'agent.spawned' event to the host.
+emitSpawnEvent :: Text -> Text -> Text -> Eff ToolEffects ()
+emitSpawnEvent slug agentType taskSummary = do
+  let eventPayload = BSL.toStrict $ Aeson.encode $ object
+        [ "slug" .= slug,
+          "agent_type" .= agentType,
+          "task_summary" .= taskSummary
+        ]
+  void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
+    { Log.emitEventRequestEventType = "agent.spawned",
+      Log.emitEventRequestPayload = eventPayload,
+      Log.emitEventRequestTimestamp = 0
+    })
 
 -- ============================================================================
 -- Raw Text prompt builders (WASM32 workaround)

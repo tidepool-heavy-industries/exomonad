@@ -29,65 +29,41 @@ prReviewEventHandlers =
 -- | Handle PR review events for dev/tl roles.
 prReviewHandler :: PRReviewEvent -> Eff HookEffects EventAction
 prReviewHandler (ReviewReceived n comments_) = do
-  void $ suspendEffect_ @Log.LogInfo $ Log.InfoRequest
-    { Log.infoRequestMessage = TL.fromStrict $
-        "[PRReviewHandler] Review received on PR #" <> T.pack (show n)
-    , Log.infoRequestFields = ""
-    }
+  logHandler $ "Review received on PR #" <> T.pack (show n)
   pure (InjectMessage (Tpl.copilotReviewReceived n comments_))
 
 prReviewHandler (ReviewApproved n) = do
-  void $ suspendEffect_ @Log.LogInfo $ Log.InfoRequest
-    { Log.infoRequestMessage = TL.fromStrict $
-        "[PRReviewHandler] PR #" <> T.pack (show n) <> " approved by Copilot"
-    , Log.infoRequestFields = ""
-    }
+  logHandler $ "PR #" <> T.pack (show n) <> " approved by Copilot"
   pure (NotifyParentAction (Tpl.prReady n) n)
 
 prReviewHandler (ReviewTimeout n mins) = do
-  void $ suspendEffect_ @Log.LogInfo $ Log.InfoRequest
-    { Log.infoRequestMessage = TL.fromStrict $
-        "[PRReviewHandler] PR #" <> T.pack (show n)
-        <> " timed out after " <> T.pack (show mins) <> " minutes"
-    , Log.infoRequestFields = ""
-    }
+  logHandler $ "PR #" <> T.pack (show n) <> " timed out after " <> T.pack (show mins) <> " minutes"
   pure (NotifyParentAction (Tpl.reviewTimeout n mins) n)
 
 prReviewHandler (FixesPushed n ci) = do
-  void $ suspendEffect_ @Log.LogInfo $ Log.InfoRequest
-    { Log.infoRequestMessage = TL.fromStrict $
-        "[PRReviewHandler] Fixes pushed on PR #" <> T.pack (show n)
-        <> ", CI: " <> ci
-    , Log.infoRequestFields = ""
-    }
+  logHandler $ "Fixes pushed on PR #" <> T.pack (show n) <> ", CI: " <> ci
   pure (NotifyParentAction (Tpl.fixesPushed n ci) n)
 
 prReviewHandler (CommitsPushed n ci) = do
-  void $ suspendEffect_ @Log.LogInfo $ Log.InfoRequest
-    { Log.infoRequestMessage = TL.fromStrict $
-        "[PRReviewHandler] New commits pushed on PR #" <> T.pack (show n)
-        <> ", CI: " <> ci
-    , Log.infoRequestFields = ""
-    }
+  logHandler $ "New commits pushed on PR #" <> T.pack (show n) <> ", CI: " <> ci
   pure (NotifyParentAction (Tpl.commitsPushed n ci) n)
 
 -- | Handle sibling merged events.
 siblingMergedHandler :: SiblingMergedEvent -> Eff HookEffects EventAction
 siblingMergedHandler (SiblingMergedEvent merged parent _prNum) = do
-  void $ suspendEffect_ @Log.LogInfo $ Log.InfoRequest
-    { Log.infoRequestMessage = TL.fromStrict $
-        "[PRReviewHandler] Sibling branch merged: " <> merged
-    , Log.infoRequestFields = ""
-    }
+  logHandler $ "Sibling branch merged: " <> merged
   pure (InjectMessage (Tpl.siblingMerged merged parent))
 
 -- | Handle CI status events.
 ciStatusHandler :: CIStatusEvent -> Eff HookEffects EventAction
 ciStatusHandler (CIStatusEvent n status_ branch_) = do
+  logHandler $ "CI status changed on PR #" <> T.pack (show n) <> ": " <> status_
+  pure (InjectMessage (Tpl.ciStatus n status_ branch_))
+
+-- | Helper to log handler entry.
+logHandler :: Text -> Eff HookEffects ()
+logHandler msg =
   void $ suspendEffect_ @Log.LogInfo $ Log.InfoRequest
-    { Log.infoRequestMessage = TL.fromStrict $
-        "[PRReviewHandler] CI status changed on PR #" <> T.pack (show n)
-        <> ": " <> status_
+    { Log.infoRequestMessage = TL.fromStrict $ "[PRReviewHandler] " <> msg
     , Log.infoRequestFields = ""
     }
-  pure (InjectMessage (Tpl.ciStatus n status_ branch_))

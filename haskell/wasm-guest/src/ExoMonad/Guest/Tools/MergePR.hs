@@ -133,7 +133,9 @@ checkCopilotReadiness prNum = do
                   <> ". Wait for [PR READY] or [REVIEW TIMEOUT] from the event system."
             else do
               -- Check the latest Copilot review
-              let latest = last copilotReviews
+              let latest = case reverse copilotReviews of
+                    (l:_) -> l
+                    [] -> error "unreachable"
                   reviewSha = TL.toStrict (GH.reviewCommitId latest)
                   state = GH.reviewState latest
               case state of
@@ -167,9 +169,9 @@ isCopilotReview r =
 extractSlug :: Text -> Maybe Text
 extractSlug branch
   | T.null branch = Nothing
-  | otherwise = case T.splitOn "." branch of
+  | otherwise = case reverse (T.splitOn "." branch) of
       [] -> Nothing
-      parts -> Just (last parts)
+      (slug : _) -> Just slug
 
 -- | Execute the actual merge after readiness check passes.
 doMerge :: MergePRArgs -> Eff ToolEffects MCPCallOutput

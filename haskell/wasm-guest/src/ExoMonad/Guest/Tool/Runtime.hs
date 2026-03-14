@@ -55,14 +55,22 @@ runHookEff eff = do
   statusToWasmResult status
 
 -- | Helper for fire-and-forget logging via yield_effect.
-logInfo_ :: Text -> IO ()
-logInfo_ msg = void $ runHookEff $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = fromText msg, Log.infoRequestFields = ""})
+logInfo_ :: Text -> IO (WasmResult ())
+logInfo_ msg = runHookEff $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = fromText msg, Log.infoRequestFields = ""})
 
-logError_ :: Text -> IO ()
-logError_ msg = void $ runHookEff $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = fromText msg, Log.errorRequestFields = ""})
+logError_ :: Text -> IO (WasmResult ())
+logError_ msg = runHookEff $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = fromText msg, Log.errorRequestFields = ""})
 
-emitEvent_ :: Value -> IO ()
-emitEvent_ val = void $ runHookEff $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest {Log.emitEventRequestEventType = "custom", Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode val), Log.emitEventRequestTimestamp = 0})
+emitEvent_ :: Value -> IO (WasmResult ())
+emitEvent_ val = runHookEff $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest {Log.emitEventRequestEventType = "custom", Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode val), Log.emitEventRequestTimestamp = 0})
+
+-- | Sequential logging helper that handles suspension.
+andThenLog :: IO (WasmResult ()) -> IO (WasmResult a) -> IO (WasmResult a)
+andThenLog first second = do
+  res <- first
+  case res of
+    Done () -> second
+    Suspend k req -> pure $ Suspend k req
 
 -- | MCP call handler - dispatches to tools based on a record.
 mcpHandlerRecord :: forall tools. (DispatchRecord tools) => tools AsHandler -> IO CInt
@@ -70,23 +78,25 @@ mcpHandlerRecord handlers = do
   inp <- input @ByteString
   case Aeson.eitherDecodeStrict inp of
     Left err -> do
-      logError_ ("MCP parse error: " <> T.pack err)
-      let resp = Done $ MCPCallOutput False Nothing (Just $ "Parse error: " <> T.pack err)
-      output (BSL.toStrict $ Aeson.encode resp)
+      res <- logError_ ("MCP parse error: " <> T.pack err)
+      case res of
+        Done () -> do
+          let resp = Done $ MCPCallOutput False Nothing (Just $ "Parse error: " <> T.pack err)
+          output (BSL.toStrict $ Aeson.encode resp)
+        Suspend k req -> output (BSL.toStrict $ Aeson.encode (Suspend @MCPCallOutput k req))
       pure 0
     Right mcpCall -> do
-      logInfo_ ("Dispatching tool: " <> toolName mcpCall)
+      result <- logInfo_ ("Dispatching tool: " <> toolName mcpCall) `andThenLog` do
+        dispatchRecord handlers (toolName mcpCall) (toolArgs mcpCall)
 
-      result <- dispatchRecord handlers (toolName mcpCall) (toolArgs mcpCall)
+      finalResult <- case result of
+        Done resp -> do
+          if success resp
+            then pure (Done resp)
+            else logError_ ("Tool failed: " <> fromMaybe "No error message" (mcpError resp)) `andThenLog` pure (Done resp)
+        Suspend k req -> pure (Suspend k req)
 
-      case result of
-        Done resp ->
-          unless (success resp) $
-            logError_ ("Tool failed: " <> fromMaybe "No error message" (mcpError resp))
-        Suspend _ _ ->
-          logInfo_ ("Tool suspended: " <> toolName mcpCall)
-
-      output (BSL.toStrict $ Aeson.encode result)
+      output (BSL.toStrict $ Aeson.encode finalResult)
       pure 0
 
 -- | Resume handler - resumes a suspended computation.
@@ -95,31 +105,37 @@ resumeHandler = do
   inp <- input @ByteString
   case Aeson.eitherDecodeStrict inp of
     Left err -> do
-      logError_ ("Resume parse error: " <> T.pack err)
-      let resp = Done $ MCPCallOutput False Nothing (Just $ "Resume parse error: " <> T.pack err)
-      output (BSL.toStrict $ Aeson.encode resp)
+      res <- logError_ ("Resume parse error: " <> T.pack err)
+      case res of
+        Done () -> do
+          let resp = Done $ MCPCallOutput False Nothing (Just $ "Resume parse error: " <> T.pack err)
+          output (BSL.toStrict $ Aeson.encode resp)
+        Suspend k req -> output (BSL.toStrict $ Aeson.encode (Suspend @MCPCallOutput k req))
       pure 0
     Right val -> do
       case parseResumeInput val of
         Left err -> do
-          logError_ ("Resume input error: " <> err)
-          let resp = Done $ MCPCallOutput False Nothing (Just $ "Resume input error: " <> err)
-          output (BSL.toStrict $ Aeson.encode resp)
+          res <- logError_ ("Resume input error: " <> err)
+          case res of
+            Done () -> do
+              let resp = Done $ MCPCallOutput False Nothing (Just $ "Resume input error: " <> err)
+              output (BSL.toStrict $ Aeson.encode resp)
+            Suspend k req -> output (BSL.toStrict $ Aeson.encode (Suspend @MCPCallOutput k req))
           pure 0
         Right (k, res) -> do
           mCont <- retrieveContinuation k
           case mCont of
             Nothing -> do
-              logError_ ("Continuation not found: " <> k)
-              let resp = Done $ MCPCallOutput False Nothing (Just $ "Continuation not found: " <> k)
-              output (BSL.toStrict $ Aeson.encode resp)
+              r <- logError_ ("Continuation not found: " <> k)
+              case r of
+                Done () -> do
+                  let resp = Done $ MCPCallOutput False Nothing (Just $ "Continuation not found: " <> k)
+                  output (BSL.toStrict $ Aeson.encode resp)
+                Suspend k_ req -> output (BSL.toStrict $ Aeson.encode (Suspend @MCPCallOutput k_ req))
               pure 0
             Just cont -> do
-              logInfo_ ("Resuming continuation: " <> k)
-              -- Execute the continuation
-              -- Note: The continuation is responsible for handling exceptions if needed
-              newResult <- cont res
-              output (BSL.toStrict $ Aeson.encode newResult)
+              result <- logInfo_ ("Resuming continuation: " <> k) `andThenLog` (cont res)
+              output (BSL.toStrict $ Aeson.encode result)
               pure 0
 
 parseResumeInput :: Value -> Either Text (Text, Value)
@@ -149,44 +165,44 @@ hookHandler config = do
   inp <- input @ByteString
   case Aeson.eitherDecodeStrict inp of
     Left err -> do
-      logError_ ("Hook parse error: " <> T.pack err)
-      let errResp = Aeson.object ["error" Aeson..= ("Parse error: " ++ err)]
-      output (BSL.toStrict $ Aeson.encode errResp)
+      res <- logError_ ("Hook parse error: " <> T.pack err)
+      case res of
+        Done () -> do
+          let errResp = Aeson.object ["error" .= ("Parse error: " <> T.pack err)]
+          output (BSL.toStrict $ Aeson.encode (Done errResp))
+        Suspend k req -> output (BSL.toStrict $ Aeson.encode (Suspend @Value k req))
       pure 1
     Right hookInput -> do
       let hookType = hiHookEventName hookInput
       let hookName = case hookType of
-            SessionStart -> "SessionStart"
+            SessionStart -> "SessionStart" :: Text
             SessionEnd -> "SessionEnd"
             Stop -> "Stop"
             SubagentStop -> "SubagentStop"
             PreToolUse -> "PreToolUse"
             PostToolUse -> "PostToolUse"
             WorkerExit -> "WorkerExit"
-      logInfo_ ("Hook received: " <> hookName)
+      
+      result <- logInfo_ ("Hook received: " <> hookName) `andThenLog` do
+        case hookType of
+          SessionStart -> handleSessionStart hookInput (onSessionStart config)
+          SessionEnd -> handleStopHook hookInput (onStop config)
+          Stop -> handleStopHook hookInput (onStop config)
+          SubagentStop -> handleStopHook hookInput (onSubagentStop config)
+          PreToolUse -> handlePreToolUse hookInput (preToolUse config)
+          PostToolUse -> handlePreToolUse hookInput (postToolUse config)
+          WorkerExit -> handleWorkerExit hookInput
 
-      case hookType of
-        SessionStart -> handleSessionStart hookInput (onSessionStart config)
-        SessionEnd -> handleStopHook hookInput (onStop config)
-        Stop -> handleStopHook hookInput (onStop config)
-        SubagentStop -> handleStopHook hookInput (onSubagentStop config)
-        PreToolUse -> handlePreToolUse hookInput (preToolUse config)
-        PostToolUse -> handlePreToolUse hookInput (postToolUse config)
-        WorkerExit -> handleWorkerExit hookInput
+      output (BSL.toStrict $ Aeson.encode result)
+      pure 0
   where
-    handleSessionStart :: HookInput -> (HookInput -> Eff HookEffects HookOutput) -> IO CInt
-    handleSessionStart hookInput hook = do
-      result <- runHookEff (hook hookInput)
-      output (BSL.toStrict $ Aeson.encode result)
-      pure 0
+    handleSessionStart :: HookInput -> (HookInput -> Eff HookEffects HookOutput) -> IO (WasmResult HookOutput)
+    handleSessionStart hookInput hook = runHookEff (hook hookInput)
 
-    handlePreToolUse :: HookInput -> (HookInput -> Eff HookEffects HookOutput) -> IO CInt
-    handlePreToolUse hookInput hook = do
-      result <- runHookEff (hook hookInput)
-      output (BSL.toStrict $ Aeson.encode result)
-      pure 0
+    handlePreToolUse :: HookInput -> (HookInput -> Eff HookEffects HookOutput) -> IO (WasmResult HookOutput)
+    handlePreToolUse hookInput hook = runHookEff (hook hookInput)
 
-    handleStopHook :: HookInput -> (HookInput -> Eff HookEffects StopHookOutput) -> IO CInt
+    handleStopHook :: HookInput -> (HookInput -> Eff HookEffects StopHookOutput) -> IO (WasmResult StopHookOutput)
     handleStopHook hookInput hook = do
       -- Extract agent ID from hook input or fallback to current working directory (e.g., "gh-453-gemini")
       cwd <- getCurrentDirectory
@@ -197,75 +213,65 @@ hookHandler config = do
       let timestamp = T.pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%QZ" now
 
       -- Log that stop hook was called
-      logInfo_ ("Stop hook firing for agent: " <> agentId)
+      logInfo_ ("Stop hook firing for agent: " <> agentId) `andThenLog` do
+        -- Emit AgentStopped event BEFORE running checks
+        -- This ensures we see the event even if checks fail
+        let event =
+              Aeson.object
+                [ "type" .= ("agent:stopped" :: Text),
+                  "agent_id" .= agentId,
+                  "timestamp" .= timestamp
+                ]
+        emitEvent_ event `andThenLog` do
+          -- Run the hook from config (using Freer effects)
+          result <- runHookEff (hook hookInput)
 
-      -- Emit AgentStopped event BEFORE running checks
-      -- This ensures we see the event even if checks fail
-      let event =
-            Aeson.object
-              [ "type" .= ("agent:stopped" :: Text),
-                "agent_id" .= agentId,
-                "timestamp" .= timestamp
-              ]
-      emitEvent_ event
+          -- Check if runtime is Gemini and override Block to Allow
+          -- Fix for infinite loop: Gemini agents retry forever on block
+          let isGemini = hiRuntime hookInput == Just Gemini
+          let finalResult = case result of
+                Done rawResult ->
+                  if isGemini && decision rawResult == Block
+                    then Done (rawResult {decision = Allow, reason = Nothing})
+                    else Done rawResult
+                Suspend k req -> Suspend k req
 
-      -- Run the hook from config (using Freer effects)
-      result <- runHookEff (hook hookInput)
+          -- Log the decision
+          case finalResult of
+            Done res ->
+              let logMsg = case decision res of
+                    Allow -> "Stop hook allowed for " <> agentId
+                    Block ->
+                      case reason res of
+                        Just r -> "Stop hook blocked for " <> agentId <> ": " <> r
+                        Nothing -> "Stop hook blocked for " <> agentId
+              in logInfo_ logMsg `andThenLog` pure (Done res)
+            Suspend k req ->
+              logInfo_ ("Stop hook suspended for " <> agentId) `andThenLog` pure (Suspend k req)
 
-      -- Check if runtime is Gemini and override Block to Allow
-      -- Fix for infinite loop: Gemini agents retry forever on block
-      let isGemini = hiRuntime hookInput == Just Gemini
-      let finalResult = case result of
-            Done rawResult ->
-              if isGemini && decision rawResult == Block
-                then Done (rawResult {decision = Allow, reason = Nothing})
-                else Done rawResult
-            Suspend k req -> Suspend k req
-
-      -- Log the decision
-      case finalResult of
-        Done res ->
-          case decision res of
-            Allow -> logInfo_ ("Stop hook allowed for " <> agentId)
-            Block ->
-              case reason res of
-                Just r ->
-                  logInfo_ ("Stop hook blocked for " <> agentId <> ": " <> r)
-                Nothing ->
-                  logInfo_ ("Stop hook blocked for " <> agentId)
-        Suspend _ _ ->
-          logInfo_ ("Stop hook suspended for " <> agentId)
-
-      -- Return the result to the hook caller
-      output (BSL.toStrict $ Aeson.encode finalResult)
-      pure 0
-
-handleWorkerExit :: HookInput -> IO CInt
+handleWorkerExit :: HookInput -> IO (WasmResult HookOutput)
 handleWorkerExit hookInput = do
-  logInfo_ "WorkerExit hook firing"
-  result <- runHookEff $ do
-    let maybeAgentId = hiAgentId hookInput
-    case maybeAgentId of
-      Just agentId -> do
-        let actualStatus = fromMaybe "success" (hiExitStatus hookInput)
-        let (status, statusMsg) = case actualStatus of
-              "success" -> ("success", agentId <> " is idle")
-              other -> ("failure", "Worker " <> agentId <> " exited with status: " <> other)
-        res <- suspendEffect @Events.EventsNotifyParent
-                (ProtoEvents.NotifyParentRequest
-                  { ProtoEvents.notifyParentRequestAgentId = TL.fromStrict agentId,
-                    ProtoEvents.notifyParentRequestStatus = TL.fromStrict status,
-                    ProtoEvents.notifyParentRequestMessage = TL.fromStrict statusMsg
-                  })
-        case res of
-          Left err -> void $ suspendEffect_ @LogError (Log.ErrorRequest { Log.errorRequestMessage = TL.fromStrict ("Failed to notify parent: " <> T.pack (show err)), Log.errorRequestFields = "" })
-          Right _ -> void $ suspendEffect_ @LogInfo (Log.InfoRequest { Log.infoRequestMessage = TL.fromStrict ("Exit notified for " <> agentId <> " (" <> status <> ")"), Log.infoRequestFields = "" })
-      Nothing -> do
-        void $ suspendEffect_ @LogError (Log.ErrorRequest { Log.errorRequestMessage = "agent_id missing from hook input", Log.errorRequestFields = "" })
-    pure (allowResponse Nothing)
-
-  output (BSL.toStrict $ Aeson.encode result)
-  pure 0
+  logInfo_ "WorkerExit hook firing" `andThenLog` do
+    runHookEff $ do
+      let maybeAgentId = hiAgentId hookInput
+      case maybeAgentId of
+        Just agentId -> do
+          let actualStatus = fromMaybe "success" (hiExitStatus hookInput)
+          let (status, statusMsg) = case actualStatus of
+                "success" -> ("success", agentId <> " is idle")
+                other -> ("failure", "Worker " <> agentId <> " exited with status: " <> other)
+          res <- suspendEffect @Events.EventsNotifyParent
+                  (ProtoEvents.NotifyParentRequest
+                    { ProtoEvents.notifyParentRequestAgentId = TL.fromStrict agentId,
+                      ProtoEvents.notifyParentRequestStatus = TL.fromStrict status,
+                      ProtoEvents.notifyParentRequestMessage = TL.fromStrict statusMsg
+                    })
+          case res of
+            Left err -> void $ suspendEffect_ @LogError (Log.ErrorRequest { Log.errorRequestMessage = TL.fromStrict ("Failed to notify parent: " <> T.pack (show err)), Log.errorRequestFields = "" })
+            Right _ -> void $ suspendEffect_ @LogInfo (Log.InfoRequest { Log.infoRequestMessage = TL.fromStrict ("Exit notified for " <> agentId <> " (" <> status <> ")"), Log.infoRequestFields = "" })
+        Nothing -> do
+          void $ suspendEffect_ @LogError (Log.ErrorRequest { Log.errorRequestMessage = "agent_id missing from hook input", Log.errorRequestFields = "" })
+      pure (allowResponse Nothing)
 
 -- | Wrap a handler with exception handling.
 wrapHandler :: IO CInt -> IO CInt
