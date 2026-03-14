@@ -2813,27 +2813,37 @@ mod tests {
     #[test]
     fn test_claude_project_path_encoding() {
         // Claude Code encodes paths via [^a-zA-Z0-9] → '-'
+        // Verified against actual ~/.claude/projects/ directory names.
         let encode = |s: &str| -> String {
             s.chars()
                 .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
                 .collect()
         };
 
+        // Basic path
         assert_eq!(
-            encode("/home/user/project"),
-            "-home-user-project"
+            encode("/home/inanna/dev/exomonad"),
+            "-home-inanna-dev-exomonad"
         );
+        // Worktree path (dots and hyphens in segments)
         assert_eq!(
-            encode("/home/user/my.project"),
-            "-home-user-my-project"
+            encode("/home/inanna/dev/exomonad/.exo/worktrees/fork-session"),
+            "-home-inanna-dev-exomonad--exo-worktrees-fork-session"
         );
+        // Hidden dir (leading dot → double dash after parent separator)
         assert_eq!(
-            encode("/home/user/path with spaces"),
-            "-home-user-path-with-spaces"
+            encode("/home/inanna/.config/home-manager"),
+            "-home-inanna--config-home-manager"
         );
+        // Deep nested path with hyphens
         assert_eq!(
-            encode("/home/user/.exo/worktrees/feature-a"),
-            "-home-user--exo-worktrees-feature-a"
+            encode("/home/inanna/dev/aegis-binder-diagnostic-framework"),
+            "-home-inanna-dev-aegis-binder-diagnostic-framework"
+        );
+        // Path with spaces
+        assert_eq!(
+            encode("/home/user/My Projects/app"),
+            "-home-user-My-Projects-app"
         );
     }
 }
