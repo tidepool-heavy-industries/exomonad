@@ -10,7 +10,6 @@
 //! - `ffi.proto` - Core FFI types (ErrorCode, FfiError, FfiResult)
 //! - `common.proto` - Shared primitives (SessionId, Role, etc.)
 //! - `hook.proto` - Claude Code hook types
-//! - `agent.proto` - Agent management types
 //!
 //! ### Effect types (effects/)
 //! Effect types use protobuf binary encoding (prost Message).
@@ -30,11 +29,6 @@ pub mod common {
 #[cfg(feature = "full")]
 pub mod hook {
     include!(concat!(env!("OUT_DIR"), "/exomonad.hook.rs"));
-}
-
-#[cfg(feature = "full")]
-pub mod agent {
-    include!(concat!(env!("OUT_DIR"), "/exomonad.agent.rs"));
 }
 
 // ============================================================================

@@ -3,7 +3,7 @@ use std::path::Path;
 
 fn main() -> Result<()> {
     // ========================================================================
-    // Part 1: Core exomonad types (ffi, common, hook, agent)
+    // Part 1: Core exomonad types (ffi, common, hook)
     // ========================================================================
     compile_core_protos()?;
 
@@ -37,16 +37,6 @@ fn compile_core_protos() -> Result<()> {
     );
     config.type_attribute(
         ".exomonad.hook.StopDecision",
-        "#[serde(rename_all = \"snake_case\")]",
-    );
-
-    // Agent types (Phase 2)
-    config.type_attribute(
-        ".exomonad.agent.AgentType",
-        "#[serde(rename_all = \"snake_case\")]",
-    );
-    config.type_attribute(
-        ".exomonad.agent.AgentStatus",
         "#[serde(rename_all = \"snake_case\")]",
     );
 
@@ -97,7 +87,6 @@ fn compile_core_protos() -> Result<()> {
         "proto/exomonad/ffi.proto",
         "proto/exomonad/common.proto",
         "proto/exomonad/hook.proto",
-        "proto/exomonad/agent.proto",
     ]
     .into_iter()
     .filter(|path| Path::new(path).exists())

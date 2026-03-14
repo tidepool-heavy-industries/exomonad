@@ -12,10 +12,10 @@ links = "exomonad_effects_proto"
 
 [features]
 default = []
-# Enable all proto modules (common, hook, agent)
+# Enable all proto modules (common, hook)
 # Use this once all proto files are created
 full = []
-# Enable effect types (requires full because agent.proto imports common.Role)
+# Enable effect types
 effects = ["full"]
 
 [dependencies]

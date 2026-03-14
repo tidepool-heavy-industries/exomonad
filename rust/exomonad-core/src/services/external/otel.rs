@@ -231,10 +231,12 @@ impl ExternalService for OtelService {
 
                 let response = builder.send().await?;
                 if !response.status().is_success() {
-                    return Err(ServiceError::Api {
-                        code: response.status().as_u16() as i32,
-                        message: response.text().await.unwrap_or_default(),
+                    let code = response.status().as_u16() as i32;
+                    let message = response.text().await.unwrap_or_else(|e| {
+                        warn!("Failed to read error response body: {}", e);
+                        String::new()
                     });
+                    return Err(ServiceError::Api { code, message });
                 }
 
                 Ok(ServiceResponse::Ack)
@@ -291,10 +293,12 @@ impl ExternalService for OtelService {
 
                 let response = builder.send().await?;
                 if !response.status().is_success() {
-                    return Err(ServiceError::Api {
-                        code: response.status().as_u16() as i32,
-                        message: response.text().await.unwrap_or_default(),
+                    let code = response.status().as_u16() as i32;
+                    let message = response.text().await.unwrap_or_else(|e| {
+                        warn!("Failed to read error response body: {}", e);
+                        String::new()
                     });
+                    return Err(ServiceError::Api { code, message });
                 }
 
                 Ok(ServiceResponse::Ack)
