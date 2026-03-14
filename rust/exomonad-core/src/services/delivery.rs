@@ -256,7 +256,9 @@ pub async fn deliver_to_agent(
                             target = %target,
                             "Teams inbox message not read after 30s, falling back to tmux injection"
                         );
-                        tmux_events::inject_input(&target, Some(&agent), &msg);
+                        if let Err(e) = tmux_events::inject_input(&target, &msg).await {
+                            warn!(target = %target, error = %e, "tmux inject_input failed (Teams fallback)");
+                        }
                     });
                     return DeliveryResult::Teams;
                 }
@@ -333,7 +335,9 @@ pub async fn deliver_to_agent(
                     chars = message.len(),
                     "Injecting message into worker pane via routing.json"
                 );
-                tmux_events::inject_input(target, None, message);
+                if let Err(e) = tmux_events::inject_input(target, message).await {
+                    warn!(target = %target, error = %e, "tmux inject_input failed (routing.json)");
+                }
                 return DeliveryResult::Tmux;
             }
         }
@@ -345,7 +349,9 @@ pub async fn deliver_to_agent(
         chars = message.len(),
         "Injecting message into agent pane via tmux"
     );
-    tmux_events::inject_input(tmux_target, Some(agent_key), message);
+    if let Err(e) = tmux_events::inject_input(tmux_target, message).await {
+        warn!(target = %tmux_target, error = %e, "tmux inject_input failed (fallback)");
+    }
     DeliveryResult::Tmux
 }
 

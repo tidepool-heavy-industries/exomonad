@@ -116,7 +116,9 @@ impl InboxWatcher {
                         let new_count = msgs.len() - state.last_count;
                         info!(member = %member, new_messages = new_count, "InboxWatcher: routing to tmux");
                         for msg in &msgs[state.last_count..] {
-                            inject_input(&state.tmux_target, None, &msg.text);
+                            if let Err(e) = inject_input(&state.tmux_target, &msg.text).await {
+                                warn!(member = %member, error = %e, "Failed to inject inbox message via tmux");
+                            }
                         }
                         state.last_count = msgs.len();
                     }
