@@ -9,7 +9,6 @@ module DevRole (config, Tools) where
 import ExoMonad
 import HttpDevHooks (httpDevHooks)
 import PRReviewHandler (prReviewEventHandlers)
-import Telemetry (telemetryPostToolUse)
 
 data Tools mode = Tools
   { pr :: FilePRTools mode,
@@ -30,6 +29,6 @@ config =
             sendMessage = mkHandler @SendMessage,
             shutdown = mkHandler @Shutdown
           },
-      hooks = httpDevHooks { postToolUse = telemetryPostToolUse },
+      hooks = httpDevHooks,
       eventHandlers = prReviewEventHandlers
     }

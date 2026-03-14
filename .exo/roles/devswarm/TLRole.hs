@@ -9,10 +9,9 @@ module TLRole (config, Tools) where
 import ExoMonad
 import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
 import PRReviewHandler (prReviewEventHandlers)
-import Telemetry (telemetryPostToolUse)
 import ExoMonad.Guest.Tools.MergePR (MergePR)
 import ExoMonad.Guest.Types (allowResponse)
-import ExoMonad.Types (HookConfig (..), defaultSessionStartHook, teamRegistrationPostToolUse, andThenPostToolUse)
+import ExoMonad.Types (HookConfig (..), defaultSessionStartHook, teamRegistrationPostToolUse)
 
 data Tools mode = Tools
   { spawn :: SpawnTools mode,
@@ -38,7 +37,7 @@ config =
       hooks =
         HookConfig
           { preToolUse = \_ -> pure (allowResponse Nothing),
-            postToolUse = teamRegistrationPostToolUse `andThenPostToolUse` telemetryPostToolUse,
+            postToolUse = teamRegistrationPostToolUse,
             onStop = \_ -> runStopHookChecks,
             onSubagentStop = \_ -> runStopHookChecks,
             onSessionStart = defaultSessionStartHook
