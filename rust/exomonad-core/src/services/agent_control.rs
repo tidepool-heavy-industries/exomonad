@@ -6,7 +6,9 @@
 //! - ListAgents: Discover from tmux windows (source of truth for running agents)
 
 use crate::common::TimeoutError;
-use crate::domain::{AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, ItemState};
+use crate::domain::{
+    AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, ItemState, RoutingInfo,
+};
 use crate::effects::EffectError;
 use crate::ffi::FFIBoundary;
 use crate::{GithubOwner, GithubRepo, IssueNumber};
@@ -20,6 +22,7 @@ use tokio::time::{timeout, Duration};
 use tracing::{debug, info, warn};
 
 use super::acp_registry::AcpRegistry;
+use super::EventLog;
 use super::git_worktree::GitWorktreeService;
 use super::github::{GitHubService, Repo};
 use super::tmux_events;
@@ -532,6 +535,26 @@ impl AgentControlService {
             .unwrap_or_else(|| self.birth_branch.clone())
     }
 
+    /// Common post-spawn bookkeeping.
+    ///
+    /// Creates the agent's config directory, writes the routing info,
+    /// and optionally appends an event to the persistent event log.
+    async fn finalize_spawn(
+        &self,
+        internal_name: &str,
+        routing: RoutingInfo,
+        event_log: Option<&EventLog>,
+        event_data: serde_json::Value,
+    ) -> Result<PathBuf> {
+        let agent_config_dir = self.project_dir.join(".exo/agents").join(internal_name);
+        fs::create_dir_all(&agent_config_dir).await?;
+        routing.write_to_dir(&agent_config_dir).await?;
+        if let Some(log) = event_log {
+            let _ = log.append("agent.spawned", internal_name, &event_data);
+        }
+        Ok(agent_config_dir)
+    }
+
     /// Initialize a standalone git repo at the given path.
     /// Creates the directory and runs `git init`, providing a .git boundary
     /// that prevents Claude's project discovery from traversing into the parent.
@@ -799,20 +822,9 @@ impl AgentControlService {
                 .await?;
 
             // Store window_id for message delivery and cleanup
-            let agent_config_dir = self
-                .project_dir
-                .join(".exo")
-                .join("agents")
-                .join(&internal_name);
-            fs::create_dir_all(&agent_config_dir).await?;
-            let routing = serde_json::json!({
-                "window_id": window_id.as_str(),
-            });
-            fs::write(
-                agent_config_dir.join("routing.json"),
-                serde_json::to_string_pretty(&routing)?,
-            )
-            .await?;
+            let routing = RoutingInfo::window(window_id.as_str());
+            self.finalize_spawn(&internal_name, routing, None, serde_json::Value::Null)
+                .await?;
 
             self.emit_agent_started(&internal_name)?;
 
@@ -978,20 +990,9 @@ impl AgentControlService {
                 .await?;
 
             // Store window_id for message delivery and cleanup
-            let agent_config_dir = self
-                .project_dir
-                .join(".exo")
-                .join("agents")
-                .join(&internal_name);
-            fs::create_dir_all(&agent_config_dir).await?;
-            let routing = serde_json::json!({
-                "window_id": window_id.as_str(),
-            });
-            fs::write(
-                agent_config_dir.join("routing.json"),
-                serde_json::to_string_pretty(&routing)?,
-            )
-            .await?;
+            let routing = RoutingInfo::window(window_id.as_str());
+            self.finalize_spawn(&internal_name, routing, None, serde_json::Value::Null)
+                .await?;
 
             self.emit_agent_started(&internal_name)?;
 
@@ -1134,14 +1135,9 @@ impl AgentControlService {
             .await?;
 
             // Store pane_id for message delivery and cleanup
-            let routing = serde_json::json!({
-                "parent_tab": &caller_tab,
-                "pane_id": pane_id.as_str(),
-            });
-            fs::write(
-                agent_config_dir.join("routing.json"),
-                serde_json::to_string_pretty(&routing)?,
-            ).await?;
+            let routing = RoutingInfo::pane(pane_id.as_str(), &caller_tab);
+            self.finalize_spawn(&internal_name, routing, None, serde_json::Value::Null)
+                .await?;
 
             // Register as synthetic team member for Claude Teams messaging
             let team_name = format!("exo-{}", self.effective_birth_branch(Some(&ctx.birth_branch)));
@@ -1335,14 +1331,9 @@ impl AgentControlService {
             };
 
             // Store window_id for message delivery and cleanup
-            fs::create_dir_all(&agent_config_dir).await?;
-            let routing = serde_json::json!({
-                "window_id": window_id.as_str(),
-            });
-            fs::write(
-                agent_config_dir.join("routing.json"),
-                serde_json::to_string_pretty(&routing)?,
-            ).await?;
+            let routing = RoutingInfo::window(window_id.as_str());
+            self.finalize_spawn(&internal_name, routing, None, serde_json::Value::Null)
+                .await?;
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: worktree_path.clone(),
@@ -1463,14 +1454,9 @@ impl AgentControlService {
             };
 
             // Store window_id for message delivery and cleanup
-            fs::create_dir_all(&agent_config_dir).await?;
-            let routing = serde_json::json!({
-                "window_id": window_id.as_str(),
-            });
-            fs::write(
-                agent_config_dir.join("routing.json"),
-                serde_json::to_string_pretty(&routing)?,
-            ).await?;
+            let routing = RoutingInfo::window(window_id.as_str());
+            self.finalize_spawn(&internal_name, routing, None, serde_json::Value::Null)
+                .await?;
 
             // Register as synthetic team member for Claude Teams messaging
             let team_name = format!("exo-{}", effective_birth);
@@ -1548,27 +1534,21 @@ impl AgentControlService {
             .join(&internal_name);
 
         // Try direct cleanup via stored window_id (O(1), no listing needed)
-        let routing_path = agent_config_dir.join("routing.json");
         let mut window_closed = false;
-        if routing_path.exists() {
-            if let Ok(content) = fs::read_to_string(&routing_path).await {
-                if let Ok(routing) = serde_json::from_str::<serde_json::Value>(&content) {
-                    if let Some(wid_str) = routing["window_id"].as_str() {
-                        if let Ok(wid) = crate::services::tmux_ipc::WindowId::parse(wid_str) {
-                            let tmux = self.tmux()?;
-                            match tokio::task::spawn_blocking(move || tmux.kill_window(&wid)).await
-                            {
-                                Ok(Ok(())) => {
-                                    info!(identifier, "Closed tmux window via stored window_id");
-                                    window_closed = true;
-                                }
-                                Ok(Err(e)) => {
-                                    warn!(identifier, error = %e, "kill_window by stored ID failed, falling back to name match");
-                                }
-                                Err(e) => {
-                                    warn!(identifier, error = %e, "spawn_blocking join error");
-                                }
-                            }
+        if let Ok(routing) = RoutingInfo::read_from_dir(&agent_config_dir).await {
+            if let Some(wid_str) = routing.window_id {
+                if let Ok(wid) = crate::services::tmux_ipc::WindowId::parse(&wid_str) {
+                    let tmux = self.tmux()?;
+                    match tokio::task::spawn_blocking(move || tmux.kill_window(&wid)).await {
+                        Ok(Ok(())) => {
+                            info!(identifier, "Closed tmux window via stored window_id");
+                            window_closed = true;
+                        }
+                        Ok(Err(e)) => {
+                            warn!(identifier, error = %e, "kill_window by stored ID failed, falling back to name match");
+                        }
+                        Err(e) => {
+                            warn!(identifier, error = %e, "spawn_blocking join error");
                         }
                     }
                 }
