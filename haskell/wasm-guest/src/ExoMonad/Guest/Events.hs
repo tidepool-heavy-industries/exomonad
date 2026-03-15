@@ -18,7 +18,7 @@ import Data.Aeson (FromJSON, ToJSON, Value, object, withObject, (.:), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import ExoMonad.Guest.Types (HookEffects)
+import ExoMonad.Guest.Types (Effects)
 
 -- | PR review event types
 data PRReviewEvent
@@ -128,10 +128,10 @@ instance FromJSON EventAction where
 
 -- | Configuration for event handlers per role.
 data EventHandlerConfig = EventHandlerConfig
-  { onPRReview :: PRReviewEvent -> Eff HookEffects EventAction,
-    onCIStatus :: CIStatusEvent -> Eff HookEffects EventAction,
-    onTimeout :: TimeoutEvent -> Eff HookEffects EventAction,
-    onSiblingMerged :: SiblingMergedEvent -> Eff HookEffects EventAction
+  { onPRReview :: PRReviewEvent -> Eff Effects EventAction,
+    onCIStatus :: CIStatusEvent -> Eff Effects EventAction,
+    onTimeout :: TimeoutEvent -> Eff Effects EventAction,
+    onSiblingMerged :: SiblingMergedEvent -> Eff Effects EventAction
   }
 
 -- | Default event handlers (all NoAction).
@@ -164,7 +164,7 @@ instance FromJSON EventInput where
       other -> fail $ "Unknown event_type: " <> show other
 
 -- | Dispatch an event to the appropriate handler.
-dispatchEvent :: EventHandlerConfig -> EventInput -> Eff HookEffects EventAction
+dispatchEvent :: EventHandlerConfig -> EventInput -> Eff Effects EventAction
 dispatchEvent cfg (PRReviewInput ev) = onPRReview cfg ev
 dispatchEvent cfg (CIStatusInput ev) = onCIStatus cfg ev
 dispatchEvent cfg (TimeoutInput ev) = onTimeout cfg ev

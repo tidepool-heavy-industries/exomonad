@@ -25,7 +25,9 @@ import ExoMonad.Guest.Tool.Runtime (wrapHandler, resumeHandler, handleWorkerExit
 import ExoMonad.Guest.Tool.Suspend (statusToWasmResult)
 import ExoMonad.Guest.Types (HookInput (..), HookEventType (..))
 import ExoMonad.PDK (input, output)
-import ExoMonad.Types (HookConfig (..), HookEffects)
+import ExoMonad.Guest.Effects.AgentControl (runAgentControlSuspend)
+import ExoMonad.Guest.Effects.FileSystem (runFileSystemSuspend)
+import ExoMonad.Types (HookConfig (..), Effects)
 import Foreign.C.Types (CInt (..))
 import Control.Monad.Freer (runM)
 import Control.Monad.Freer.Coroutine (runC)
@@ -121,7 +123,7 @@ handle_event = wrapHandler $ do
             pure 1
           Aeson.Success eventInput -> do
             let handlers = roleEventHandlers roleCfg
-            status <- runM $ runC (dispatchEvent handlers eventInput)
+            status <- runM $ runC $ runFileSystemSuspend $ runAgentControlSuspend (dispatchEvent handlers eventInput)
             result <- statusToWasmResult status
             output (BSL.toStrict $ Aeson.encode result)
             pure 0
@@ -176,7 +178,7 @@ dispatchHook :: HookConfig -> HookInput -> IO CInt
 dispatchHook cfg hookInput =
   case hiHookEventName hookInput of
     SessionStart -> do
-      status <- runM $ runC (onSessionStart cfg hookInput)
+      status <- runM $ runC $ runFileSystemSuspend $ runAgentControlSuspend (onSessionStart cfg hookInput)
       result <- statusToWasmResult status
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
@@ -184,12 +186,12 @@ dispatchHook cfg hookInput =
     Stop -> runStopHook (onStop cfg)
     SubagentStop -> runStopHook (onSubagentStop cfg)
     PreToolUse -> do
-      status <- runM $ runC (preToolUse cfg hookInput)
+      status <- runM $ runC $ runFileSystemSuspend $ runAgentControlSuspend (preToolUse cfg hookInput)
       result <- statusToWasmResult status
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
     PostToolUse -> do
-      status <- runM $ runC (postToolUse cfg hookInput)
+      status <- runM $ runC $ runFileSystemSuspend $ runAgentControlSuspend (postToolUse cfg hookInput)
       result <- statusToWasmResult status
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
@@ -199,7 +201,7 @@ dispatchHook cfg hookInput =
       pure 0
   where
     runStopHook hook = do
-      status <- runM $ runC (hook hookInput)
+      status <- runM $ runC $ runFileSystemSuspend $ runAgentControlSuspend (hook hookInput)
       result <- statusToWasmResult status
       output (BSL.toStrict $ Aeson.encode result)
       pure 0

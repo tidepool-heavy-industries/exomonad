@@ -6,7 +6,7 @@
 module ExoMonad.Types
   ( RoleConfig (..),
     HookConfig (..),
-    HookEffects,
+    Effects,
     EventHandlerConfig,
     defaultEventHandlers,
     defaultHooks,
@@ -29,7 +29,7 @@ import ExoMonad.Effects.Log qualified as Log
 import ExoMonad.Effects.Session qualified as Session
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Events (EventHandlerConfig, defaultEventHandlers)
-import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), HookSpecificOutput (..), StopHookOutput, HookEffects, allowResponse, allowStopResponse, postToolUseResponse)
+import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), HookSpecificOutput (..), StopHookOutput, Effects, allowResponse, allowStopResponse, postToolUseResponse)
 import GHC.Generics (Generic)
 
 -- | Role configuration.
@@ -45,15 +45,15 @@ data RoleConfig tools = RoleConfig
 -- | Configuration for lifecycle hooks.
 data HookConfig = HookConfig
   { -- | Called before any tool use. Can allow, block, or modify the tool call.
-    preToolUse :: HookInput -> Eff HookEffects HookOutput,
+    preToolUse :: HookInput -> Eff Effects HookOutput,
     -- | Called after any tool use. Can inject additional context into the conversation.
-    postToolUse :: HookInput -> Eff HookEffects HookOutput,
+    postToolUse :: HookInput -> Eff Effects HookOutput,
     -- | Called when the agent stops (e.g. /stop or session end).
-    onStop :: HookInput -> Eff HookEffects StopHookOutput,
+    onStop :: HookInput -> Eff Effects StopHookOutput,
     -- | Called when a sub-agent stops.
-    onSubagentStop :: HookInput -> Eff HookEffects StopHookOutput,
+    onSubagentStop :: HookInput -> Eff Effects StopHookOutput,
     -- | Called on session start. Default: registers Claude session ID for fork-session.
-    onSessionStart :: HookInput -> Eff HookEffects HookOutput
+    onSessionStart :: HookInput -> Eff Effects HookOutput
   }
 
 -- | Default hooks that allow everything.
@@ -71,7 +71,7 @@ defaultHooks =
 -- then instructs Claude to create a team via TeamCreate.
 -- Team name registration happens in PostToolUse (teamRegistrationPostToolUse)
 -- after TeamCreate returns the actual auto-generated name.
-defaultSessionStartHook :: HookInput -> Eff HookEffects HookOutput
+defaultSessionStartHook :: HookInput -> Eff Effects HookOutput
 defaultSessionStartHook hookInput = do
   let claudeUuid = hiSessionId hookInput
   void $ suspendEffect_ @Session.SessionRegisterClaudeId
@@ -89,7 +89,7 @@ defaultSessionStartHook hookInput = do
 -- | PostToolUse hook that registers the team after TeamCreate completes.
 -- Extracts the auto-generated team name from TeamCreate's tool_response
 -- and registers it with the server so notify_parent can route via Teams inbox.
-teamRegistrationPostToolUse :: HookInput -> Eff HookEffects HookOutput
+teamRegistrationPostToolUse :: HookInput -> Eff Effects HookOutput
 teamRegistrationPostToolUse hookInput =
   case hiToolName hookInput of
     Just "TeamCreate" -> do
@@ -144,10 +144,10 @@ extractTeamName _ = Nothing
 
 -- | Compose two PostToolUse hooks sequentially.
 -- The first runs for side effects only; the second's output is returned.
-andThenPostToolUse :: (HookInput -> Eff HookEffects HookOutput)
-                   -> (HookInput -> Eff HookEffects HookOutput)
+andThenPostToolUse :: (HookInput -> Eff Effects HookOutput)
+                   -> (HookInput -> Eff Effects HookOutput)
                    -> HookInput
-                   -> Eff HookEffects HookOutput
+                   -> Eff Effects HookOutput
 andThenPostToolUse first second input = do
   _ <- first input
   second input

@@ -25,7 +25,7 @@ import ExoMonad.Effects.GitHub (GitHubGetPullRequest, GitHubGetPullRequestForBra
 import ExoMonad.Effects.Log (LogEmitEvent)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Types (StopDecision (..), StopHookOutput (..), allowStopResponse, blockStopResponse)
-import ExoMonad.Types (HookEffects)
+import ExoMonad.Types (Effects)
 import Proto3.Suite.Types qualified as Protobuf
 import System.Environment (lookupEnv)
 
@@ -38,7 +38,7 @@ data StopCheckResult
   | ShouldNudge Text -- ^ informational: agent can still stop
   | Clean            -- ^ no issues
 
-runStopHookChecks :: Eff HookEffects StopHookOutput
+runStopHookChecks :: Eff Effects StopHookOutput
 runStopHookChecks = do
   branch <- getCurrentBranch
   if branch `elem` ["main", "master"]
@@ -65,7 +65,7 @@ describeResult (ShouldNudge msg) = "nudge: " <> msg
 describeResult Clean = "clean"
 
 -- | Check git/PR state and return a structured check result.
-gatherStopCheck :: Text -> Eff HookEffects StopCheckResult
+gatherStopCheck :: Text -> Eff Effects StopCheckResult
 gatherStopCheck branch = do
   repoInfoResult <- suspendEffect @GitGetRepoInfo (Git.GetRepoInfoRequest {Git.getRepoInfoRequestWorkingDir = "."})
   case repoInfoResult of
@@ -95,7 +95,7 @@ gatherStopCheck branch = do
             Nothing -> pure Clean
 
 -- | Check PR review status and return structured result if there are issues.
-checkPrStatusStructured :: Text -> Text -> Int -> Eff HookEffects StopCheckResult
+checkPrStatusStructured :: Text -> Text -> Int -> Eff Effects StopCheckResult
 checkPrStatusStructured repoOwner repoName prNum = do
   fullPrResult <- suspendEffect @GitHubGetPullRequest GH.GetPullRequestRequest
     { GH.getPullRequestRequestOwner = TL.fromStrict repoOwner
@@ -128,7 +128,7 @@ checkPrStatusStructured repoOwner repoName prNum = do
         else pure Clean
 
 -- | Check for uncommitted/unpushed work and nudge if found.
-checkUncommittedWork :: Text -> Eff HookEffects (Maybe Text)
+checkUncommittedWork :: Text -> Eff Effects (Maybe Text)
 checkUncommittedWork branch = do
   statusResult <- suspendEffect @GitGetStatus (Git.GetStatusRequest {Git.getStatusRequestWorkingDir = "."})
   let hasUncommitted = case statusResult of
@@ -156,7 +156,7 @@ getAgentId :: IO (Maybe Text)
 getAgentId = fmap (fmap T.pack) (lookupEnv "EXOMONAD_AGENT_ID")
 
 -- | Get the current git branch name, defaulting to "unknown" on error.
-getCurrentBranch :: Eff HookEffects Text
+getCurrentBranch :: Eff Effects Text
 getCurrentBranch = do
   result <- suspendEffect @GitGetBranch (Git.GetBranchRequest {Git.getBranchRequestWorkingDir = "."})
   case result of

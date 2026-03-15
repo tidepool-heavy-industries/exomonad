@@ -16,7 +16,7 @@ module ExoMonad.Guest.Types
     StopHookOutput (..),
     StopDecision (..),
     Runtime (..),
-    HookEffects,
+    Effects,
     allowResponse,
     denyResponse,
     postToolUseResponse,
@@ -30,13 +30,12 @@ import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
 import GHC.Generics (Generic)
-import Control.Monad.Freer (Eff)
+import ExoMonad.Guest.Effects.AgentControl (AgentControl)
+import ExoMonad.Guest.Effects.FileSystem (FileSystem)
 import ExoMonad.Guest.Tool.Suspend.Types (SuspendYield)
 
--- | Effects available to hooks.
--- Currently allows arbitrary IO via IO (required for Host Calls).
--- Future versions may restrict this to specific effects (Git, GitHub, Log).
-type HookEffects = '[SuspendYield, IO]
+-- | Unified effect row for tools, hooks, and event handlers.
+type Effects = '[AgentControl, FileSystem, SuspendYield, IO]
 
 -- ============================================================================
 -- MCP Call Types

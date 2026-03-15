@@ -15,7 +15,7 @@ import ExoMonad.Effects.Log qualified as Log
 import ExoMonad.Guest.Events (CIStatusEvent (..), EventAction (..), EventHandlerConfig (..), PRReviewEvent (..), SiblingMergedEvent (..), defaultEventHandlers)
 import ExoMonad.Guest.Events.Templates qualified as Tpl
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
-import ExoMonad.Guest.Types (HookEffects)
+import ExoMonad.Guest.Types (Effects)
 
 -- | Event handler config with PR review handling.
 -- Timeout handlers use defaults (NoAction).
@@ -28,7 +28,7 @@ prReviewEventHandlers =
     }
 
 -- | Handle PR review events for dev/tl roles.
-prReviewHandler :: PRReviewEvent -> Eff HookEffects EventAction
+prReviewHandler :: PRReviewEvent -> Eff Effects EventAction
 prReviewHandler (ReviewReceived n comments_) = do
   logHandler $ "Review received on PR #" <> T.pack (show n)
   pure (InjectMessage (Tpl.copilotReviewReceived n comments_))
@@ -50,19 +50,19 @@ prReviewHandler (CommitsPushed n ci) = do
   pure (NotifyParentAction (Tpl.commitsPushed n ci) n)
 
 -- | Handle sibling merged events.
-siblingMergedHandler :: SiblingMergedEvent -> Eff HookEffects EventAction
+siblingMergedHandler :: SiblingMergedEvent -> Eff Effects EventAction
 siblingMergedHandler (SiblingMergedEvent merged parent _prNum) = do
   logHandler $ "Sibling branch merged: " <> merged
   pure (InjectMessage (Tpl.siblingMerged merged parent))
 
 -- | Handle CI status events.
-ciStatusHandler :: CIStatusEvent -> Eff HookEffects EventAction
+ciStatusHandler :: CIStatusEvent -> Eff Effects EventAction
 ciStatusHandler (CIStatusEvent n status_ branch_) = do
   logHandler $ "CI status changed on PR #" <> T.pack (show n) <> ": " <> status_
   pure (InjectMessage (Tpl.ciStatus n status_ branch_))
 
 -- | Helper to log handler entry.
-logHandler :: Text -> Eff HookEffects ()
+logHandler :: Text -> Eff Effects ()
 logHandler msg =
   void $ suspendEffect_ @Log.LogInfo $ Log.InfoRequest
     { Log.infoRequestMessage = TL.fromStrict $ "[PRReviewHandler] " <> msg

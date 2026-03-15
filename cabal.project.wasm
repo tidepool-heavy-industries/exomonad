@@ -13,7 +13,6 @@ packages:
     haskell/vendor/proto3-runtime
     haskell/vendor/proto3-wire
     .exo/roles/devswarm
-    .exo/roles/shoal
 
 -- Global settings for static-only build
 -- Note: 'shared: True' is REQUIRED for Template Haskell (GHC 9.12 WASM)
