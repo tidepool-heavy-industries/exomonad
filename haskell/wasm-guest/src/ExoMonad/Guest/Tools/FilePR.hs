@@ -8,7 +8,7 @@ module ExoMonad.Guest.Tools.FilePR
 where
 
 import Control.Monad (void)
-import Control.Monad.Freer (Eff, sendM)
+import Control.Monad.Freer (Eff)
 import Data.Aeson (FromJSON, Value, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as BSL
