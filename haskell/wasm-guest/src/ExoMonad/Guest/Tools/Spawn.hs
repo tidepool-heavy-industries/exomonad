@@ -43,7 +43,7 @@ import GHC.Generics (Generic)
 spawnErrorMessage :: EffectError -> Text
 spawnErrorMessage (EffectError kind) = case kind of
   Just (EffectErrorKindCustom c) -> case customCode c of
-    "worktree.branch_exists" -> "Branch already exists. Try a different branch_name suffix."
+    "worktree.branch_exists" -> "Branch already exists. Try a different slug."
     "worktree.push_rejected" -> "Push rejected (non-fast-forward). Remote branch has diverged."
     "worktree.lock_conflict" -> "Git lock file conflict - another git operation may be in progress. Retry in a few seconds."
     _ -> TL.toStrict (customMessage c)
@@ -97,7 +97,7 @@ instance FromJSON ForkWaveArgs where
 instance MCPTool ForkWave where
   type ToolArgs ForkWave = ForkWaveArgs
   toolName = "fork_wave"
-  toolDescription = "Fork any number of parallel Claude agents at this point in the conversation. Each inherits your full context window and starts in a worktree branched off your branch. Requires clean git state (committed and pushed). Use this tool to parallelize when work becomes applicative and can be split into independent streams."
+  toolDescription = "Fork any number of parallel Claude agents at this point in the conversation. Each inherits your full context window and starts in a worktree branched off your branch. Requires clean git state (committed and pushed). Use this tool to parallelize when work becomes applicative and can be split into independent streams. IMPORTANT: Create a team using TeamCreate BEFORE calling."
   toolSchema =
     genericToolSchemaWith @ForkWaveArgs
       [ ("children", "Array of children to spawn, each with a slug and task")

@@ -157,7 +157,7 @@ All tools are defined in Haskell WASM and executed via host functions.
 
 | Tool | Role | Description |
 |------|------|-------------|
-| `spawn_subtree` | tl | Fork Claude agent into worktree + tmux window (TL role, can spawn children) |
+| `fork_wave` | tl | Fork N parallel Claude agents from conversation context, each in its own worktree |
 | `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree + tmux window (dev role, files PR) |
 | `spawn_workers` | tl | Spawn ephemeral Gemini agents as panes in parent dir (no branch, no worktree) |
 | `file_pr` | tl, dev | Create/update PR for current branch (auto-detects base branch from naming) |

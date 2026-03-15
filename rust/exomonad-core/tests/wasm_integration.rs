@@ -541,7 +541,7 @@ async fn wasm_tl_tools_include_spawn_and_merge() {
     let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
 
     for expected in [
-        "spawn_subtree",
+        "fork_wave",
         "spawn_leaf_subtree",
         "spawn_workers",
         "merge_pr",
@@ -579,8 +579,8 @@ async fn wasm_dev_tools_include_file_pr() {
 
     // Dev should NOT have spawn or merge tools
     assert!(
-        !names.contains(&"spawn_subtree"),
-        "Dev role should not have spawn_subtree"
+        !names.contains(&"fork_wave"),
+        "Dev role should not have fork_wave"
     );
     assert!(
         !names.contains(&"merge_pr"),
@@ -608,8 +608,8 @@ async fn wasm_worker_tools_include_notify_parent() {
 
     // Worker should have minimal tools
     assert!(
-        !names.contains(&"spawn_subtree"),
-        "Worker should not have_spawn_subtree"
+        !names.contains(&"fork_wave"),
+        "Worker should not have fork_wave"
     );
     assert!(
         !names.contains(&"file_pr"),
@@ -623,21 +623,22 @@ async fn wasm_worker_tools_include_notify_parent() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial]
-async fn wasm_spawn_subtree_roundtrip() {
+async fn wasm_fork_wave_roundtrip() {
     let runtime = build_test_runtime().await;
 
     let output = call_tool(
         &runtime,
         "tl",
-        "spawn_subtree",
+        "fork_wave",
         json!({
-            "task": "Implement feature X",
-            "branch_name": "feature-x"
+            "children": [
+                {"slug": "feature-x", "task": "Implement feature X"}
+            ]
         }),
     )
     .await;
 
-    assert_tool_success(&output, "spawn_subtree");
+    assert_tool_success(&output, "fork_wave");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -746,10 +747,10 @@ async fn wasm_notify_parent_roundtrip() {
 async fn wasm_tool_missing_required_field() {
     let runtime = build_test_runtime().await;
 
-    // spawn_subtree requires "task"
-    let output = call_tool(&runtime, "tl", "spawn_subtree", json!({})).await;
+    // fork_wave requires "children"
+    let output = call_tool(&runtime, "tl", "fork_wave", json!({})).await;
 
-    assert_tool_error(&output, "spawn_subtree (missing task)");
+    assert_tool_error(&output, "fork_wave (missing children)");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -767,16 +768,16 @@ async fn wasm_tool_unknown_name_returns_error() {
 async fn wasm_tool_wrong_role_returns_error() {
     let runtime = build_test_runtime().await;
 
-    // Dev role should not have spawn_subtree
+    // Dev role should not have fork_wave
     let output = call_tool(
         &runtime,
         "dev",
-        "spawn_subtree",
-        json!({"task": "test", "branch_name": "test"}),
+        "fork_wave",
+        json!({"children": [{"slug": "test", "task": "test"}]}),
     )
     .await;
 
-    assert_tool_error(&output, "spawn_subtree as dev");
+    assert_tool_error(&output, "fork_wave as dev");
 }
 
 // ============================================================================
@@ -798,15 +799,14 @@ async fn wasm_unhandled_effect_returns_error() {
     let output = call_tool(
         &runtime,
         "tl",
-        "spawn_subtree",
+        "fork_wave",
         json!({
-            "task": "test",
-            "branch_name": "test-branch"
+            "children": [{"slug": "test-branch", "task": "test"}]
         }),
     )
     .await;
 
-    assert_tool_error(&output, "spawn_subtree without agent handler");
+    assert_tool_error(&output, "fork_wave without agent handler");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -848,20 +848,26 @@ async fn wasm_effect_handler_error_propagates() {
     let output = call_tool(
         &runtime,
         "tl",
-        "spawn_subtree",
+        "fork_wave",
         json!({
-            "task": "test",
-            "branch_name": "test-branch"
+            "children": [{"slug": "test-branch", "task": "test"}]
         }),
     )
     .await;
 
-    assert_tool_error(&output, "spawn_subtree with failing handler");
+    // fork_wave returns success=true with per-child errors in the result
+    assert_tool_success(&output, "fork_wave with failing handler (partial success)");
 
-    // Verify the error message propagated
-    let error_msg = output["error"].as_str().unwrap_or_default();
+    let errors = output["result"]["errors"]
+        .as_array()
+        .expect("fork_wave result should have errors array");
     assert!(
-        error_msg.contains("spawn_failed") || error_msg.contains("tmux session"),
+        !errors.is_empty(),
+        "fork_wave errors array should contain the handler error"
+    );
+    let error_msg = errors[0].as_str().unwrap_or_default();
+    assert!(
+        error_msg.contains("tmux session"),
         "Error message should contain handler error info, got: {error_msg}"
     );
 }
@@ -926,79 +932,71 @@ async fn wasm_hook_pre_tool_use_allow() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial]
 async fn wasm_tool_multiple_suspends() {
-    // spawn_subtree yields multiple effects:
-    // 1. log.info (logging)
-    // 2. git.get_branch or git.get_repo_info
-    // 3. agent.spawn_subtree
-    // 4. log.emit_event
+    // fork_wave yields multiple effects:
+    // 1. git.get_status (clean check)
+    // 2. git.has_unpushed_commits (push check)
+    // 3. agent.spawn_subtree (per child)
+    // 4. log.emit_event (per child)
     // Each suspend/resume cycle goes through the trampoline.
     let runtime = build_test_runtime().await;
 
     let output = call_tool(
         &runtime,
         "tl",
-        "spawn_subtree",
+        "fork_wave",
         json!({
-            "task": "Multi-suspend test",
-            "branch_name": "multi-suspend"
+            "children": [{"slug": "multi-suspend", "task": "Multi-suspend test"}]
         }),
     )
     .await;
 
-    assert_tool_success(&output, "spawn_subtree (multi-suspend)");
+    assert_tool_success(&output, "fork_wave (multi-suspend)");
 
-    // The result should contain agent info from the mock handler
+    // The result should contain spawned array from the mock handler
     let result = &output["result"];
     assert!(
         result.is_object() || result.is_string(),
-        "spawn_subtree result should contain agent info: {output:#}"
+        "fork_wave result should contain spawned info: {output:#}"
     );
 }
 
-/// Test if sending a long task text to spawn_subtree causes a hang.
-/// spawn_leaf_subtree hangs — this checks if the issue is text length vs P.render.
+/// Test if sending a long task text to fork_wave causes a hang.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial]
-async fn wasm_spawn_subtree_long_text() {
+async fn wasm_fork_wave_long_text() {
     let runtime = build_test_runtime().await;
 
-    // Simulate roughly the same amount of text as P.render + P.leafProfile produces
     let long_task = "A".repeat(600);
 
     let output = call_tool(
         &runtime,
         "tl",
-        "spawn_subtree",
+        "fork_wave",
         json!({
-            "task": long_task,
-            "branch_name": "long-text-test"
+            "children": [{"slug": "long-text-test", "task": long_task}]
         }),
     )
     .await;
 
-    assert_tool_success(&output, "spawn_subtree (long text)");
+    assert_tool_success(&output, "fork_wave (long text)");
 }
 
-/// Diagnostic: does spawn_subtree hang with multiline text containing newlines?
-/// If this passes but spawn_leaf_subtree hangs, the issue is in the Haskell handler,
-/// not in text encoding.
+/// Diagnostic: does fork_wave hang with multiline text containing newlines?
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial]
-async fn wasm_spawn_subtree_multiline_text() {
+async fn wasm_fork_wave_multiline_text() {
     let runtime = build_test_runtime().await;
 
-    // Simulate the text that P.render would produce for spawn_leaf_subtree
-    let multiline_task = "## TASK\nImplement the Rust handler\n\n## Completion Protocol (Leaf Subtree)\nYou are a **leaf agent** in your own git worktree and branch.\n\nWhen you are done:\n\n1. **Commit your changes** with a descriptive message.\n2. **File a PR** using `file_pr` tool.\n3. **Wait for Copilot review** if it arrives.\n4. **Call `notify_parent`** with status `success`.\n\n**DO NOT:**\n- Merge your own PR\n- Push to main\n- Create additional branches";
+    let multiline_task = "## TASK\nImplement the Rust handler\n\n## Details\nMultiple lines of context.\n\n**DO NOT:**\n- Merge your own PR\n- Push to main";
 
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         call_tool(
             &runtime,
             "tl",
-            "spawn_subtree",
+            "fork_wave",
             json!({
-                "task": multiline_task,
-                "branch_name": "multiline-test"
+                "children": [{"slug": "multiline-test", "task": multiline_task}]
             }),
         ),
     )
@@ -1006,29 +1004,29 @@ async fn wasm_spawn_subtree_multiline_text() {
 
     match result {
         Ok(output) => {
-            eprintln!("=== spawn_subtree with multiline text completed: {output:#} ===");
-            assert_tool_success(&output, "spawn_subtree (multiline)");
+            eprintln!("=== fork_wave with multiline text completed: {output:#} ===");
+            assert_tool_success(&output, "fork_wave (multiline)");
         }
         Err(_) => {
-            panic!("spawn_subtree with multiline text hung after 30s — text encoding issue");
+            panic!("fork_wave with multiline text hung after 30s — text encoding issue");
         }
     }
 }
 
 /// Diagnostic: spawn_leaf_subtree with timeout to observe trampoline logs.
-/// Calls spawn_subtree first to warm up the WASM runtime, then tries spawn_leaf_subtree.
+/// Calls fork_wave first to warm up the WASM runtime, then tries spawn_leaf_subtree.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial]
 async fn wasm_spawn_leaf_subtree_timeout_diagnostic() {
     let runtime = build_test_runtime().await;
 
-    // Warm up: call spawn_subtree first (this works)
-    eprintln!("=== DIAGNOSTIC: Warming up with spawn_subtree ===");
+    // Warm up: call fork_wave first (this works)
+    eprintln!("=== DIAGNOSTIC: Warming up with fork_wave ===");
     let warmup = call_tool(
         &runtime,
         "tl",
-        "spawn_subtree",
-        json!({"task": "warmup", "branch_name": "warmup"}),
+        "fork_wave",
+        json!({"children": [{"slug": "warmup", "task": "warmup"}]}),
     )
     .await;
     eprintln!("=== Warmup completed: success={} ===", warmup["success"]);
