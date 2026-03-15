@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use exomonad_core::{HookEnvelope, HookEventType};
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
-use tracing::{debug, warn};
+use tracing::warn;
 
 // ============================================================================
 // CLI Types
@@ -115,12 +115,16 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let _guard = logging::init();
 
     let config = config::Config::discover().unwrap_or_else(|e| {
-        debug!(error = %e, "No config found, using defaults");
+        eprintln!("[exomonad] No config found, using defaults: {e}");
         config::Config::default()
     });
+
+    let _guard = logging::init(
+        config.otlp_endpoint.as_deref(),
+        &config.tmux_session,
+    );
 
     match cli.command {
         Commands::McpStdio { ref role, ref name } => {

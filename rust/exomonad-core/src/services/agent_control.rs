@@ -1175,6 +1175,7 @@ impl AgentControlService {
 
     /// Spawn a subtree agent (Claude-only) in a new git worktree.
     #[tracing::instrument(skip(self, options), fields(branch_name = %options.branch_name))]
+    #[tracing::instrument(skip_all, fields(slug = %options.branch_name, agent_type = "claude"))]
     pub async fn spawn_subtree(
         &self,
         options: &SpawnSubtreeOptions,
@@ -1361,6 +1362,7 @@ impl AgentControlService {
 
     /// Spawn a Gemini leaf agent in a new git worktree.
     #[tracing::instrument(skip(self, options), fields(branch_name = %options.branch_name))]
+    #[tracing::instrument(skip_all, fields(slug = %options.branch_name, agent_type = "gemini"))]
     pub async fn spawn_leaf_subtree(
         &self,
         options: &SpawnLeafOptions,

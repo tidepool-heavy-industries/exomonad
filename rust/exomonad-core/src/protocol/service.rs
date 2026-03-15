@@ -5,7 +5,6 @@
 use crate::domain::{GithubOwner, GithubRepo, ItemState, ReviewState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
 
 // ============================================================================
 // Service Protocol Types
@@ -118,24 +117,6 @@ pub enum ServiceRequest {
     },
     GitHubCheckAuth,
 
-    // Observability
-    OtelSpan {
-        trace_id: String,
-        span_id: String,
-        name: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        start_ns: Option<u64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        end_ns: Option<u64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        attributes: Option<HashMap<String, String>>,
-    },
-    OtelMetric {
-        name: String,
-        value: f64,
-        labels: HashMap<String, String>,
-    },
-
     // User Interaction (from tmux CLI)
     UserInteraction {
         request_id: String,
@@ -213,8 +194,8 @@ pub enum ServiceResponse {
         user: Option<String>,
     },
 
-    // Generic acknowledgment (label/assignee operations, OTLP export, etc.)
-    #[serde(rename = "AckResponse", alias = "OtelAckResponse")]
+    // Generic acknowledgment (label/assignee operations, etc.)
+    #[serde(rename = "AckResponse")]
     Ack,
 
     // Error
