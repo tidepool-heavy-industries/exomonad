@@ -6,7 +6,7 @@
 use crate::ui_protocol::AgentEvent;
 use anyhow::{Context, Result};
 use std::path::Path;
-use tracing::info;
+use tracing::{info, warn};
 
 use super::tmux_ipc::{PaneId, TmuxIpc};
 
@@ -21,6 +21,7 @@ pub fn emit_event(_session: &str, event: &AgentEvent) -> Result<()> {
 /// Extract a short label from the first line of text.
 /// Strips leading markdown headers (`# `, `## `, `### `) and sanitizes
 /// shell metacharacters so the pointer itself is safe for tmux injection.
+/// Allows alphanumeric characters, spaces, hyphens, underscores, and dots.
 fn extract_label(text: &str) -> String {
     let first_line = text.lines().next().unwrap_or("feedback");
     let stripped = first_line
@@ -41,14 +42,40 @@ fn extract_label(text: &str) -> String {
     }
 }
 
+/// Delete tmp files older than 1 hour. Best-effort, errors are logged and ignored.
+async fn gc_tmp_dir(tmp_dir: &Path) {
+    let mut entries = match tokio::fs::read_dir(tmp_dir).await {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let Ok(meta) = entry.metadata().await else {
+            continue;
+        };
+        let is_old = meta
+            .modified()
+            .map(|m| m < cutoff)
+            .unwrap_or(false);
+        if is_old {
+            if let Err(e) = tokio::fs::remove_file(entry.path()).await {
+                warn!(path = %entry.path().display(), error = %e, "Failed to GC tmp file");
+            }
+        }
+    }
+}
+
 /// Inject text into a target pane/window via tmux buffer pattern.
 ///
 /// `target` is a tmux target specifier (pane_id like %N, or window name).
 ///
 /// For multiline text, writes content to `.exo/tmp/{uuid}.txt` and injects
-/// a short `[label] @/path/to/file.txt` pointer instead. This avoids shell
+/// a short `[label] @.exo/tmp/{uuid}.txt` pointer instead. This avoids shell
 /// metacharacter expansion (`!`, `$`, backticks) when pasting into tmux.
+/// Uses a relative path so directory names containing metacharacters are safe.
 /// Both Claude and Gemini auto-read `@filepath` references.
+///
+/// Tmp files older than 1 hour are garbage-collected on each write.
 pub async fn inject_input(target: &str, text: &str, project_dir: &Path) -> Result<()> {
     let session =
         std::env::var("EXOMONAD_TMUX_SESSION").context("EXOMONAD_TMUX_SESSION not set")?;
@@ -61,23 +88,24 @@ pub async fn inject_input(target: &str, text: &str, project_dir: &Path) -> Resul
             .await
             .context("Failed to create .exo/tmp/")?;
 
+        // GC old files before writing new one
+        gc_tmp_dir(&tmp_dir).await;
+
         let filename = format!("{}.txt", uuid::Uuid::new_v4());
+        let relative_path = format!(".exo/tmp/{}", filename);
         let file_path = tmp_dir.join(&filename);
         tokio::fs::write(&file_path, text)
             .await
             .context("Failed to write feedback file")?;
 
-        let abs_path = file_path
-            .canonicalize()
-            .unwrap_or_else(|_| file_path.clone());
         let label = extract_label(text);
-        let pointer = format!("[{}] @{}", label, abs_path.display());
+        let pointer = format!("[{}] @{}", label, relative_path);
 
         info!(
-            "[TmuxEvents] Injecting file-indirect to target '{}': {} chars → {}",
+            "[TmuxEvents] Injecting file-indirect to target '{}': {} chars -> {}",
             target,
             text.len(),
-            file_path.display()
+            relative_path
         );
 
         let target = target.to_string();
