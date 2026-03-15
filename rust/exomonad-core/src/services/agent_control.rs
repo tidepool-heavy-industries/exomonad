@@ -1273,7 +1273,8 @@ impl AgentControlService {
                         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
                         .collect()
                 };
-                let parent_encoded = encode_path(&self.project_dir);
+                let canonical_project_dir = self.project_dir.canonicalize().unwrap_or_else(|_| self.project_dir.clone());
+                let parent_encoded = encode_path(&canonical_project_dir);
                 let worktree_encoded = encode_path(&worktree_path);
                 let parent_project = claude_projects_dir.join(&parent_encoded);
                 let child_project = claude_projects_dir.join(&worktree_encoded);
