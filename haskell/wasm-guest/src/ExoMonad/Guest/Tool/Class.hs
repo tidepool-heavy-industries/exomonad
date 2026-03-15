@@ -21,7 +21,7 @@ module ExoMonad.Guest.Tool.Class
 
     -- * Coroutine suspension
     SuspendYield,
-    ToolEffects,
+    Effects,
     suspend,
 
     -- * Type-level list append
@@ -36,9 +36,8 @@ import Data.Aeson.KeyMap qualified as KM
 import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Text qualified as T
-import ExoMonad.Guest.Effects.AgentControl (AgentControl)
-import ExoMonad.Guest.Effects.FileSystem (FileSystem)
 import ExoMonad.Guest.Tool.Suspend.Types (EffectRequest (..), SuspendYield, suspend)
+import ExoMonad.Guest.Types (Effects)
 import GHC.Generics (Generic)
 
 -- ============================================================================
@@ -103,8 +102,7 @@ errorResult msg = MCPCallOutput False Nothing (Just msg)
 -- Coroutine Suspension
 -- ============================================================================
 
--- | Effect row for tool handlers that can suspend.
-type ToolEffects = '[AgentControl, FileSystem, SuspendYield, IO]
+-- Effects is re-exported from ExoMonad.Guest.Types.
 
 -- ============================================================================
 -- Async / Suspension Types
@@ -146,7 +144,7 @@ class MCPTool (t :: Type) where
   toolSchema :: Aeson.Object
 
   -- | Effectful handler that can suspend via coroutine yield.
-  toolHandlerEff :: ToolArgs t -> Eff ToolEffects MCPCallOutput
+  toolHandlerEff :: ToolArgs t -> Eff Effects MCPCallOutput
 
 -- ============================================================================
 -- Type-level list append

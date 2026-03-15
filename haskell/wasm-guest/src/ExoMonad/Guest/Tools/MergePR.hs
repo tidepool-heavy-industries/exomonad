@@ -32,7 +32,7 @@ import ExoMonad.Effects.GitHub (GitHubGetPullRequest)
 import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
 import ExoMonad.Effects.Process (ProcessRun)
 import ExoMonad.Effects.MergePR (MergePRMergePr)
-import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), ToolEffects, errorResult, successResult)
+import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), Effects, errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import GHC.Generics (Generic)
@@ -101,7 +101,7 @@ instance MCPTool MergePR where
 data Readiness = Ready | NotReady Text
 
 -- | Check whether a PR is ready to merge based on Copilot review status.
-checkCopilotReadiness :: Int -> Eff ToolEffects Readiness
+checkCopilotReadiness :: Int -> Eff Effects Readiness
 checkCopilotReadiness prNum = do
   -- Get repo info for API calls
   repoInfoResult <- suspendEffect @GitGetRepoInfo (Git.GetRepoInfoRequest {Git.getRepoInfoRequestWorkingDir = "."})
@@ -174,7 +174,7 @@ extractSlug branch
       (slug : _) -> Just slug
 
 -- | Execute the actual merge after readiness check passes.
-doMerge :: MergePRArgs -> Eff ToolEffects MCPCallOutput
+doMerge :: MergePRArgs -> Eff Effects MCPCallOutput
 doMerge args = do
   let req =
         MP.MergePrRequest

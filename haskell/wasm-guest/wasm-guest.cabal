@@ -70,6 +70,7 @@ library wasm-guest-internal
         ExoMonad.Guest.Prompt
         ExoMonad.Guest.Events
         ExoMonad.Guest.Events.Templates
+        ExoMonad.Guest.Lifecycle
         -- SpawnSpec compiler
         ExoMonad.Guest.SpawnSpec.Types
         ExoMonad.Guest.SpawnSpec.Zones

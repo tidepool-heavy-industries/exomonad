@@ -1,6 +1,6 @@
 -- | Bridge between coroutine-based tool handlers and the WASM trampoline.
 --
--- Converts @Eff ToolEffects@ computations into @IO (WasmResult MCPCallOutput)@,
+-- Converts @Eff Effects@ computations into @IO (WasmResult MCPCallOutput)@,
 -- storing continuations for suspended computations.
 module ExoMonad.Guest.Tool.Suspend
   ( runToolEff,
@@ -16,11 +16,11 @@ import Data.Aeson qualified as Aeson
 import ExoMonad.Guest.Continuations (newContinuationId, storeContinuation)
 import ExoMonad.Guest.Effects.AgentControl (runAgentControlSuspend)
 import ExoMonad.Guest.Effects.FileSystem (runFileSystemSuspend)
-import ExoMonad.Guest.Tool.Class (EffectRequest, MCPCallOutput, ToolEffects, WasmResult (..))
+import ExoMonad.Guest.Tool.Class (EffectRequest, MCPCallOutput, Effects, WasmResult (..))
 
 -- | Run an effectful tool handler, converting to WasmResult.
 -- Handles both immediate completion and suspension with continuation storage.
-runToolEff :: Eff ToolEffects MCPCallOutput -> IO (WasmResult MCPCallOutput)
+runToolEff :: Eff Effects MCPCallOutput -> IO (WasmResult MCPCallOutput)
 runToolEff eff = do
   status <- runM (runC (runFileSystemSuspend (runAgentControlSuspend eff)))
   statusToWasmResult status

@@ -25,7 +25,7 @@ import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
 import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), Runtime (..), allowResponse, denyResponse, postToolUseResponse)
 import ExoMonad.Permissions (PermissionCheck (..), checkAgentPermissions)
-import ExoMonad.Types (HookConfig (..), HookEffects, defaultSessionStartHook)
+import ExoMonad.Types (HookConfig (..), Effects, defaultSessionStartHook)
 
 -- ============================================================================
 -- Gemini Tool Types
@@ -88,7 +88,7 @@ httpDevHooks =
     }
 
 -- | Permission cascade with tool-specific guards.
-permissionCascade :: HookInput -> Eff HookEffects HookOutput
+permissionCascade :: HookInput -> Eff Effects HookOutput
 permissionCascade hookInput = do
   let tool = fromMaybe "" (hiToolName hookInput)
       args = fromMaybe (Aeson.Object mempty) (hiToolInput hookInput)

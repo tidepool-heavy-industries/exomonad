@@ -402,7 +402,7 @@ instance MCPTool SpawnAcp where
         pure $ successResult $ Aeson.toJSON spawnResult
 
 -- | Helper to emit 'agent.spawned' event to the host.
-emitSpawnEvent :: Text -> Text -> Text -> Eff ToolEffects ()
+emitSpawnEvent :: Text -> Text -> Text -> Eff Effects ()
 emitSpawnEvent slug agentType taskSummary = do
   let eventPayload = BSL.toStrict $ Aeson.encode $ object
         [ "slug" .= slug,

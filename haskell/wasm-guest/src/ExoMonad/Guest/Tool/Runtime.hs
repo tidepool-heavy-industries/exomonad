@@ -35,6 +35,8 @@ import Effects.Log qualified as Log
 import ExoMonad.Effects.Events qualified as Events
 import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
 import ExoMonad.Guest.Continuations (retrieveContinuation)
+import ExoMonad.Guest.Effects.AgentControl (runAgentControlSuspend)
+import ExoMonad.Guest.Effects.FileSystem (runFileSystemSuspend)
 import ExoMonad.Guest.Proto (fromText)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), WasmResult (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
@@ -43,15 +45,15 @@ import ExoMonad.Guest.Tool.Suspend (statusToWasmResult)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Types (HookEventType (..), HookInput (..), HookOutput, MCPCallInput (..), Runtime (..), StopDecision (..), StopHookOutput (..), allowResponse)
 import ExoMonad.PDK (input, output)
-import ExoMonad.Types (HookConfig (..), HookEffects)
+import ExoMonad.Types (HookConfig (..), Effects)
 import Foreign.C.Types (CInt (..))
 import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName)
 
 -- | Run an effectful hook, converting to WasmResult.
-runHookEff :: (ToJSON a) => Eff HookEffects a -> IO (WasmResult a)
+runHookEff :: (ToJSON a) => Eff Effects a -> IO (WasmResult a)
 runHookEff eff = do
-  status <- runM (runC eff)
+  status <- runM (runC (runFileSystemSuspend (runAgentControlSuspend eff)))
   statusToWasmResult status
 
 -- | Helper for fire-and-forget logging via yield_effect.
@@ -204,13 +206,13 @@ hookHandler config = do
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
   where
-    handleSessionStart :: HookInput -> (HookInput -> Eff HookEffects HookOutput) -> IO Value
+    handleSessionStart :: HookInput -> (HookInput -> Eff Effects HookOutput) -> IO Value
     handleSessionStart hookInput hook = Aeson.toJSON <$> runHookEff (hook hookInput)
 
-    handlePreToolUse :: HookInput -> (HookInput -> Eff HookEffects HookOutput) -> IO Value
+    handlePreToolUse :: HookInput -> (HookInput -> Eff Effects HookOutput) -> IO Value
     handlePreToolUse hookInput hook = Aeson.toJSON <$> runHookEff (hook hookInput)
 
-    handleStopHook :: HookInput -> (HookInput -> Eff HookEffects StopHookOutput) -> IO Value
+    handleStopHook :: HookInput -> (HookInput -> Eff Effects StopHookOutput) -> IO Value
     handleStopHook hookInput hook = do
       -- Extract agent ID from hook input or fallback to current working directory (e.g., "gh-453-gemini")
       cwd <- getCurrentDirectory
