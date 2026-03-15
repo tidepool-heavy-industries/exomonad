@@ -67,7 +67,7 @@ runStopHookChecks = do
 
       -- Log to event log for observability
       let eventPayload = BSL.toStrict $ Aeson.encode $
-            object ["branch" .= branch, "result" .= describeResult result, "phase" .= show mPhase]
+            object ["branch" .= branch, "result" .= describeResult result, "phase" .= (Aeson.toJSON <$> mPhase)]
       void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
         { Log.emitEventRequestEventType = "agent.stop_check",
           Log.emitEventRequestPayload = eventPayload,
