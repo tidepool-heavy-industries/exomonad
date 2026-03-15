@@ -46,13 +46,13 @@ runStopHookChecks = do
           Clean -> do
             nudge <- checkUncommittedWork branch
             case nudge of
-              Just msg -> pure (ShouldNudge (T.unpack msg))
+              Just msg -> pure (ShouldNudge msg)
               Nothing -> pure Clean
         Nothing -> do
           -- No phase set yet — fall back to git status check
           nudge <- checkUncommittedWork branch
           case nudge of
-            Just msg -> pure (ShouldNudge (T.unpack msg))
+            Just msg -> pure (ShouldNudge msg)
             Nothing -> pure Clean
 
       -- Log to event log for observability
@@ -65,13 +65,13 @@ runStopHookChecks = do
         })
 
       case result of
-        MustBlock msg -> pure $ blockStopResponse (T.pack msg)
-        ShouldNudge msg -> pure $ StopHookOutput Allow (Just (T.pack msg))
+        MustBlock msg -> pure $ blockStopResponse msg
+        ShouldNudge msg -> pure $ StopHookOutput Allow (Just msg)
         Clean -> pure allowStopResponse
 
 describeResult :: StopCheckResult -> Text
-describeResult (MustBlock msg) = "block: " <> T.pack msg
-describeResult (ShouldNudge msg) = "nudge: " <> T.pack msg
+describeResult (MustBlock msg) = "block: " <> msg
+describeResult (ShouldNudge msg) = "nudge: " <> msg
 describeResult Clean = "clean"
 
 -- | Check for uncommitted/unpushed work and nudge if found.

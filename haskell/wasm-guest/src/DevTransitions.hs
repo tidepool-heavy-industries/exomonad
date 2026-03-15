@@ -7,7 +7,6 @@ module DevTransitions
 
 import Control.Monad (void)
 import Control.Monad.Freer (Eff)
-import Data.Aeson (ToJSON)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Aeson qualified as Aeson
 import Data.Aeson (object, (.=))
@@ -16,10 +15,10 @@ import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Effects.Log qualified as Log
 import ExoMonad.Effects.Log (LogEmitEvent, LogInfo)
-import ExoMonad.Guest.Lifecycle (DevPhase(..), PRNumber, getDevPhase)
+import ExoMonad.Guest.Lifecycle (DevPhase(..), PRNumber)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
 import ExoMonad.Guest.Types (Effects)
-import AgentTransition (AgentTransition(..), StopCheckResult(..))
+import AgentTransition (AgentLifecycle(..), AgentTransition(..), StopCheckResult(..))
 
 data DevEvent
   = PRCreated PRNumber Text Text
@@ -30,6 +29,9 @@ data DevEvent
   | ReviewApproved PRNumber
   | FixesPushed PRNumber Text
   | CommitsPushed PRNumber Text
+
+instance AgentLifecycle DevPhase where
+  initialPhase = DevSpawned
 
 instance AgentTransition DevPhase DevEvent where
   transition phase event = case event of
@@ -64,12 +66,12 @@ instance AgentTransition DevPhase DevEvent where
 
 canExit :: DevPhase -> StopCheckResult
 canExit (DevChangesRequested pr _) =
-  MustBlock $ "PR #" <> show pr <> " has changes requested. Address review comments before stopping."
+  MustBlock $ "PR #" <> T.pack (show pr) <> " has changes requested. Address review comments before stopping."
 canExit (DevPRFiled pr) =
-  ShouldNudge $ "PR #" <> show pr <> " awaiting review. System will auto-notify parent."
+  ShouldNudge $ "PR #" <> T.pack (show pr) <> " awaiting review. System will auto-notify parent."
 canExit (DevUnderReview pr _) =
-  ShouldNudge $ "PR #" <> show pr <> " under review. System will auto-notify parent."
-canExit DevWorking = ShouldNudge "Still in working phase."
+  ShouldNudge $ "PR #" <> T.pack (show pr) <> " under review. System will auto-notify parent."
+canExit DevWorking = Clean
 canExit DevSpawned = Clean
 canExit (DevApproved _) = Clean
 canExit DevDone = Clean

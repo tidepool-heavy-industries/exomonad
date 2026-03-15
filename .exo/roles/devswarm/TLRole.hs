@@ -31,8 +31,8 @@ tlStopCheck = do
   mPhase <- getTLPhase
   case mPhase of
     Just phase -> case TLTransitions.canExit phase of
-      MustBlock msg -> pure $ blockStopResponse (T.pack msg)
-      ShouldNudge msg -> pure $ StopHookOutput Allow (Just (T.pack msg))
+      MustBlock msg -> pure $ blockStopResponse msg
+      ShouldNudge msg -> pure $ StopHookOutput Allow (Just msg)
       Clean -> pure allowStopResponse
     Nothing -> pure allowStopResponse
 

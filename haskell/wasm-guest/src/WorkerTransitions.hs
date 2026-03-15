@@ -15,22 +15,25 @@ import ExoMonad.Effects.Log (LogInfo)
 import ExoMonad.Guest.Lifecycle (WorkerPhase(..))
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
 import ExoMonad.Guest.Types (Effects)
-import AgentTransition (AgentTransition(..), StopCheckResult(..))
+import AgentTransition (AgentLifecycle(..), AgentTransition(..), StopCheckResult(..))
 
 data WorkerEvent
   = WorkerStarted
   | WorkerCompleted Text
   | WorkerErrored Text
 
+instance AgentLifecycle WorkerPhase where
+  initialPhase = WorkerSpawned
+
 instance AgentTransition WorkerPhase WorkerEvent where
   transition phase event = case event of
     WorkerStarted ->
       pure (WorkerWorking, [logTransition phase WorkerWorking])
     WorkerCompleted msg ->
-      pure (WorkerDone, [logTransition phase WorkerDone])
+      pure (WorkerDone, [logTransitionWithMsg msg phase WorkerDone])
     WorkerErrored reason ->
       let newPhase = WorkerFailed reason
-      in pure (newPhase, [logTransition phase newPhase])
+      in pure (newPhase, [logTransitionWithMsg reason phase newPhase])
 
 canExit :: WorkerPhase -> StopCheckResult
 canExit WorkerSpawned = Clean
@@ -43,5 +46,13 @@ logTransition old new =
   void $ suspendEffect_ @LogInfo $ Log.InfoRequest
     { Log.infoRequestMessage = TL.fromStrict $
         "[WorkerTransition] " <> T.pack (show old) <> " -> " <> T.pack (show new)
+    , Log.infoRequestFields = ""
+    }
+
+logTransitionWithMsg :: Text -> WorkerPhase -> WorkerPhase -> Eff Effects ()
+logTransitionWithMsg msg old new =
+  void $ suspendEffect_ @LogInfo $ Log.InfoRequest
+    { Log.infoRequestMessage = TL.fromStrict $
+        "[WorkerTransition] " <> T.pack (show old) <> " -> " <> T.pack (show new) <> " (" <> msg <> ")"
     , Log.infoRequestFields = ""
     }
