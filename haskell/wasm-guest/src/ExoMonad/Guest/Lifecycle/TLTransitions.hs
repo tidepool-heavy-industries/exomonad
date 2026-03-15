@@ -27,10 +27,10 @@ import ExoMonad.Guest.Types (Effects)
 
 -- | TL lifecycle events.
 data TLEvent
-  = ChildSpawned Text
+  = ChildSpawned ChildHandle
   | ChildCompleted Text
   | ChildFailed Text Text
-  | PRMerged PRNumber
+  | PRMerged PRNumber Text
   | AllChildrenDone
 
 -- ============================================================================
@@ -48,9 +48,17 @@ applyTLEvent event = do
 
 transitionTL :: SomeTLState -> TLEvent -> Eff Effects SomeTLState
 transitionTL (SomeTLState old) event = case event of
-  ChildSpawned slug -> do
-    logTransitionWithSlug slug (showPhase old) "Dispatching"
-    pure (SomeTLState STLDispatching)
+  ChildSpawned handle -> do
+    let slug = chSlug handle
+        newState = case old of
+          STLWaiting children ->
+            SomeTLState (STLWaiting (Map.insert slug handle children))
+          STLDispatching ->
+            SomeTLState (STLWaiting (Map.singleton slug handle))
+          _ ->
+            SomeTLState (STLWaiting (Map.singleton slug handle))
+    logTransitionWithSlug slug (showPhase old) (showSomePhase newState)
+    pure newState
   ChildCompleted slug -> do
     let newState = case old of
           STLWaiting children ->
@@ -65,15 +73,20 @@ transitionTL (SomeTLState old) event = case event of
     let newPhase = STLFailed (slug <> ": " <> reason)
     logTransitionWithSlug slug (showPhase old) "Failed"
     pure (SomeTLState newPhase)
-  PRMerged prNum -> do
+  PRMerged _prNum slug -> do
     let newState = case old of
           STLMerging _ children ->
-            let remaining = Map.filter (\_ -> True) children
-             in if Map.size remaining <= 1
+            let remaining = Map.delete slug children
+             in if Map.null remaining
+                  then SomeTLState STLAllMerged
+                  else SomeTLState (STLWaiting remaining)
+          STLWaiting children ->
+            let remaining = Map.delete slug children
+             in if Map.null remaining
                   then SomeTLState STLAllMerged
                   else SomeTLState (STLWaiting remaining)
           _ -> SomeTLState old
-    logTransition (showPhase old) (showSomePhase newState)
+    logTransitionWithSlug slug (showPhase old) (showSomePhase newState)
     pure newState
   AllChildrenDone -> do
     logTransition (showPhase old) "Done"

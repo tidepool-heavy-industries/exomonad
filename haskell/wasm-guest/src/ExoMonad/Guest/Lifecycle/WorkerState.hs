@@ -44,6 +44,7 @@ describeWorkerPhase (SomeWorkerState (SWorkerFailed msg)) = "failed: " <> msg
 
 instance ToJSON SomeWorkerState where
   toJSON (SomeWorkerState SWorkerSpawned) = object ["phase" .= ("worker_spawned" :: Text)]
+  -- "worker_working" (not "worker_running") for backward compat with persisted KV data
   toJSON (SomeWorkerState SWorkerRunning) = object ["phase" .= ("worker_working" :: Text)]
   toJSON (SomeWorkerState SWorkerDone) = object ["phase" .= ("worker_done" :: Text)]
   toJSON (SomeWorkerState (SWorkerFailed msg)) = object ["phase" .= ("worker_failed" :: Text), "message" .= msg]
