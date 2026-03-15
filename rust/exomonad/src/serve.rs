@@ -902,7 +902,32 @@ Run `exomonad recompile` first to build it.",
         .await
         .insert(AgentName::from("root"), root_plugin.clone());
 
-    // Write server.pid for stale socket detection
+    // Check for existing server BEFORE writing our own PID
+    let socket_path_early = project_dir.join(".exo/server.sock");
+    if socket_path_early.exists() {
+        if let Ok(content) = std::fs::read_to_string(&server_pid_path) {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(pid) = parsed.get("pid").and_then(|v| v.as_u64()) {
+                    let pid_i32 = pid as i32;
+                    let is_self = pid_i32 == std::process::id() as i32;
+                    use nix::sys::signal;
+                    use nix::unistd::Pid;
+                    if !is_self && signal::kill(Pid::from_raw(pid_i32), None).is_ok() {
+                        return Err(anyhow::anyhow!(
+                            "Server already running (PID {}). Stop it first or use a different project directory.",
+                            pid
+                        ));
+                    }
+                }
+            }
+        }
+        // Stale socket (or our own PID) — clean up
+        info!(path = %socket_path_early.display(), "Removing stale socket");
+        let _ = std::fs::remove_file(&socket_path_early);
+        let _ = std::fs::remove_file(&server_pid_path);
+    }
+
+    // Write server.pid
     let pid_info = serde_json::json!({
         "pid": std::process::id(),
         "role": role_name,
@@ -982,24 +1007,9 @@ Run `exomonad recompile` first to build it.",
     // Bind Unix domain socket
     let socket_path = project_dir.join(".exo/server.sock");
 
-    // Check for existing server
+    // Stale socket check already done above (before PID write).
+    // Clean up if socket still exists (e.g., race or leftover).
     if socket_path.exists() {
-        let pid_path = project_dir.join(".exo/server.pid");
-        if let Ok(content) = std::fs::read_to_string(&pid_path) {
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(pid) = parsed.get("pid").and_then(|v| v.as_u64()) {
-                    use nix::sys::signal;
-                    use nix::unistd::Pid;
-                    if signal::kill(Pid::from_raw(pid as i32), None).is_ok() {
-                        return Err(anyhow::anyhow!(
-                            "Server already running (PID {}). Stop it first or use a different project directory.",
-                            pid
-                        ));
-                    }
-                }
-            }
-        }
-        // Stale socket — clean up
         info!(path = %socket_path.display(), "Removing stale socket");
         std::fs::remove_file(&socket_path)?;
     }
