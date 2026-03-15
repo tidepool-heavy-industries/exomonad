@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, instrument};
 
 use super::acp_registry::AcpRegistry;
 use super::EventLog;
@@ -1067,7 +1067,7 @@ impl AgentControlService {
     /// Spawn a Gemini worker agent (Phase 2/3).
     ///
     /// Creates a new git worktree and branch for isolation.
-    #[tracing::instrument(skip(self, options), fields(name = %options.name))]
+    #[instrument(skip_all, fields(name = %options.name, agent_type = "gemini"))]
     pub async fn spawn_worker(
         &self,
         options: &SpawnWorkerOptions,
@@ -1174,8 +1174,7 @@ impl AgentControlService {
     }
 
     /// Spawn a subtree agent (Claude-only) in a new git worktree.
-    #[tracing::instrument(skip(self, options), fields(branch_name = %options.branch_name))]
-    #[tracing::instrument(skip_all, fields(slug = %options.branch_name, agent_type = "claude"))]
+    #[instrument(skip_all, fields(slug = %options.branch_name, agent_type = "claude"))]
     pub async fn spawn_subtree(
         &self,
         options: &SpawnSubtreeOptions,
@@ -1361,8 +1360,7 @@ impl AgentControlService {
     }
 
     /// Spawn a Gemini leaf agent in a new git worktree.
-    #[tracing::instrument(skip(self, options), fields(branch_name = %options.branch_name))]
-    #[tracing::instrument(skip_all, fields(slug = %options.branch_name, agent_type = "gemini"))]
+    #[instrument(skip_all, fields(slug = %options.branch_name, agent_type = "gemini"))]
     pub async fn spawn_leaf_subtree(
         &self,
         options: &SpawnLeafOptions,
@@ -1933,6 +1931,20 @@ impl AgentControlService {
         if let Some(ref session) = self.tmux_session {
             env_vars.insert("EXOMONAD_TMUX_SESSION".to_string(), session.clone());
         }
+
+        // Propagate W3C traceparent for cross-agent trace correlation
+        {
+            use tracing_opentelemetry::OpenTelemetrySpanExt;
+            let cx = tracing::Span::current().context();
+            let mut injector = std::collections::HashMap::new();
+            opentelemetry::global::get_text_map_propagator(|propagator| {
+                propagator.inject_context(&cx, &mut injector);
+            });
+            if let Some(traceparent) = injector.get("traceparent") {
+                env_vars.insert("TRACEPARENT".to_string(), traceparent.clone());
+            }
+        }
+
         env_vars
     }
 

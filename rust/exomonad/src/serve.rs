@@ -646,6 +646,18 @@ pub async fn shutdown_endpoint(State(signal): State<Arc<tokio::sync::Notify>>) -
 // ============================================================================
 
 pub async fn run(config: &Config) -> Result<()> {
+    // Extract TRACEPARENT from env if this is a child agent (parent injected it)
+    if let Ok(tp) = std::env::var("TRACEPARENT") {
+        use opentelemetry::propagation::TextMapPropagator;
+        let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::new();
+        let mut carrier = std::collections::HashMap::new();
+        carrier.insert("traceparent".to_string(), tp.clone());
+        let parent_cx = propagator.extract(&carrier);
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        tracing::Span::current().set_parent(parent_cx);
+        info!(traceparent = %tp, "Inherited parent trace context");
+    }
+
     let project_dir = if config.project_dir.is_absolute() {
         config.project_dir.clone()
     } else {

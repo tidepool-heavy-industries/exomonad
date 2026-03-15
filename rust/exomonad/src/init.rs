@@ -27,6 +27,41 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
 
     // Resolve config
     let config = Config::discover()?;
+
+    // Check OTel endpoint reachability if configured
+    if let Some(ref endpoint) = config.otlp_endpoint {
+        if let Some(host_port) = endpoint
+            .strip_prefix("http://")
+            .or_else(|| endpoint.strip_prefix("https://"))
+        {
+            use std::net::ToSocketAddrs;
+            match host_port.to_socket_addrs() {
+                Ok(mut addrs) => {
+                    if let Some(addr) = addrs.next() {
+                        match std::net::TcpStream::connect_timeout(
+                            &addr,
+                            std::time::Duration::from_secs(2),
+                        ) {
+                            Ok(_) => info!(endpoint = %endpoint, "OTel endpoint reachable"),
+                            Err(_) => {
+                                eprint!(
+                                    "OTel endpoint {} unreachable — continue without tracing? [y/N] ",
+                                    endpoint
+                                );
+                                let mut input = String::new();
+                                std::io::stdin().read_line(&mut input)?;
+                                if !input.trim().eq_ignore_ascii_case("y") {
+                                    anyhow::bail!("OTel endpoint unreachable. Start it with:\n  docker compose -f ~/.exo/otel/docker-compose.yml up -d");
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => warn!(endpoint = %endpoint, error = %e, "Could not resolve OTel endpoint address"),
+            }
+        }
+    }
+
     let session = session_override.unwrap_or(config.tmux_session.clone());
 
     // Auto-build or copy WASM if it doesn't exist yet

@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::sync::{Mutex, RwLock};
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, instrument};
 
 type PluginMap = Arc<RwLock<HashMap<crate::AgentName, Arc<PluginManager>>>>;
 
@@ -329,6 +329,7 @@ impl GitHubPoller {
     /// Call handle_event on the agent's WASM plugin.
     /// The event JSON matches ExoMonad.Guest.Events.EventInput format:
     /// { "role": "dev", "event_type": "pr_review", "payload": { "kind": "approved", "pr_number": 123 } }
+    #[instrument(skip_all, fields(branch = %branch, event_type = %event_type, role = tracing::field::Empty))]
     async fn call_handle_event(
         &self,
         branch: &str,
@@ -348,6 +349,8 @@ impl GitHubPoller {
             AgentType::Gemini => "dev",
             AgentType::Shoal => "dev",
         };
+
+        tracing::Span::current().record("role", &role);
 
         let event_input = serde_json::json!({
             "role": role,

@@ -116,5 +116,9 @@ fn build_otel_provider(
         .with_resource(resource)
         .build();
 
+    opentelemetry::global::set_text_map_propagator(
+        opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+    );
+
     Ok(provider)
 }
