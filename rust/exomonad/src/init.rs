@@ -218,7 +218,7 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     }
 
     // Set EXOMONAD_TMUX_SESSION
-    let _ = std::process::Command::new("tmux")
+    let env_output = std::process::Command::new("tmux")
         .args([
             "set-environment",
             "-t",
@@ -226,18 +226,29 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
             "EXOMONAD_TMUX_SESSION",
             &session,
         ])
-        .output();
+        .output()
+        .context("Failed to set EXOMONAD_TMUX_SESSION in tmux session")?;
+    if !env_output.status.success() {
+        warn!(
+            "tmux set-environment failed: {}",
+            String::from_utf8_lossy(&env_output.stderr)
+        );
+    }
 
     // 3. Setup windows
     let ipc = TmuxIpc::new(&session);
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
 
     let server_target = server_window_id;
-    let _ = std::process::Command::new("tmux")
+    let rename_status = std::process::Command::new("tmux")
         .args(["rename-window", "-t", server_target.as_str(), "Server"])
-        .status();
+        .status()
+        .context("Failed to rename server window")?;
+    if !rename_status.success() {
+        warn!("tmux rename-window failed with status {}", rename_status);
+    }
     let serve_cmd = format!("EXOMONAD_TMUX_SESSION={} exomonad serve", &session);
-    let _ = std::process::Command::new("tmux")
+    let send_status = std::process::Command::new("tmux")
         .args([
             "send-keys",
             "-t",
@@ -245,7 +256,14 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
             &serve_cmd,
             "Enter",
         ])
-        .status();
+        .status()
+        .context("Failed to send server start command to tmux")?;
+    if !send_status.success() {
+        anyhow::bail!(
+            "Failed to start server in tmux (send-keys exited with {})",
+            send_status
+        );
+    }
 
     // Create "TL" window
     let base_command = match (config.root_agent_type, config.initial_prompt.as_deref()) {

@@ -532,7 +532,13 @@ impl AgentControlService {
     fn effective_birth_branch(&self, override_bb: Option<&BirthBranch>) -> BirthBranch {
         override_bb
             .cloned()
-            .unwrap_or_else(|| self.birth_branch.clone())
+            .unwrap_or_else(|| {
+                debug_assert!(
+                    self.birth_branch.as_str() != "unset",
+                    "birth_branch was never initialized via with_birth_branch()"
+                );
+                self.birth_branch.clone()
+            })
     }
 
     /// Common post-spawn bookkeeping.

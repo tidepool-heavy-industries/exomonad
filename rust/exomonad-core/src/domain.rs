@@ -5,14 +5,12 @@
 //! boundary (deserialization, construction) to ensure invalid values
 //! never enter the system.
 
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 #[cfg(feature = "runtime")]
 use anyhow::Result;
-#[cfg(feature = "runtime")]
-use std::path::{Path, PathBuf};
 #[cfg(feature = "runtime")]
 use tokio::fs;
 
@@ -152,11 +150,11 @@ validated_string!(
 impl BirthBranch {
     /// Root TL birth-branch from the current git branch.
     /// Returns an error if git is not available or HEAD is detached.
-    pub fn root() -> Result<Self, anyhow::Error> {
+    pub fn root() -> std::result::Result<Self, anyhow::Error> {
         let output = std::process::Command::new("git")
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
             .output()
-            .context("Failed to execute git rev-parse")?;
+            .map_err(|e| anyhow::anyhow!("Failed to execute git rev-parse: {}", e))?;
 
         if !output.status.success() {
             anyhow::bail!(
@@ -683,12 +681,14 @@ impl RoutingInfo {
         }
     }
 
+    #[cfg(feature = "runtime")]
     pub async fn write_to_dir(&self, dir: &Path) -> Result<()> {
         let json = serde_json::to_string_pretty(self)?;
         fs::write(dir.join("routing.json"), json).await?;
         Ok(())
     }
 
+    #[cfg(feature = "runtime")]
     pub async fn read_from_dir(dir: &Path) -> Result<Self> {
         let content = fs::read_to_string(dir.join("routing.json")).await?;
         Ok(serde_json::from_str(&content)?)

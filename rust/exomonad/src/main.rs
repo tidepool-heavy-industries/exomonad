@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use exomonad_core::{HookEnvelope, HookEventType};
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
-use tracing::debug;
+use tracing::{debug, warn};
 
 // ============================================================================
 // CLI Types
@@ -188,7 +188,13 @@ async fn main() -> Result<()> {
             };
 
             let client = uds_client::ServerClient::new(socket);
-            let json_body: serde_json::Value = serde_json::from_str(&body).unwrap_or(serde_json::json!({}));
+            let json_body: serde_json::Value = match serde_json::from_str(&body) {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!(error = %e, body_len = body.len(), "Hook body is not valid JSON, using empty object");
+                    serde_json::json!({})
+                }
+            };
 
             match client.post_json::<serde_json::Value, HookEnvelope>(&path, &json_body).await {
                 Ok(resp) => {
@@ -209,7 +215,10 @@ async fn main() -> Result<()> {
             let socket_path = std::env::var("EXOMONAD_CONTROL_SOCKET").unwrap_or_else(|_| ".exo/sockets/control.sock".to_string());
             let mut stream = UnixStream::connect(&socket_path).await?;
 
-            let parsed_payload = payload.and_then(|p| serde_json::from_str(&p).ok());
+            let parsed_payload = match payload {
+                Some(p) => Some(serde_json::from_str(&p).context("Invalid JSON in --payload")?),
+                None => None,
+            };
             let request = ServiceRequest::UserInteraction {
                 request_id: id,
                 payload: parsed_payload,

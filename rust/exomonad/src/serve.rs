@@ -554,7 +554,7 @@ pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
     Json(serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
-        "role": state.wasm_name, // Using wasm_name as a proxy for role here, or we could pass role to AppState
+        "role": state.default_role.as_str(),
         "wasm_hash": wasm_hash,
     }))
 }
@@ -934,6 +934,7 @@ Run `exomonad recompile` first to build it.",
         wasm_path: wasm_path.clone(),
         wasm_dir: wasm_dir.clone(),
         wasm_name: wasm_name.clone(),
+        default_role: config.role.clone(),
         worktree_base: worktree_base.clone(),
         event_log: event_log.clone(),
     };

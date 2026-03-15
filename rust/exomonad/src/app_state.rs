@@ -1,6 +1,6 @@
 use exomonad_core::effects::EffectRegistry;
 use exomonad_core::services::EventLog;
-use exomonad_core::{AgentName, PluginManager};
+use exomonad_core::{AgentName, PluginManager, Role};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,6 +13,7 @@ pub struct AppState {
     pub wasm_path: PathBuf,
     pub wasm_dir: PathBuf,
     pub wasm_name: String,
+    pub default_role: Role,
     pub worktree_base: PathBuf,
     pub event_log: Option<Arc<EventLog>>,
 }
