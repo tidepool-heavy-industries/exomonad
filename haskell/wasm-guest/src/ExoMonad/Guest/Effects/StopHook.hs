@@ -20,7 +20,9 @@ import Effects.Git qualified as Git
 import Effects.Log qualified as Log
 import ExoMonad.Effects.Git (GitGetBranch, GitGetStatus, GitHasUnpushedCommits)
 import ExoMonad.Effects.Log (LogEmitEvent)
-import ExoMonad.Guest.Lifecycle (DevPhase (..), getDevPhase)
+import ExoMonad.Guest.Lifecycle (DevPhase, getDevPhase)
+import AgentTransition (StopCheckResult(..))
+import DevTransitions qualified
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Types (StopDecision (..), StopHookOutput (..), allowStopResponse, blockStopResponse)
 import ExoMonad.Types (Effects)
@@ -30,11 +32,6 @@ import System.Environment (lookupEnv)
 -- Main Check Logic
 -- ============================================================================
 
-data StopCheckResult
-  = MustBlock Text   -- ^ changes_requested: agent must address
-  | ShouldNudge Text -- ^ informational: agent can still stop
-  | Clean            -- ^ no issues
-
 runStopHookChecks :: Eff Effects StopHookOutput
 runStopHookChecks = do
   branch <- getCurrentBranch
@@ -43,26 +40,19 @@ runStopHookChecks = do
     else do
       mPhase <- getDevPhase
       result <- case mPhase of
-        Just (DevChangesRequested pr _) -> pure $ MustBlock $
-          "PR #" <> T.pack (show pr) <> " has changes requested. Address review comments before stopping."
-        Just (DevPRFiled pr) -> pure $ ShouldNudge $
-          "PR #" <> T.pack (show pr) <> " awaiting review. System will auto-notify parent."
-        Just (DevUnderReview pr _) -> pure $ ShouldNudge $
-          "PR #" <> T.pack (show pr) <> " under review. System will auto-notify parent."
-        Just DevSpawned -> pure Clean
-        Just DevWorking -> do
-          nudge <- checkUncommittedWork branch
-          case nudge of
-            Just msg -> pure (ShouldNudge msg)
-            Nothing -> pure Clean
-        Just (DevApproved _) -> pure Clean
-        Just DevDone -> pure Clean
-        Just (DevFailed _) -> pure Clean
+        Just phase -> case DevTransitions.canExit phase of
+          r@(MustBlock _) -> pure r
+          ShouldNudge msg -> pure (ShouldNudge msg)
+          Clean -> do
+            nudge <- checkUncommittedWork branch
+            case nudge of
+              Just msg -> pure (ShouldNudge (T.unpack msg))
+              Nothing -> pure Clean
         Nothing -> do
           -- No phase set yet — fall back to git status check
           nudge <- checkUncommittedWork branch
           case nudge of
-            Just msg -> pure (ShouldNudge msg)
+            Just msg -> pure (ShouldNudge (T.unpack msg))
             Nothing -> pure Clean
 
       -- Log to event log for observability
@@ -75,13 +65,13 @@ runStopHookChecks = do
         })
 
       case result of
-        MustBlock msg -> pure $ blockStopResponse msg
-        ShouldNudge msg -> pure $ StopHookOutput Allow (Just msg)
+        MustBlock msg -> pure $ blockStopResponse (T.pack msg)
+        ShouldNudge msg -> pure $ StopHookOutput Allow (Just (T.pack msg))
         Clean -> pure allowStopResponse
 
 describeResult :: StopCheckResult -> Text
-describeResult (MustBlock msg) = "block: " <> msg
-describeResult (ShouldNudge msg) = "nudge: " <> msg
+describeResult (MustBlock msg) = "block: " <> T.pack msg
+describeResult (ShouldNudge msg) = "nudge: " <> T.pack msg
 describeResult Clean = "clean"
 
 -- | Check for uncommitted/unpushed work and nudge if found.

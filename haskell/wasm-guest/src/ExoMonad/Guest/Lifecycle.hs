@@ -9,6 +9,8 @@ module ExoMonad.Guest.Lifecycle
     WorkerPhase (..),
     PRNumber,
     ReviewRound,
+    getPhase,
+    setPhase,
     getDevPhase,
     setDevPhase,
     getTLPhase,

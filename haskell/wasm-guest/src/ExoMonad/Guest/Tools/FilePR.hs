@@ -11,7 +11,6 @@ import Control.Monad (void)
 import Control.Monad.Freer (Eff)
 import Data.Aeson (FromJSON, Value, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
-import Data.ByteString.Lazy qualified as BSL
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -19,8 +18,10 @@ import Effects.EffectError (EffectError (..))
 import Effects.FilePr qualified as FP
 import Effects.Log qualified as Log
 import ExoMonad.Effects.FilePR (FilePRFilePr)
-import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
-import ExoMonad.Guest.Lifecycle (DevPhase (..), setDevPhase)
+import ExoMonad.Effects.Log (LogError, LogInfo)
+import AgentTransition (applyTransition)
+import DevTransitions (DevEvent(..))
+import ExoMonad.Guest.Lifecycle (DevPhase)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
@@ -103,17 +104,5 @@ instance MCPTool FilePR where
                   fpoCreated = FP.filePrResponseCreated resp
                 }
         void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("FilePR: Success - PR #" <> T.pack (show $ fpoNumber output)), Log.infoRequestFields = ""})
-        let eventPayload = BSL.toStrict $ Aeson.encode $ object
-              [ "pr_number" .= fpoNumber output,
-                "pr_url" .= fpoUrl output,
-                "head_branch" .= fpoHeadBranch output,
-                "base_branch" .= fpoBaseBranch output,
-                "created" .= fpoCreated output
-              ]
-        void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
-          { Log.emitEventRequestEventType = "pr.filed",
-            Log.emitEventRequestPayload = eventPayload,
-            Log.emitEventRequestTimestamp = 0
-          })
-        setDevPhase (DevPRFiled (fpoNumber output))
+        applyTransition @DevPhase (PRCreated (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
         pure $ successResult (Aeson.toJSON output)

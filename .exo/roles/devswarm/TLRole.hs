@@ -7,11 +7,15 @@
 module TLRole (config, Tools) where
 
 import ExoMonad
-import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
+import Control.Monad.Freer (Eff)
+import ExoMonad.Guest.Lifecycle (getTLPhase)
+import TLTransitions qualified
+import AgentTransition (StopCheckResult(..))
 import PRReviewHandler (prReviewEventHandlers)
 import ExoMonad.Guest.Tools.MergePR (MergePR)
-import ExoMonad.Guest.Types (allowResponse)
-import ExoMonad.Types (HookConfig (..), defaultSessionStartHook, teamRegistrationPostToolUse)
+import ExoMonad.Guest.Types (StopDecision(..), StopHookOutput(..), blockStopResponse, allowStopResponse, allowResponse)
+import ExoMonad.Types (HookConfig (..), Effects, defaultSessionStartHook, teamRegistrationPostToolUse)
+import Data.Text qualified as T
 
 data Tools mode = Tools
   { spawn :: SpawnTools mode,
@@ -21,6 +25,16 @@ data Tools mode = Tools
     sendMessage :: mode :- SendMessage
   }
   deriving (Generic)
+
+tlStopCheck :: Eff Effects StopHookOutput
+tlStopCheck = do
+  mPhase <- getTLPhase
+  case mPhase of
+    Just phase -> case TLTransitions.canExit phase of
+      MustBlock msg -> pure $ blockStopResponse (T.pack msg)
+      ShouldNudge msg -> pure $ StopHookOutput Allow (Just (T.pack msg))
+      Clean -> pure allowStopResponse
+    Nothing -> pure allowStopResponse
 
 config :: RoleConfig (Tools AsHandler)
 config =
@@ -38,8 +52,8 @@ config =
         HookConfig
           { preToolUse = \_ -> pure (allowResponse Nothing),
             postToolUse = teamRegistrationPostToolUse,
-            onStop = \_ -> runStopHookChecks,
-            onSubagentStop = \_ -> runStopHookChecks,
+            onStop = \_ -> tlStopCheck,
+            onSubagentStop = \_ -> tlStopCheck,
             onSessionStart = defaultSessionStartHook
           },
       eventHandlers = prReviewEventHandlers
