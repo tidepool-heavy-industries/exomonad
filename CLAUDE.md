@@ -175,9 +175,9 @@ wasm_name = "devswarm"       # auto-detected from .exo/roles/ if exactly one rol
 
 **Hook configuration** is auto-generated in two places:
 - **`exomonad init`**: Writes `.claude/settings.local.json` with all hooks (SessionStart, PreToolUse, etc.) for the root TL session
-- **`spawn_subtree`**: Writes `.claude/settings.local.json` into each spawned Claude worktree
+- **`fork_wave`**: Writes `.claude/settings.local.json` into each spawned Claude worktree
 
-The `SessionStart` hook is critical — it registers the Claude session UUID in `ClaudeSessionRegistry`, which `spawn_subtree` reads to pass `--resume <uuid> --fork-session` for context inheritance. Without it, spawned subtrees start with no context.
+The `SessionStart` hook is critical — it registers the Claude session UUID in `ClaudeSessionRegistry`, which `fork_wave` reads to pass `--resume <uuid> --fork-session` for context inheritance. Without it, spawned subtrees start with no context.
 
 Gemini agents get settings via `GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var (NOT `.gemini/settings.json`).
 
@@ -193,7 +193,7 @@ What you can do with exomonad right now, end-to-end.
 
 Spawn heterogeneous agent teams as a recursive tree:
 
-- **`spawn_subtree`** — Fork a Claude agent into its own git worktree + tmux window. Gets TL role (can spawn its own children). Depth-capped at 2.
+- **`fork_wave`** — Fork N parallel Claude agents from your current conversation context, each in its own worktree. Children inherit the full context window and only need a slug + task. Requires clean git state (committed and pushed).
 - **`spawn_leaf_subtree`** — Fork a Gemini agent into its own git worktree + tmux window. Gets dev role, files PR when done.
 - **`spawn_workers`** — Spawn multiple Gemini agents as tmux panes in the parent's directory. Ephemeral (no branch, no worktree). Config in `.exo/agents/{name}/`.
 
@@ -201,9 +201,7 @@ Spawn heterogeneous agent teams as a recursive tree:
 
 **Multi-WASM:** The server loads multiple WASM modules from `.exo/wasm/`. Convention: if `wasm-guest-{role}.wasm` exists, it's used for that role; otherwise falls back to `wasm-guest-{wasm_name}.wasm` (default). Drop a WASM file, it's available.
 
-**Standalone repo mode:** Both `spawn_subtree` and `spawn_leaf_subtree` accept `standalone_repo: true`. Instead of a git worktree (which shares `.git` with the parent), this creates a fresh `git init` repo. Claude's native project discovery treats the local `.git` as the boundary — the agent cannot traverse into the parent repository. Use this for information segmentation (e.g., enterprise customers with proprietary root-level IP).
-
-**Permissions:** `spawn_subtree` accepts optional `permissions` (Claude-only, not available on Gemini spawns). The Haskell DSL (`ClaudePermissions` with `ToolPattern` sum type) renders to Claude Code's native `permissions.allow`/`permissions.deny` format in `settings.local.json`. Combine with `--permission-mode dontAsk` for deny-by-default allowlisting.
+**Standalone repo mode:** `spawn_leaf_subtree` accepts `standalone_repo: true`. Instead of a git worktree (which shares `.git` with the parent), this creates a fresh `git init` repo. Claude's native project discovery treats the local `.git` as the boundary — the agent cannot traverse into the parent repository. Use this for information segmentation (e.g., enterprise customers with proprietary root-level IP).
 
 **Branch naming:** `{parent_branch}.{slug}` (dot separator). PRs target parent branch, not main — merged via recursive fold up the tree.
 
@@ -272,7 +270,7 @@ Views are defined in `.exo/kaizen.sql`. Add new views there — they're availabl
 ```
 Human in tmux session
     └── Claude Code + exomonad (Rust + Haskell WASM)
-            ├── MCP tools via WASM (spawn_subtree, spawn_leaf_subtree, spawn_workers, file_pr, etc.)
+            ├── MCP tools via WASM (fork_wave, spawn_leaf_subtree, spawn_workers, etc.)
             └── Agent tree:
                 ├── worktree: main.feature-a (TL role, can spawn children)
                 │   ├── worker: rust-impl (Gemini, in-place pane)
@@ -323,7 +321,7 @@ Claude Code → exomonad hook pre-tool-use (reads stdin JSON)
 Claude Code starts → exomonad hook session-start
 → WASM yields SessionRegister effect with claude_session_id
 → Server stores in ClaudeSessionRegistry
-→ spawn_subtree uses this ID for --fork-session
+→ fork_wave uses this ID for --fork-session
 ```
 
 **Event Handler Call:**
@@ -343,7 +341,7 @@ All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/To
 
 | Tool | Role | Description |
 |------|------|-------------|
-| `spawn_subtree` | tl | Fork Claude agent into worktree or standalone repo + tmux window (TL role, can spawn children). Supports `permissions` and `standalone_repo`. |
+| `fork_wave` | tl | Fork N parallel Claude agents from current conversation context, each in its own worktree. Requires clean git state. |
 | `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree or standalone repo + tmux window (dev role, files PR). Supports `standalone_repo`. |
 | `spawn_workers` | tl | Spawn Gemini agents as tmux panes (ephemeral, no worktree) |
 | `file_pr` | tl, dev | Create/update PR (auto-detects base branch from naming) |

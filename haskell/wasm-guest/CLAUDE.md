@@ -27,11 +27,11 @@ The guest exports MCP tools that agents can call. These are defined in `ExoMonad
 
 ### Spawn Tools (`ExoMonad.Guest.Tools.Spawn`)
 
-- **`spawn_subtree`**: Fork a Claude agent in a new git worktree + tmux window (TL role, can further decompose). Supports `permissions` and `standalone_repo: true`.
+- **`fork_wave`**: Fork N parallel Claude agents from current conversation context, each in its own worktree. Children inherit full context and only need a slug + task. Requires clean git state.
 - **`spawn_leaf_subtree`**: Fork a Gemini agent in a new git worktree + tmux window (dev role, isolated, files PR). Supports `standalone_repo: true`.
 - **`spawn_workers`**: Spawn ephemeral Gemini agents as panes in the parent directory (no branch, no worktree).
 
-**Standalone repo mode**: Both `spawn_subtree` and `spawn_leaf_subtree` accept `standalone_repo: true`. This creates a fresh `git init` repo instead of a worktree, providing stronger filesystem isolation for the subagent.
+**Standalone repo mode**: `spawn_leaf_subtree` accepts `standalone_repo: true`. This creates a fresh `git init` repo instead of a worktree, providing stronger filesystem isolation for the subagent.
 
 ### Defining MCP Tools (`ExoMonad.Guest.Tool.Class`)
 
@@ -74,7 +74,7 @@ Pure Haskell prompt assembly for worker/leaf agents. Replaces the former templat
 
 | Role | Tools | Spawned by |
 |------|-------|------------|
-| **tl** | spawn (3), merge_pr, file_pr, notify_parent, send_message | `spawn_subtree` |
+| **tl** | spawn (3), merge_pr, file_pr, notify_parent, send_message | `fork_wave` |
 | **dev** | file_pr, notify_parent, send_message, shutdown | `spawn_leaf_subtree` |
 | **worker** | notify_parent, send_message, shutdown | `spawn_workers` |
 

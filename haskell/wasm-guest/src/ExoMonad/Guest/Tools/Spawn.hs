@@ -1,9 +1,10 @@
--- | Hylo spawn primitives: spawn_subtree, spawn_workers.
+-- | Hylo spawn primitives: fork_wave, spawn_leaf_subtree, spawn_workers.
 module ExoMonad.Guest.Tools.Spawn
-  ( SpawnSubtree,
+  ( ForkWave,
+    ForkWaveArgs (..),
+    ForkWaveChild (..),
     SpawnLeafSubtree,
     SpawnWorkers,
-    SpawnSubtreeArgs (..),
     SpawnLeafSubtreeArgs (..),
     SpawnWorkersArgs (..),
     WorkerSpec (..),
@@ -24,13 +25,14 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Effects.EffectError (Custom (..), EffectError (..), EffectErrorKind (..), InvalidInput (..), NetworkError (..), NotFound (..), PermissionDenied (..), Timeout (..))
+import Effects.Git qualified as Git
+import ExoMonad.Effects.Git (GitGetStatus, GitHasUnpushedCommits)
 import Effects.Log qualified as Log
 import ExoMonad.Effects.Log (LogEmitEvent)
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
 import ExoMonad.Guest.Tool.Class
 import ExoMonad.Guest.Tool.Schema (JsonSchema (..), genericToolSchemaWith)
-import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
-import ExoMonad.Guest.Types.Permissions
+import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import GHC.Generics (Generic)
 
 -- ============================================================================
@@ -58,90 +60,103 @@ hasCustomCode code (EffectError (Just (EffectErrorKindCustom c))) = customCode c
 hasCustomCode _ _ = False
 
 -- ============================================================================
--- SpawnSubtree
+-- ForkWave
 -- ============================================================================
 
-data SpawnSubtree
+data ForkWave
 
-data SpawnSubtreeArgs = SpawnSubtreeArgs
-  { ssTask :: Text,
-    ssBranchName :: Text,
-    ssForkSession :: Maybe Bool,
-    ssPermissionMode :: Maybe Text,
-    ssAllowedTools :: Maybe [Text],
-    ssDisallowedTools :: Maybe [Text],
-    ssWorkingDir :: Maybe Text,
-    ssPermissions :: Maybe ClaudePermissions,
-    ssStandaloneRepo :: Maybe Bool,
-    ssAllowedDirs :: Maybe [Text]
+data ForkWaveChild = ForkWaveChild
+  { fwcSlug :: Text,
+    fwcTask :: Text
   }
   deriving (Show, Eq, Generic)
 
-instance FromJSON SpawnSubtreeArgs where
-  parseJSON = withObject "SpawnSubtreeArgs" $ \v ->
-    SpawnSubtreeArgs
-      <$> v .: "task"
-      <*> v .: "branch_name"
-      <*> v .:? "fork_session"
-      <*> v .:? "permission_mode"
-      <*> v .:? "allowed_tools"
-      <*> v .:? "disallowed_tools"
-      <*> v .:? "working_dir"
-      <*> v .:? "permissions"
-      <*> v .:? "standalone_repo"
-      <*> v .:? "allowed_dirs"
+instance FromJSON ForkWaveChild where
+  parseJSON = withObject "ForkWaveChild" $ \v ->
+    ForkWaveChild
+      <$> v .: "slug"
+      <*> v .: "task"
 
-instance MCPTool SpawnSubtree where
-  type ToolArgs SpawnSubtree = SpawnSubtreeArgs
-  toolName = "spawn_subtree"
-  toolDescription = "Fork a Claude agent into its own worktree and tmux window. The child gets TL role (can spawn its own children). IMPORTANT: You MUST create a team using TeamCreate BEFORE calling any spawn tool — without a team, child agent messages will not be delivered to you. After spawning, return immediately — you will be notified when the agent sends updates or when Copilot approves their PR. Do not poll or wait. Prefer spawn_leaf_subtree or spawn_workers for implementation work — Gemini agents are highly capable implementers and cost 10-30x less."
+instance JsonSchema ForkWaveChild where
+  toSchema =
+    Aeson.Object $
+      genericToolSchemaWith @ForkWaveChild
+        [ ("slug", "Branch name suffix (will be prefixed with current branch)"),
+          ("task", "One-line task description — the child inherits your full context, so keep it brief")
+        ]
+
+data ForkWaveArgs = ForkWaveArgs
+  { fwaChildren :: [ForkWaveChild]
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON ForkWaveArgs where
+  parseJSON = withObject "ForkWaveArgs" $ \v ->
+    ForkWaveArgs <$> v .: "children"
+
+instance MCPTool ForkWave where
+  type ToolArgs ForkWave = ForkWaveArgs
+  toolName = "fork_wave"
+  toolDescription = "Fork any number of parallel Claude agents at this point in the conversation. Each inherits your full context window and starts in a worktree branched off your branch. Requires clean git state (committed and pushed). Use this tool to parallelize when work becomes applicative and can be split into independent streams."
   toolSchema =
-    genericToolSchemaWith @SpawnSubtreeArgs
-      [ ("task", "Description of the sub-problem to solve"),
-        ("branch_name", "Branch name suffix (will be prefixed with current branch)"),
-        ("fork_session", "Whether to fork the parent's conversation context into the child (default: false). Set true to inherit context, but may fail if the session is stale or compacted."),
-        ("permission_mode", "Permission mode for Claude (e.g., 'plan', 'default'). Omit for --dangerously-skip-permissions."),
-        ("allowed_tools", "Tool patterns to allow (e.g., ['Read', 'Grep']). Omit for no restriction."),
-        ("disallowed_tools", "Tool patterns to disallow (e.g., ['Bash']). Omit for no restriction."),
-        ("working_dir", "Working directory for the agent (relative to worktree root)."),
-        ("permissions", "Explicit permission rules (object with 'allow' and 'deny' arrays of strings)."),
-        ("standalone_repo", "When true, creates a standalone git repo instead of a worktree for information isolation."),
-        ("allowed_dirs", "Directories from the parent project to be copied into the agent's context (only for standalone_repo).")
+    genericToolSchemaWith @ForkWaveArgs
+      [ ("children", "Array of children to spawn, each with a slug and task")
       ]
   toolHandlerEff args = do
-    let forkSession = fromMaybe False (ssForkSession args)
-        standaloneRepo = fromMaybe False (ssStandaloneRepo args)
-        perms = AC.PermissionFlags
-          { AC.permMode = ssPermissionMode args,
-            AC.allowedTools = fromMaybe [] (ssAllowedTools args),
-            AC.disallowedTools = fromMaybe [] (ssDisallowedTools args)
-          }
-        cfg = AC.SpawnSubtreeConfig
-          { AC.stcTask = ssTask args
-          , AC.stcBranchName = ssBranchName args
-          , AC.stcForkSession = forkSession
-          , AC.stcRole = Nothing
-          , AC.stcAgentType = AC.Claude
-          , AC.stcPerms = perms
-          , AC.stcWorkingDir = ssWorkingDir args
-          , AC.stcPermissions = ssPermissions args
-          , AC.stcStandaloneRepo = standaloneRepo
-          , AC.stcAllowedDirs = fromMaybe [] (ssAllowedDirs args)
-          }
-    result <- AC.spawnSubtree cfg
-    case result of
-      Left err | hasCustomCode "worktree.branch_exists" err -> do
-        let cfg' = cfg { AC.stcBranchName = AC.stcBranchName cfg <> "-2" }
-        result' <- AC.spawnSubtree cfg'
-        case result' of
-          Left err' -> pure $ errorResult (spawnErrorMessage err')
-          Right spawnResult -> do
-            emitSpawnEvent (AC.stcBranchName cfg') "claude" (ssTask args)
-            pure $ successResult $ Aeson.toJSON spawnResult
-      Left err -> pure $ errorResult (spawnErrorMessage err)
-      Right spawnResult -> do
-        emitSpawnEvent (ssBranchName args) "claude" (ssTask args)
-        pure $ successResult $ Aeson.toJSON spawnResult
+    -- Check for uncommitted changes
+    statusResult <- suspendEffect @GitGetStatus (Git.GetStatusRequest {Git.getStatusRequestWorkingDir = "."})
+    case statusResult of
+      Right resp
+        | not (null (Git.getStatusResponseDirtyFiles resp))
+          || not (null (Git.getStatusResponseStagedFiles resp)) ->
+          pure $ errorResult "Working tree has uncommitted changes. Commit and push your changes first, then call fork_wave."
+      Left err ->
+        pure $ errorResult ("Failed to check git status: " <> spawnErrorMessage err)
+      _ -> do
+        -- Check for unpushed commits
+        unpushedResult <- suspendEffect @GitHasUnpushedCommits (Git.HasUnpushedCommitsRequest {Git.hasUnpushedCommitsRequestWorkingDir = ".", Git.hasUnpushedCommitsRequestRemote = "origin"})
+        case unpushedResult of
+          Right resp | Git.hasUnpushedCommitsResponseHasUnpushed resp ->
+            pure $ errorResult "Local commits not pushed to remote. Run 'git push' first, then call fork_wave."
+          Left err ->
+            pure $ errorResult ("Failed to check unpushed commits: " <> spawnErrorMessage err)
+          _ -> do
+            -- Spawn each child with fork_session=true
+            results <- forM (fwaChildren args) $ \child -> do
+              let cfg = AC.SpawnSubtreeConfig
+                    { AC.stcTask = fwcTask child
+                    , AC.stcBranchName = fwcSlug child
+                    , AC.stcForkSession = True
+                    , AC.stcRole = Nothing
+                    , AC.stcAgentType = AC.Claude
+                    , AC.stcPerms = AC.defaultPermFlags
+                    , AC.stcWorkingDir = Nothing
+                    , AC.stcPermissions = Nothing
+                    , AC.stcStandaloneRepo = False
+                    , AC.stcAllowedDirs = []
+                    }
+              result <- AC.spawnSubtree cfg
+              case result of
+                Left err | hasCustomCode "worktree.branch_exists" err -> do
+                  let cfg' = cfg { AC.stcBranchName = fwcSlug child <> "-2" }
+                  result' <- AC.spawnSubtree cfg'
+                  case result' of
+                    Left err' -> pure (Left err')
+                    Right spawnResult -> do
+                      emitSpawnEvent (fwcSlug child <> "-2") "claude" (fwcTask child)
+                      pure (Right spawnResult)
+                Left err -> pure (Left err)
+                Right spawnResult -> do
+                  emitSpawnEvent (fwcSlug child) "claude" (fwcTask child)
+                  pure (Right spawnResult)
+
+            let (errs, successes) = partitionEithers results
+            pure $
+              successResult $
+                object
+                  [ "spawned" .= map Aeson.toJSON successes,
+                    "errors" .= map (Aeson.String . spawnErrorMessage) errs
+                  ]
 
 -- ============================================================================
 -- SpawnLeafSubtree
