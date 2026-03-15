@@ -2,6 +2,8 @@
 
 module ExoMonad.Guest.Effects.StopHook
   ( runStopHookChecks,
+    checkUncommittedWork,
+    getCurrentBranch,
 
     -- * Agent identity helpers
     getAgentId,

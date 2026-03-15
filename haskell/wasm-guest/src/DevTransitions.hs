@@ -38,7 +38,7 @@ instance AgentTransition DevPhase DevEvent where
     PRCreated prNum url branch -> do
       let newPhase = DevPRFiled prNum
       pure (newPhase, [logTransition phase newPhase, emitPREvent prNum url branch])
-    NotifyParentSuccess msg ->
+    NotifyParentSuccess _msg ->
       pure (DevDone, [logTransition phase DevDone])
     NotifyParentFailure msg ->
       let newPhase = DevFailed msg
@@ -51,13 +51,13 @@ instance AgentTransition DevPhase DevEvent where
     ReviewApproved prNum -> do
       let newPhase = DevApproved prNum
       pure (newPhase, [logTransition phase newPhase])
-    FixesPushed prNum ci -> do
+    FixesPushed prNum _ci -> do
       let round = case phase of
             DevUnderReview _ r -> r + 1
             _ -> 1
           newPhase = DevUnderReview prNum round
       pure (newPhase, [logTransition phase newPhase])
-    CommitsPushed prNum ci -> do
+    CommitsPushed prNum _ci -> do
       let round = case phase of
             DevUnderReview _ r -> r + 1
             _ -> 1
@@ -93,7 +93,7 @@ emitPREvent prNum url branch = do
         , "head_branch" .= branch
         ]
   void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
-    { Log.emitEventRequestEventType = "agent.phase_transition"
+    { Log.emitEventRequestEventType = "pr.filed"
     , Log.emitEventRequestPayload = eventPayload
     , Log.emitEventRequestTimestamp = 0
     })
