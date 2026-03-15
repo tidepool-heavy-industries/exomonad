@@ -38,6 +38,8 @@ cabal.project.wasm.dev
 .exo/sockets/
 .exomonad/logs/
 .exo/logs/
+.exomonad/tmp/
+.exo/tmp/
 .exomonad/wasm-cache
 .exo/wasm-cache
 .exomonad/wasm-cache.toml

@@ -229,6 +229,7 @@ pub async fn deliver_to_agent(
                     let agent = agent_key.to_string();
                     let target = tmux_target.to_string();
                     let msg = message.to_string();
+                    let pd = project_dir.to_path_buf();
                     tokio::spawn(async move {
                         for attempt in 1..=3 {
                             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
@@ -253,7 +254,7 @@ pub async fn deliver_to_agent(
                             target = %target,
                             "Teams inbox message not read after 30s, falling back to tmux injection"
                         );
-                        if let Err(e) = tmux_events::inject_input(&target, &msg).await {
+                        if let Err(e) = tmux_events::inject_input(&target, &msg, &pd).await {
                             warn!(target = %target, error = %e, "tmux inject_input failed (Teams fallback)");
                         }
                     });
@@ -416,7 +417,7 @@ pub async fn deliver_to_agent(
             chars = message.len(),
             "Injecting message via routing.json"
         );
-        let outcome = match tmux_events::inject_input(&target, message).await {
+        let outcome = match tmux_events::inject_input(&target, message, project_dir).await {
             Ok(()) => "success",
             Err(e) => {
                 warn!(target = %target, error = %e, "tmux inject_input failed (routing.json)");
@@ -444,7 +445,7 @@ pub async fn deliver_to_agent(
         chars = message.len(),
         "Injecting message into agent pane via tmux"
     );
-    let outcome = match tmux_events::inject_input(tmux_target, message).await {
+    let outcome = match tmux_events::inject_input(tmux_target, message, project_dir).await {
         Ok(()) => "success",
         Err(e) => {
             warn!(target = %tmux_target, error = %e, "tmux inject_input failed (fallback)");
