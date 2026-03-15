@@ -5,6 +5,7 @@
 //! boundary (deserialization, construction) to ensure invalid values
 //! never enter the system.
 
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -150,17 +151,26 @@ validated_string!(
 
 impl BirthBranch {
     /// Root TL birth-branch from the current git branch.
-    /// Detects the branch via `git rev-parse --abbrev-ref HEAD`, falls back to "main".
-    pub fn root() -> Self {
-        let branch = std::process::Command::new("git")
+    /// Returns an error if git is not available or HEAD is detached.
+    pub fn root() -> Result<Self, anyhow::Error> {
+        let output = std::process::Command::new("git")
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
             .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .filter(|b| !b.is_empty() && b != "HEAD")
-            .unwrap_or_else(|| "main".to_string());
-        Self(branch)
+            .context("Failed to execute git rev-parse")?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "git rev-parse failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if branch.is_empty() || branch == "HEAD" {
+            anyhow::bail!("HEAD is detached or branch name is empty");
+        }
+
+        Ok(Self(branch))
     }
 
     /// Depth in the agent tree (0 = root TL, 1 = first subtree, etc.).

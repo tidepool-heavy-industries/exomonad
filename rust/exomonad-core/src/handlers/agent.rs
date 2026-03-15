@@ -757,7 +757,9 @@ mod tests {
     fn test_handler() -> AgentHandler {
         let dir = PathBuf::from(".");
         let git_wt = Arc::new(GitWorktreeService::new(dir.clone()));
-        let service = Arc::new(AgentControlService::new(dir, None, git_wt));
+        let service = Arc::new(
+            AgentControlService::new(dir, None, git_wt),
+        );
         AgentHandler::new(service)
     }
 

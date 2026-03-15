@@ -138,9 +138,9 @@ pub async fn resolve_plugin(
 
     // Slow path: resolve birth branch and create plugin
     let birth_branch = if name == "root" {
-        BirthBranch::root()
+        BirthBranch::root()?
     } else {
-        resolve_agent_birth_branch(worktree_base, name).await
+        resolve_agent_birth_branch(worktree_base, name).await?
     };
 
     get_or_create_plugin(plugins, agent_name, birth_branch, registry, wasm_path).await
@@ -149,7 +149,7 @@ pub async fn resolve_plugin(
 pub async fn resolve_agent_birth_branch(
     worktree_base: &StdPath,
     agent_name: &str,
-) -> BirthBranch {
+) -> anyhow::Result<BirthBranch> {
     let slug = agent_name
         .trim_end_matches("-claude")
         .trim_end_matches("-gemini");
@@ -165,7 +165,7 @@ pub async fn resolve_agent_birth_branch(
         Ok(output) if output.status.success() => {
             let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
             tracing::debug!(agent = %agent_name, branch = %branch, "Resolved agent birth branch from worktree");
-            return BirthBranch::from(branch.as_str());
+            return Ok(BirthBranch::from(branch.as_str()));
         }
         _ => {}
     }
@@ -179,7 +179,7 @@ pub async fn resolve_agent_birth_branch(
         if let Ok(contents) = tokio::fs::read_to_string(&bb_file).await {
             let branch = contents.trim().to_string();
             tracing::debug!(agent = %agent_name, branch = %branch, "Resolved agent birth branch from config file");
-            return BirthBranch::from(branch.as_str());
+            return Ok(BirthBranch::from(branch.as_str()));
         }
     }
 
@@ -188,7 +188,8 @@ pub async fn resolve_agent_birth_branch(
         agent = %agent_name,
         "Failed to resolve birth branch from worktree or config, falling back to root"
     );
-    BirthBranch::root()
+    Ok(BirthBranch::root()
+        .context("Failed to resolve root birth branch")?)
 }
 
 // ============================================================================
@@ -813,7 +814,7 @@ Run `exomonad recompile` first to build it.",
         .with_acp_registry(acp_registry.clone());
     let worktree_base = config.worktree_base.clone();
     agent_control = agent_control.with_worktree_base(worktree_base.clone());
-    agent_control = agent_control.with_birth_branch(BirthBranch::root());
+    agent_control = agent_control.with_birth_branch(BirthBranch::root()?);
     agent_control = agent_control.with_tmux_session(config.tmux_session.clone());
     agent_control = agent_control.with_yolo(config.yolo);
     let event_session_id = uuid::Uuid::new_v4().to_string();

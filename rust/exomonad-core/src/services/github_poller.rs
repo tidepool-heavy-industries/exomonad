@@ -32,7 +32,7 @@ pub struct GitHubPoller {
 }
 
 /// A Copilot review comment with optional file context.
-#[derive(Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 struct CopilotComment {
     body: String,
     path: Option<String>,
@@ -40,7 +40,7 @@ struct CopilotComment {
 }
 
 /// A Copilot review with typed state.
-#[derive(Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 struct CopilotReview {
     body: String,
     state: ReviewState,
@@ -60,6 +60,25 @@ enum ReviewState {
     Approved,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+enum PendingAction {
+    WasmEvent {
+        event_type: &'static str,
+        payload: serde_json::Value,
+    },
+    EmitEvent {
+        status: String,
+        message: String,
+        comments: Option<Vec<CopilotComment>>,
+        reviews: Option<Vec<CopilotReview>>,
+    },
+}
+
+#[derive(Deserialize)]
+struct GitHubUser {
+    login: String,
+}
+
 #[derive(Debug, Clone)]
 struct PRState {
     last_copilot_comment_count: usize,
@@ -72,6 +91,175 @@ struct PRState {
     last_sha: String,
     notified_parent_approved: bool,
     addressed_changes: bool,
+}
+
+impl PRState {
+    fn new(
+        branch: &str,
+        agent_type: AgentType,
+        sha: &str,
+        ci_status: &str,
+        copilot_count: usize,
+    ) -> Self {
+        Self {
+            last_copilot_comment_count: copilot_count,
+            last_ci_status: ci_status.to_string(),
+            branch_name: branch.to_string(),
+            agent_type,
+            first_seen: Instant::now(),
+            notified_parent_timeout: false,
+            last_review_state: ReviewState::None,
+            last_sha: sha.to_string(),
+            notified_parent_approved: false,
+            addressed_changes: false,
+        }
+    }
+}
+
+/// Pure state machine: given old state + new observations, compute pending actions.
+/// Testable without GitHub API calls.
+fn compute_pr_actions(
+    old_state: &mut PRState,
+    pr_number: PRNumber,
+    pr_sha: &str,
+    copilot_comments: &[CopilotComment],
+    copilot_reviews: &[CopilotReview],
+    ci_status: &str,
+    branch: &str,
+    format_message: &dyn Fn(&[CopilotComment], &[CopilotReview]) -> String,
+) -> Vec<PendingAction> {
+    let mut pending_actions = Vec::new();
+    let copilot_count = copilot_comments.len() + copilot_reviews.len();
+
+    // Reset review tracking if new commits pushed
+    if pr_sha != old_state.last_sha {
+        old_state.last_sha = pr_sha.to_string();
+        if old_state.last_review_state == ReviewState::ChangesRequested {
+            old_state.last_review_state = ReviewState::None;
+            old_state.notified_parent_timeout = false;
+            old_state.first_seen = Instant::now();
+            old_state.addressed_changes = true;
+
+            // Fire FixesPushed event — Copilot does NOT re-review,
+            // so this is the actionable signal for the TL.
+            pending_actions.push(PendingAction::WasmEvent {
+                event_type: "pr_review",
+                payload: serde_json::json!({
+                    "kind": "fixes_pushed",
+                    "pr_number": pr_number.as_u64(),
+                    "ci_status": ci_status,
+                }),
+            });
+        } else {
+            // New commits pushed outside of a review-response cycle.
+            // Notify parent so TL knows the agent is active.
+            pending_actions.push(PendingAction::WasmEvent {
+                event_type: "pr_review",
+                payload: serde_json::json!({
+                    "kind": "commits_pushed",
+                    "pr_number": pr_number.as_u64(),
+                    "ci_status": ci_status,
+                }),
+            });
+        }
+    }
+
+    // Check Copilot changes
+    if copilot_count != old_state.last_copilot_comment_count {
+        if copilot_count > old_state.last_copilot_comment_count {
+            // New activity!
+            let message = format_message(copilot_comments, copilot_reviews);
+            pending_actions.push(PendingAction::EmitEvent {
+                status: "copilot_review".to_string(),
+                message: message.clone(),
+                comments: Some(copilot_comments.to_vec()),
+                reviews: Some(copilot_reviews.to_vec()),
+            });
+
+            // Fire WASM event handler
+            pending_actions.push(PendingAction::WasmEvent {
+                event_type: "pr_review",
+                payload: serde_json::json!({
+                    "kind": "review_received",
+                    "pr_number": pr_number.as_u64(),
+                    "comments": message,
+                }),
+            });
+        }
+        // Update state even if count decreased (to sync with reality)
+        old_state.last_copilot_comment_count = copilot_count;
+    }
+
+    // Check for Copilot approval
+    let approved = copilot_reviews.iter().any(|r| {
+        r.state == ReviewState::Approved || r.body.to_lowercase().contains("approved")
+    });
+    if approved && old_state.last_review_state != ReviewState::Approved {
+        old_state.last_review_state = ReviewState::Approved;
+        old_state.notified_parent_approved = true;
+        pending_actions.push(PendingAction::WasmEvent {
+            event_type: "pr_review",
+            payload: serde_json::json!({
+                "kind": "approved",
+                "pr_number": pr_number.as_u64(),
+            }),
+        });
+    }
+
+    // Check for changes_requested
+    let changes_requested = copilot_reviews
+        .iter()
+        .any(|r| r.state == ReviewState::ChangesRequested);
+    if changes_requested && old_state.last_review_state != ReviewState::ChangesRequested {
+        old_state.last_review_state = ReviewState::ChangesRequested;
+        pending_actions.push(PendingAction::WasmEvent {
+            event_type: "pr_review",
+            payload: serde_json::json!({
+                "kind": "review_received",
+                "pr_number": pr_number.as_u64(),
+                "comments": format_message(copilot_comments, copilot_reviews),
+            }),
+        });
+    }
+
+    // Check CI changes
+    if ci_status != old_state.last_ci_status {
+        pending_actions.push(PendingAction::WasmEvent {
+            event_type: "ci_status",
+            payload: serde_json::json!({
+                "pr_number": pr_number.as_u64(),
+                "status": ci_status,
+                "branch": branch,
+            }),
+        });
+        pending_actions.push(PendingAction::EmitEvent {
+            status: ci_status.to_string(),
+            message: format!("[CI STATUS: {}] {}", branch, ci_status),
+            comments: None,
+            reviews: None,
+        });
+        old_state.last_ci_status = ci_status.to_string();
+    }
+
+    // Shorter timeout after addressing changes (Copilot won't re-review)
+    let timeout_minutes: u64 = if old_state.addressed_changes { 5 } else { 15 };
+    if !old_state.notified_parent_timeout
+        && old_state.last_review_state == ReviewState::None
+        && !old_state.notified_parent_approved
+        && old_state.first_seen.elapsed() > Duration::from_secs(timeout_minutes * 60)
+    {
+        old_state.notified_parent_timeout = true;
+        pending_actions.push(PendingAction::WasmEvent {
+            event_type: "pr_review",
+            payload: serde_json::json!({
+                "kind": "timeout",
+                "pr_number": pr_number.as_u64(),
+                "minutes_elapsed": timeout_minutes,
+            }),
+        });
+    }
+
+    pending_actions
 }
 
 #[derive(Debug, Deserialize)]
@@ -509,179 +697,42 @@ impl GitHubPoller {
             self.fetch_copilot_activity(owner, repo, pr_number).await?;
         let ci_status = self.fetch_ci_status(owner, repo, pr_sha).await?;
 
-        let copilot_count = copilot_comments.len() + copilot_reviews.len();
-
-        // Check for state changes
-        enum PendingAction {
-            WasmEvent {
-                event_type: &'static str,
-                payload: serde_json::Value,
-            },
-            EmitEvent {
-                status: String,
-                message: String,
-                comments: Option<Vec<CopilotComment>>,
-                reviews: Option<Vec<CopilotReview>>,
-            },
-        }
-        let mut pending_actions = Vec::new();
-
-        {
+        let pending_actions = {
             let mut state_guard = self.state.lock().await;
 
             if let Some(old_state) = state_guard.get_mut(&pr_number) {
-                // Reset review tracking if new commits pushed
-                if pr_sha != old_state.last_sha {
-                    old_state.last_sha = pr_sha.to_string();
-                    if old_state.last_review_state == ReviewState::ChangesRequested {
-                        old_state.last_review_state = ReviewState::None;
-                        old_state.notified_parent_timeout = false;
-                        old_state.first_seen = Instant::now();
-                        old_state.addressed_changes = true;
-
-                        // Fire FixesPushed event — Copilot does NOT re-review,
-                        // so this is the actionable signal for the TL.
-                        pending_actions.push(PendingAction::WasmEvent {
-                            event_type: "pr_review",
-                            payload: serde_json::json!({
-                                "kind": "fixes_pushed",
-                                "pr_number": pr_number.as_u64(),
-                                "ci_status": ci_status,
-                            }),
-                        });
-                    } else {
-                        // New commits pushed outside of a review-response cycle.
-                        // Notify parent so TL knows the agent is active.
-                        pending_actions.push(PendingAction::WasmEvent {
-                            event_type: "pr_review",
-                            payload: serde_json::json!({
-                                "kind": "commits_pushed",
-                                "pr_number": pr_number.as_u64(),
-                                "ci_status": ci_status,
-                            }),
-                        });
-                    }
-                }
-
-                // Check Copilot changes
-                if copilot_count != old_state.last_copilot_comment_count {
-                    if copilot_count > old_state.last_copilot_comment_count {
-                        // New activity!
-                        let message =
-                            self.format_copilot_message(&copilot_comments, &copilot_reviews);
-                        pending_actions.push(PendingAction::EmitEvent {
-                            status: "copilot_review".to_string(),
-                            message: message.clone(),
-                            comments: Some(copilot_comments.clone()),
-                            reviews: Some(copilot_reviews.clone()),
-                        });
-
-                        // Fire WASM event handler
-                        pending_actions.push(PendingAction::WasmEvent {
-                            event_type: "pr_review",
-                            payload: serde_json::json!({
-                                "kind": "review_received",
-                                "pr_number": pr_number.as_u64(),
-                                "comments": message,
-                            }),
-                        });
-                    }
-                    // Update state even if count decreased (to sync with reality)
-                    old_state.last_copilot_comment_count = copilot_count;
-                }
-
-                // Check for Copilot approval
-                let approved = copilot_reviews.iter().any(|r| {
-                    r.state == ReviewState::Approved || r.body.to_lowercase().contains("approved")
-                });
-                if approved && old_state.last_review_state != ReviewState::Approved {
-                    old_state.last_review_state = ReviewState::Approved;
-                    old_state.notified_parent_approved = true;
-                    pending_actions.push(PendingAction::WasmEvent {
-                        event_type: "pr_review",
-                        payload: serde_json::json!({
-                            "kind": "approved",
-                            "pr_number": pr_number.as_u64(),
-                        }),
-                    });
-                }
-
-                // Check for changes_requested
-                let changes_requested = copilot_reviews
-                    .iter()
-                    .any(|r| r.state == ReviewState::ChangesRequested);
-                if changes_requested && old_state.last_review_state != ReviewState::ChangesRequested
-                {
-                    old_state.last_review_state = ReviewState::ChangesRequested;
-                    pending_actions.push(PendingAction::WasmEvent {
-                        event_type: "pr_review",
-                        payload: serde_json::json!({
-                            "kind": "review_received",
-                            "pr_number": pr_number.as_u64(),
-                            "comments": self.format_copilot_message(&copilot_comments, &copilot_reviews),
-                        }),
-                    });
-                }
-
-                // Check CI changes
                 if ci_status != old_state.last_ci_status {
                     info!(
                         "[Poller] CI status changed for {}: {} -> {}",
                         branch, old_state.last_ci_status, ci_status
                     );
-                    pending_actions.push(PendingAction::WasmEvent {
-                        event_type: "ci_status",
-                        payload: serde_json::json!({
-                            "pr_number": pr_number.as_u64(),
-                            "status": ci_status,
-                            "branch": branch,
-                        }),
-                    });
-                    pending_actions.push(PendingAction::EmitEvent {
-                        status: ci_status.clone(),
-                        message: format!("[CI STATUS: {}] {}", branch, ci_status),
-                        comments: None,
-                        reviews: None,
-                    });
-                    old_state.last_ci_status = ci_status;
                 }
 
-                // Shorter timeout after addressing changes (Copilot won't re-review)
-                let timeout_minutes: u64 = if old_state.addressed_changes { 5 } else { 15 };
-                if !old_state.notified_parent_timeout
-                    && old_state.last_review_state == ReviewState::None
-                    && !old_state.notified_parent_approved
-                    && old_state.first_seen.elapsed() > Duration::from_secs(timeout_minutes * 60)
-                {
-                    old_state.notified_parent_timeout = true;
-                    pending_actions.push(PendingAction::WasmEvent {
-                        event_type: "pr_review",
-                        payload: serde_json::json!({
-                            "kind": "timeout",
-                            "pr_number": pr_number.as_u64(),
-                            "minutes_elapsed": timeout_minutes,
-                        }),
-                    });
-                }
+                compute_pr_actions(
+                    old_state,
+                    pr_number,
+                    pr_sha,
+                    &copilot_comments,
+                    &copilot_reviews,
+                    &ci_status,
+                    branch,
+                    &|c, r| self.format_copilot_message(c, r),
+                )
             } else {
                 // New PR tracked - do not emit, just store
                 state_guard.insert(
                     pr_number,
-                    PRState {
-                        last_copilot_comment_count: copilot_count,
-                        last_ci_status: ci_status,
-                        branch_name: branch.to_string(),
+                    PRState::new(
+                        branch,
                         agent_type,
-                        first_seen: Instant::now(),
-                        notified_parent_timeout: false,
-                        last_review_state: ReviewState::None,
-                        last_sha: pr_sha.to_string(),
-                        notified_parent_approved: false,
-                        addressed_changes: false,
-                    },
+                        pr_sha,
+                        &ci_status,
+                        copilot_comments.len() + copilot_reviews.len(),
+                    ),
                 );
+                vec![]
             }
-        } // state_guard dropped here
+        };
 
         // Execute pending actions outside of lock
         for action in pending_actions {
@@ -740,13 +791,9 @@ impl GitHubPoller {
             #[derive(Deserialize)]
             struct Comment {
                 body: String,
-                user: User,
+                user: GitHubUser,
                 path: Option<String>,
                 diff_hunk: Option<String>,
-            }
-            #[derive(Deserialize)]
-            struct User {
-                login: String,
             }
 
             if let Ok(comments) = serde_json::from_slice::<Vec<Comment>>(&output.stdout) {
@@ -775,11 +822,7 @@ impl GitHubPoller {
             struct Review {
                 body: Option<String>,
                 state: String,
-                user: User,
-            }
-            #[derive(Deserialize)]
-            struct User {
-                login: String,
+                user: GitHubUser,
             }
             if let Ok(reviews) = serde_json::from_slice::<Vec<Review>>(&output_reviews.stdout) {
                 for r in reviews {
@@ -1018,5 +1061,138 @@ mod tests {
         assert!(msg.contains("1. [src/main.rs] Fix this typo"));
         assert!(msg.contains("```diff\n   @@ -1,3 +1,3 @@\n   ```"));
         assert!(msg.contains("2. [unknown file] Add a comment here"));
+    }
+
+    fn make_pr_state(branch: &str, sha: &str) -> PRState {
+        PRState::new(branch, AgentType::Gemini, sha, "pending", 0)
+    }
+
+    #[test]
+    fn test_new_commits_after_changes_requested_fires_fixes_pushed() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        state.last_review_state = ReviewState::ChangesRequested;
+
+        let actions = compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "def456", // new SHA
+            &[],
+            &[],
+            "success",
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        assert!(actions.iter().any(
+            |a| matches!(a, PendingAction::WasmEvent { event_type: "pr_review", payload } if payload.get("kind").and_then(|v| v.as_str()) == Some("fixes_pushed"))
+        ));
+        assert_eq!(state.addressed_changes, true);
+        assert_eq!(state.last_review_state, ReviewState::None);
+    }
+
+    #[test]
+    fn test_timeout_fires_after_threshold() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        state.first_seen = Instant::now() - Duration::from_secs(20 * 60); // 20 minutes ago
+
+        let actions = compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "abc123",
+            &[],
+            &[],
+            "success",
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        assert!(actions.iter().any(|a| matches!(a, PendingAction::WasmEvent { event_type: "pr_review", payload } if payload.get("kind").and_then(|v| v.as_str()) == Some("timeout"))));
+    }
+
+    #[test]
+    fn test_approval_detected() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        let reviews = vec![CopilotReview {
+            body: "LGTM".to_string(),
+            state: ReviewState::Approved,
+        }];
+
+        let actions = compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "abc123",
+            &[],
+            &reviews,
+            "success",
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        assert_eq!(state.last_review_state, ReviewState::Approved);
+        assert!(actions.iter().any(|a| matches!(a, PendingAction::WasmEvent { event_type: "pr_review", payload } if payload.get("kind").and_then(|v| v.as_str()) == Some("approved"))));
+    }
+
+    #[test]
+    fn test_same_sha_no_op() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        state.last_ci_status = "success".to_string();
+
+        let actions = compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "abc123",
+            &[],
+            &[],
+            "success",
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn test_ci_status_change() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        state.last_ci_status = "pending".to_string();
+
+        let actions = compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "abc123",
+            &[],
+            &[],
+            "failure",
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        assert!(actions.iter().any(
+            |a| matches!(a, PendingAction::WasmEvent { event_type: "ci_status", .. })
+        ));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, PendingAction::EmitEvent { status, .. } if status == "failure")));
+        assert_eq!(state.last_ci_status, "failure");
+    }
+
+    #[test]
+    fn test_addressed_changes_shorter_timeout() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        state.addressed_changes = true;
+        state.first_seen = Instant::now() - Duration::from_secs(6 * 60); // 6 minutes ago
+
+        let actions = compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "abc123",
+            &[],
+            &[],
+            "success",
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        assert!(actions.iter().any(|a| matches!(a, PendingAction::WasmEvent { event_type: "pr_review", payload } if payload.get("kind").and_then(|v| v.as_str()) == Some("timeout"))));
     }
 }
