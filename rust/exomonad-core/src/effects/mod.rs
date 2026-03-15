@@ -228,7 +228,7 @@ mod tests {
     fn test_ctx() -> EffectContext {
         EffectContext {
             agent_name: crate::domain::AgentName::from("test"),
-            birth_branch: crate::domain::BirthBranch::root(),
+            birth_branch: crate::domain::BirthBranch::from("test-branch"),
         }
     }
 

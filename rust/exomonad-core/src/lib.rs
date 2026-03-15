@@ -243,7 +243,7 @@ impl RuntimeBuilder {
         // separately in the serve command with baked-in per-agent identity.
         let root_ctx = EffectContext {
             agent_name: AgentName::from("root"),
-            birth_branch: BirthBranch::root(),
+            birth_branch: BirthBranch::root()?,
         };
 
         let plugin_manager = if let Some(path) = self.wasm_path {
