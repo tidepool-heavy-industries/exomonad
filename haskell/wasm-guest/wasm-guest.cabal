@@ -85,6 +85,11 @@ library wasm-guest-internal
         ExoMonad.Guest.Effects.StopHook
         -- Proto helpers
         ExoMonad.Guest.Proto
+        -- Transitions
+        AgentTransition
+        DevTransitions
+        TLTransitions
+        WorkerTransitions
         -- Extensible effects (for external consumers)
         ExoMonad.Guest.Effect
         -- Effect typeclass and namespace-based effects
