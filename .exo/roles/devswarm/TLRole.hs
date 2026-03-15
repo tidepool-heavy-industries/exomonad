@@ -8,10 +8,9 @@ module TLRole (config, Tools) where
 
 import ExoMonad
 import Control.Monad.Freer (Eff)
-import ExoMonad.Guest.Lifecycle (getTLPhase)
+import ExoMonad.Guest.Lifecycle.PhaseEffect (StopCheckResult (..), getTLPhase)
+import ExoMonad.Guest.Lifecycle.TLTransitions qualified as TLTransitions
 import ExoMonad.Guest.Effects.StopHook (checkUncommittedWork, getCurrentBranch)
-import TLTransitions qualified
-import AgentTransition (StopCheckResult(..))
 import PRReviewHandler (prReviewEventHandlers)
 import ExoMonad.Guest.Tools.MergePR (MergePR)
 import ExoMonad.Guest.Types (StopDecision(..), StopHookOutput(..), blockStopResponse, allowStopResponse, allowResponse)

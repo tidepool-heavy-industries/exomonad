@@ -22,9 +22,9 @@ import Effects.Git qualified as Git
 import Effects.Log qualified as Log
 import ExoMonad.Effects.Git (GitGetBranch, GitGetStatus, GitHasUnpushedCommits)
 import ExoMonad.Effects.Log (LogEmitEvent)
-import ExoMonad.Guest.Lifecycle (DevPhase, getDevPhase)
-import AgentTransition (StopCheckResult(..))
-import DevTransitions qualified
+import ExoMonad.Guest.Lifecycle.DevState (SomeDevState, describeDevPhase)
+import ExoMonad.Guest.Lifecycle.DevTransitions qualified as DevTransitions
+import ExoMonad.Guest.Lifecycle.PhaseEffect (StopCheckResult (..), describeStopResult, getDevPhase)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Types (StopDecision (..), StopHookOutput (..), allowStopResponse, blockStopResponse)
 import ExoMonad.Types (Effects)
@@ -59,7 +59,7 @@ runStopHookChecks = do
 
       -- Log to event log for observability
       let eventPayload = BSL.toStrict $ Aeson.encode $
-            object ["branch" .= branch, "result" .= describeResult result, "phase" .= (Aeson.toJSON <$> mPhase)]
+            object ["branch" .= branch, "result" .= describeStopResult result, "phase" .= (Aeson.toJSON <$> (mPhase :: Maybe SomeDevState))]
       void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
         { Log.emitEventRequestEventType = "agent.stop_check",
           Log.emitEventRequestPayload = eventPayload,
@@ -70,11 +70,6 @@ runStopHookChecks = do
         MustBlock msg -> pure $ blockStopResponse msg
         ShouldNudge msg -> pure $ StopHookOutput Allow (Just msg)
         Clean -> pure allowStopResponse
-
-describeResult :: StopCheckResult -> Text
-describeResult (MustBlock msg) = "block: " <> msg
-describeResult (ShouldNudge msg) = "nudge: " <> msg
-describeResult Clean = "clean"
 
 -- | Check for uncommitted/unpushed work and nudge if found.
 checkUncommittedWork :: Text -> Eff Effects (Maybe Text)

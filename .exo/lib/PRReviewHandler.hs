@@ -14,14 +14,11 @@ import Data.Text.Lazy qualified as TL
 import ExoMonad.Effects.Log qualified as Log
 import ExoMonad.Guest.Events (CIStatusEvent (..), EventAction (..), EventHandlerConfig (..), PRReviewEvent (..), SiblingMergedEvent (..), defaultEventHandlers)
 import ExoMonad.Guest.Events.Templates qualified as Tpl
-import AgentTransition (applyTransition)
-import DevTransitions qualified as DT
-import ExoMonad.Guest.Lifecycle (DevPhase)
+import ExoMonad.Guest.Lifecycle.DevTransitions (applyDevEvent, DevEvent (..))
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
 import ExoMonad.Guest.Types (Effects)
 
 -- | Event handler config with PR review handling.
--- Timeout handlers use defaults (NoAction).
 prReviewEventHandlers :: EventHandlerConfig
 prReviewEventHandlers =
   defaultEventHandlers
@@ -34,12 +31,12 @@ prReviewEventHandlers =
 prReviewHandler :: PRReviewEvent -> Eff Effects EventAction
 prReviewHandler (ReviewReceived n comments_) = do
   logHandler $ "Review received on PR #" <> T.pack (show n)
-  applyTransition @DevPhase (DT.ReviewReceived n comments_)
+  applyDevEvent (ReviewReceivedEv n comments_)
   pure (InjectMessage (Tpl.copilotReviewReceived n comments_))
 
 prReviewHandler (ReviewApproved n) = do
   logHandler $ "PR #" <> T.pack (show n) <> " approved by Copilot"
-  applyTransition @DevPhase (DT.ReviewApproved n)
+  applyDevEvent (ReviewApprovedEv n)
   pure (NotifyParentAction (Tpl.prReady n) n)
 
 prReviewHandler (ReviewTimeout n mins) = do
@@ -48,12 +45,12 @@ prReviewHandler (ReviewTimeout n mins) = do
 
 prReviewHandler (FixesPushed n ci) = do
   logHandler $ "Fixes pushed on PR #" <> T.pack (show n) <> ", CI: " <> ci
-  applyTransition @DevPhase (DT.FixesPushed n ci)
+  applyDevEvent (FixesPushedEv n ci)
   pure (NotifyParentAction (Tpl.fixesPushed n ci) n)
 
 prReviewHandler (CommitsPushed n ci) = do
   logHandler $ "New commits pushed on PR #" <> T.pack (show n) <> ", CI: " <> ci
-  applyTransition @DevPhase (DT.CommitsPushed n ci)
+  applyDevEvent (CommitsPushedEv n ci)
   pure (NotifyParentAction (Tpl.commitsPushed n ci) n)
 
 -- | Handle sibling merged events.

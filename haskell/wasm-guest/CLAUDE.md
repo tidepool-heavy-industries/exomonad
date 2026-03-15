@@ -87,6 +87,26 @@ The guest handles hooks invoked by Claude Code:
 - **`onSubagentStop`**: Validates child agent exit status.
 - **`onStop`**: Stop hook — gates agent exit. Uses `StopCheckResult` (MustBlock/ShouldNudge/Clean).
 
+### Agent Lifecycle (`ExoMonad.Guest.Lifecycle.*`)
+
+GADT-indexed state machine for agent lifecycle phases. Each role has its own GADT (DevState, TLState, WorkerState) where phase-specific data is carried in type-indexed constructors. Invalid state transitions are compile errors.
+
+| Module | Purpose |
+|--------|---------|
+| `Lifecycle.DevState` | GADT `DevState (p :: DevPhase)` + existential `SomeDevState` |
+| `Lifecycle.TLState` | GADT `TLState (p :: TLPhase)` + `ChildHandle` + existential `SomeTLState` |
+| `Lifecycle.WorkerState` | GADT `WorkerState (p :: WorkerPhase)` + existential `SomeWorkerState` |
+| `Lifecycle.PhaseEffect` | KV persistence (`getDevPhase`/`setDevPhase` etc.) + `StopCheckResult` |
+| `Lifecycle.DevTransitions` | Typed transitions + `applyDevEvent` + `canExit` |
+| `Lifecycle.TLTransitions` | `applyTLEvent` + `canExit` |
+| `Lifecycle.WorkerTransitions` | `applyWorkerEvent` + `canExit` |
+
+**Typed transitions** (e.g., `filePR :: DevState 'Working -> PRNumber -> URL -> Text -> Eff Effects (DevState 'PRFiled)`) give compile-time phase safety. Use inside pattern match branches on the existential.
+
+**Existential transitions** (e.g., `applyDevEvent :: DevEvent -> Eff Effects ()`) handle KV read/write internally. Use from tool handlers and event handlers.
+
+**Soft block pattern**: Tool handlers check phase via `getDevPhase`, log a warning for unexpected phases, but proceed anyway (idempotent tools like `file_pr`).
+
 ### Stop Hook State Machine (`ExoMonad.Guest.Effects.StopHook`)
 
 | PR State | Decision | Agent can exit? |

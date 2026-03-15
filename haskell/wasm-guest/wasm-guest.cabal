@@ -85,11 +85,14 @@ library wasm-guest-internal
         ExoMonad.Guest.Effects.StopHook
         -- Proto helpers
         ExoMonad.Guest.Proto
-        -- Transitions
-        AgentTransition
-        DevTransitions
-        TLTransitions
-        WorkerTransitions
+        -- Lifecycle (GADT state machines)
+        ExoMonad.Guest.Lifecycle.DevState
+        ExoMonad.Guest.Lifecycle.TLState
+        ExoMonad.Guest.Lifecycle.WorkerState
+        ExoMonad.Guest.Lifecycle.PhaseEffect
+        ExoMonad.Guest.Lifecycle.DevTransitions
+        ExoMonad.Guest.Lifecycle.TLTransitions
+        ExoMonad.Guest.Lifecycle.WorkerTransitions
         -- Extensible effects (for external consumers)
         ExoMonad.Guest.Effect
         -- Effect typeclass and namespace-based effects
