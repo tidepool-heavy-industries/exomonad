@@ -1,3 +1,4 @@
+-- Kaizen trace test
 -- Kaizen: DuckDB views for swarm analysis
 -- Load: duckdb -init .exo/kaizen.sql
 -- Or use: .exo/bin/kaizen
