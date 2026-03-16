@@ -241,9 +241,9 @@ This is **native Claude Code Teams integration**. Messages from child agents arr
 | **Event router** (tmux STDIN fallback) | Built. Fallback path: `notify_parent` → `inject_input` into parent pane via tmux buffer pattern. |
 | **Event handlers** (WASM dispatch for world events) | **Built.** Third dispatch category alongside tools and hooks. GitHub poller calls `handle_event` on agent's PluginManager for PR review events (reviews, approvals, timeouts) and **sibling merge events**. Handlers return `EventAction` (InjectMessage, NotifyParent, NoAction). |
 | **GitHub poller** (PR status → events) | Built. Background service polls PR/CI status, fires WASM event handlers, and injects notifications into agent panes. Tracks `first_seen`, `last_review_state`, and `notified_parent_timeout` per PR. |
-| **OTel observability** | **Built.** OTel span events replace JSONL logs. Structured events (e.g., `agent.spawned`, `tool.called`) are emitted via `tracing::info!()` with `otel.name`. |
+| **OTel observability** | **Built.** Structured tracing spans with queryable attributes: `agent_id`, `tool.name`, `hook.type`, `role`, `status`. Spans: `spawn_worker`, `call_tool`, `handle_hook_request`, `notify_parent_delivery`, `deliver_to_agent`. |
 | **Coordination mutexes** | Built. In-memory `MutexRegistry` with FIFO wait queues, TTL auto-expiry, idempotent acquire. Effect-only (`coordination.acquire_mutex`, `coordination.release_mutex`) — no MCP tool exposed. |
-| **Kaizen analysis** | Built. SQL analysis of OTel events stored in ClickHouse. Views: `swarm_summary`, `agent_lifecycles`, `pr_pipeline`, `tool_usage`, `tool_summary`, `copilot_reviews`. |
+| **Kaizen analysis** | Built. ClickHouse views over OTel span data. Views: `agent_lifecycles` (spawn→activity with tool counts), `tool_summary`, `swarm_summary`, `swarm_timeline`, `delivery_audit`, `pr_pipeline`, `copilot_reviews`. |
 
 ### Kaizen Analysis
 
