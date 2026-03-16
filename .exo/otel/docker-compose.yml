@@ -213,6 +213,7 @@ services:
         echo "Created API key"
 
         echo "SIGNOZ_API_KEY=$${API_KEY}" > /host/.env.signoz
+        chmod 600 /host/.env.signoz
         echo "Wrote API key to /host/.env.signoz"
 
   signoz-mcp-server:
