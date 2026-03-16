@@ -27,7 +27,7 @@ import Effects.MergePr qualified as MP
 import Effects.Process qualified as Proc
 import Effects.Agent qualified as Agent
 import ExoMonad.Effects.Agent (AgentCleanup)
-import ExoMonad.Effects.Git (GitGetRepoInfo)
+import ExoMonad.Effects.Git (GitGetRepoInfo, GitGetBranch)
 import ExoMonad.Effects.GitHub (GitHubGetPullRequest)
 import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
 import ExoMonad.Effects.Process (ProcessRun)
@@ -84,18 +84,45 @@ instance MCPTool MergePR where
       ]
   toolHandlerEff args = do
     let force = fromMaybe False (mprForce args)
-    void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: Merging PR #" <> T.pack (show (mprPrNumber args)) <> if force then " (force)" else ""), Log.infoRequestFields = ""})
+    let prNum = mprPrNumber args
+    void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: Merging PR #" <> T.pack (show prNum) <> if force then " (force)" else ""), Log.infoRequestFields = ""})
 
-    -- Readiness check: verify Copilot review status before merging
-    if force
-      then doMerge args
+    -- Self-merge guard: agents cannot merge their own PRs
+    repoInfoResult <- suspendEffect @GitGetRepoInfo (Git.GetRepoInfoRequest {Git.getRepoInfoRequestWorkingDir = "."})
+    branchResult <- suspendEffect @GitGetBranch (Git.GetBranchRequest {Git.getBranchRequestWorkingDir = "."})
+
+    isSelfMerge <- case (repoInfoResult, branchResult) of
+      (Right repoInfo, Right branchResp) -> do
+        let owner = TL.toStrict (Git.getRepoInfoResponseOwner repoInfo)
+            repo = TL.toStrict (Git.getRepoInfoResponseName repoInfo)
+            currentBranch = TL.toStrict (Git.getBranchResponseBranch branchResp)
+
+        prResult <- suspendEffect @GitHubGetPullRequest GH.GetPullRequestRequest
+          { GH.getPullRequestRequestOwner = TL.fromStrict owner
+          , GH.getPullRequestRequestRepo = TL.fromStrict repo
+          , GH.getPullRequestRequestNumber = fromIntegral prNum
+          , GH.getPullRequestRequestIncludeReviews = False
+          }
+        case prResult of
+          Right resp -> case GH.getPullRequestResponsePullRequest resp of
+            Just pr -> pure $ TL.toStrict (GH.pullRequestHeadRef pr) == currentBranch
+            Nothing -> pure False
+          Left _ -> pure False
+      _ -> pure False
+
+    if isSelfMerge
+      then pure $ errorResult $ "Cannot merge your own PR #" <> T.pack (show prNum) <> ". Your parent agent will merge this PR after reviewing. Call notify_parent instead."
       else do
-        readiness <- checkCopilotReadiness (mprPrNumber args)
-        case readiness of
-          Ready -> doMerge args
-          NotReady reason -> do
-            void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("MergePR: blocked: " <> reason), Log.errorRequestFields = ""})
-            pure $ errorResult reason
+        -- Readiness check: verify Copilot review status before merging
+        if force
+          then doMerge args
+          else do
+            readiness <- checkCopilotReadiness prNum
+            case readiness of
+              Ready -> doMerge args
+              NotReady reason -> do
+                void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("MergePR: blocked: " <> reason), Log.errorRequestFields = ""})
+                pure $ errorResult reason
 
 -- | Copilot review readiness.
 data Readiness = Ready | NotReady Text

@@ -15,7 +15,7 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as T
-import ExoMonad.Guest.Lifecycle.DevState (PRNumber)
+import ExoMonad.Guest.Lifecycle.DevState (PRNumber, URL)
 
 -- | Child agent handle for tracking spawned agents.
 data ChildHandle = ChildHandle
@@ -39,6 +39,7 @@ data TLPhase
   | Waiting
   | Merging
   | AllMerged
+  | TLPRFiled
   | TLDone
   | TLFailed
 
@@ -49,6 +50,7 @@ data TLState (p :: TLPhase) where
   STLWaiting :: Map Text ChildHandle -> TLState 'Waiting
   STLMerging :: PRNumber -> Map Text ChildHandle -> TLState 'Merging
   STLAllMerged :: TLState 'AllMerged
+  STLPRFiled :: PRNumber -> URL -> TLState 'TLPRFiled
   STLDone :: TLState 'TLDone
   STLFailed :: Text -> TLState 'TLFailed
 
@@ -69,6 +71,7 @@ describeTLPhase (SomeTLState (STLWaiting children)) =
 describeTLPhase (SomeTLState (STLMerging pr children)) =
   "merging PR #" <> T.pack (show pr) <> " (" <> T.pack (show (Map.size children)) <> " remaining)"
 describeTLPhase (SomeTLState STLAllMerged) = "all_merged"
+describeTLPhase (SomeTLState (STLPRFiled pr _url)) = "pr_filed (#" <> T.pack (show pr) <> ")"
 describeTLPhase (SomeTLState STLDone) = "done"
 describeTLPhase (SomeTLState (STLFailed msg)) = "failed: " <> msg
 
@@ -78,6 +81,7 @@ instance ToJSON SomeTLState where
   toJSON (SomeTLState (STLWaiting children)) = object ["phase" .= ("tl_waiting" :: Text), "children" .= children]
   toJSON (SomeTLState (STLMerging pr children)) = object ["phase" .= ("tl_merging" :: Text), "pr_number" .= pr, "children" .= children]
   toJSON (SomeTLState STLAllMerged) = object ["phase" .= ("tl_all_merged" :: Text)]
+  toJSON (SomeTLState (STLPRFiled pr url)) = object ["phase" .= ("tl_pr_filed" :: Text), "pr_number" .= pr, "url" .= url]
   toJSON (SomeTLState STLDone) = object ["phase" .= ("tl_done" :: Text)]
   toJSON (SomeTLState (STLFailed msg)) = object ["phase" .= ("tl_failed" :: Text), "message" .= msg]
 
@@ -97,6 +101,10 @@ instance FromJSON SomeTLState where
         children <- v .:? "children"
         pure (SomeTLState (STLMerging pr (maybe Map.empty id children)))
       "tl_all_merged" -> pure (SomeTLState STLAllMerged)
+      "tl_pr_filed" -> do
+        pr <- v .: "pr_number"
+        url <- v .: "url"
+        pure (SomeTLState (STLPRFiled pr url))
       "tl_done" -> pure (SomeTLState STLDone)
       "tl_failed" -> do
         msg <- v .: "message"

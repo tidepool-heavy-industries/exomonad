@@ -19,7 +19,7 @@ import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Effects.Log qualified as Log
 import ExoMonad.Effects.Log (LogInfo)
-import ExoMonad.Guest.Lifecycle.DevState (PRNumber)
+import ExoMonad.Guest.Lifecycle.DevState (PRNumber, URL)
 import ExoMonad.Guest.Lifecycle.PhaseEffect (StopCheckResult (..), getTLPhase, setTLPhase)
 import ExoMonad.Guest.Lifecycle.TLState
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
@@ -32,6 +32,7 @@ data TLEvent
   | ChildFailed Text Text
   | PRMerged PRNumber Text
   | AllChildrenDone
+  | OwnPRFiled PRNumber URL Text
 
 -- ============================================================================
 -- Existential-Level Transitions
@@ -91,6 +92,10 @@ transitionTL (SomeTLState old) event = case event of
   AllChildrenDone -> do
     logTransition (showPhase old) "Done"
     pure (SomeTLState STLDone)
+  OwnPRFiled pr url branch -> do
+    let newState = SomeTLState (STLPRFiled pr url)
+    logTransitionWithSlug branch (showPhase old) (showSomePhase newState)
+    pure newState
 
 -- ============================================================================
 -- Stop Hook
@@ -104,6 +109,8 @@ canExit (SomeTLState (STLWaiting children)) =
 canExit (SomeTLState (STLMerging pr children)) =
   ShouldNudge $ "Merging PR #" <> T.pack (show pr) <> ", " <> T.pack (show (Map.size children)) <> " remaining."
 canExit (SomeTLState STLAllMerged) = Clean
+canExit (SomeTLState (STLPRFiled pr _url)) =
+  MustBlock $ "PR #" <> T.pack (show pr) <> " filed, waiting for parent to merge. Do not exit."
 canExit (SomeTLState STLDone) = Clean
 canExit (SomeTLState (STLFailed _)) = Clean
 
@@ -117,6 +124,7 @@ showPhase STLDispatching = "Dispatching"
 showPhase (STLWaiting _) = "Waiting"
 showPhase (STLMerging _ _) = "Merging"
 showPhase STLAllMerged = "AllMerged"
+showPhase (STLPRFiled _ _) = "PRFiled"
 showPhase STLDone = "Done"
 showPhase (STLFailed _) = "Failed"
 

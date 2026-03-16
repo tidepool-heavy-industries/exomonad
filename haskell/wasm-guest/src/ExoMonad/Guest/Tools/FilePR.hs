@@ -21,7 +21,8 @@ import ExoMonad.Effects.FilePR (FilePRFilePr)
 import ExoMonad.Effects.Log (LogError, LogInfo)
 import ExoMonad.Guest.Lifecycle.DevState (SomeDevState (..), DevState (..), describeDevPhase)
 import ExoMonad.Guest.Lifecycle.DevTransitions (applyDevEvent, DevEvent (..))
-import ExoMonad.Guest.Lifecycle.PhaseEffect (getDevPhase, setDevPhase)
+import ExoMonad.Guest.Lifecycle.PhaseEffect (getDevPhase, setDevPhase, getTLPhase)
+import ExoMonad.Guest.Lifecycle.TLTransitions (applyTLEvent, TLEvent (..))
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
@@ -78,15 +79,17 @@ instance MCPTool FilePR where
   toolHandlerEff args = do
     -- Phase check: log warning for unexpected phases, auto-init if no phase set
     mState <- getDevPhase
-    case mState of
-      Just (SomeDevState SWorking) -> pure ()
-      Just (SomeDevState SSpawned) -> setDevPhase (SomeDevState SWorking)
-      Just other ->
+    mTLState <- getTLPhase
+    case (mState, mTLState) of
+      (_, Just _) -> pure () -- TL role, skip dev phase check
+      (Just (SomeDevState SWorking), _) -> pure ()
+      (Just (SomeDevState SSpawned), _) -> setDevPhase (SomeDevState SWorking)
+      (Just other, _) ->
         void $ suspendEffect_ @LogInfo (Log.InfoRequest
           { Log.infoRequestMessage = TL.fromStrict $ "FilePR: unexpected phase " <> describeDevPhase other <> ", proceeding anyway"
           , Log.infoRequestFields = ""
           })
-      Nothing -> setDevPhase (SomeDevState SWorking)
+      (Nothing, Nothing) -> setDevPhase (SomeDevState SWorking)
 
     let req =
           FP.FilePrRequest
@@ -113,5 +116,10 @@ instance MCPTool FilePR where
                   fpoCreated = FP.filePrResponseCreated resp
                 }
         void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("FilePR: Success - PR #" <> T.pack (show $ fpoNumber output)), Log.infoRequestFields = ""})
-        applyDevEvent (PRCreated (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
+        
+        mTLState <- getTLPhase
+        case mTLState of
+          Just _ -> applyTLEvent (OwnPRFiled (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
+          Nothing -> applyDevEvent (PRCreated (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
+
         pure $ successResult (Aeson.toJSON output)
