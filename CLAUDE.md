@@ -261,14 +261,6 @@ docker compose -f .exo/otel/docker-compose.yml up -d
 #   OTLP:       localhost:4317 (gRPC), localhost:4318 (HTTP)
 #   SigNoz UI:  http://localhost:8080  (SIGNOZ_PORT to override)
 #   MCP server: http://localhost:8000/mcp  (MCP_PORT to override)
-
-# CLI queries (direct ClickHouse access)
-.exo/bin/kaizen spans              # recent spans (all agents)
-.exo/bin/kaizen spans my-worker    # filter by agent_id
-.exo/bin/kaizen agents             # agent lifecycles (spawn → activity)
-.exo/bin/kaizen tools              # tool usage summary
-.exo/bin/kaizen trace <trace_id>   # all spans in a trace
-.exo/bin/kaizen                    # interactive ClickHouse SQL
 ```
 
 Auth is auto-bootstrapped: `init-signoz-auth` creates an admin user, generates a PAT, and writes it to `.exo/otel/.env.signoz`. The MCP server reads this via `env_file`. The API key is required in the `Authorization: Bearer <key>` header for MCP requests.

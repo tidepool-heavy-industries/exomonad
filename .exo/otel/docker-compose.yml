@@ -109,7 +109,7 @@ services:
       - SIGNOZ_ALERTMANAGER_PROVIDER=signoz
       - SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN=tcp://clickhouse:9000
       - SIGNOZ_SQLSTORE_SQLITE_PATH=/var/lib/signoz/signoz.db
-      - SIGNOZ_TOKENIZER_JWT_SECRET=secret
+      - SIGNOZ_TOKENIZER_JWT_SECRET=${SIGNOZ_JWT_SECRET:-secret}
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "localhost:8080/api/v1/health"]
       interval: 30s
@@ -162,7 +162,7 @@ services:
   # Writes SIGNOZ_API_KEY=<pat> to .env.signoz for mcp-server to read.
   init-signoz-auth:
     <<: *common
-    image: curlimages/curl:latest
+    image: curlimages/curl:8.18.0
     container_name: signoz-init-auth
     user: root
     depends_on:
@@ -177,9 +177,9 @@ services:
       - |
         set -e
         SIGNOZ=http://signoz:8080
-        EMAIL=admin@exomonad.dev
-        PASSWORD=ExoMonad2026.x
-        ORG=exomonad
+        EMAIL=$${SIGNOZ_ADMIN_EMAIL:-admin@exomonad.dev}
+        PASSWORD=$${SIGNOZ_ADMIN_PASSWORD:-ExoMonad2026.x}
+        ORG=$${SIGNOZ_ORG:-exomonad}
 
         # Skip if API key already bootstrapped
         if [ -s /host/.env.signoz ]; then
@@ -217,7 +217,7 @@ services:
 
   signoz-mcp-server:
     <<: *common
-    image: signoz/signoz-mcp-server:latest
+    image: signoz/signoz-mcp-server:${MCP_SERVER_TAG:-latest}
     container_name: signoz-mcp-server
     depends_on:
       init-signoz-auth:
