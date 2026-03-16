@@ -29,7 +29,7 @@ Install Nix if you don't have it:
 
 ```bash
 sh <(curl -L https://nixos.org/nix/install) --daemon
-mkdir -p ~/.config/nix && echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
+mkdir -p ~/.config/nix && grep -q 'nix-command flakes' ~/.config/nix/nix.conf 2>/dev/null || echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
 ```
 
 Then build and install:
