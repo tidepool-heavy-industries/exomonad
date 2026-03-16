@@ -9,21 +9,18 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use exomonad_core::protocol::{Runtime as HookRuntime, ServiceRequest};
-use exomonad_core::services::external::otel::OtelService;
-use exomonad_core::services::external::ExternalService;
+use exomonad_core::protocol::Runtime as HookRuntime;
 use exomonad_core::services::{git, tmux_events};
 use exomonad_core::{
     AgentName, BirthBranch, ClaudePreToolUseOutput, HookEnvelope, HookEventType, HookInput,
-    HookSpecificOutput, InternalStopHookOutput, PluginManager, Role, RuntimeBuilder, StopDecision,
-    ToolPermission,
+    InternalStopHookOutput, PluginManager, Role, RuntimeBuilder, StopDecision,
 };
 use std::collections::HashMap;
 use std::path::{Path as StdPath, PathBuf};
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, instrument, warn};
 
 // ============================================================================
 // REST API Types
@@ -55,7 +52,6 @@ pub struct HookState {
     pub plugins: Arc<tokio::sync::RwLock<HashMap<AgentName, Arc<PluginManager>>>>,
     pub registry: Arc<exomonad_core::effects::EffectRegistry>,
     pub wasm_path: PathBuf,
-    pub otel: Option<Arc<OtelService>>,
     pub tmux_session: String,
     pub default_role: Role,
     pub event_log: Option<Arc<exomonad_core::services::EventLog>>,
@@ -196,50 +192,6 @@ pub async fn resolve_agent_birth_branch(
 // Server-side Hook Handler Helpers
 // ============================================================================
 
-#[allow(clippy::too_many_arguments)]
-pub async fn emit_hook_span(
-    otel: &OtelService,
-    trace_id: &str,
-    event_type: HookEventType,
-    runtime: HookRuntime,
-    hook_input: &HookInput,
-    decision_str: &str,
-    start_ns: u64,
-    extra_attributes: HashMap<String, String>,
-) {
-    let end_ns = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as u64;
-
-    let mut attributes = HashMap::new();
-    attributes.insert("session.id".to_string(), hook_input.session_id.to_string());
-    attributes.insert("jsonl.file".to_string(), hook_input.transcript_path.clone());
-    if let Some(tid) = &hook_input.tool_use_id {
-        attributes.insert("tool_use_id".to_string(), tid.clone());
-    }
-    attributes.insert("hook.type".to_string(), format!("{:?}", event_type));
-    attributes.insert("hook.runtime".to_string(), runtime.to_string());
-    attributes.insert("hook.decision".to_string(), decision_str.to_string());
-
-    for (k, v) in extra_attributes {
-        attributes.insert(k, v);
-    }
-
-    let req = ServiceRequest::OtelSpan {
-        trace_id: trace_id.to_string(),
-        span_id: uuid::Uuid::new_v4().simple().to_string()[..16].to_string(),
-        name: format!("hook:{:?}", event_type),
-        start_ns: Some(start_ns),
-        end_ns: Some(end_ns),
-        attributes: Some(attributes),
-    };
-
-    if let Err(e) = otel.call(req).await {
-        warn!("Failed to emit OTel span: {}", e);
-    }
-}
-
 pub async fn handle_hook_inner(
     params: &HookQueryParams,
     state: &HookState,
@@ -252,12 +204,6 @@ pub async fn handle_hook_inner(
         .as_ref()
         .map(|r| Role::from(r.as_str()))
         .unwrap_or(state.default_role.clone());
-
-    let trace_id = uuid::Uuid::new_v4().simple().to_string();
-    let start_ns = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as u64;
 
     debug!(
         runtime = ?runtime,
@@ -317,20 +263,6 @@ pub async fn handle_hook_inner(
             debug!(event = ?event_type, "Hook type not handled by WASM, allowing");
             let output_json = serde_json::to_string(&ClaudePreToolUseOutput::default())
                 .context("Failed to serialize output")?;
-
-            if let Some(ref otel) = state.otel {
-                emit_hook_span(
-                    otel,
-                    &trace_id,
-                    event_type,
-                    runtime,
-                    &hook_input,
-                    "allow",
-                    start_ns,
-                    HashMap::new(),
-                )
-                .await;
-            }
 
             return Ok(HookEnvelope {
                 stdout: output_json,
@@ -431,25 +363,6 @@ pub async fn handle_hook_inner(
                 );
             }
 
-            if let Some(ref otel) = state.otel {
-                let mut extra_attributes = HashMap::new();
-                extra_attributes.insert("routing.decision".to_string(), decision_str.to_string());
-                if let Some(reason) = &internal_output.reason {
-                    extra_attributes.insert("routing.reason".to_string(), reason.clone());
-                }
-                emit_hook_span(
-                    otel,
-                    &trace_id,
-                    event_type,
-                    runtime,
-                    &hook_input,
-                    decision_str,
-                    start_ns,
-                    extra_attributes,
-                )
-                .await;
-            }
-
             // Emit StopHookBlocked tmux event
             if internal_output.decision == StopDecision::Block
                 && event_type == HookEventType::SubagentStop
@@ -496,36 +409,6 @@ pub async fn handle_hook_inner(
             let output_json =
                 serde_json::to_string(&output).context("Failed to serialize output")?;
 
-            let decision_str = if !output.continue_ {
-                "block"
-            } else {
-                match output.hook_specific_output {
-                    Some(HookSpecificOutput::PreToolUse {
-                        permission_decision,
-                        ..
-                    }) => match permission_decision {
-                        ToolPermission::Allow => "allow",
-                        ToolPermission::Deny => "deny",
-                        ToolPermission::Ask => "ask",
-                    },
-                    _ => "allow",
-                }
-            };
-
-            if let Some(ref otel) = state.otel {
-                emit_hook_span(
-                    otel,
-                    &trace_id,
-                    event_type,
-                    runtime,
-                    &hook_input,
-                    decision_str,
-                    start_ns,
-                    HashMap::new(),
-                )
-                .await;
-            }
-
             let exit_code = if output.continue_ { 0 } else { 2 };
 
             Ok(HookEnvelope {
@@ -559,6 +442,7 @@ pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
+#[instrument(skip_all, fields(hook = ?params.event, agent_id = ?params.agent_id))]
 pub async fn handle_hook_request(
     Query(params): Query<HookQueryParams>,
     State(state): State<HookState>,
@@ -627,6 +511,7 @@ pub async fn list_tools(
     }
 }
 
+#[instrument(skip_all, fields(agent_id = %name, role = %role, tool = %body.name))]
 pub async fn call_tool(
     Path((role, name)): Path<(String, String)>,
     State(state): State<AppState>,
@@ -760,7 +645,20 @@ pub async fn shutdown_endpoint(State(signal): State<Arc<tokio::sync::Notify>>) -
 // Serve Command Runner
 // ============================================================================
 
+#[tracing::instrument(name = "exomonad.serve", skip_all)]
 pub async fn run(config: &Config) -> Result<()> {
+    // Extract TRACEPARENT from env if this is a child agent (parent injected it)
+    if let Ok(tp) = std::env::var("TRACEPARENT") {
+        use opentelemetry::propagation::TextMapPropagator;
+        let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::new();
+        let mut carrier = std::collections::HashMap::new();
+        carrier.insert("traceparent".to_string(), tp.clone());
+        let parent_cx = propagator.extract(&carrier);
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        tracing::Span::current().set_parent(parent_cx);
+        info!(traceparent = %tp, "Inherited parent trace context");
+    }
+
     let project_dir = if config.project_dir.is_absolute() {
         config.project_dir.clone()
     } else {
@@ -939,12 +837,10 @@ Run `exomonad recompile` first to build it.",
         event_log: event_log.clone(),
     };
 
-    // Hook handler state (shared OtelService created once)
     let hook_state = HookState {
         plugins: plugins.clone(),
         registry: rt_registry.clone(),
         wasm_path: wasm_path.clone(),
-        otel: OtelService::from_env().ok().map(Arc::new),
         tmux_session: config.tmux_session.clone(),
         default_role: config.role.clone(),
         event_log: event_log.clone(),

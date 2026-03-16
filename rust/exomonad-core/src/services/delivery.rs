@@ -6,7 +6,7 @@ use agent_client_protocol::{Agent, PromptRequest};
 use claude_teams_bridge as teams_mailbox;
 use claude_teams_bridge::TeamRegistry;
 use exomonad_proto::effects::events::{event, AgentMessage, Event};
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, instrument};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryResult {
@@ -53,6 +53,7 @@ pub fn format_parent_notification(agent_id: &str, status: &str, message: &str) -
 /// inside the message body, so the TL sees: `[from: leaf-id] [PR READY] PR #5...`
 ///
 /// For peer-to-peer messaging, use `deliver_to_agent()` directly instead.
+#[instrument(skip_all, fields(agent_id = %agent_id, parent_session_id = %parent_session_id, status = %status))]
 pub async fn notify_parent_delivery(
     team_registry: Option<&TeamRegistry>,
     acp_registry: Option<&AcpRegistry>,
@@ -180,6 +181,7 @@ async fn deliver_via_uds(
 /// Attempts ACP prompt delivery if a registry is provided and agent is registered.
 /// Attempts HTTP-over-UDS delivery for custom binary agents (e.g., shoal-agent).
 /// Falls back to tmux input injection if other delivery methods fail or are not available.
+#[instrument(skip_all, fields(agent_key = %agent_key, from = %from, delivery_method = tracing::field::Empty))]
 pub async fn deliver_to_agent(
     team_registry: Option<&TeamRegistry>,
     acp_registry: Option<&super::acp_registry::AcpRegistry>,
@@ -201,6 +203,7 @@ pub async fn deliver_to_agent(
                 summary,
             ) {
                 Ok(timestamp) => {
+                    tracing::Span::current().record("delivery_method", "teams");
                     info!(
                         agent = %agent_key,
                         team = %team_info.team_name,
@@ -295,6 +298,7 @@ pub async fn deliver_to_agent(
                 .await
             {
                 Ok(_) => {
+                    tracing::Span::current().record("delivery_method", "acp");
                     info!(agent = %agent_key, "Delivered message via ACP prompt");
                     if let Some(log) = event_log {
                         let _ = log.append(
@@ -338,6 +342,7 @@ pub async fn deliver_to_agent(
     if socket_path.exists() {
         match deliver_via_uds(&socket_path, from, message, summary).await {
             Ok(()) => {
+                tracing::Span::current().record("delivery_method", "uds");
                 info!(agent = %agent_key, socket = %socket_path.display(), "Delivered message via Unix socket");
                 if let Some(log) = event_log {
                     let _ = log.append(
@@ -411,6 +416,7 @@ pub async fn deliver_to_agent(
     }
 
     if let Some(target) = routing_target {
+        tracing::Span::current().record("delivery_method", "tmux");
         info!(
             agent = %agent_key,
             target = %target,
@@ -439,6 +445,7 @@ pub async fn deliver_to_agent(
         return DeliveryResult::Tmux;
     }
 
+    tracing::Span::current().record("delivery_method", "tmux");
     debug!(
         target = %tmux_target,
         agent = %agent_key,

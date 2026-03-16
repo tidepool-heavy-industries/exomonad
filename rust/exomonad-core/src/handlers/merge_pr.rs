@@ -3,6 +3,7 @@ use crate::services::event_log::EventLog;
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::merge_pr;
 use async_trait::async_trait;
+use tracing::instrument;
 use exomonad_proto::effects::merge_pr::*;
 use std::sync::Arc;
 
@@ -29,6 +30,7 @@ crate::impl_pass_through_handler!(MergePRHandler, "merge_pr", dispatch_merge_pr_
 
 #[async_trait]
 impl MergePrEffects for MergePRHandler {
+    #[instrument(skip_all, fields(agent_name = %ctx.agent_name, pr_number = req.pr_number))]
     async fn merge_pr(
         &self,
         req: MergePrRequest,

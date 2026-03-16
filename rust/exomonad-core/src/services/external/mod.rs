@@ -1,22 +1,19 @@
-//! External service clients for LLM providers, GitHub, and observability.
+//! External service clients for LLM providers and GitHub.
 //!
 //! Provides standalone clients for external APIs:
 //! - **Anthropic**: Claude chat completions
 //! - **GitHub**: Issue and PR management via octocrab
 //! - **Ollama**: Local LLM generation
-//! - **OTLP**: OpenTelemetry traces and metrics export
 
 use async_trait::async_trait;
 
 pub mod anthropic;
 pub mod github;
 pub mod ollama;
-pub mod otel;
 
 pub use anthropic::AnthropicService;
 pub use github::GitHubService as ExternalGitHubService;
 pub use ollama::OllamaService;
-pub use otel::OtelService;
 
 /// A common trait for all external service clients.
 #[async_trait]

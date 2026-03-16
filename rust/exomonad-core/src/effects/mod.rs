@@ -104,6 +104,8 @@ pub trait EffectHandler: Send + Sync {
     ) -> EffectResult<Vec<u8>>;
 }
 
+use tracing::instrument;
+
 /// Registry for effect handlers.
 ///
 /// Maps namespace prefixes to handlers and dispatches effect requests.
@@ -149,6 +151,7 @@ impl EffectRegistry {
     /// Dispatch an effect to the appropriate handler.
     ///
     /// Routes based on namespace prefix extracted from the effect type.
+    #[instrument(skip_all, fields(effect_type = %effect_type, namespace = tracing::field::Empty, agent_name = %ctx.agent_name))]
     pub async fn dispatch(
         &self,
         effect_type: &str,
@@ -161,6 +164,8 @@ impl EffectRegistry {
                 effect_type
             ))
         })?;
+
+        tracing::Span::current().record("namespace", &namespace);
 
         let handler = self
             .handlers

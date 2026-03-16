@@ -57,6 +57,10 @@ pub struct RawConfig {
     /// When true, spawned Gemini agents receive `--yolo` flag.
     #[serde(default)]
     pub yolo: bool,
+
+    /// OTLP gRPC endpoint (e.g. "http://localhost:4317").
+    /// If absent, OTel export is disabled (fmt-only tracing).
+    pub otlp_endpoint: Option<String>,
 }
 
 /// Final resolved configuration.
@@ -84,6 +88,9 @@ pub struct Config {
     pub initial_prompt: Option<String>,
     /// When true, spawned Gemini agents receive `--yolo` flag.
     pub yolo: bool,
+    /// OTLP gRPC endpoint (e.g. "http://localhost:4317").
+    /// If absent, OTel export is disabled (fmt-only tracing).
+    pub otlp_endpoint: Option<String>,
 }
 
 impl Config {
@@ -200,6 +207,9 @@ impl Config {
         // Resolve yolo: local > global > false
         let yolo = local_raw.yolo || global_raw.yolo;
 
+        // Resolve otlp_endpoint: local > global
+        let otlp_endpoint = local_raw.otlp_endpoint.or(global_raw.otlp_endpoint);
+
         Ok(Self {
             project_dir,
             role,
@@ -213,6 +223,7 @@ impl Config {
             extra_mcp_servers,
             initial_prompt,
             yolo,
+            otlp_endpoint,
         })
     }
 
@@ -243,6 +254,7 @@ impl Default for Config {
             extra_mcp_servers: std::collections::HashMap::new(),
             initial_prompt: None,
             yolo: false,
+            otlp_endpoint: None,
         }
     }
 }

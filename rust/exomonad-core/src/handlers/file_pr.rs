@@ -10,6 +10,7 @@ use crate::services::event_log::EventLog;
 use crate::services::file_pr::{self, FilePRInput};
 use crate::services::git_worktree::GitWorktreeService;
 use async_trait::async_trait;
+use tracing::instrument;
 use exomonad_proto::effects::file_pr::*;
 use std::sync::Arc;
 
@@ -54,6 +55,7 @@ impl EffectHandler for FilePRHandler {
 
 #[async_trait]
 impl FilePrEffects for FilePRHandler {
+    #[instrument(skip_all, fields(agent_name = %ctx.agent_name, pr_title = %req.title))]
     async fn file_pr(
         &self,
         req: FilePrRequest,

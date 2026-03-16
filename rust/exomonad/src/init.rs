@@ -27,6 +27,57 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
 
     // Resolve config
     let config = Config::discover()?;
+
+    // Check OTel endpoint reachability if configured
+    if let Some(ref endpoint) = config.otlp_endpoint {
+        if let Some(host_port) = endpoint
+            .strip_prefix("http://")
+            .or_else(|| endpoint.strip_prefix("https://"))
+        {
+            let hp = host_port.to_string();
+            let reachable = tokio::task::spawn_blocking(move || {
+                use std::net::ToSocketAddrs;
+                match hp.to_socket_addrs() {
+                    Ok(mut addrs) => {
+                        if let Some(addr) = addrs.next() {
+                            std::net::TcpStream::connect_timeout(
+                                &addr,
+                                std::time::Duration::from_secs(2),
+                            )
+                            .is_ok()
+                        } else {
+                            false
+                        }
+                    }
+                    Err(_) => false,
+                }
+            })
+            .await
+            .unwrap_or(false);
+
+            if reachable {
+                info!(endpoint = %endpoint, "OTel endpoint reachable");
+            } else {
+                use std::io::Write;
+                eprint!(
+                    "OTel endpoint {} unreachable — continue without tracing? [y/N] ",
+                    endpoint
+                );
+                std::io::stderr().flush().ok();
+                let input = tokio::task::spawn_blocking(|| {
+                    let mut buf = String::new();
+                    std::io::stdin().read_line(&mut buf).ok();
+                    buf
+                })
+                .await
+                .unwrap_or_default();
+                if !input.trim().eq_ignore_ascii_case("y") {
+                    anyhow::bail!("OTel endpoint unreachable. Start it with:\n  docker compose -f ~/.exo/otel/docker-compose.yml up -d");
+                }
+            }
+        }
+    }
+
     let session = session_override.unwrap_or(config.tmux_session.clone());
 
     // Auto-build or copy WASM if it doesn't exist yet

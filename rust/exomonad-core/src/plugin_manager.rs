@@ -18,6 +18,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::{Instant, SystemTime};
 
+use tracing::instrument;
+
 /// Result from WASM execution, supporting suspension.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "tag", rename_all = "snake_case")]
@@ -234,6 +236,7 @@ impl PluginManager {
     /// All WASM exports return `WasmResult<O>` (Done | Suspend). On Suspend,
     /// the effect is dispatched asynchronously (lock released), then the WASM
     /// `resume` function is called with the result. Loops until Done.
+    #[instrument(skip_all, fields(function = %function, agent_name = %self.ctx.agent_name, birth_branch = %self.ctx.birth_branch))]
     pub async fn call<I, O>(&self, function: &str, input: &I) -> Result<O>
     where
         I: Serialize + Send + Sync + 'static,
@@ -275,6 +278,8 @@ impl PluginManager {
                     continuation_id,
                     effect,
                 } => {
+                    tracing::debug!(effect_type = %effect.effect_type, round, "wasm.suspend");
+
                     // Execute the async effect WITHOUT holding the lock
 
                     // Convert payload (Value) to bytes
@@ -328,6 +333,7 @@ impl PluginManager {
                     let effect_result = response.encode_to_vec();
 
                     // Set up resume call
+                    tracing::debug!(round, "wasm.resume");
                     current_function = "resume".to_string();
                     current_input = serde_json::to_vec(&serde_json::json!({
                         "continuation_id": continuation_id,
