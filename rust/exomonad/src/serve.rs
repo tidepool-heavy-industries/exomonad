@@ -54,6 +54,7 @@ pub struct HookState {
     pub wasm_path: PathBuf,
     pub tmux_session: String,
     pub default_role: Role,
+    pub event_log: Option<Arc<exomonad_core::services::EventLog>>,
 }
 
 // ============================================================================
@@ -358,6 +359,13 @@ pub async fn handle_hook_inner(
                 reason = ?internal_output.reason,
                 "[event] hook.stop"
             );
+            if let Some(ref log) = state.event_log {
+                let _ = log.append("hook.stop", agent_name_for_hook.as_str(), &serde_json::json!({
+                    "event_type": format!("{:?}", event_type),
+                    "decision": decision_str,
+                    "reason": internal_output.reason,
+                }));
+            }
 
             // Emit StopHookBlocked tmux event
             if internal_output.decision == StopDecision::Block
@@ -566,6 +574,15 @@ pub async fn call_tool(
                 error = %e,
                 "[event] tool.called"
             );
+            if let Some(ref log) = state.event_log {
+                let _ = log.append("tool.called", &name, &serde_json::json!({
+                    "tool_name": body.name,
+                    "role": role,
+                    "duration_ms": duration_ms,
+                    "success": false,
+                    "error": e.to_string(),
+                }));
+            }
             return Json(serde_json::json!({
                 "success": false,
                 "result": null,
@@ -585,6 +602,15 @@ pub async fn call_tool(
         error = ?output.error,
         "[event] tool.called"
     );
+    if let Some(ref log) = state.event_log {
+        let _ = log.append("tool.called", &name, &serde_json::json!({
+            "tool_name": body.name,
+            "role": role,
+            "duration_ms": duration_ms,
+            "success": output.success,
+            "error": output.error,
+        }));
+    }
 
     Json(serde_json::json!({
         "success": output.success,
@@ -692,6 +718,18 @@ Run `exomonad recompile` first to build it.",
     let team_registry = Arc::new(claude_teams_bridge::TeamRegistry::new());
     let acp_registry = Arc::new(exomonad_core::services::acp_registry::AcpRegistry::new());
 
+    // JSONL event log (parallel to OTel span events, queryable via DuckDB/kaizen)
+    let event_log = match exomonad_core::services::EventLog::open(project_dir.join(".exo/logs")) {
+        Ok(log) => {
+            info!(path = %project_dir.join(".exo/logs").display(), "Event log opened");
+            Some(Arc::new(log))
+        }
+        Err(e) => {
+            warn!(error = %e, "Failed to open event log, JSONL logging disabled");
+            None
+        }
+    };
+
     let project_dir_for_services = project_dir.clone();
     let mut agent_control =
         exomonad_core::services::agent_control::AgentControlService::new(
@@ -739,11 +777,13 @@ Run `exomonad recompile` first to build it.",
 
     builder = builder.with_handlers(exomonad_core::core_handlers(
         project_dir.clone(),
+        event_log.clone(),
     ));
     builder = builder.with_handlers(exomonad_core::git_handlers(
         git,
         github,
         git_wt,
+        event_log.clone(),
     ));
     let orch_handlers = exomonad_core::orchestration_handlers(
         agent_control.clone(),
@@ -755,6 +795,7 @@ Run `exomonad recompile` first to build it.",
         team_registry.clone(),
         acp_registry.clone(),
         mutex_registry,
+        event_log.clone(),
     );
     builder = builder.with_handlers(orch_handlers);
     let rt = builder.build().await.context("Failed to build runtime")?;
@@ -793,6 +834,9 @@ Run `exomonad recompile` first to build it.",
     poller = poller.with_team_registry(team_registry);
     poller = poller.with_acp_registry(acp_registry.clone());
     poller = poller.with_plugins(plugins.clone());
+    if let Some(ref log) = event_log {
+        poller = poller.with_event_log(log.clone());
+    }
     tokio::spawn(async move {
         poller.run().await;
     });
@@ -805,6 +849,7 @@ Run `exomonad recompile` first to build it.",
         wasm_name: wasm_name.clone(),
         default_role: config.role.clone(),
         worktree_base: worktree_base.clone(),
+        event_log: event_log.clone(),
     };
 
     let hook_state = HookState {
@@ -813,6 +858,7 @@ Run `exomonad recompile` first to build it.",
         wasm_path: wasm_path.clone(),
         tmux_session: config.tmux_session.clone(),
         default_role: config.role.clone(),
+        event_log: event_log.clone(),
     };
 
     // Shutdown signal for graceful shutdown via /shutdown endpoint

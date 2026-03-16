@@ -27,6 +27,7 @@ pub struct GitHubPoller {
     team_registry: Option<Arc<TeamRegistry>>,
     acp_registry: Option<Arc<AcpRegistry>>,
     plugins: Option<PluginMap>,
+    event_log: Option<Arc<super::event_log::EventLog>>,
 }
 
 /// A Copilot review comment with optional file context.
@@ -282,7 +283,13 @@ impl GitHubPoller {
             team_registry: None,
             acp_registry: None,
             plugins: None,
+            event_log: None,
         }
+    }
+
+    pub fn with_event_log(mut self, log: Arc<super::event_log::EventLog>) -> Self {
+        self.event_log = Some(log);
+        self
     }
 
     pub fn with_team_registry(mut self, registry: Arc<TeamRegistry>) -> Self {
@@ -388,6 +395,12 @@ impl GitHubPoller {
                     action = %action_str,
                     "[event] event.dispatched"
                 );
+                if let Some(ref log) = self.event_log {
+                    let _ = log.append("event.dispatched", agent_name, &serde_json::json!({
+                        "event_type": event_type,
+                        "action": action_str,
+                    }));
+                }
 
                 Ok(Some(action))
             }
@@ -404,6 +417,12 @@ impl GitHubPoller {
                     error = %e,
                     "[event] event.dispatch_failed"
                 );
+                if let Some(ref log) = self.event_log {
+                    let _ = log.append("event.dispatch_failed", agent_name, &serde_json::json!({
+                        "event_type": event_type,
+                        "error": e.to_string(),
+                    }));
+                }
 
                 Ok(None)
             }
@@ -457,6 +476,7 @@ impl GitHubPoller {
                 crate::services::delivery::notify_parent_delivery(
                     self.team_registry.as_deref(),
                     self.acp_registry.as_deref(),
+                    self.event_log.as_deref(),
                     &self.event_queue,
                     &self.project_dir,
                     agent_slug,
@@ -591,6 +611,13 @@ impl GitHubPoller {
                         parent = %parent_branch,
                         "[event] agent.sibling_merged"
                     );
+                    if let Some(ref log) = self.event_log {
+                        let _ = log.append("agent.sibling_merged", branch, &serde_json::json!({
+                            "pr_number": pr_num.as_u64(),
+                            "branch": branch,
+                            "parent": parent_branch,
+                        }));
+                    }
 
                     removed_prs.push(*pr_num);
                 }
@@ -988,6 +1015,15 @@ impl GitHubPoller {
             "[event] {}",
             event_name
         );
+        if let Some(ref log) = self.event_log {
+            let _ = log.append(event_name, branch, &serde_json::json!({
+                "branch": branch,
+                "status": status,
+                "message": message,
+                "comments": comments,
+                "reviews": reviews,
+            }));
+        }
 
         let event = Event {
             event_id: 0,

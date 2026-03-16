@@ -26,6 +26,8 @@ pub struct EventHandler {
     acp_registry: Option<Arc<AcpRegistry>>,
     /// Project root directory for resolving UDS socket paths.
     project_dir: std::path::PathBuf,
+    /// JSONL event log for offline analysis.
+    event_log: Option<Arc<crate::services::event_log::EventLog>>,
 }
 
 impl EventHandler {
@@ -40,6 +42,7 @@ impl EventHandler {
             team_registry: None,
             acp_registry: None,
             project_dir,
+            event_log: None,
         }
     }
 
@@ -50,6 +53,11 @@ impl EventHandler {
 
     pub fn with_acp_registry(mut self, registry: Arc<AcpRegistry>) -> Self {
         self.acp_registry = Some(registry);
+        self
+    }
+
+    pub fn with_event_log(mut self, log: Arc<crate::services::event_log::EventLog>) -> Self {
+        self.event_log = Some(log);
         self
     }
 }
@@ -176,6 +184,7 @@ impl EventEffects for EventHandler {
         crate::services::delivery::notify_parent_delivery(
             self.team_registry.as_deref(),
             self.acp_registry.as_deref(),
+            self.event_log.as_deref(),
             &self.queue,
             &self.project_dir,
             &agent_id_str,

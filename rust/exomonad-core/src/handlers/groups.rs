@@ -5,6 +5,7 @@ use crate::effects::EffectHandler;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::AgentControlService;
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
+use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
 use crate::services::filesystem::FileSystemService;
 use crate::services::git::GitService;
@@ -21,9 +22,14 @@ use super::{
 /// Core handlers every consumer needs: logging, key-value store, filesystem.
 pub fn core_handlers(
     project_dir: PathBuf,
+    event_log: Option<Arc<EventLog>>,
 ) -> Vec<Box<dyn EffectHandler>> {
+    let mut log_handler = LogHandler::new();
+    if let Some(ref log) = event_log {
+        log_handler = log_handler.with_event_log(log.clone());
+    }
     vec![
-        Box::new(LogHandler::new()),
+        Box::new(log_handler),
         Box::new(KvHandler::new(project_dir.clone())),
         Box::new(FsHandler::new(Arc::new(FileSystemService::new(
             project_dir,
@@ -40,9 +46,14 @@ pub fn git_handlers(
     git: Arc<GitService>,
     github: Option<GitHubService>,
     git_wt: Arc<GitWorktreeService>,
+    event_log: Option<Arc<EventLog>>,
 ) -> Vec<Box<dyn EffectHandler>> {
-    let file_pr_handler = FilePRHandler::new(git_wt.clone());
-    let merge_pr_handler = MergePRHandler::new(git_wt);
+    let mut file_pr_handler = FilePRHandler::new(git_wt.clone());
+    let mut merge_pr_handler = MergePRHandler::new(git_wt);
+    if let Some(ref log) = event_log {
+        file_pr_handler = file_pr_handler.with_event_log(log.clone());
+        merge_pr_handler = merge_pr_handler.with_event_log(log.clone());
+    }
 
     let mut handlers: Vec<Box<dyn EffectHandler>> = vec![
         Box::new(GitHandler::new(git)),
@@ -72,14 +83,20 @@ pub fn orchestration_handlers(
     team_registry: Arc<TeamRegistry>,
     acp_registry: Arc<AcpRegistry>,
     mutex_registry: Arc<MutexRegistry>,
+    event_log: Option<Arc<EventLog>>,
 ) -> Vec<Box<dyn EffectHandler>> {
-    let agent_handler = AgentHandler::new(agent_control)
+    let mut agent_handler = AgentHandler::new(agent_control)
         .with_claude_session_registry(claude_session_registry.clone())
         .with_acp_registry(acp_registry.clone());
 
-    let event_handler = EventHandler::new(event_queue, event_queue_scope, project_dir)
+    let mut event_handler = EventHandler::new(event_queue, event_queue_scope, project_dir)
         .with_team_registry(team_registry.clone())
         .with_acp_registry(acp_registry.clone());
+
+    if let Some(ref log) = event_log {
+        agent_handler = agent_handler.with_event_log(log.clone());
+        event_handler = event_handler.with_event_log(log.clone());
+    }
 
     vec![
         Box::new(agent_handler),
@@ -111,7 +128,7 @@ mod tests {
     #[test]
     fn test_core_handlers() {
         let tmp = tempdir().unwrap();
-        let handlers = core_handlers(tmp.path().to_path_buf());
+        let handlers = core_handlers(tmp.path().to_path_buf(), None);
         assert_eq!(handlers.len(), 4);
         let namespaces: Vec<_> = handlers.iter().map(|h| h.namespace()).collect();
         assert!(namespaces.contains(&"log"));
@@ -126,7 +143,7 @@ mod tests {
         let git = Arc::new(GitService::new(Arc::new(MockExecutor)));
         let git_wt = Arc::new(GitWorktreeService::new(tmp.path().to_path_buf()));
 
-        let handlers = git_handlers(git, None, git_wt);
+        let handlers = git_handlers(git, None, git_wt, None);
         assert_eq!(handlers.len(), 4);
         let namespaces: Vec<_> = handlers.iter().map(|h| h.namespace()).collect();
         assert!(namespaces.contains(&"git"));
@@ -143,7 +160,7 @@ mod tests {
         let git_wt = Arc::new(GitWorktreeService::new(tmp.path().to_path_buf()));
         let github = GitHubService::new("test-token".to_string()).unwrap();
 
-        let handlers = git_handlers(git, Some(github), git_wt);
+        let handlers = git_handlers(git, Some(github), git_wt, None);
         assert_eq!(handlers.len(), 5);
         let namespaces: Vec<_> = handlers.iter().map(|h| h.namespace()).collect();
         assert!(namespaces.contains(&"github"));

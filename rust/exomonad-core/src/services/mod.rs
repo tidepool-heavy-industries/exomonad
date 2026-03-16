@@ -5,6 +5,7 @@ pub mod claude_session_registry;
 pub mod command;
 pub mod copilot_review;
 pub mod delivery;
+pub mod event_log;
 pub mod event_queue;
 pub mod external;
 pub mod file_pr;
@@ -24,6 +25,7 @@ pub mod synthetic_members;
 pub mod tmux_events;
 pub mod tmux_ipc;
 
+pub use self::event_log::EventLog;
 pub use self::acp_registry::AcpRegistry;
 pub use self::agent_control::{
     resolve_parent_tab_name, AgentControlService, AgentInfo, AgentType, BatchCleanupResult,

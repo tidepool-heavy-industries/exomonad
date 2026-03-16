@@ -56,6 +56,7 @@ pub fn format_parent_notification(agent_id: &str, status: &str, message: &str) -
 pub async fn notify_parent_delivery(
     team_registry: Option<&TeamRegistry>,
     acp_registry: Option<&AcpRegistry>,
+    event_log: Option<&super::event_log::EventLog>,
     event_queue: &EventQueue,
     project_dir: &std::path::Path,
     agent_id: &str,
@@ -66,7 +67,7 @@ pub async fn notify_parent_delivery(
     summary: Option<&str>,
     source: &str,
 ) -> DeliveryResult {
-    // 1. Log OTel event
+    // 1. Log OTel event + JSONL
     tracing::info!(
         otel.name = "agent.notify_parent",
         agent_id = %agent_id,
@@ -75,6 +76,14 @@ pub async fn notify_parent_delivery(
         source = %source,
         "[event] agent.notify_parent"
     );
+    if let Some(log) = event_log {
+        let _ = log.append("agent.notify_parent", agent_id, &serde_json::json!({
+            "parent": parent_session_id,
+            "status": status,
+            "message": message,
+            "source": source,
+        }));
+    }
 
     // 2. Publish to event queue
     let event = Event {

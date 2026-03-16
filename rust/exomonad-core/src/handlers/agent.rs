@@ -31,6 +31,7 @@ pub struct AgentHandler {
     service: Arc<AgentControlService>,
     claude_session_registry: Option<Arc<ClaudeSessionRegistry>>,
     acp_registry: Option<Arc<AcpRegistry>>,
+    event_log: Option<Arc<crate::services::event_log::EventLog>>,
 }
 
 impl AgentHandler {
@@ -39,11 +40,17 @@ impl AgentHandler {
             service,
             claude_session_registry: None,
             acp_registry: None,
+            event_log: None,
         }
     }
 
     pub fn with_claude_session_registry(mut self, reg: Arc<ClaudeSessionRegistry>) -> Self {
         self.claude_session_registry = Some(reg);
+        self
+    }
+
+    pub fn with_event_log(mut self, log: Arc<crate::services::event_log::EventLog>) -> Self {
+        self.event_log = Some(log);
         self
     }
 
@@ -228,6 +235,12 @@ impl AgentEffects for AgentHandler {
             spawn_type = "worker",
             "[event] agent.spawned"
         );
+        if let Some(ref log) = self.event_log {
+            let _ = log.append("agent.spawned", &ctx.agent_name.to_string(), &serde_json::json!({
+                "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "worker",
+                "branch": agent_info.branch_name,
+            }));
+        }
 
         Ok(SpawnWorkerResponse {
             agent: Some(agent_info),
@@ -310,6 +323,12 @@ impl AgentEffects for AgentHandler {
             spawn_type = "subtree",
             "[event] agent.spawned"
         );
+        if let Some(ref log) = self.event_log {
+            let _ = log.append("agent.spawned", &ctx.agent_name.to_string(), &serde_json::json!({
+                "child_agent": agent_info.id, "agent_type": "claude", "spawn_type": "subtree",
+                "branch": agent_info.branch_name,
+            }));
+        }
 
         Ok(SpawnSubtreeResponse {
             agent: Some(agent_info),
@@ -352,6 +371,12 @@ impl AgentEffects for AgentHandler {
             spawn_type = "leaf_subtree",
             "[event] agent.spawned"
         );
+        if let Some(ref log) = self.event_log {
+            let _ = log.append("agent.spawned", &ctx.agent_name.to_string(), &serde_json::json!({
+                "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "leaf_subtree",
+                "branch": agent_info.branch_name,
+            }));
+        }
 
         Ok(SpawnLeafSubtreeResponse {
             agent: Some(agent_info),
@@ -450,6 +475,12 @@ impl AgentEffects for AgentHandler {
             spawn_type = "acp",
             "[event] agent.spawned"
         );
+        if let Some(ref log) = self.event_log {
+            let _ = log.append("agent.spawned", &ctx.agent_name.to_string(), &serde_json::json!({
+                "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "acp",
+                "branch": agent_info.branch_name,
+            }));
+        }
 
         Ok(SpawnAcpResponse {
             agent: Some(agent_info),
