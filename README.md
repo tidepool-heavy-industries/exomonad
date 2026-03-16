@@ -23,7 +23,16 @@ See [try-exomonad/README.md](try-exomonad/README.md) for details.
 
 ## Install (Native)
 
-Requires [Nix](https://nixos.org/) and [tmux](https://github.com/tmux/tmux/wiki).
+**Prerequisites:** [Nix](https://nixos.org/) (with flakes), [tmux](https://github.com/tmux/tmux/wiki), and [just](https://github.com/casey/just).
+
+Install Nix if you don't have it:
+
+```bash
+sh <(curl -L https://nixos.org/nix/install) --daemon
+mkdir -p ~/.config/nix && echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf
+```
+
+Then build and install:
 
 ```bash
 git clone https://github.com/tidepool-heavy-industries/exomonad
@@ -33,7 +42,7 @@ just install-all      # Release build (optimized, slower compile)
 just install-all-dev  # Debug build (fast compile, good for development)
 ```
 
-This builds the Haskell WASM plugin (via Nix) and the Rust binary, then installs everything to `~/.cargo/bin/`.
+First build downloads Nix dependencies and initializes the WASM toolchain — subsequent builds are cached.
 
 ## Getting Started
 
