@@ -12,6 +12,9 @@ use tracing::debug;
 pub struct McpServerConfig {
     /// HTTP URL for the MCP server.
     pub url: String,
+    /// Optional HTTP headers (e.g. Authorization).
+    #[serde(default)]
+    pub headers: std::collections::HashMap<String, String>,
 }
 
 /// Raw configuration from file (supports both config.toml and config.local.toml fields).

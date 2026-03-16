@@ -242,20 +242,54 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     info!(session = %session, "Creating session");
 
     // 1. Write .mcp.json
-    let mcp_json = serde_json::json!({
-        "mcpServers": {
-            "exomonad": {
-                "type": "stdio",
-                "command": "exomonad",
-                "args": ["mcp-stdio", "--role", "tl", "--name", "root"]
+    let mut mcp_servers = serde_json::Map::new();
+    mcp_servers.insert(
+        "exomonad".to_string(),
+        serde_json::json!({
+            "type": "stdio",
+            "command": "exomonad",
+            "args": ["mcp-stdio", "--role", "tl", "--name", "root"]
+        }),
+    );
+
+    // Add extra MCP servers from config
+    for (name, server) in &config.extra_mcp_servers {
+        let mut entry = serde_json::json!({
+            "type": "http",
+            "url": server.url,
+        });
+        if !server.headers.is_empty() {
+            entry["headers"] = serde_json::to_value(&server.headers)?;
+        }
+        mcp_servers.insert(name.clone(), entry);
+    }
+
+    // Auto-register SigNoz MCP server if .env.signoz has an API key
+    let signoz_env = cwd.join(".exo/otel/.env.signoz");
+    if signoz_env.exists() && !config.extra_mcp_servers.contains_key("signoz") {
+        if let Ok(content) = std::fs::read_to_string(&signoz_env) {
+            if let Some(key) = content.trim().strip_prefix("SIGNOZ_API_KEY=") {
+                if !key.is_empty() {
+                    mcp_servers.insert(
+                        "signoz".to_string(),
+                        serde_json::json!({
+                            "type": "http",
+                            "url": "http://localhost:8000/mcp",
+                            "headers": { "Authorization": format!("Bearer {}", key) }
+                        }),
+                    );
+                    info!("Auto-registered SigNoz MCP server from .exo/otel/.env.signoz");
+                }
             }
         }
-    });
+    }
+
+    let mcp_json = serde_json::json!({ "mcpServers": mcp_servers });
     std::fs::write(
         cwd.join(".mcp.json"),
         serde_json::to_string_pretty(&mcp_json)?,
     )?;
-    info!("Wrote .mcp.json with stdio MCP config");
+    info!("Wrote .mcp.json with {} MCP server(s)", mcp_servers.len());
 
     // 2. Create session in background
     let server_window_id = TmuxIpc::new_session(&session, &cwd)?;
