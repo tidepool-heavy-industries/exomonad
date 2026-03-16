@@ -64,6 +64,9 @@ pub struct RawConfig {
     /// OTLP gRPC endpoint (e.g. "http://localhost:4317").
     /// If absent, OTel export is disabled (fmt-only tracing).
     pub otlp_endpoint: Option<String>,
+
+    /// SigNoz MCP server port (default: 8000).
+    pub signoz_mcp_port: Option<u16>,
 }
 
 /// Final resolved configuration.
@@ -94,6 +97,8 @@ pub struct Config {
     /// OTLP gRPC endpoint (e.g. "http://localhost:4317").
     /// If absent, OTel export is disabled (fmt-only tracing).
     pub otlp_endpoint: Option<String>,
+    /// SigNoz MCP server port (default: 8000).
+    pub signoz_mcp_port: u16,
 }
 
 impl Config {
@@ -213,6 +218,12 @@ impl Config {
         // Resolve otlp_endpoint: local > global
         let otlp_endpoint = local_raw.otlp_endpoint.or(global_raw.otlp_endpoint);
 
+        // Resolve signoz_mcp_port: local > global > 8000
+        let signoz_mcp_port = local_raw
+            .signoz_mcp_port
+            .or(global_raw.signoz_mcp_port)
+            .unwrap_or(8000);
+
         Ok(Self {
             project_dir,
             role,
@@ -227,6 +238,7 @@ impl Config {
             initial_prompt,
             yolo,
             otlp_endpoint,
+            signoz_mcp_port,
         })
     }
 
@@ -258,6 +270,7 @@ impl Default for Config {
             initial_prompt: None,
             yolo: false,
             otlp_endpoint: None,
+            signoz_mcp_port: 8000,
         }
     }
 }

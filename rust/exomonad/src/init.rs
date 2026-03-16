@@ -274,12 +274,11 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
                 .unwrap_or("")
                 .trim();
             if !key.is_empty() {
-                let mcp_port = std::env::var("MCP_PORT").unwrap_or_else(|_| "8000".to_string());
                 mcp_servers.insert(
                     "signoz".to_string(),
                     serde_json::json!({
                         "type": "http",
-                        "url": format!("http://localhost:{}/mcp", mcp_port),
+                        "url": format!("http://localhost:{}/mcp", config.signoz_mcp_port),
                         "headers": { "Authorization": format!("Bearer {}", key) }
                     }),
                 );
