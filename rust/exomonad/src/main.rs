@@ -121,9 +121,11 @@ async fn main() -> Result<()> {
         config::Config::default()
     });
 
+    let agent_id = std::env::var("EXOMONAD_AGENT_ID").unwrap_or_else(|_| "root".to_string());
+    let service_name = format!("exomonad/{}", agent_id);
     let _guard = logging::init(
         config.otlp_endpoint.as_deref(),
-        &config.tmux_session,
+        &service_name,
     );
 
     match cli.command {

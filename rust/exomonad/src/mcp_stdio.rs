@@ -7,6 +7,7 @@ use crate::uds_client::{self, ServerClient, ToolCallRequest};
 use anyhow::Result;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tracing::Instrument;
 
 /// Run the stdio MCP translation layer.
 ///
@@ -53,46 +54,58 @@ pub async fn run(role: &str, name: &str) -> Result<()> {
         let id = msg.get("id").cloned();
         let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
 
-        // Notifications (no id) — don't send a response
-        let is_notification = id.is_none() || id.as_ref().map(|v| v.is_null()).unwrap_or(false);
+        let span = tracing::info_span!(
+            "mcp_stdio.request",
+            method = %method,
+            jsonrpc_id = ?id,
+            role = %role,
+            agent = %name,
+        );
 
-        let result: Option<Result<Value>> = match method {
-            "initialize" => Some(Ok(json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": { "tools": { "listChanged": false } },
-                "serverInfo": { "name": "exomonad", "version": env!("CARGO_PKG_VERSION") }
-            }))),
+        let result: Option<Result<Value>> = async {
+            // Notifications (no id) — don't send a response
+            let is_notification = id.is_none() || id.as_ref().map(|v| v.is_null()).unwrap_or(false);
 
-            "notifications/initialized" | "notifications/cancelled" => {
-                // Notifications — no response
-                None
-            }
+            match method {
+                "initialize" => Some(Ok(json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": { "listChanged": false } },
+                    "serverInfo": { "name": "exomonad", "version": env!("CARGO_PKG_VERSION") }
+                }))),
 
-            "tools/list" => Some(
-                client
-                    .list_tools(role, name)
-                    .await
-                    .map(|tools| json!({ "tools": tools })),
-            ),
+                "notifications/initialized" | "notifications/cancelled" => {
+                    // Notifications — no response
+                    None
+                }
 
-            "tools/call" => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-                let req = ToolCallRequest {
-                    name: params["name"].as_str().unwrap_or("").to_string(),
-                    arguments: params.get("arguments").cloned().unwrap_or(json!({})),
-                };
-                Some(
+                "tools/list" => Some(
                     client
-                        .call_tool(role, name, &req)
+                        .list_tools(role, name)
                         .await
-                        .map(|output| output.to_mcp_result()),
-                )
+                        .map(|tools| json!({ "tools": tools })),
+                ),
+
+                "tools/call" => {
+                    let params = msg.get("params").cloned().unwrap_or(json!({}));
+                    let req = ToolCallRequest {
+                        name: params["name"].as_str().unwrap_or("").to_string(),
+                        arguments: params.get("arguments").cloned().unwrap_or(json!({})),
+                    };
+                    Some(
+                        client
+                            .call_tool(role, name, &req)
+                            .await
+                            .map(|output| output.to_mcp_result()),
+                    )
+                }
+
+                _ if is_notification => None,
+
+                other => Some(Err(anyhow::anyhow!("Unknown method: {}", other))),
             }
-
-            _ if is_notification => None,
-
-            other => Some(Err(anyhow::anyhow!("Unknown method: {}", other))),
-        };
+        }
+        .instrument(span)
+        .await;
 
         if let (Some(result), Some(id)) = (result, id) {
             let response = match result {

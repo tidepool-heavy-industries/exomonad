@@ -278,6 +278,8 @@ impl PluginManager {
                     continuation_id,
                     effect,
                 } => {
+                    tracing::debug!(effect_type = %effect.effect_type, round, "wasm.suspend");
+
                     // Execute the async effect WITHOUT holding the lock
 
                     // Convert payload (Value) to bytes
@@ -331,6 +333,7 @@ impl PluginManager {
                     let effect_result = response.encode_to_vec();
 
                     // Set up resume call
+                    tracing::debug!(round, "wasm.resume");
                     current_function = "resume".to_string();
                     current_input = serde_json::to_vec(&serde_json::json!({
                         "continuation_id": continuation_id,
