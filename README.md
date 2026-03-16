@@ -42,7 +42,7 @@ just install-all      # Release build (optimized, slower compile)
 just install-all-dev  # Debug build (fast compile, good for development)
 ```
 
-First build downloads Nix dependencies and initializes the WASM toolchain — subsequent builds are cached.
+First build downloads Nix dependencies and initializes the WASM toolchain — subsequent builds are cached. Artifacts are installed to `~/.cargo/bin/exomonad` and `~/.exo/wasm/`.
 
 ## Getting Started
 

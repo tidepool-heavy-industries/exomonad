@@ -51,7 +51,7 @@ install-hooks:
 
 # Build WASM role and install to .exo/wasm/
 wasm role="tl":
-    @nix develop .#wasm --command bash -c 'if ! wasm32-wasi-cabal list-bin wasm-guest-{{role}} --project-file=cabal.project.wasm >/dev/null 2>&1; then echo ">>> First-time WASM setup (populating cabal package index)..."; wasm32-wasi-cabal update --project-file=cabal.project.wasm; fi'
+    @nix develop .#wasm --command bash -c 'if [ ! -d ~/.cabal/packages/hackage.haskell.org ]; then echo ">>> First-time WASM setup (populating cabal package index)..."; wasm32-wasi-cabal update --project-file=cabal.project.wasm; fi'
     @echo ">>> Building wasm-guest-{{role}}..."
     nix develop .#wasm --command bash -c 'export PATH=$PWD/.gemini/tmp/bin:$PATH; wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest-{{role}}'
     @echo ">>> Installing to .exo/wasm/..."
