@@ -1,0 +1,2 @@
+.env.signoz
+common/clickhouse/user_scripts/histogramQuantile

@@ -1,42 +1,191 @@
 #!/usr/bin/env bash
-# Kaizen: DuckDB-powered swarm analysis
+# Kaizen: query exomonad swarm traces from SigNoz's ClickHouse.
+#
+# SigNoz manages the ClickHouse schema, migrations, and OTLP ingestion.
+# This script queries the trace data directly for swarm analysis.
 #
 # Usage:
-#   kaizen                    # interactive DuckDB with views loaded
-#   kaizen "SELECT ..."       # one-shot query
-#   kaizen summary            # shortcut for swarm_summary
-#   kaizen agents             # shortcut for agent_lifecycles
-#   kaizen prs                # shortcut for pr_pipeline
-#   kaizen tools              # shortcut for tool_summary
-#   kaizen reviews            # shortcut for copilot_reviews
-#   kaizen tree               # shortcut for agent_tree
-#   kaizen timeline           # shortcut for swarm_timeline
-#   kaizen delivery           # shortcut for delivery_audit
+#   kaizen                          # interactive ClickHouse SQL
+#   kaizen "SELECT ..."             # one-shot query
+#   kaizen spans [agent_id]         # recent spans, optionally filtered by agent
+#   kaizen agents                   # agent lifecycles (spawn → last activity)
+#   kaizen tools                    # tool usage summary
+#   kaizen hooks                    # hook request summary
+#   kaizen tree                     # parent-child span tree
+#   kaizen trace <trace_id>         # all spans in a trace
+#   kaizen find <attr> <value>      # find spans by attribute
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SQL_FILE="$SCRIPT_DIR/kaizen.sql"
-LOG_DIR="$SCRIPT_DIR/logs"
+set -euo pipefail
 
-# Ensure log directory exists and has at least one jsonl file
-if [ ! -d "$LOG_DIR" ] || [ -z "$(ls "$LOG_DIR"/*.jsonl 2>/dev/null)" ]; then
-  echo "No event logs found in $LOG_DIR" >&2
+CH_CONTAINER="signoz-clickhouse"
+CH="docker exec $CH_CONTAINER clickhouse-client --format PrettyCompact"
+DB="signoz_traces"
+TABLE="$DB.distributed_signoz_index_v3"
+
+# Verify ClickHouse is reachable
+if ! docker exec "$CH_CONTAINER" clickhouse-client --query "SELECT 1" &>/dev/null; then
+  echo "ClickHouse not reachable. Start SigNoz: docker compose -f .exo/otel/docker-compose.yml up -d" >&2
   exit 1
 fi
 
-# SQL uses relative path '.exo/logs/*.jsonl', so cd to repo root
-cd "$SCRIPT_DIR/.." || exit 1
-
 case "${1:-}" in
-  summary)  QUERY="SELECT * FROM swarm_summary" ;;
-  agents)   QUERY="SELECT * FROM agent_lifecycles ORDER BY spawned_at" ;;
-  prs)      QUERY="SELECT * FROM pr_pipeline ORDER BY filed_at" ;;
-  tools)    QUERY="SELECT * FROM tool_summary" ;;
-  reviews)  QUERY="SELECT * FROM copilot_reviews ORDER BY review_ts" ;;
-  tree)     QUERY="SELECT * FROM agent_tree" ;;
-  timeline) QUERY="SELECT * FROM swarm_timeline ORDER BY ts" ;;
-  delivery) QUERY="SELECT * FROM delivery_audit ORDER BY ts" ;;
-  "")       exec duckdb -init "$SQL_FILE" ;;
-  *)        QUERY="$1" ;;
-esac
+  spans)
+    AGENT_FILTER=""
+    if [[ -n "${2:-}" ]]; then
+      AGENT_FILTER="AND attributes_string['agent_id'] LIKE '%${2}%'"
+    fi
+    $CH --query "
+      SELECT
+        timestamp,
+        name,
+        attributes_string['agent_id'] AS agent_id,
+        attributes_string['tool.name'] AS tool_name,
+        attributes_string['hook.type'] AS hook_type,
+        duration_nano / 1000000 AS duration_ms,
+        span_id,
+        parent_span_id
+      FROM $TABLE
+      WHERE 1=1 $AGENT_FILTER
+      ORDER BY timestamp DESC
+      LIMIT 50
+    "
+    ;;
 
-duckdb -init "$SQL_FILE" -c "$QUERY"
+  agents)
+    $CH --query "
+      WITH
+        spawns AS (
+          SELECT
+            timestamp AS spawned_at,
+            attributes_string['agent_id'] AS parent_id,
+            attributes_string['child_agent'] AS child_agent,
+            attributes_string['agent_type'] AS agent_type,
+            attributes_string['spawn_type'] AS spawn_type,
+            attributes_string['branch'] AS branch
+          FROM $TABLE
+          WHERE name = 'spawn_worker' OR name = 'spawn_subtree' OR name = 'spawn_leaf_subtree'
+        ),
+        activity AS (
+          SELECT
+            attributes_string['agent_id'] AS agent_id,
+            MAX(timestamp) AS last_activity,
+            countIf(name = 'call_tool') AS tool_calls,
+            countIf(name = 'handle_hook_request') AS hook_calls
+          FROM $TABLE
+          WHERE agent_id != ''
+          GROUP BY agent_id
+        )
+      SELECT
+        s.child_agent AS agent_id,
+        s.parent_id,
+        s.agent_type,
+        s.spawn_type,
+        s.branch,
+        s.spawned_at,
+        a.last_activity,
+        a.tool_calls,
+        a.hook_calls,
+        dateDiff('second', s.spawned_at, a.last_activity) AS duration_s
+      FROM spawns s
+      LEFT JOIN activity a ON a.agent_id = s.child_agent
+      WHERE s.child_agent != ''
+      ORDER BY s.spawned_at
+    "
+    ;;
+
+  tools)
+    $CH --query "
+      SELECT
+        attributes_string['tool.name'] AS tool_name,
+        attributes_string['agent_id'] AS agent_id,
+        COUNT(*) AS calls,
+        AVG(duration_nano / 1000000) AS avg_ms,
+        MAX(duration_nano / 1000000) AS max_ms
+      FROM $TABLE
+      WHERE name = 'call_tool' AND tool_name != ''
+      GROUP BY tool_name, agent_id
+      ORDER BY calls DESC
+    "
+    ;;
+
+  hooks)
+    $CH --query "
+      SELECT
+        attributes_string['hook.type'] AS hook_type,
+        attributes_string['agent_id'] AS agent_id,
+        COUNT(*) AS calls,
+        AVG(duration_nano / 1000000) AS avg_ms
+      FROM $TABLE
+      WHERE name = 'handle_hook_request'
+      GROUP BY hook_type, agent_id
+      ORDER BY calls DESC
+    "
+    ;;
+
+  tree)
+    $CH --query "
+      SELECT
+        timestamp,
+        name,
+        span_id,
+        parent_span_id,
+        attributes_string['agent_id'] AS agent_id,
+        duration_nano / 1000000 AS duration_ms
+      FROM $TABLE
+      ORDER BY timestamp
+      LIMIT 100
+    "
+    ;;
+
+  trace)
+    if [[ -z "${2:-}" ]]; then
+      echo "Usage: kaizen trace <trace_id>" >&2
+      exit 1
+    fi
+    $CH --query "
+      SELECT
+        timestamp,
+        name,
+        span_id,
+        parent_span_id,
+        attributes_string['agent_id'] AS agent_id,
+        attributes_string['tool.name'] AS tool_name,
+        attributes_string['hook.type'] AS hook_type,
+        duration_nano / 1000000 AS duration_ms,
+        status_code_string AS status
+      FROM $TABLE
+      WHERE trace_id = '${2}'
+      ORDER BY timestamp
+    "
+    ;;
+
+  find)
+    if [[ -z "${2:-}" || -z "${3:-}" ]]; then
+      echo "Usage: kaizen find <attribute> <value>" >&2
+      echo "Example: kaizen find agent_id my-worker" >&2
+      exit 1
+    fi
+    $CH --query "
+      SELECT
+        timestamp,
+        name,
+        attributes_string['agent_id'] AS agent_id,
+        attributes_string['${2}'] AS matched_value,
+        duration_nano / 1000000 AS duration_ms,
+        trace_id,
+        span_id
+      FROM $TABLE
+      WHERE attributes_string['${2}'] LIKE '%${3}%'
+      ORDER BY timestamp DESC
+      LIMIT 50
+    "
+    ;;
+
+  "")
+    exec docker exec -it "$CH_CONTAINER" clickhouse-client -d "$DB"
+    ;;
+
+  *)
+    $CH --query "$1"
+    ;;
+esac

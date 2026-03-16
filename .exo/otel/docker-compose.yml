@@ -1,36 +1,245 @@
+# SigNoz observability stack + MCP server for exomonad swarm analysis.
+#
+# Usage:
+#   touch .exo/otel/.env.signoz  # placeholder for auto-generated API key
+#   docker compose -f .exo/otel/docker-compose.yml up -d
+#
+# Endpoints:
+#   OTLP:       localhost:4317 (gRPC), localhost:4318 (HTTP)
+#   SigNoz UI:  http://localhost:${SIGNOZ_PORT:-8080}
+#   MCP server: http://localhost:${MCP_PORT:-8000}/mcp
+#
+# Auth is auto-bootstrapped: init-signoz-auth creates an admin user and
+# writes a PAT to .env.signoz. The MCP server reads it via env_file.
+
+x-common: &common
+  networks:
+    - signoz-net
+  restart: unless-stopped
+
+x-clickhouse-defaults: &clickhouse-defaults
+  <<: *common
+  image: clickhouse/clickhouse-server:25.5.6
+  tty: true
+  depends_on:
+    init-clickhouse:
+      condition: service_completed_successfully
+    zookeeper-1:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "wget", "--spider", "-q", "0.0.0.0:8123/ping"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+  ulimits:
+    nproc: 65535
+    nofile:
+      soft: 262144
+      hard: 262144
+  environment:
+    - CLICKHOUSE_SKIP_USER_SETUP=1
+
+x-zookeeper-defaults: &zookeeper-defaults
+  <<: *common
+  image: signoz/zookeeper:3.7.1
+  user: root
+  healthcheck:
+    test: ["CMD-SHELL", "curl -s -m 2 http://localhost:8080/commands/ruok | grep error | grep null"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+
+x-db-depend: &db-depend
+  <<: *common
+  depends_on:
+    clickhouse:
+      condition: service_healthy
+
 services:
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.12
-    ports:
-      - "8123:8123"
-      - "9000:9000"
-    environment:
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+  init-clickhouse:
+    <<: *common
+    image: clickhouse/clickhouse-server:25.5.6
+    container_name: signoz-init-clickhouse
+    command:
+      - bash
+      - -c
+      - |
+        version="v0.0.1"
+        node_os=$$(uname -s | tr '[:upper:]' '[:lower:]')
+        node_arch=$$(uname -m | sed s/aarch64/arm64/ | sed s/x86_64/amd64/)
+        echo "Fetching histogram-binary for $${node_os}/$${node_arch}"
+        cd /tmp
+        wget -O histogram-quantile.tar.gz "https://github.com/SigNoz/signoz/releases/download/histogram-quantile%2F$${version}/histogram-quantile_$${node_os}_$${node_arch}.tar.gz"
+        tar -xvzf histogram-quantile.tar.gz
+        mv histogram-quantile /var/lib/clickhouse/user_scripts/histogramQuantile
+    restart: on-failure
     volumes:
-      - clickhouse-data:/var/lib/clickhouse
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
+      - ./common/clickhouse/user_scripts:/var/lib/clickhouse/user_scripts/
+
+  zookeeper-1:
+    <<: *zookeeper-defaults
+    container_name: signoz-zookeeper-1
+    volumes:
+      - zookeeper-1:/bitnami/zookeeper
+    environment:
+      - ZOO_SERVER_ID=1
+      - ALLOW_ANONYMOUS_LOGIN=yes
+      - ZOO_AUTOPURGE_INTERVAL=1
+
+  clickhouse:
+    <<: *clickhouse-defaults
+    container_name: signoz-clickhouse
+    volumes:
+      - ./common/clickhouse/config.xml:/etc/clickhouse-server/config.xml
+      - ./common/clickhouse/users.xml:/etc/clickhouse-server/users.xml
+      - ./common/clickhouse/custom-function.xml:/etc/clickhouse-server/custom-function.xml
+      - ./common/clickhouse/user_scripts:/var/lib/clickhouse/user_scripts/
+      - ./common/clickhouse/cluster.xml:/etc/clickhouse-server/config.d/cluster.xml
+      - clickhouse:/var/lib/clickhouse/
+
+  signoz:
+    <<: *db-depend
+    image: signoz/signoz:${SIGNOZ_VERSION:-v0.115.0}
+    container_name: signoz
+    ports:
+      - "${SIGNOZ_PORT:-8080}:8080"
+    volumes:
+      - sqlite:/var/lib/signoz/
+    environment:
+      - SIGNOZ_ALERTMANAGER_PROVIDER=signoz
+      - SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN=tcp://clickhouse:9000
+      - SIGNOZ_SQLSTORE_SQLITE_PATH=/var/lib/signoz/signoz.db
+      - SIGNOZ_TOKENIZER_JWT_SECRET=secret
     healthcheck:
-      test: ["CMD", "clickhouse-client", "--user", "default", "--password", "", "--query", "SELECT 1"]
-      interval: 5s
+      test: ["CMD", "wget", "--spider", "-q", "localhost:8080/api/v1/health"]
+      interval: 30s
       timeout: 5s
-      retries: 10
-      start_period: 10s
+      retries: 3
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.120.0
+    <<: *db-depend
+    image: signoz/signoz-otel-collector:${OTELCOL_TAG:-v0.144.2}
+    container_name: signoz-otel-collector
+    entrypoint: ["/bin/sh"]
+    command:
+      - -c
+      - |
+        /signoz-otel-collector migrate sync check &&
+        /signoz-otel-collector --config=/etc/otel-collector-config.yaml
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    environment:
+      - OTEL_RESOURCE_ATTRIBUTES=host.name=signoz-host,os.type=linux
+      - LOW_CARDINAL_EXCEPTION_GROUPING=false
+      - SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_DSN=tcp://clickhouse:9000
+      - SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_CLUSTER=cluster
+      - SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_REPLICATION=true
+      - SIGNOZ_OTEL_COLLECTOR_TIMEOUT=10m
     ports:
       - "4317:4317"
-    volumes:
-      - ./otel-collector.yml:/etc/otelcol-contrib/config.yaml:ro
+      - "4318:4318"
+
+  signoz-telemetrystore-migrator:
+    <<: *db-depend
+    image: signoz/signoz-otel-collector:${OTELCOL_TAG:-v0.144.2}
+    container_name: signoz-telemetrystore-migrator
+    environment:
+      - SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_DSN=tcp://clickhouse:9000
+      - SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_CLUSTER=cluster
+      - SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_REPLICATION=true
+      - SIGNOZ_OTEL_COLLECTOR_TIMEOUT=10m
+    entrypoint: ["/bin/sh"]
+    command:
+      - -c
+      - |
+        /signoz-otel-collector migrate bootstrap &&
+        /signoz-otel-collector migrate sync up &&
+        /signoz-otel-collector migrate async up
+    restart: on-failure
+
+  # Bootstrap: register admin user + create API key for MCP server.
+  # Idempotent — skips if admin already exists (register returns error).
+  # Writes SIGNOZ_API_KEY=<pat> to .env.signoz for mcp-server to read.
+  init-signoz-auth:
+    <<: *common
+    image: curlimages/curl:latest
+    container_name: signoz-init-auth
+    user: root
     depends_on:
-      clickhouse:
+      signoz:
         condition: service_healthy
+    restart: on-failure
+    volumes:
+      - ./:/host
+    entrypoint: ["/bin/sh"]
+    command:
+      - -c
+      - |
+        set -e
+        SIGNOZ=http://signoz:8080
+        EMAIL=admin@exomonad.dev
+        PASSWORD=ExoMonad2026.x
+        ORG=exomonad
+
+        # Skip if API key already bootstrapped
+        if [ -s /host/.env.signoz ]; then
+          echo "API key already exists, skipping"
+          exit 0
+        fi
+
+        # Register admin (idempotent — fails silently if already registered)
+        curl -sf -X POST "$${SIGNOZ}/api/v1/register" \
+          -H 'Content-Type: application/json' \
+          -d "{\"name\":\"admin\",\"email\":\"$${EMAIL}\",\"password\":\"$${PASSWORD}\",\"orgName\":\"$${ORG}\"}" || true
+
+        # Get org ID
+        ORG_ID=$$(curl -sf "$${SIGNOZ}/api/v2/sessions/context?email=$${EMAIL}&ref=$${SIGNOZ}" \
+          | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
+        echo "Org ID: $${ORG_ID}"
+
+        # Login
+        TOKEN=$$(curl -sf -X POST "$${SIGNOZ}/api/v2/sessions/email_password" \
+          -H 'Content-Type: application/json' \
+          -d "{\"email\":\"$${EMAIL}\",\"password\":\"$${PASSWORD}\",\"orgId\":\"$${ORG_ID}\"}" \
+          | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
+        echo "Got access token"
+
+        # Create PAT
+        API_KEY=$$(curl -sf -X POST "$${SIGNOZ}/api/v1/pats" \
+          -H "Authorization: Bearer $${TOKEN}" \
+          -H 'Content-Type: application/json' \
+          -d '{"name":"mcp-server","role":"ADMIN","expiresInDays":365}' \
+          | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+        echo "Created API key"
+
+        echo "SIGNOZ_API_KEY=$${API_KEY}" > /host/.env.signoz
+        echo "Wrote API key to /host/.env.signoz"
+
+  signoz-mcp-server:
+    <<: *common
+    image: signoz/signoz-mcp-server:latest
+    container_name: signoz-mcp-server
+    depends_on:
+      init-signoz-auth:
+        condition: service_completed_successfully
+    ports:
+      - "${MCP_PORT:-8000}:8000"
+    env_file:
+      - .env.signoz
+    environment:
+      - SIGNOZ_URL=http://signoz:8080
+      - TRANSPORT_MODE=http
+      - MCP_SERVER_PORT=8000
+      - LOG_LEVEL=info
+
+networks:
+  signoz-net:
+    name: signoz-net
 
 volumes:
-  clickhouse-data:
+  clickhouse:
+    name: signoz-clickhouse
+  sqlite:
+    name: signoz-sqlite
+  zookeeper-1:
+    name: signoz-zookeeper-1

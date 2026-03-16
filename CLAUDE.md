@@ -243,29 +243,37 @@ This is **native Claude Code Teams integration**. Messages from child agents arr
 | **GitHub poller** (PR status → events) | Built. Background service polls PR/CI status, fires WASM event handlers, and injects notifications into agent panes. Tracks `first_seen`, `last_review_state`, and `notified_parent_timeout` per PR. |
 | **OTel observability** | **Built.** Structured tracing spans with queryable attributes: `agent_id`, `tool.name`, `hook.type`, `role`, `status`. Spans: `spawn_worker`, `call_tool`, `handle_hook_request`, `notify_parent_delivery`, `deliver_to_agent`. |
 | **Coordination mutexes** | Built. In-memory `MutexRegistry` with FIFO wait queues, TTL auto-expiry, idempotent acquire. Effect-only (`coordination.acquire_mutex`, `coordination.release_mutex`) — no MCP tool exposed. |
-| **Kaizen analysis** | Built. ClickHouse views over OTel span data. Views: `agent_lifecycles` (spawn→activity with tool counts), `tool_summary`, `swarm_summary`, `swarm_timeline`, `delivery_audit`, `pr_pipeline`, `copilot_reviews`. |
+| **SigNoz observability** | **Built.** SigNoz + MCP server for LLM-queryable swarm traces. Agents query traces via SigNoz MCP tools (search, aggregate, filter by `agent_id`, structural descendant queries). UI at `http://localhost:8080`, MCP at `http://localhost:8000/mcp`. |
 
-### Kaizen Analysis
+### SigNoz Observability
 
-ClickHouse-powered analysis of structured OTel events. Requires ClickHouse + OTel Collector running:
+SigNoz manages ClickHouse schema, OTLP ingestion, and indexing. The **SigNoz MCP server** exposes trace/log/metric queries as MCP tools — LLM agents can query swarm observability data directly.
 
 ```bash
-# Start infrastructure (ClickHouse + OTel Collector)
+# Start SigNoz stack + MCP server
+touch .exo/otel/.env.signoz
 docker compose -f .exo/otel/docker-compose.yml up -d
 
 # Set otlp_endpoint in .exo/config.toml:
 # otlp_endpoint = "http://localhost:4317"
 
-# Query
-.exo/bin/kaizen summary     # one-row swarm overview
-.exo/bin/kaizen agents      # agent lifecycles with duration
-.exo/bin/kaizen prs         # PR pipeline (filed → merged)
-.exo/bin/kaizen tools       # tool usage summary
-.exo/bin/kaizen reviews     # Copilot review history
-.exo/bin/kaizen             # interactive SQL session
+# Endpoints:
+#   OTLP:       localhost:4317 (gRPC), localhost:4318 (HTTP)
+#   SigNoz UI:  http://localhost:8080  (SIGNOZ_PORT to override)
+#   MCP server: http://localhost:8000/mcp  (MCP_PORT to override)
+
+# CLI queries (direct ClickHouse access)
+.exo/bin/kaizen spans              # recent spans (all agents)
+.exo/bin/kaizen spans my-worker    # filter by agent_id
+.exo/bin/kaizen agents             # agent lifecycles (spawn → activity)
+.exo/bin/kaizen tools              # tool usage summary
+.exo/bin/kaizen trace <trace_id>   # all spans in a trace
+.exo/bin/kaizen                    # interactive ClickHouse SQL
 ```
 
-Without ClickHouse, events still appear in stderr via the tracing fmt layer — not queryable, but not lost. Views are defined in `.exo/otel/kaizen-traces.sql`.
+Auth is auto-bootstrapped: `init-signoz-auth` creates an admin user, generates a PAT, and writes it to `.exo/otel/.env.signoz`. The MCP server reads this via `env_file`. The API key is required in the `Authorization: Bearer <key>` header for MCP requests.
+
+Without SigNoz running, spans still appear in stderr via the tracing fmt layer.
 
 ---
 
