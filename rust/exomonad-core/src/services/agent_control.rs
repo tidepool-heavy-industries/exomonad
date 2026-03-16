@@ -2242,8 +2242,15 @@ impl AgentControlService {
         };
 
         let pane_cwd = cwd.to_path_buf();
+        let t = tmux.clone();
         let pane_id = tokio::task::spawn_blocking(move || {
-            tmux.split_window(&target_window, &pane_cwd, &shell, &full_command)
+            let pane_id = t.split_window(&target_window, &pane_cwd, &shell, &full_command)?;
+            // Rebalance panes into a grid after each split to prevent
+            // exponential height decay (60 → 29 → 14 → 6 → 2 → 1 lines).
+            if let Err(e) = t.select_layout(&target_window, "tiled") {
+                tracing::warn!(error = %e, "Failed to apply tiled layout (non-fatal)");
+            }
+            Ok::<_, anyhow::Error>(pane_id)
         })
         .await
         .context("tokio task join error")?

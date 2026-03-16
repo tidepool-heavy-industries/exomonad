@@ -322,6 +322,23 @@ impl TmuxIpc {
         Ok(pane_id)
     }
 
+    /// Apply a tmux layout to a window (e.g. "tiled", "even-vertical", "even-horizontal").
+    pub fn select_layout(&self, window_id: &WindowId, layout: &str) -> Result<()> {
+        let qualified = format!("{}:{}", self.session_name, window_id.as_str());
+        let output = std::process::Command::new("tmux")
+            .args(["select-layout", "-t", &qualified, layout])
+            .output()
+            .context("Failed to run tmux select-layout")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux select-layout failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        info!(window = %window_id, layout, "Applied tmux layout");
+        Ok(())
+    }
+
     pub fn kill_pane(&self, pane_id: &PaneId) -> Result<()> {
         let output = std::process::Command::new("tmux")
             .args(["kill-pane", "-t", pane_id.as_str()])
