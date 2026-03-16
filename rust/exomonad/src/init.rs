@@ -268,18 +268,22 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     let signoz_env = cwd.join(".exo/otel/.env.signoz");
     if signoz_env.exists() && !config.extra_mcp_servers.contains_key("signoz") {
         if let Ok(content) = std::fs::read_to_string(&signoz_env) {
-            if let Some(key) = content.trim().strip_prefix("SIGNOZ_API_KEY=") {
-                if !key.is_empty() {
-                    mcp_servers.insert(
-                        "signoz".to_string(),
-                        serde_json::json!({
-                            "type": "http",
-                            "url": "http://localhost:8000/mcp",
-                            "headers": { "Authorization": format!("Bearer {}", key) }
-                        }),
-                    );
-                    info!("Auto-registered SigNoz MCP server from .exo/otel/.env.signoz");
-                }
+            let key = content
+                .lines()
+                .find_map(|line| line.strip_prefix("SIGNOZ_API_KEY="))
+                .unwrap_or("")
+                .trim();
+            if !key.is_empty() {
+                let mcp_port = std::env::var("MCP_PORT").unwrap_or_else(|_| "8000".to_string());
+                mcp_servers.insert(
+                    "signoz".to_string(),
+                    serde_json::json!({
+                        "type": "http",
+                        "url": format!("http://localhost:{}/mcp", mcp_port),
+                        "headers": { "Authorization": format!("Bearer {}", key) }
+                    }),
+                );
+                info!("Auto-registered SigNoz MCP server from .exo/otel/.env.signoz");
             }
         }
     }
