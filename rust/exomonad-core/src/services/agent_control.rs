@@ -552,12 +552,6 @@ impl AgentControlService {
         fs::create_dir_all(&agent_config_dir).await?;
         routing.write_to_dir(&agent_config_dir).await?;
 
-        tracing::info!(
-            otel.name = "agent.spawned",
-            agent_id = %internal_name,
-            "[event] agent.spawned"
-        );
-
         Ok(agent_config_dir)
     }
 

@@ -52,4 +52,4 @@ esac
 {
   cat "$SQL_VIEWS_FILE"
   echo "$QUERY FORMAT PrettyCompact;"
-} | curl -sS "$CH_URL" --data-binary @-
+} | curl -sS "$CH_URL/?allow_multiquery=1" --data-binary @-

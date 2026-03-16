@@ -473,6 +473,7 @@ impl GitHubPoller {
         }
     }
 
+    #[tracing::instrument(skip_all, name = "github_poller.poll_cycle")]
     async fn poll_cycle(&self) -> Result<()> {
         // Ensure we have repo info
         let (owner, repo) = match self.get_repo_info().await? {
@@ -967,14 +968,23 @@ impl GitHubPoller {
             other => other,
         };
 
+        let comments_json = comments
+            .as_ref()
+            .and_then(|c| serde_json::to_string(c).ok())
+            .unwrap_or_default();
+        let reviews_json = reviews
+            .as_ref()
+            .and_then(|r| serde_json::to_string(r).ok())
+            .unwrap_or_default();
+
         tracing::info!(
             otel.name = event_name,
             agent_id = %branch,
             branch = %branch,
             status = %status,
             message = %message,
-            comments = ?comments,
-            reviews = ?reviews,
+            comments = %comments_json,
+            reviews = %reviews_json,
             "[event] {}",
             event_name
         );
