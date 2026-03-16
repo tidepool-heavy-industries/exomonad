@@ -218,7 +218,7 @@ services:
 
   signoz-mcp-server:
     <<: *common
-    image: signoz/signoz-mcp-server:${MCP_SERVER_TAG:-latest}
+    image: signoz/signoz-mcp-server:${MCP_SERVER_TAG:-v0.0.5}
     container_name: signoz-mcp-server
     depends_on:
       init-signoz-auth:

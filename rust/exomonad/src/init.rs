@@ -271,9 +271,11 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
             let key = content
                 .lines()
                 .find_map(|line| line.strip_prefix("SIGNOZ_API_KEY="))
-                .unwrap_or("")
-                .trim();
-            if !key.is_empty() {
+                .map(|v| v.trim().to_string())
+                .unwrap_or_default();
+            if key.is_empty() {
+                warn!(path = %signoz_env.display(), "No SIGNOZ_API_KEY found in .env.signoz");
+            } else {
                 mcp_servers.insert(
                     "signoz".to_string(),
                     serde_json::json!({
