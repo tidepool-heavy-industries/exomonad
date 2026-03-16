@@ -117,8 +117,8 @@ instance MCPTool FilePR where
                 }
         void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("FilePR: Success - PR #" <> T.pack (show $ fpoNumber output)), Log.infoRequestFields = ""})
         
-        mTLState <- getTLPhase
-        case mTLState of
+        mTLStateAfter <- getTLPhase
+        case mTLStateAfter of
           Just _ -> applyTLEvent (OwnPRFiled (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
           Nothing -> applyDevEvent (PRCreated (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
 

@@ -87,101 +87,83 @@ instance MCPTool MergePR where
     let prNum = mprPrNumber args
     void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: Merging PR #" <> T.pack (show prNum) <> if force then " (force)" else ""), Log.infoRequestFields = ""})
 
-    -- Self-merge guard: agents cannot merge their own PRs
+    -- Get repo info and branch (shared across self-merge guard and readiness check)
     repoInfoResult <- suspendEffect @GitGetRepoInfo (Git.GetRepoInfoRequest {Git.getRepoInfoRequestWorkingDir = "."})
     branchResult <- suspendEffect @GitGetBranch (Git.GetBranchRequest {Git.getBranchRequestWorkingDir = "."})
 
-    isSelfMerge <- case (repoInfoResult, branchResult) of
+    case (repoInfoResult, branchResult) of
       (Right repoInfo, Right branchResp) -> do
         let owner = TL.toStrict (Git.getRepoInfoResponseOwner repoInfo)
             repo = TL.toStrict (Git.getRepoInfoResponseName repoInfo)
             currentBranch = TL.toStrict (Git.getBranchResponseBranch branchResp)
 
+        -- Self-merge guard: agents cannot merge their own PRs
         prResult <- suspendEffect @GitHubGetPullRequest GH.GetPullRequestRequest
           { GH.getPullRequestRequestOwner = TL.fromStrict owner
           , GH.getPullRequestRequestRepo = TL.fromStrict repo
           , GH.getPullRequestRequestNumber = fromIntegral prNum
-          , GH.getPullRequestRequestIncludeReviews = False
+          , GH.getPullRequestRequestIncludeReviews = not force  -- fetch reviews when needed for readiness check
           }
         case prResult of
-          Right resp -> case GH.getPullRequestResponsePullRequest resp of
-            Just pr -> pure $ TL.toStrict (GH.pullRequestHeadRef pr) == currentBranch
-            Nothing -> pure False
-          Left _ -> pure False
-      _ -> pure False
-
-    if isSelfMerge
-      then pure $ errorResult $ "Cannot merge your own PR #" <> T.pack (show prNum) <> ". Your parent agent will merge this PR after reviewing. Call notify_parent instead."
-      else do
-        -- Readiness check: verify Copilot review status before merging
-        if force
-          then doMerge args
-          else do
-            readiness <- checkCopilotReadiness prNum
-            case readiness of
-              Ready -> doMerge args
-              NotReady reason -> do
-                void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("MergePR: blocked: " <> reason), Log.errorRequestFields = ""})
-                pure $ errorResult reason
+          Left err -> do
+            void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("MergePR: failed to fetch PR: " <> T.pack (show err)), Log.errorRequestFields = ""})
+            pure $ errorResult ("Failed to fetch PR #" <> T.pack (show prNum) <> " for self-merge check. Cannot proceed.")
+          Right resp -> do
+            let mPr = GH.getPullRequestResponsePullRequest resp
+                isSelfMerge = case mPr of
+                  Just pr -> TL.toStrict (GH.pullRequestHeadRef pr) == currentBranch
+                  Nothing -> False
+            if isSelfMerge
+              then pure $ errorResult $ "Cannot merge your own PR #" <> T.pack (show prNum) <> ". Your parent agent will merge this PR after reviewing. Call notify_parent instead."
+              else if force
+                then doMerge args
+                else do
+                  -- Readiness check using already-fetched PR data (avoids redundant API calls)
+                  let readiness = checkCopilotReadinessFromPR prNum resp
+                  case readiness of
+                    Ready -> doMerge args
+                    NotReady reason -> do
+                      void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("MergePR: blocked: " <> reason), Log.errorRequestFields = ""})
+                      pure $ errorResult reason
+      _ -> do
+        void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = "MergePR: failed to get repo info or branch for self-merge check", Log.errorRequestFields = ""})
+        pure $ errorResult ("Failed to determine repo/branch info. Cannot verify self-merge guard for PR #" <> T.pack (show prNum) <> ".")
 
 -- | Copilot review readiness.
 data Readiness = Ready | NotReady Text
 
--- | Check whether a PR is ready to merge based on Copilot review status.
-checkCopilotReadiness :: Int -> Eff Effects Readiness
-checkCopilotReadiness prNum = do
-  -- Get repo info for API calls
-  repoInfoResult <- suspendEffect @GitGetRepoInfo (Git.GetRepoInfoRequest {Git.getRepoInfoRequestWorkingDir = "."})
-  case repoInfoResult of
-    Left _ -> pure Ready -- Can't determine repo info — allow merge
-    Right repoInfo -> do
-      let owner = TL.toStrict (Git.getRepoInfoResponseOwner repoInfo)
-          repo = TL.toStrict (Git.getRepoInfoResponseName repoInfo)
+-- | Check Copilot readiness from an already-fetched PR response (avoids redundant API calls).
+checkCopilotReadinessFromPR :: Int -> GH.GetPullRequestResponse -> Readiness
+checkCopilotReadinessFromPR prNum resp =
+  let reviews = V.toList (GH.getPullRequestResponseReviews resp)
+      pr = GH.getPullRequestResponsePullRequest resp
+      headSha = case pr of
+        Just p -> TL.toStrict (GH.pullRequestHeadSha p)
+        Nothing -> ""
+      copilotReviews = filter isCopilotReview reviews
+  in case reverse copilotReviews of
+    [] -> NotReady $ "No Copilot review yet on PR #" <> T.pack (show prNum)
+          <> ". Wait for [PR READY] or [REVIEW TIMEOUT] from the event system."
+    (latest:_) ->
+      let reviewSha = TL.toStrict (GH.reviewCommitId latest)
+          state = GH.reviewState latest
+      in case state of
+        Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_APPROVED) ->
+          Ready
 
-      -- Fetch PR with reviews
-      prResult <- suspendEffect @GitHubGetPullRequest GH.GetPullRequestRequest
-        { GH.getPullRequestRequestOwner = TL.fromStrict owner
-        , GH.getPullRequestRequestRepo = TL.fromStrict repo
-        , GH.getPullRequestRequestNumber = fromIntegral prNum
-        , GH.getPullRequestRequestIncludeReviews = True
-        }
+        Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_CHANGES_REQUESTED) ->
+          if headSha /= reviewSha && not (T.null headSha) && not (T.null reviewSha)
+            then Ready
+            else NotReady $ "Copilot requested changes on PR #" <> T.pack (show prNum)
+                  <> ". Wait for the agent to push fixes ([FIXES PUSHED]) or use force=true."
 
-      case prResult of
-        Left _ -> pure Ready -- API error — allow merge
-        Right resp -> do
-          let reviews = V.toList (GH.getPullRequestResponseReviews resp)
-              pr = GH.getPullRequestResponsePullRequest resp
-              headSha = case pr of
-                Just p -> TL.toStrict (GH.pullRequestHeadSha p)
-                Nothing -> ""
+        Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_COMMENTED) ->
+          if headSha /= reviewSha && not (T.null headSha) && not (T.null reviewSha)
+            then Ready
+            else NotReady $ "Copilot commented on PR #" <> T.pack (show prNum)
+                  <> ". Wait for the agent to address comments ([FIXES PUSHED]) or use force=true."
 
-          -- Filter to Copilot reviews (author login contains "copilot")
-          let copilotReviews = filter isCopilotReview reviews
-
-          case reverse copilotReviews of
-            [] -> pure $ NotReady $ "No Copilot review yet on PR #" <> T.pack (show prNum)
-                  <> ". Wait for [PR READY] or [REVIEW TIMEOUT] from the event system."
-            (latest:_) -> do
-              -- Check the latest Copilot review
-              let reviewSha = TL.toStrict (GH.reviewCommitId latest)
-                  state = GH.reviewState latest
-              case state of
-                Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_APPROVED) ->
-                  pure Ready
-
-                Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_CHANGES_REQUESTED) ->
-                  if headSha /= reviewSha && not (T.null headSha) && not (T.null reviewSha)
-                    then pure Ready -- Fixes pushed after review
-                    else pure $ NotReady $ "Copilot requested changes on PR #" <> T.pack (show prNum)
-                          <> ". Wait for the agent to push fixes ([FIXES PUSHED]) or use force=true."
-
-                Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_COMMENTED) ->
-                  if headSha /= reviewSha && not (T.null headSha) && not (T.null reviewSha)
-                    then pure Ready -- Commits after review
-                    else pure $ NotReady $ "Copilot commented on PR #" <> T.pack (show prNum)
-                          <> ". Wait for the agent to address comments ([FIXES PUSHED]) or use force=true."
-
-                _ -> pure Ready -- PENDING or unknown — allow merge
+        _ -> Ready
 
 -- | Check if a review is from Copilot (author login contains "copilot").
 isCopilotReview :: GH.Review -> Bool
