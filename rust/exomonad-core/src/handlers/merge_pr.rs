@@ -1,5 +1,4 @@
 use crate::effects::{dispatch_merge_pr_effect, EffectResult, MergePrEffects, ResultExt};
-use crate::services::event_log::EventLog;
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::merge_pr;
 use async_trait::async_trait;
@@ -9,20 +8,13 @@ use std::sync::Arc;
 
 pub struct MergePRHandler {
     git_wt: Arc<GitWorktreeService>,
-    event_log: Option<Arc<EventLog>>,
 }
 
 impl MergePRHandler {
     pub fn new(git_wt: Arc<GitWorktreeService>) -> Self {
         Self {
             git_wt,
-            event_log: None,
         }
-    }
-
-    pub fn with_event_log(mut self, log: Arc<EventLog>) -> Self {
-        self.event_log = Some(log);
-        self
     }
 }
 
@@ -52,31 +44,23 @@ impl MergePrEffects for MergePRHandler {
             "[MergePR] merge_pr complete"
         );
 
-        if let Some(ref log) = self.event_log {
-            if result.success {
-                if let Err(e) = log.append(
-                    "pr.merged",
-                    &ctx.agent_name.to_string(),
-                    &serde_json::json!({
-                        "pr_number": pr_number.as_u64(),
-                        "strategy": req.strategy,
-                        "git_fetched": result.git_fetched,
-                    }),
-                ) {
-                    tracing::warn!(error = %e, "Failed to write event log");
-                }
-            } else {
-                if let Err(e) = log.append(
-                    "pr.merge_failed",
-                    &ctx.agent_name.to_string(),
-                    &serde_json::json!({
-                        "pr_number": pr_number.as_u64(),
-                        "error": &result.message,
-                    }),
-                ) {
-                    tracing::warn!(error = %e, "Failed to write pr.merge_failed event");
-                }
-            }
+        if result.success {
+            tracing::info!(
+                otel.name = "pr.merged",
+                agent_id = %ctx.agent_name.to_string(),
+                pr_number = pr_number.as_u64(),
+                strategy = %req.strategy,
+                git_fetched = result.git_fetched,
+                "[event] pr.merged"
+            );
+        } else {
+            tracing::info!(
+                otel.name = "pr.merge_failed",
+                agent_id = %ctx.agent_name.to_string(),
+                pr_number = pr_number.as_u64(),
+                error = %result.message,
+                "[event] pr.merge_failed"
+            );
         }
 
         Ok(MergePrResponse {

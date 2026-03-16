@@ -22,7 +22,6 @@ use tokio::time::{timeout, Duration};
 use tracing::{debug, info, warn, instrument};
 
 use super::acp_registry::AcpRegistry;
-use super::EventLog;
 use super::git_worktree::GitWorktreeService;
 use super::github::{GitHubService, Repo};
 use super::tmux_events;
@@ -543,21 +542,22 @@ impl AgentControlService {
 
     /// Common post-spawn bookkeeping.
     ///
-    /// Creates the agent's config directory, writes the routing info,
-    /// and optionally appends an event to the persistent event log.
+    /// Creates the agent's config directory and writes the routing info.
     async fn finalize_spawn(
         &self,
         internal_name: &str,
         routing: RoutingInfo,
-        event_log: Option<&EventLog>,
-        event_data: serde_json::Value,
     ) -> Result<PathBuf> {
         let agent_config_dir = self.project_dir.join(".exo/agents").join(internal_name);
         fs::create_dir_all(&agent_config_dir).await?;
         routing.write_to_dir(&agent_config_dir).await?;
-        if let Some(log) = event_log {
-            let _ = log.append("agent.spawned", internal_name, &event_data);
-        }
+
+        tracing::info!(
+            otel.name = "agent.spawned",
+            agent_id = %internal_name,
+            "[event] agent.spawned"
+        );
+
         Ok(agent_config_dir)
     }
 
@@ -829,7 +829,7 @@ impl AgentControlService {
 
             // Store window_id for message delivery and cleanup
             let routing = RoutingInfo::window(window_id.as_str());
-            self.finalize_spawn(&internal_name, routing, None, serde_json::Value::Null)
+            self.finalize_spawn(&internal_name, routing)
                 .await?;
 
             self.emit_agent_started(&internal_name)?;
@@ -997,7 +997,7 @@ impl AgentControlService {
 
             // Store window_id for message delivery and cleanup
             let routing = RoutingInfo::window(window_id.as_str());
-            self.finalize_spawn(&internal_name, routing, None, serde_json::Value::Null)
+            self.finalize_spawn(&internal_name, routing)
                 .await?;
 
             self.emit_agent_started(&internal_name)?;
@@ -1142,7 +1142,7 @@ impl AgentControlService {
 
             // Store pane_id for message delivery and cleanup
             let routing = RoutingInfo::pane(pane_id.as_str(), &caller_tab);
-            self.finalize_spawn(&internal_name, routing, None, serde_json::Value::Null)
+            self.finalize_spawn(&internal_name, routing)
                 .await?;
 
             // Register as synthetic team member for Claude Teams messaging
@@ -1338,7 +1338,7 @@ impl AgentControlService {
 
             // Store window_id for message delivery and cleanup
             let routing = RoutingInfo::window(window_id.as_str());
-            self.finalize_spawn(&internal_name, routing, None, serde_json::Value::Null)
+            self.finalize_spawn(&internal_name, routing)
                 .await?;
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
@@ -1461,7 +1461,7 @@ impl AgentControlService {
 
             // Store window_id for message delivery and cleanup
             let routing = RoutingInfo::window(window_id.as_str());
-            self.finalize_spawn(&internal_name, routing, None, serde_json::Value::Null)
+            self.finalize_spawn(&internal_name, routing)
                 .await?;
 
             // Register as synthetic team member for Claude Teams messaging

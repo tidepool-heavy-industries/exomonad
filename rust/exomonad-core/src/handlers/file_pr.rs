@@ -6,7 +6,6 @@ use super::non_empty;
 use crate::effects::{
     dispatch_file_pr_effect, EffectHandler, EffectResult, FilePrEffects, ResultExt,
 };
-use crate::services::event_log::EventLog;
 use crate::services::file_pr::{self, FilePRInput};
 use crate::services::git_worktree::GitWorktreeService;
 use async_trait::async_trait;
@@ -20,20 +19,13 @@ use std::sync::Arc;
 /// the generated `dispatch_file_pr_effect` function.
 pub struct FilePRHandler {
     git_wt: Arc<GitWorktreeService>,
-    event_log: Option<Arc<EventLog>>,
 }
 
 impl FilePRHandler {
     pub fn new(git_wt: Arc<GitWorktreeService>) -> Self {
         Self {
             git_wt,
-            event_log: None,
         }
-    }
-
-    pub fn with_event_log(mut self, log: Arc<EventLog>) -> Self {
-        self.event_log = Some(log);
-        self
     }
 }
 
@@ -83,27 +75,24 @@ impl FilePrEffects for FilePRHandler {
             "[FilePR] file_pr complete"
         );
 
-        if let Some(ref log) = self.event_log {
-            let event_type = if output.created {
-                "pr.filed"
-            } else {
-                "pr.updated"
-            };
-            if let Err(e) = log.append(
-                event_type,
-                &ctx.agent_name.to_string(),
-                &serde_json::json!({
-                    "pr_number": output.pr_number.as_u64(),
-                    "pr_url": output.pr_url,
-                    "head_branch": output.head_branch,
-                    "base_branch": output.base_branch,
-                    "created": output.created,
-                    "title": input.title,
-                }),
-            ) {
-                tracing::warn!(error = %e, "Failed to write event log");
-            }
-        }
+        let event_type = if output.created {
+            "pr.filed"
+        } else {
+            "pr.updated"
+        };
+
+        tracing::info!(
+            otel.name = event_type,
+            agent_id = %ctx.agent_name.to_string(),
+            pr_number = output.pr_number.as_u64(),
+            pr_url = %output.pr_url,
+            head_branch = %output.head_branch,
+            base_branch = %output.base_branch,
+            created = output.created,
+            title = %input.title,
+            "[event] {}",
+            event_type
+        );
 
         Ok(FilePrResponse {
             pr_url: output.pr_url,

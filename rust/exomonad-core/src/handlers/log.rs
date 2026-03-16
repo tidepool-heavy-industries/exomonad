@@ -3,29 +3,19 @@
 //! Uses proto-generated types from `exomonad_proto::effects::log`.
 
 use crate::effects::{dispatch_log_effect, EffectHandler, EffectResult, LogEffects};
-use crate::services::EventLog;
 use async_trait::async_trait;
 use exomonad_proto::effects::log::*;
-use std::sync::Arc;
 use uuid::Uuid;
 
 /// Log effect handler.
 ///
 /// Handles all effects in the `log.*` namespace by delegating to
 /// the generated `dispatch_log_effect` function.
-/// Optionally writes structured events to a JSONL event log.
-pub struct LogHandler {
-    event_log: Option<Arc<EventLog>>,
-}
+pub struct LogHandler {}
 
 impl LogHandler {
     pub fn new() -> Self {
-        Self { event_log: None }
-    }
-
-    pub fn with_event_log(mut self, event_log: Arc<EventLog>) -> Self {
-        self.event_log = Some(event_log);
-        self
+        Self {}
     }
 
     async fn do_log(
@@ -150,25 +140,13 @@ impl LogEffects for LogHandler {
         };
 
         tracing::info!(
+            otel.name = %req.event_type,
             event_type = %req.event_type,
             event_id = %event_id,
+            agent_id = %ctx.agent_name,
             payload = %payload_str,
             "[event]"
         );
-
-        // Write to JSONL event log
-        if let Some(ref log) = self.event_log {
-            let data: serde_json::Value = if req.payload.is_empty() {
-                serde_json::json!({})
-            } else {
-                serde_json::from_slice(&req.payload)
-                    .unwrap_or(serde_json::json!({"raw": payload_str}))
-            };
-            let agent_id = ctx.agent_name.to_string();
-            if let Err(e) = log.append(&req.event_type, &agent_id, &data) {
-                tracing::warn!(error = %e, "Failed to write event to JSONL log");
-            }
-        }
 
         Ok(EmitEventResponse { event_id })
     }
@@ -177,34 +155,20 @@ impl LogEffects for LogHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     #[test]
     fn test_log_handler_new() {
-        let handler = LogHandler::new();
-        assert!(handler.event_log.is_none());
+        let _handler = LogHandler::new();
     }
 
     #[test]
     fn test_log_handler_default() {
-        let handler = LogHandler::default();
-        assert!(handler.event_log.is_none());
+        let _handler = LogHandler::default();
     }
 
     #[test]
     fn test_log_handler_namespace() {
         let handler = LogHandler::new();
         assert_eq!(handler.namespace(), "log");
-    }
-
-    #[test]
-    fn test_log_handler_with_event_log() {
-        let tmp = tempfile::tempdir().unwrap();
-        let log_dir = tmp.path().join("logs");
-        let event_log = Arc::new(EventLog::open(log_dir).unwrap());
-        let handler = LogHandler::new().with_event_log(event_log.clone());
-
-        assert!(handler.event_log.is_some());
-        assert!(Arc::ptr_eq(handler.event_log.as_ref().unwrap(), &event_log));
     }
 }

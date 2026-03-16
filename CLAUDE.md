@@ -241,25 +241,31 @@ This is **native Claude Code Teams integration**. Messages from child agents arr
 | **Event router** (tmux STDIN fallback) | Built. Fallback path: `notify_parent` → `inject_input` into parent pane via tmux buffer pattern. |
 | **Event handlers** (WASM dispatch for world events) | **Built.** Third dispatch category alongside tools and hooks. GitHub poller calls `handle_event` on agent's PluginManager for PR review events (reviews, approvals, timeouts) and **sibling merge events**. Handlers return `EventAction` (InjectMessage, NotifyParent, NoAction). |
 | **GitHub poller** (PR status → events) | Built. Background service polls PR/CI status, fires WASM event handlers, and injects notifications into agent panes. Tracks `first_seen`, `last_review_state`, and `notified_parent_timeout` per PR. |
-| **Event log** (JSONL structured events) | Built. `.exo/logs/{agent_id}.jsonl` — per-agent append-only JSONL. Query with `.exo/bin/kaizen` (DuckDB views over `.exo/logs/*.jsonl`). Events: `agent.spawned`, `agent.completed`, `tool.called`, `pr.filed`, `pr.merged`, `pr.merge_failed`, `copilot.review`, `ci.status_changed`, `hook.stop`, `message.delivery`, `agent.notify_parent`. |
+| **OTel observability** | **Built.** OTel span events replace JSONL logs. Structured events (e.g., `agent.spawned`, `tool.called`) are emitted via `tracing::info!()` with `otel.name`. |
 | **Coordination mutexes** | Built. In-memory `MutexRegistry` with FIFO wait queues, TTL auto-expiry, idempotent acquire. Effect-only (`coordination.acquire_mutex`, `coordination.release_mutex`) — no MCP tool exposed. |
-| **Kaizen analysis** (DuckDB views) | Built. `.exo/kaizen.sql` defines views over event log. `.exo/bin/kaizen` wrapper for one-shot queries and interactive exploration. Views: `swarm_summary`, `agent_lifecycles`, `pr_pipeline`, `tool_usage`, `tool_summary`, `copilot_reviews`. |
+| **Kaizen analysis** | Built. SQL analysis of OTel events stored in ClickHouse. Views: `swarm_summary`, `agent_lifecycles`, `pr_pipeline`, `tool_usage`, `tool_summary`, `copilot_reviews`. |
 
 ### Kaizen Analysis
 
-DuckDB-powered analysis of per-agent event logs (`.exo/logs/{agent_id}.jsonl`). No custom binary — SQL views over structured JSONL.
+ClickHouse-powered analysis of structured OTel events. Requires ClickHouse + OTel Collector running:
 
 ```bash
+# Start infrastructure (ClickHouse + OTel Collector)
+docker compose -f .exo/otel/docker-compose.yml up -d
+
+# Set otlp_endpoint in .exo/config.toml:
+# otlp_endpoint = "http://localhost:4317"
+
+# Query
 .exo/bin/kaizen summary     # one-row swarm overview
 .exo/bin/kaizen agents      # agent lifecycles with duration
 .exo/bin/kaizen prs         # PR pipeline (filed → merged)
 .exo/bin/kaizen tools       # tool usage summary
 .exo/bin/kaizen reviews     # Copilot review history
-.exo/bin/kaizen             # interactive DuckDB session
-.exo/bin/kaizen "SELECT agent_id, duration_ms/1000 AS secs FROM agent_lifecycles WHERE status='success' ORDER BY duration_ms"
+.exo/bin/kaizen             # interactive SQL session
 ```
 
-Views are defined in `.exo/kaizen.sql`. Add new views there — they're available immediately.
+Without ClickHouse, events still appear in stderr via the tracing fmt layer — not queryable, but not lost. Views are defined in `.exo/otel/kaizen-traces.sql`.
 
 ---
 

@@ -5,7 +5,6 @@ pub mod claude_session_registry;
 pub mod command;
 pub mod copilot_review;
 pub mod delivery;
-pub mod event_log;
 pub mod event_queue;
 pub mod external;
 pub mod file_pr;
@@ -30,7 +29,6 @@ pub use self::agent_control::{
     resolve_parent_tab_name, AgentControlService, AgentInfo, AgentType, BatchCleanupResult,
     BatchSpawnResult, SpawnOptions, SpawnResult,
 };
-pub use self::event_log::EventLog;
 pub use self::event_queue::EventQueue;
 pub use self::filesystem::FileSystemService;
 pub use self::git_worktree::GitWorktreeService;

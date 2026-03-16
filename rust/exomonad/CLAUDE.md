@@ -30,6 +30,8 @@ exomonad reload                   # Clear WASM plugin cache (hot reload)
 exomonad shutdown                 # Gracefully shut down the running server
 ```
 
+**Observability:** Structured events (agent spawning, tool calls, PR activity) are emitted as OTel span events via `tracing::info!` with the `otel.name` field, replacing the legacy JSONL event log.
+
 ### Init Command
 
 `exomonad init` creates a two-window tmux session:
