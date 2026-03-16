@@ -245,9 +245,35 @@ async fn main() -> Result<()> {
 
         Commands::Shutdown => {
             let socket = uds_client::find_server_socket().context("Cannot find server socket.")?;
+            println!("Socket: {}", socket.display());
+
+            // Read and validate PID file
+            let pid_path = socket.parent().unwrap().join("server.pid");
+            match std::fs::read_to_string(&pid_path) {
+                Ok(content) => {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(pid) = parsed.get("pid").and_then(|v| v.as_u64()) {
+                            use nix::sys::signal;
+                            use nix::unistd::Pid;
+                            let alive = signal::kill(Pid::from_raw(pid as i32), None).is_ok();
+                            println!("PID: {} ({})", pid, if alive { "running" } else { "not running" });
+                            if !alive {
+                                eprintln!("Warning: server process {} is not running. Stale socket?", pid);
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    eprintln!("Warning: no server.pid found at {}", pid_path.display());
+                }
+            }
+
             let client = uds_client::ServerClient::new(socket);
-            let _ = client.post_json::<serde_json::Value, serde_json::Value>("/shutdown", &serde_json::json!({})).await;
-            println!("Shutdown signal sent");
+            println!("Connecting...");
+            match client.post_json::<serde_json::Value, serde_json::Value>("/shutdown", &serde_json::json!({})).await {
+                Ok(resp) => println!("Server acknowledged shutdown: {}", resp),
+                Err(e) => eprintln!("Shutdown request failed: {}", e),
+            }
         }
     }
 
