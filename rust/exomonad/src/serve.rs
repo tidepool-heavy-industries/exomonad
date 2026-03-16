@@ -645,6 +645,7 @@ pub async fn shutdown_endpoint(State(signal): State<Arc<tokio::sync::Notify>>) -
 // Serve Command Runner
 // ============================================================================
 
+#[tracing::instrument(name = "exomonad.serve", skip_all)]
 pub async fn run(config: &Config) -> Result<()> {
     // Extract TRACEPARENT from env if this is a child agent (parent injected it)
     if let Ok(tp) = std::env::var("TRACEPARENT") {
