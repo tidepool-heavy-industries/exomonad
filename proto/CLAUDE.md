@@ -25,7 +25,8 @@ proto/
     ├── log.proto           # log.* effects
     ├── merge_pr.proto      # merge_pr.* effects
     ├── process.proto       # process.* effects
-    └── session.proto       # session.* effects
+    ├── session.proto       # session.* effects
+    └── tasks.proto         # tasks.* effects
 ```
 
 ## Codegen
@@ -235,6 +236,15 @@ Coordination primitives (`coordination.*` namespace):
 
 Session management (`session.*` namespace):
 - `RegisterClaudeSession`: Link Claude session ID to agent identity
+- `RegisterTeam`: Register agent's Claude Teams membership
+- `DeregisterTeam`: Remove agent's Claude Teams membership (called on TeamDelete)
+
+### effects/tasks.proto
+
+Task list operations (`tasks.*` namespace):
+- `ListTasks`: List tasks with optional status filter. Team auto-resolved from TeamRegistry.
+- `GetTask`: Get a single task by ID
+- `UpdateTask`: Update task status, owner, or activeForm (structural fields preserved)
 
 ## Usage
 
@@ -315,6 +325,7 @@ just proto-test  # Run wire format compatibility tests
 | kv.proto | ✅ | ✅ | ✅ |
 | merge_pr.proto | ✅ | ✅ | ✅ |
 | process.proto | ✅ | ✅ | ❌ |
+| tasks.proto | ✅ | ✅ | ❌ |
 
 ## Related Files
 

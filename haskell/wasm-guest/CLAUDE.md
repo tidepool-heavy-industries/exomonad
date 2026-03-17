@@ -33,6 +33,14 @@ The guest exports MCP tools that agents can call. These are defined in `ExoMonad
 
 **Standalone repo mode**: `spawn_leaf_subtree` accepts `standalone_repo: true`. This creates a fresh `git init` repo instead of a worktree, providing stronger filesystem isolation for the subagent.
 
+### Task Tools (`ExoMonad.Guest.Tools.Tasks`)
+
+- **`task_list`**: List tasks from the shared Claude Code task list. Optionally filter by status. Team name auto-resolved from TeamRegistry.
+- **`task_get`**: Get a task by ID from the shared task list.
+- **`task_update`**: Update task status, owner, or activeForm. Structural fields (subject, description, blocks, blockedBy) are never overwritten.
+
+Available in dev and worker roles. Enables Gemini agents to coordinate via the same task list that Claude Code's native TaskCreate/TaskList/TaskUpdate tools use.
+
 ### Defining MCP Tools (`ExoMonad.Guest.Tool.Class`)
 
 MCP tools are defined by implementing the `MCPTool` typeclass for a specific type.
@@ -74,6 +82,7 @@ The SDK (`wasm-guest`) exports **core I/O functions** and **shared descriptions/
 | `Tools.Events` | `notifyParentCore`, `shutdownCore`, descriptions/schemas, `MCPTool SendMessage` | `DevNotifyParent`, `TLNotifyParent`, `WorkerNotifyParent`, `DevShutdown`, `WorkerShutdown` |
 | `Tools.MergePR` | `mergePRCore`, `mergePRRender`, description/schema, `extractSlug` | `TLMergePR` |
 | `Tools.Spawn` | `forkWaveCore`, `spawnLeafSubtreeCore`, `spawnWorkersCore`, descriptions/schemas, render functions | `TLForkWave`, `TLSpawnLeaf`, `TLSpawnWorkers` |
+| `Tools.Tasks` | `taskListCore`, `taskGetCore`, `taskUpdateCore`, descriptions/schemas | `DevTaskList`, `DevTaskGet`, `DevTaskUpdate`, `WorkerTaskList`, `WorkerTaskGet`, `WorkerTaskUpdate` |
 
 `SendMessage` is the only tool with an `MCPTool` instance in the SDK (no state transitions needed).
 
@@ -82,8 +91,8 @@ The SDK (`wasm-guest`) exports **core I/O functions** and **shared descriptions/
 | Role | Tools | State Machine | Spawned by |
 |------|-------|---------------|------------|
 | **tl** | `TLForkWave`, `TLSpawnLeaf`, `TLSpawnWorkers`, `TLMergePR`, `TLFilePR`, `TLNotifyParent`, `SendMessage` | `TLPhase` (tracks children via `ChildSpawned`/`ChildCompleted`) | `fork_wave` |
-| **dev** | `DevFilePR`, `DevNotifyParent`, `SendMessage`, `DevShutdown` | `DevPhase` (tracks PR lifecycle) | `spawn_leaf_subtree` |
-| **worker** | `WorkerNotifyParent`, `SendMessage`, `WorkerShutdown` | None (ephemeral) | `spawn_workers` |
+| **dev** | `DevFilePR`, `DevNotifyParent`, `SendMessage`, `DevShutdown`, `DevTaskList`, `DevTaskGet`, `DevTaskUpdate` | `DevPhase` (tracks PR lifecycle) | `spawn_leaf_subtree` |
+| **worker** | `WorkerNotifyParent`, `SendMessage`, `WorkerShutdown`, `WorkerTaskList`, `WorkerTaskGet`, `WorkerTaskUpdate` | None (ephemeral) | `spawn_workers` |
 
 ## Hooks
 
