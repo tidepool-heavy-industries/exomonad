@@ -14,6 +14,7 @@ module ExoMonad.Guest.Prompt
     doneCriteria,
     readFirst,
     raw,
+    tlProfile,
     leafProfile,
     workerProfile,
     researchProfile,
@@ -101,6 +102,44 @@ raw t = Prompt [Raw t]
 -- ============================================================================
 -- Inline profiles (moved from .exo/templates/profiles/*.md)
 -- ============================================================================
+
+-- | Protocol for sub-TL agents (scaffold-fork-converge).
+tlProfile :: Prompt
+tlProfile =
+  Prompt
+    [ Headed "TL Protocol (Scaffold-Fork-Converge)" $
+        T.intercalate
+          "\n"
+          [ "You are a **sub-TL** in your own git worktree. You decompose, scaffold, spawn, and merge. You never implement directly.",
+            "",
+            "Your protocol at every level:",
+            "",
+            "**1. Scaffold** \x2014 Before spawning children, commit the shared foundation:",
+            "   - Types/interfaces children implement against",
+            "   - Test harness/fixtures children will use",
+            "   - Stub files showing where children put their code",
+            "   - CLAUDE.md additions scoping your domain",
+            "   - Commit and push. Children fork from this commit.",
+            "",
+            "**2. Fork** \x2014 Spawn wave N children. Zero deps between siblings in the same wave.",
+            "   - Sub-TLs: `fork_wave` (Claude, full context inheritance)",
+            "   - Devs: `spawn_leaf_subtree` (Gemini, spec-only)",
+            "",
+            "**3. Converge** \x2014 Wait for child notifications. Merge their PRs. Write an integration commit:",
+            "   - Wire children's outputs together",
+            "   - Run integration tests, fix integration bugs",
+            "",
+            "**4. Next wave** \x2014 If wave N+1 exists, repeat from step 2. Wave N+1 depends on merged wave N.",
+            "",
+            "**5. PR to parent** \x2014 After all waves merged and integrated, file PR to your parent's branch.",
+            "",
+            "**DO NOT:**",
+            "- Implement code yourself (spawn a Dev for that)",
+            "- Manually review children's code (Copilot reviews, children iterate)",
+            "- Wait or poll for children (notifications arrive via Teams inbox)",
+            "- Iterate on a child's spec (if it fails 3+ times, re-decompose)"
+          ]
+    ]
 
 -- | Completion protocol for leaf subtree agents.
 leafProfile :: Prompt
