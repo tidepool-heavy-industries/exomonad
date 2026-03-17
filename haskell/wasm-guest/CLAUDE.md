@@ -87,25 +87,37 @@ The guest handles hooks invoked by Claude Code:
 - **`onSubagentStop`**: Validates child agent exit status.
 - **`onStop`**: Stop hook — gates agent exit. Uses `StopCheckResult` (MustBlock/ShouldNudge/Clean).
 
-### Agent Lifecycle (`ExoMonad.Guest.Lifecycle.*`)
+### State Machine (`ExoMonad.Guest.StateMachine`)
 
-GADT-indexed state machine for agent lifecycle phases. Each role has its own GADT (DevState, TLState, WorkerState) where phase-specific data is carried in type-indexed constructors. Invalid state transitions are compile errors.
+Generic `StateMachine` typeclass for agent lifecycle phases. Users define sum types + transitions, framework handles KV persistence, logging, and stop hook integration.
 
-| Module | Purpose |
-|--------|---------|
-| `Lifecycle.DevState` | GADT `DevState (p :: DevPhase)` + existential `SomeDevState` |
-| `Lifecycle.TLState` | GADT `TLState (p :: TLPhase)` + `ChildHandle` + existential `SomeTLState` |
-| `Lifecycle.WorkerState` | GADT `WorkerState (p :: WorkerPhase)` + existential `SomeWorkerState` |
-| `Lifecycle.PhaseEffect` | KV persistence (`getDevPhase`/`setDevPhase` etc.) + `StopCheckResult` |
-| `Lifecycle.DevTransitions` | Typed transitions + `applyDevEvent` + `canExit` |
-| `Lifecycle.TLTransitions` | `applyTLEvent` + `canExit` |
-| `Lifecycle.WorkerTransitions` | `applyWorkerEvent` + `canExit` |
+```haskell
+class (ToJSON phase, FromJSON phase, Typeable phase, Show phase) => StateMachine phase event where
+  transition :: phase -> event -> TransitionResult phase  -- pure
+  canExit    :: phase -> StopCheckResult
+  machineName :: Text  -- scopes KV key: "phase-{name}"
+```
 
-**Typed transitions** (e.g., `filePR :: DevState 'Working -> PRNumber -> URL -> Text -> Eff Effects (DevState 'PRFiled)`) give compile-time phase safety. Use inside pattern match branches on the existential.
+**Framework functions:**
+- `getPhase` — read current phase from KV
+- `applyEvent defaultPhase event` — read phase, apply transition, persist + log
+- `checkExit defaultPhase` — read phase, return `StopCheckResult`
 
-**Existential transitions** (e.g., `applyDevEvent :: DevEvent -> Eff Effects ()`) handle KV read/write internally. Use from tool handlers and event handlers.
+**Phase types** live in `.exo/roles/devswarm/`:
+- `DevPhase.hs` — dev agent phases + events + `StateMachine` instance
+- `TLPhase.hs` — TL agent phases (with `ChildHandle` in `TLWaiting`) + events + instance
+- `WorkerPhase.hs` — worker agent phases + events + instance
 
-**Soft block pattern**: Tool handlers check phase via `getDevPhase`, log a warning for unexpected phases, but proceed anyway (idempotent tools like `file_pr`).
+**KV key scoping:** Each machine writes to `"phase-{machineName}"` (e.g., `"phase-dev"`, `"phase-tl"`), preventing cross-role collisions.
+
+**Usage from tool/event handlers:**
+```haskell
+import ExoMonad.Guest.StateMachine (applyEvent)
+import DevPhase (DevPhase(..), DevEvent(..))
+
+-- In a tool handler:
+void $ applyEvent @DevPhase @DevEvent DevSpawned (PRCreated prNum url branch)
+```
 
 ### Stop Hook State Machine (`ExoMonad.Guest.Effects.StopHook`)
 
