@@ -1,9 +1,14 @@
 {-# LANGUAGE TypeApplications #-}
 
 -- | File PR tool - creates or updates a PR for the current branch.
+--
+-- 'filePRCore' contains the shared I/O logic.
+-- Role-specific MCP wrappers apply their own state transitions.
 module ExoMonad.Guest.Tools.FilePR
   ( FilePR,
     FilePRArgs (..),
+    FilePROutput (..),
+    filePRCore,
   )
 where
 
@@ -26,6 +31,7 @@ import ExoMonad.Guest.Lifecycle.TLTransitions (applyTLEvent, TLEvent (..))
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
+import ExoMonad.Guest.Types (Effects)
 import GHC.Generics (Generic)
 
 -- | File PR tool marker type.
@@ -66,6 +72,37 @@ instance Aeson.ToJSON FilePROutput where
         "created" .= c
       ]
 
+-- | Shared I/O logic for filing a PR. Role-specific tools call this
+-- and apply their own state transitions on the result.
+filePRCore :: FilePRArgs -> Eff Effects (Either Text FilePROutput)
+filePRCore args = do
+  let req =
+        FP.FilePrRequest
+          { FP.filePrRequestTitle = TL.fromStrict (fpTitle args),
+            FP.filePrRequestBody = TL.fromStrict (fpBody args),
+            FP.filePrRequestBaseBranch = maybe "" TL.fromStrict (fpBaseBranch args)
+          }
+
+  void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = "FilePR: Calling file_pr effect", Log.infoRequestFields = ""})
+
+  result <- suspendEffect @FilePRFilePr req
+
+  case result of
+    Left err -> do
+      void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("FilePR: effect failed: " <> T.pack (show err)), Log.errorRequestFields = ""})
+      pure $ Left (T.pack (show err))
+    Right resp -> do
+      let output =
+            FilePROutput
+              { fpoUrl = TL.toStrict (FP.filePrResponsePrUrl resp),
+                fpoNumber = fromIntegral (FP.filePrResponsePrNumber resp),
+                fpoHeadBranch = TL.toStrict (FP.filePrResponseHeadBranch resp),
+                fpoBaseBranch = TL.toStrict (FP.filePrResponseBaseBranch resp),
+                fpoCreated = FP.filePrResponseCreated resp
+              }
+      void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("FilePR: Success - PR #" <> T.pack (show $ fpoNumber output)), Log.infoRequestFields = ""})
+      pure $ Right output
+
 instance MCPTool FilePR where
   type ToolArgs FilePR = FilePRArgs
   toolName = "file_pr"
@@ -91,35 +128,12 @@ instance MCPTool FilePR where
           })
       (Nothing, Nothing) -> setDevPhase (SomeDevState SWorking)
 
-    let req =
-          FP.FilePrRequest
-            { FP.filePrRequestTitle = TL.fromStrict (fpTitle args),
-              FP.filePrRequestBody = TL.fromStrict (fpBody args),
-              FP.filePrRequestBaseBranch = maybe "" TL.fromStrict (fpBaseBranch args)
-            }
-
-    void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = "FilePR: Calling file_pr effect", Log.infoRequestFields = ""})
-
-    result <- suspendEffect @FilePRFilePr req
-
+    result <- filePRCore args
     case result of
-      Left err -> do
-        void $ suspendEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("FilePR: effect failed: " <> T.pack (show err)), Log.errorRequestFields = ""})
-        pure $ errorResult (T.pack (show err))
-      Right resp -> do
-        let output =
-              FilePROutput
-                { fpoUrl = TL.toStrict (FP.filePrResponsePrUrl resp),
-                  fpoNumber = fromIntegral (FP.filePrResponsePrNumber resp),
-                  fpoHeadBranch = TL.toStrict (FP.filePrResponseHeadBranch resp),
-                  fpoBaseBranch = TL.toStrict (FP.filePrResponseBaseBranch resp),
-                  fpoCreated = FP.filePrResponseCreated resp
-                }
-        void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("FilePR: Success - PR #" <> T.pack (show $ fpoNumber output)), Log.infoRequestFields = ""})
-        
+      Left err -> pure $ errorResult err
+      Right output -> do
         mTLStateAfter <- getTLPhase
         case mTLStateAfter of
           Just _ -> applyTLEvent (OwnPRFiled (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
           Nothing -> applyDevEvent (PRCreated (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
-
         pure $ successResult (Aeson.toJSON output)
