@@ -264,33 +264,6 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
         mcp_servers.insert(name.clone(), entry);
     }
 
-    // Auto-register SigNoz MCP server if ~/.exo/otel/.env.signoz has an API key
-    let signoz_env = std::env::var("HOME")
-        .map(|h| PathBuf::from(h).join(".exo/otel/.env.signoz"))
-        .unwrap_or_default();
-    if signoz_env.exists() && !config.extra_mcp_servers.contains_key("signoz") {
-        if let Ok(content) = std::fs::read_to_string(&signoz_env) {
-            let key = content
-                .lines()
-                .find_map(|line| line.strip_prefix("SIGNOZ_API_KEY="))
-                .map(|v| v.trim().to_string())
-                .unwrap_or_default();
-            if key.is_empty() {
-                warn!(path = %signoz_env.display(), "No SIGNOZ_API_KEY found in .env.signoz");
-            } else {
-                mcp_servers.insert(
-                    "signoz".to_string(),
-                    serde_json::json!({
-                        "type": "http",
-                        "url": format!("http://localhost:{}/mcp", config.signoz_mcp_port),
-                        "headers": { "Authorization": format!("Bearer {}", key) }
-                    }),
-                );
-                info!("Auto-registered SigNoz MCP server from ~/.exo/otel/.env.signoz");
-            }
-        }
-    }
-
     let mcp_json = serde_json::json!({ "mcpServers": mcp_servers });
     std::fs::write(
         cwd.join(".mcp.json"),

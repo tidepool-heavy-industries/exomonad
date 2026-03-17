@@ -243,29 +243,44 @@ This is **native Claude Code Teams integration**. Messages from child agents arr
 | **GitHub poller** (PR status → events) | Built. Background service polls PR/CI status, fires WASM event handlers, and injects notifications into agent panes. Tracks `first_seen`, `last_review_state`, and `notified_parent_timeout` per PR. |
 | **OTel observability** | **Built.** Axum middleware auto-attributes every agent request span with `agent_id`, `agent.role`, `agent.parent`, `swarm.run_id`. `swarm.run_id` persisted to `.exo/run_id`, set as OTel resource attribute, propagated to children via env. Query all spans in a run: `resource.swarm.run_id = '{id}'`. Reconstruct spawn tree: `groupBy agent.parent, agent_id`. |
 | **Coordination mutexes** | Built. In-memory `MutexRegistry` with FIFO wait queues, TTL auto-expiry, idempotent acquire. Effect-only (`coordination.acquire_mutex`, `coordination.release_mutex`) — no MCP tool exposed. |
-| **SigNoz observability** | **Built.** SigNoz + MCP server for LLM-queryable swarm traces. Agents query traces via SigNoz MCP tools (search, aggregate, filter by `agent_id`, structural descendant queries). UI at `http://localhost:8931`, MCP at `http://localhost:8932/mcp`. |
+| **Tempo observability** | **Built.** Grafana Tempo for lightweight trace storage (~100-200MB RAM). Agents query traces via `curl` + TraceQL against Tempo's HTTP API (port 3200). Optional Grafana UI at `http://localhost:3000`. |
 
-### SigNoz Observability
+### Tempo Observability
 
-SigNoz manages ClickHouse schema, OTLP ingestion, and indexing. The **SigNoz MCP server** exposes trace/log/metric queries as MCP tools — LLM agents can query swarm observability data directly.
+Grafana Tempo provides lightweight trace storage with TraceQL query support. Agents query traces directly via `curl` against Tempo's HTTP API — no MCP tools needed.
 
 ```bash
-# Start SigNoz stack + MCP server
-touch ~/.exo/otel/.env.signoz
+# Start Tempo
 docker compose -f .exo/otel/docker-compose.yml up -d
+
+# Start Tempo + Grafana UI
+docker compose -f .exo/otel/docker-compose.yml --profile grafana up -d
 
 # Set otlp_endpoint in .exo/config.toml:
 # otlp_endpoint = "http://localhost:4317"
 
 # Endpoints:
 #   OTLP:       localhost:4317 (gRPC), localhost:4318 (HTTP)
-#   SigNoz UI:  http://localhost:8931  (SIGNOZ_PORT to override)
-#   MCP server: http://localhost:8932/mcp  (MCP_PORT to override)
+#   Tempo API:  http://localhost:3200 (TraceQL queries)
+#   Grafana UI: http://localhost:3000 (optional, with --profile grafana)
 ```
 
-Auth is auto-bootstrapped: `init-signoz-auth` creates an admin user, generates a PAT, and writes it to `~/.exo/otel/.env.signoz`. The MCP server reads this via `env_file`. The API key is required in the `Authorization: Bearer <key>` header for MCP requests.
+**Querying traces (TraceQL via curl):**
+```bash
+# All spans in a run
+curl -s 'http://localhost:3200/api/search?q=%7B+resource.swarm.run_id+%3D+%22abc%22+%7D&limit=50&spss=100'
 
-Without SigNoz running, spans still appear in stderr via the tracing fmt layer.
+# Find error spans for an agent
+curl -s 'http://localhost:3200/api/search?q=%7B+span.agent_id+%3D+%22my-agent%22+%26%26+span%3Astatus+%3D+error+%7D'
+
+# Parent-child structural query
+curl -s 'http://localhost:3200/api/search?q=%7B+span.agent_id+%3D+%22tl%22+%7D+%3E%3E+%7B+span.agent_id+%3D+%22worker-1%22+%7D'
+
+# Full trace by ID
+curl -s 'http://localhost:3200/api/traces/{traceID}'
+```
+
+Without Tempo running, spans still appear in stderr via the tracing fmt layer.
 
 ---
 
