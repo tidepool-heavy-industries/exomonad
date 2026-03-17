@@ -171,10 +171,10 @@ pub fn resolve_agent_working_dir(ctx: &crate::effects::EffectContext) -> PathBuf
 
 /// Resolve the working directory for an agent from its birth branch.
 ///
-/// Follows the dot-segment hierarchy: "main.feature-a" -> ".exo/worktrees/feature-a".
+/// Follows the dot-segment hierarchy: "main.feature-a" -> ".exo/worktrees/feature-a/".
 pub fn resolve_working_dir(birth_branch: &str) -> PathBuf {
     if let Some((_, slug)) = birth_branch.rsplit_once('.') {
-        PathBuf::from(format!(".exo/worktrees/{}", slug))
+        PathBuf::from(format!(".exo/worktrees/{}/", slug))
     } else {
         PathBuf::from(".")
     }
@@ -189,7 +189,7 @@ pub fn resolve_worktree_from_tab(tab: &str) -> PathBuf {
     } else {
         // Tab name is "{emoji} {slug}" (e.g. "💎 feature-a")
         if let Some((_, slug)) = tab.split_once(' ') {
-            PathBuf::from(format!(".exo/worktrees/{}", slug))
+            PathBuf::from(format!(".exo/worktrees/{}/", slug))
         } else {
             PathBuf::from(".")
         }

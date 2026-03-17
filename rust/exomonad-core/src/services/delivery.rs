@@ -384,6 +384,7 @@ pub async fn deliver_to_agent(
 
     let mut routing_target = None;
     let mut routing_parent_tab = None;
+    let mut matched_dir_name = None;
     for dir_name in routing_candidates {
         let path = agents_dir.join(&dir_name).join("routing.json");
         if let Ok(content) = tokio::fs::read_to_string(&path).await {
@@ -398,6 +399,7 @@ pub async fn deliver_to_agent(
                 if let Some(t) = target {
                     routing_target = Some(t);
                     routing_parent_tab = routing["parent_tab"].as_str().map(|s| s.to_string());
+                    matched_dir_name = Some(dir_name.clone());
                     break;
                 }
             }
@@ -414,6 +416,14 @@ pub async fn deliver_to_agent(
         );
         let worktree = if let Some(ref parent_tab) = routing_parent_tab {
             crate::services::resolve_worktree_from_tab(parent_tab)
+        } else if let Some(ref dir_name) = matched_dir_name {
+            // Check if a worktree exists with this name (subtree agent)
+            let wt_path = project_dir.join(".exo/worktrees").join(dir_name);
+            if wt_path.exists() {
+                std::path::PathBuf::from(format!(".exo/worktrees/{}/", dir_name))
+            } else {
+                crate::services::resolve_working_dir(agent_key)
+            }
         } else {
             crate::services::resolve_working_dir(agent_key)
         };
