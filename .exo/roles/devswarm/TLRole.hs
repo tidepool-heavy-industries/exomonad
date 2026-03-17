@@ -22,8 +22,8 @@ import ExoMonad.Guest.Tools.Events
 import ExoMonad.Guest.Tools.MergePR (mergePRCore, mergePRDescription, mergePRSchema, mergePRRender, MergePRArgs (..), MergePROutput (..), extractSlug)
 import ExoMonad.Guest.Tools.Spawn
   ( forkWaveCore, forkWaveDescription, forkWaveSchema, forkWaveRender, ForkWaveArgs (..), ForkWaveResult (..),
-    spawnLeafSubtreeCore, spawnLeafSubtreeDescription, spawnLeafSubtreeSchema, spawnLeafRender, SpawnLeafSubtreeArgs (..),
-    spawnWorkersCore, spawnWorkersDescription, spawnWorkersSchema, SpawnWorkersArgs,
+    spawnGeminiCore, spawnGeminiDescription, spawnGeminiSchema, SpawnGemini, SpawnGeminiArgs,
+    spawnLeafRender,
     spawnAcpCore, SpawnAcpArgs
   )
 import ExoMonad.Guest.Effects.AgentControl (SpawnResult (..))
@@ -90,36 +90,28 @@ instance MCPTool TLForkWave where
           void $ applyEvent @TLPhase @TLEvent TLPlanning (ChildSpawned handle)
         pure $ forkWaveRender fwResult
 
--- | TL-specific spawn_leaf_subtree: spawns Gemini leaf, fires ChildSpawned.
-data TLSpawnLeaf
+-- | TL-specific spawn_gemini: worktree/standalone fire ChildSpawned; inline is ephemeral.
+data TLSpawnGemini
 
-instance MCPTool TLSpawnLeaf where
-  type ToolArgs TLSpawnLeaf = SpawnLeafSubtreeArgs
-  toolName = "spawn_leaf_subtree"
-  toolDescription = spawnLeafSubtreeDescription
-  toolSchema = spawnLeafSubtreeSchema
+instance MCPTool TLSpawnGemini where
+  type ToolArgs TLSpawnGemini = SpawnGeminiArgs
+  toolName = "spawn_gemini"
+  toolDescription = spawnGeminiDescription
+  toolSchema = spawnGeminiSchema
   toolHandlerEff args = do
-    result <- spawnLeafSubtreeCore args
+    result <- spawnGeminiCore args
     case result of
       Left err -> pure $ errorResult err
-      Right (slug, sr) -> do
+      Right (Just (slug, sr)) -> do
         let handle = ChildHandle
               { chSlug = slug
               , chBranch = branchName sr
               , chAgentType = agentTypeResult sr
               }
         void $ applyEvent @TLPhase @TLEvent TLPlanning (ChildSpawned handle)
-        pure $ spawnLeafRender result
-
--- | TL-specific spawn_workers: no state transitions (workers are ephemeral).
-data TLSpawnWorkers
-
-instance MCPTool TLSpawnWorkers where
-  type ToolArgs TLSpawnWorkers = SpawnWorkersArgs
-  toolName = "spawn_workers"
-  toolDescription = spawnWorkersDescription
-  toolSchema = spawnWorkersSchema
-  toolHandlerEff = spawnWorkersCore
+        pure $ spawnLeafRender (Right (slug, sr))
+      Right Nothing ->
+        pure $ successResult $ object ["spawned" .= True]
 
 -- | TL notify_parent: thin wrapper, no phase transitions.
 data TLNotifyParent
@@ -137,8 +129,7 @@ instance MCPTool TLNotifyParent where
 
 data Tools mode = Tools
   { forkWave :: mode :- TLForkWave,
-    spawnLeafSubtree :: mode :- TLSpawnLeaf,
-    spawnWorkers :: mode :- TLSpawnWorkers,
+    spawnGemini :: mode :- TLSpawnGemini,
     pr :: mode :- TLFilePR,
     mergePr :: mode :- TLMergePR,
     notifyParent :: mode :- TLNotifyParent,
@@ -169,8 +160,7 @@ config =
       tools =
         Tools
           { forkWave = mkHandler @TLForkWave,
-            spawnLeafSubtree = mkHandler @TLSpawnLeaf,
-            spawnWorkers = mkHandler @TLSpawnWorkers,
+            spawnGemini = mkHandler @TLSpawnGemini,
             pr = mkHandler @TLFilePR,
             mergePr = mkHandler @TLMergePR,
             notifyParent = mkHandler @TLNotifyParent,
