@@ -93,9 +93,9 @@ Claude Code hooks:
 ### agent (feature = "full")
 
 Agent management:
-- `AgentType` - Claude/Gemini
-- `AgentStatus` - Running/stopped/failed
-- `SpawnOptions`, `AgentInfo`, etc.
+- `AgentType` - Claude/Gemini/Shoal
+- `AgentInfo` - Agent metadata with `alive` bool (tmux liveness)
+- Spawn/Cleanup/List request/response types
 
 ## Usage
 

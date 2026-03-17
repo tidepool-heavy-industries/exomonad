@@ -17,15 +17,6 @@ enum AgentType {
   AGENT_TYPE_SHOAL = 3;
 }
 
-// Agent execution status.
-enum AgentStatus {
-  AGENT_STATUS_UNSPECIFIED = 0;
-  AGENT_STATUS_RUNNING = 1;
-  AGENT_STATUS_STOPPED = 2;
-  AGENT_STATUS_FAILED = 3;
-  AGENT_STATUS_WAITING = 4;
-}
-
 // Topology of the workspace.
 enum WorkspaceTopology {
   WORKSPACE_TOPOLOGY_UNSPECIFIED = 0;
@@ -47,8 +38,8 @@ message AgentInfo {
   AgentType agent_type = 5;
   // Agent role (dev/tl/pm).
   exomonad.common.Role role = 6;
-  // Current status.
-  AgentStatus status = 7;
+  // Whether the agent's tmux window/pane is alive.
+  bool alive = 7;
   // Multiplexer window name (if running).
   string mux_window = 8;
   // Error message (if failed).
@@ -216,8 +207,8 @@ message CleanupMergedResponse {
 // ============================================================================
 
 message ListRequest {
-  // Filter by status (optional).
-  AgentStatus filter_status = 1;
+  // When true, only return agents with alive=true.
+  bool filter_alive_only = 1;
   // Filter by role (optional).
   exomonad.common.Role filter_role = 2;
   // Sub-repository path relative to project_dir.

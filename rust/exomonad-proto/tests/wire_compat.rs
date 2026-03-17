@@ -251,7 +251,7 @@ mod binary {
                 branch_name: "gh-433/fix-build".into(),
                 agent_type: 1, // CLAUDE
                 role: 1,       // DEV
-                status: 1,     // RUNNING
+                alive: true,
                 mux_window: "433-fix-build".into(),
                 error: String::new(),
                 pr_number: 0,
@@ -273,7 +273,7 @@ mod binary {
         assert_eq!(agent.branch_name, "gh-433/fix-build");
         assert_eq!(agent.agent_type, 1);
         assert_eq!(agent.role, 1);
-        assert_eq!(agent.status, 1);
+        assert!(agent.alive);
         assert_eq!(agent.mux_window, "433-fix-build");
     }
 
@@ -290,7 +290,7 @@ mod binary {
                     branch_name: "gh-1/a".into(),
                     agent_type: 1,
                     role: 1,
-                    status: 1,
+                    alive: true,
                     mux_window: "1-a".into(),
                     error: String::new(),
                     pr_number: 0,
@@ -304,7 +304,7 @@ mod binary {
                     branch_name: "gh-2/b".into(),
                     agent_type: 2, // GEMINI
                     role: 1,
-                    status: 1,
+                    alive: true,
                     mux_window: "2-b".into(),
                     error: String::new(),
                     pr_number: 0,
@@ -336,7 +336,7 @@ mod binary {
                 branch_name: "gh-10/feature".into(),
                 agent_type: 1,
                 role: 2,   // TL
-                status: 2, // STOPPED
+                alive: false,
                 mux_window: String::new(),
                 error: String::new(),
                 pr_number: 42,
@@ -351,7 +351,7 @@ mod binary {
         let agent = &decoded.agents[0];
         assert_eq!(agent.pr_number, 42);
         assert_eq!(agent.pr_url, "https://github.com/org/repo/pull/42");
-        assert_eq!(agent.status, 2);
+        assert!(!agent.alive);
     }
 
     #[test]
@@ -782,7 +782,7 @@ mod binary {
                 branch_name: "b".into(),
                 agent_type: 1,
                 role: 1,
-                status: 1,
+                alive: true,
                 mux_window: "t".into(),
                 error: String::new(),
                 pr_number: 0,
@@ -841,7 +841,7 @@ mod binary {
                 branch_name: "gh-1/a".into(),
                 agent_type: 1,
                 role: 1,
-                status: 1,
+                alive: true,
                 mux_window: "1-a".into(),
                 error: String::new(),
                 pr_number: 0,

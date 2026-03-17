@@ -366,14 +366,6 @@ pub struct AgentPrInfo {
 
 impl FFIBoundary for AgentPrInfo {}
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum AgentStatus {
-    Running,
-    Stopped,
-}
-
-impl FFIBoundary for AgentStatus {}
 
 /// Workspace topology for an agent — how it relates to the project directory.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -404,10 +396,8 @@ impl Topology {
 pub struct AgentInfo {
     /// Issue ID (e.g., "123")
     pub issue_id: String,
-    /// Whether a tmux window exists for this agent
+    /// Whether a tmux window/pane exists for this agent.
     pub has_tab: bool,
-    /// Status of the agent
-    pub status: AgentStatus,
     /// Workspace topology.
     #[serde(default)]
     pub topology: Topology,
@@ -1694,7 +1684,7 @@ impl AgentControlService {
             }
 
             // Only clean up stopped agents (no running tab)
-            if agent.status == AgentStatus::Stopped {
+            if !agent.has_tab {
                 info!(issue_id = %agent.issue_id, "Agent is stopped, marking for cleanup");
                 to_cleanup.push(agent.issue_id);
             }
@@ -1748,16 +1738,10 @@ impl AgentControlService {
                         let display_name = format!("{} {}", agent_type.emoji(), name);
 
                         let has_tab = windows.iter().any(|t| t == &display_name);
-                        let status = if has_tab {
-                            AgentStatus::Running
-                        } else {
-                            AgentStatus::Stopped
-                        };
 
                         agents.push(AgentInfo {
                             issue_id: name.to_string(),
                             has_tab,
-                            status,
                             topology: Topology::WorktreePerAgent,
                             agent_dir: Some(path.clone()),
                             slug: Some(AgentName::from(name)),
@@ -1807,16 +1791,10 @@ impl AgentControlService {
                     // Liveness: for workers, they might be panes in a window.
                     // Currently list_agents only sees windows.
                     let has_tab = windows.iter().any(|t| t == &display_name);
-                    let status = if has_tab {
-                        AgentStatus::Running
-                    } else {
-                        AgentStatus::Stopped
-                    };
 
                     agents.push(AgentInfo {
                         issue_id: name.to_string(),
                         has_tab,
-                        status,
                         topology: Topology::SharedDir,
                         agent_dir: Some(path.clone()),
                         slug: Some(AgentName::from(base_name)),
