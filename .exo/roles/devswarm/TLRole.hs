@@ -31,6 +31,7 @@ import ExoMonad.Guest.Types (StopDecision(..), StopHookOutput(..), blockStopResp
 import ExoMonad.Types (HookConfig (..), Effects, defaultSessionStartHook, teamRegistrationPostToolUse)
 import PRReviewHandler (prReviewEventHandlers)
 import TLPhase (TLPhase (..), TLEvent (..), ChildHandle (..))
+import TLStopCheck (tlStopCheck)
 
 -- | TL-specific file_pr: files PR, transitions TLPhase.
 data TLFilePR
@@ -145,22 +146,6 @@ data Tools mode = Tools
     sendMessage :: mode :- SendMessage
   }
   deriving (Generic)
-
-tlStopCheck :: Eff Effects StopHookOutput
-tlStopCheck = do
-  branch <- getCurrentBranch
-  if branch `elem` ["main", "master"]
-    then pure allowStopResponse
-    else do
-      result <- checkExit @TLPhase @TLEvent TLPlanning
-      case result of
-        MustBlock msg -> pure $ blockStopResponse msg
-        ShouldNudge msg -> pure $ StopHookOutput Allow (Just msg)
-        Clean -> do
-          nudge <- checkUncommittedWork branch
-          case nudge of
-            Just msg -> pure $ StopHookOutput Allow (Just msg)
-            Nothing -> pure allowStopResponse
 
 config :: RoleConfig (Tools AsHandler)
 config =
