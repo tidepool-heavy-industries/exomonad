@@ -7,6 +7,7 @@ module ExoMonad.Guest.Tools.Spawn
     ForkWave,
     SpawnLeafSubtree,
     SpawnWorkers,
+    SpawnGemini,
     SpawnAcp,
 
     -- * Args types
@@ -14,6 +15,8 @@ module ExoMonad.Guest.Tools.Spawn
     ForkWaveChild (..),
     SpawnLeafSubtreeArgs (..),
     SpawnWorkersArgs (..),
+    SpawnGeminiArgs (..),
+    GeminiIsolation (..),
     WorkerSpec (..),
     WorkerType (..),
     SpawnAcpArgs (..),
@@ -22,6 +25,7 @@ module ExoMonad.Guest.Tools.Spawn
     forkWaveCore,
     spawnLeafSubtreeCore,
     spawnWorkersCore,
+    spawnGeminiCore,
     spawnAcpCore,
 
     -- * Result types
@@ -38,6 +42,8 @@ module ExoMonad.Guest.Tools.Spawn
     spawnLeafSubtreeSchema,
     spawnWorkersDescription,
     spawnWorkersSchema,
+    spawnGeminiDescription,
+    spawnGeminiSchema,
 
     -- * Helpers (re-exported for role code)
     spawnErrorMessage,
@@ -99,7 +105,8 @@ data ForkWave
 
 data ForkWaveChild = ForkWaveChild
   { fwcSlug :: Text,
-    fwcTask :: Text
+    fwcTask :: Text,
+    fwcForkSession :: Bool
   }
   deriving (Show, Eq, Generic)
 
@@ -108,13 +115,15 @@ instance FromJSON ForkWaveChild where
     ForkWaveChild
       <$> v .: "slug"
       <*> v .: "task"
+      <*> (fromMaybe False <$> v .:? "fork_session")
 
 instance JsonSchema ForkWaveChild where
   toSchema =
     Aeson.Object $
       genericToolSchemaWith @ForkWaveChild
         [ ("slug", "Branch name suffix (will be prefixed with current branch)"),
-          ("task", "One-line task description — the child inherits your full context, so keep it brief")
+          ("task", "One-line task description — the child inherits your full context, so keep it brief"),
+          ("fork_session", "Inherit parent conversation context via --fork-session (default: false). Set true only when the child needs full context; omit for fresh-start children.")
         ]
 
 data ForkWaveArgs = ForkWaveArgs
@@ -134,7 +143,7 @@ data ForkWaveResult = ForkWaveResult
 
 -- | Shared tool description for fork_wave.
 forkWaveDescription :: Text
-forkWaveDescription = "Fork any number of parallel Claude agents at this point in the conversation. Each inherits your full context window and starts in a worktree branched off your branch. Requires clean git state (committed and pushed). Use this tool to parallelize when work becomes applicative and can be split into independent streams. IMPORTANT: Create a team using TeamCreate BEFORE calling."
+forkWaveDescription = "Fork any number of parallel Claude agents. Each starts in a worktree branched off your branch. Set fork_session: true on a child to inherit your full context window (useful when the child needs no re-orientation). Requires clean git state (committed and pushed). IMPORTANT: Create a team using TeamCreate BEFORE calling."
 
 -- | Shared tool schema for fork_wave.
 forkWaveSchema :: Aeson.Object
@@ -165,12 +174,12 @@ forkWaveCore args = do
         Left err ->
           pure $ Left ("Failed to check unpushed commits: " <> spawnErrorMessage err)
         _ -> do
-          -- Spawn each child with fork_session=true
+          -- Spawn each child
           results <- forM (fwaChildren args) $ \child -> do
             let cfg = AC.SpawnSubtreeConfig
                   { AC.stcTask = fwcTask child
                   , AC.stcBranchName = fwcSlug child
-                  , AC.stcForkSession = True
+                  , AC.stcForkSession = fwcForkSession child
                   , AC.stcRole = Nothing
                   , AC.stcAgentType = AC.Claude
                   , AC.stcPerms = AC.defaultPermFlags
@@ -425,6 +434,150 @@ spawnWorkersCore args = do
         [ "spawned" .= map Aeson.toJSON successes,
           "errors" .= map (Aeson.String . spawnErrorMessage) errs
         ]
+
+-- ============================================================================
+-- SpawnGemini (unified spawn tool)
+-- ============================================================================
+
+data SpawnGemini
+
+data GeminiIsolation = WorktreeIsolation | InlineIsolation | StandaloneIsolation
+  deriving (Show, Eq, Generic)
+
+instance FromJSON GeminiIsolation where
+  parseJSON = withText "GeminiIsolation" $ \case
+    "worktree"   -> pure WorktreeIsolation
+    "inline"     -> pure InlineIsolation
+    "standalone" -> pure StandaloneIsolation
+    t -> fail $ "Unknown isolation mode: " <> T.unpack t
+
+instance JsonSchema GeminiIsolation
+
+data SpawnGeminiArgs = SpawnGeminiArgs
+  { sgName        :: Text
+  , sgTask        :: Text
+  , sgIsolation   :: GeminiIsolation
+  , sgPermissionMode  :: Maybe Text
+  , sgAllowedTools    :: Maybe [Text]
+  , sgDisallowedTools :: Maybe [Text]
+  , sgAllowedDirs     :: Maybe [Text]
+  -- Structured task fields (inline/worktree richer specs)
+  , sgReadFirst    :: Maybe [Text]
+  , sgSteps        :: Maybe [Text]
+  , sgVerify       :: Maybe [Text]
+  , sgDoneCriteria :: Maybe [Text]
+  , sgBoundary     :: Maybe [Text]
+  , sgContext      :: Maybe Text
+  , sgProfiles     :: Maybe [Text]
+  , sgContextFiles :: Maybe [Text]
+  , sgVerifyTemplates :: Maybe [Text]
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON SpawnGeminiArgs where
+  parseJSON = withObject "SpawnGeminiArgs" $ \v ->
+    SpawnGeminiArgs
+      <$> v .:  "name"
+      <*> v .:  "task"
+      <*> v .:  "isolation"
+      <*> v .:? "permission_mode"
+      <*> v .:? "allowed_tools"
+      <*> v .:? "disallowed_tools"
+      <*> v .:? "allowed_dirs"
+      <*> v .:? "read_first"
+      <*> v .:? "steps"
+      <*> v .:? "verify"
+      <*> v .:? "done_criteria"
+      <*> v .:? "boundary"
+      <*> v .:? "context"
+      <*> v .:? "profiles"
+      <*> v .:? "context_files"
+      <*> v .:? "verify_templates"
+
+spawnGeminiDescription :: Text
+spawnGeminiDescription = "Spawn a Gemini agent. Use isolation='worktree' for code changes that need a branch and PR review (own branch, own directory, files PR). Use isolation='inline' for ephemeral tasks in the parent directory (research, boilerplate, refactors across non-conflicting files \x2014 no branch, no PR). Use isolation='standalone' for full filesystem isolation (own git repo, no shared .git). IMPORTANT: Create a team using TeamCreate BEFORE calling. After spawning, return immediately."
+
+spawnGeminiSchema :: Aeson.Object
+spawnGeminiSchema =
+  genericToolSchemaWith @SpawnGeminiArgs
+    [ ("name",           "Agent name / branch suffix")
+    , ("task",           "Description of the task")
+    , ("isolation",      "Isolation mode: 'worktree' (own branch+dir+PR), 'inline' (parent dir, ephemeral), 'standalone' (own git repo)")
+    , ("permission_mode","Permission mode. Omit for --dangerously-skip-permissions.")
+    , ("allowed_tools",  "Tool patterns to allow.")
+    , ("disallowed_tools","Tool patterns to disallow.")
+    , ("allowed_dirs",   "Dirs to copy into context (standalone only).")
+    , ("read_first",     "Files to read before starting.")
+    , ("steps",          "Numbered implementation steps.")
+    , ("verify",         "Commands to verify the work.")
+    , ("done_criteria",  "Acceptance criteria.")
+    , ("boundary",       "Things the agent must NOT do.")
+    , ("context",        "Freeform context: code snippets, examples.")
+    , ("profiles",       "Template profiles (e.g. 'rust', 'haskell').")
+    , ("context_files",  "Files to include in context.")
+    , ("verify_templates","Verification script templates.")
+    ]
+
+spawnGeminiCore :: SpawnGeminiArgs -> Eff Effects (Either Text (Maybe (Text, AC.SpawnResult)))
+spawnGeminiCore args = case sgIsolation args of
+  WorktreeIsolation -> do
+    let leafArgs = SpawnLeafSubtreeArgs
+          { slsTask         = buildGeminiTask args
+          , slsBranchName   = sgName args
+          , slsPermissionMode  = sgPermissionMode args
+          , slsAllowedTools    = sgAllowedTools args
+          , slsDisallowedTools = sgDisallowedTools args
+          , slsStandaloneRepo  = Just False
+          , slsAllowedDirs     = sgAllowedDirs args
+          }
+    result <- spawnLeafSubtreeCore leafArgs
+    pure $ fmap (Just) result
+  StandaloneIsolation -> do
+    let leafArgs = SpawnLeafSubtreeArgs
+          { slsTask         = buildGeminiTask args
+          , slsBranchName   = sgName args
+          , slsPermissionMode  = sgPermissionMode args
+          , slsAllowedTools    = sgAllowedTools args
+          , slsDisallowedTools = sgDisallowedTools args
+          , slsStandaloneRepo  = Just True
+          , slsAllowedDirs     = sgAllowedDirs args
+          }
+    result <- spawnLeafSubtreeCore leafArgs
+    pure $ fmap (Just) result
+  InlineIsolation -> do
+    let spec = WorkerSpec
+          { wsName             = sgName args
+          , wsTask             = sgTask args
+          , wsReadFirst        = sgReadFirst args
+          , wsSteps            = sgSteps args
+          , wsVerify           = sgVerify args
+          , wsDoneCriteria     = sgDoneCriteria args
+          , wsBoundary         = sgBoundary args
+          , wsContext          = sgContext args
+          , wsPrompt           = Nothing
+          , wsProfiles         = sgProfiles args
+          , wsContextFiles     = sgContextFiles args
+          , wsVerifyTemplates  = sgVerifyTemplates args
+          , wsType             = Nothing
+          , wsPermissionMode   = sgPermissionMode args
+          , wsAllowedTools     = sgAllowedTools args
+          , wsDisallowedTools  = sgDisallowedTools args
+          }
+    result <- spawnWorkersCore (SpawnWorkersArgs [spec])
+    pure $ Right Nothing  -- inline workers don't return SpawnResult
+
+buildGeminiTask :: SpawnGeminiArgs -> Text
+buildGeminiTask args =
+  let spec = WorkerSpec
+        { wsName = sgName args, wsTask = sgTask args
+        , wsReadFirst = sgReadFirst args, wsSteps = sgSteps args
+        , wsVerify = sgVerify args, wsDoneCriteria = sgDoneCriteria args
+        , wsBoundary = sgBoundary args, wsContext = sgContext args
+        , wsPrompt = Nothing, wsProfiles = sgProfiles args
+        , wsContextFiles = sgContextFiles args, wsVerifyTemplates = sgVerifyTemplates args
+        , wsType = Nothing
+        , wsPermissionMode = Nothing, wsAllowedTools = Nothing, wsDisallowedTools = Nothing
+        }
+  in renderWorkerPrompt spec
 
 -- ============================================================================
 -- SpawnAcp (single ACP agent)
