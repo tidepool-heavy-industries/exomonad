@@ -70,7 +70,6 @@ library wasm-guest-internal
         ExoMonad.Guest.Prompt
         ExoMonad.Guest.Events
         ExoMonad.Guest.Events.Templates
-        ExoMonad.Guest.Lifecycle
         -- State machine primitive
         ExoMonad.Guest.StateMachine
         -- SpawnSpec compiler
@@ -87,14 +86,6 @@ library wasm-guest-internal
         ExoMonad.Guest.Effects.StopHook
         -- Proto helpers
         ExoMonad.Guest.Proto
-        -- Lifecycle (GADT state machines)
-        ExoMonad.Guest.Lifecycle.DevState
-        ExoMonad.Guest.Lifecycle.TLState
-        ExoMonad.Guest.Lifecycle.WorkerState
-        ExoMonad.Guest.Lifecycle.PhaseEffect
-        ExoMonad.Guest.Lifecycle.DevTransitions
-        ExoMonad.Guest.Lifecycle.TLTransitions
-        ExoMonad.Guest.Lifecycle.WorkerTransitions
         -- Extensible effects (for external consumers)
         ExoMonad.Guest.Effect
         -- Effect typeclass and namespace-based effects

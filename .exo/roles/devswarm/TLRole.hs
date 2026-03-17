@@ -8,13 +8,13 @@ module TLRole (config, Tools) where
 
 import ExoMonad
 import Control.Monad.Freer (Eff)
-import ExoMonad.Guest.Lifecycle.PhaseEffect (StopCheckResult (..), getTLPhase)
-import ExoMonad.Guest.Lifecycle.TLTransitions qualified as TLTransitions
+import ExoMonad.Guest.StateMachine (StopCheckResult(..), checkExit)
 import ExoMonad.Guest.Effects.StopHook (checkUncommittedWork, getCurrentBranch)
 import PRReviewHandler (prReviewEventHandlers)
 import ExoMonad.Guest.Tools.MergePR (MergePR)
 import ExoMonad.Guest.Types (StopDecision(..), StopHookOutput(..), blockStopResponse, allowStopResponse, allowResponse)
 import ExoMonad.Types (HookConfig (..), Effects, defaultSessionStartHook, teamRegistrationPostToolUse)
+import TLPhase (TLPhase(..), TLEvent)
 
 data Tools mode = Tools
   { spawn :: SpawnTools mode,
@@ -31,25 +31,17 @@ tlStopCheck = do
   if branch `elem` ["main", "master"]
     then pure allowStopResponse
     else do
-      mPhase <- getTLPhase
-      result <- case mPhase of
-        Just phase -> case TLTransitions.canExit phase of
-          r@(MustBlock _) -> pure r
-          ShouldNudge msg -> pure (ShouldNudge msg)
-          Clean -> do
-            nudge <- checkUncommittedWork branch
-            case nudge of
-              Just msg -> pure (ShouldNudge msg)
-              Nothing -> pure Clean
-        Nothing -> do
-          nudge <- checkUncommittedWork branch
-          case nudge of
-            Just msg -> pure (ShouldNudge msg)
-            Nothing -> pure Clean
+      result <- checkExit @TLPhase @TLEvent TLPlanning
       case result of
         MustBlock msg -> pure $ blockStopResponse msg
-        ShouldNudge msg -> pure $ StopHookOutput Allow (Just msg)
-        Clean -> pure allowStopResponse
+        ShouldNudge msg -> do
+          -- If SM says clean, also check uncommitted work
+          pure $ StopHookOutput Allow (Just msg)
+        Clean -> do
+          nudge <- checkUncommittedWork branch
+          case nudge of
+            Just msg -> pure $ StopHookOutput Allow (Just msg)
+            Nothing -> pure allowStopResponse
 
 config :: RoleConfig (Tools AsHandler)
 config =
