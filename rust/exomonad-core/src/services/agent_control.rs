@@ -166,11 +166,33 @@ impl AgentType {
 /// Spawned agents (birth_branch with dots, e.g. "main.feature.scaffold")
 /// work in `.exo/worktrees/{slug}/` where slug is the last dot-segment.
 pub fn resolve_agent_working_dir(ctx: &crate::effects::EffectContext) -> PathBuf {
-    let birth_branch_str = ctx.birth_branch.as_str();
-    if let Some((_, slug)) = birth_branch_str.rsplit_once('.') {
-        PathBuf::from(format!(".exo/worktrees/{}/", slug))
+    resolve_working_dir(ctx.birth_branch.as_str())
+}
+
+/// Resolve the working directory for an agent from its birth branch.
+///
+/// Follows the dot-segment hierarchy: "main.feature-a" -> ".exo/worktrees/feature-a".
+pub fn resolve_working_dir(birth_branch: &str) -> PathBuf {
+    if let Some((_, slug)) = birth_branch.rsplit_once('.') {
+        PathBuf::from(format!(".exo/worktrees/{}", slug))
     } else {
         PathBuf::from(".")
+    }
+}
+
+/// Resolve the working directory for an agent from its tmux tab name.
+///
+/// Tab names are formatted as "{emoji} {slug}" or "TL".
+pub fn resolve_worktree_from_tab(tab: &str) -> PathBuf {
+    if tab == "TL" {
+        PathBuf::from(".")
+    } else {
+        // Tab name is "{emoji} {slug}" (e.g. "💎 feature-a")
+        if let Some((_, slug)) = tab.split_once(' ') {
+            PathBuf::from(format!(".exo/worktrees/{}", slug))
+        } else {
+            PathBuf::from(".")
+        }
     }
 }
 

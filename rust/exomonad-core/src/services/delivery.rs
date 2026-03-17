@@ -227,7 +227,14 @@ pub async fn deliver_to_agent(
                     let agent = agent_key.to_string();
                     let target = tmux_target.to_string();
                     let msg = message.to_string();
-                    let pd = project_dir.to_path_buf();
+                    let worktree = if agent_key.contains('.') {
+                        crate::services::resolve_working_dir(agent_key)
+                    } else if tmux_target == "TL" {
+                        std::path::PathBuf::from(".")
+                    } else {
+                        crate::services::resolve_worktree_from_tab(tmux_target)
+                    };
+                    let pd = project_dir.join(worktree);
                     tokio::spawn(async move {
                         for attempt in 1..=3 {
                             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
@@ -376,6 +383,7 @@ pub async fn deliver_to_agent(
     );
 
     let mut routing_target = None;
+    let mut routing_parent_tab = None;
     for dir_name in routing_candidates {
         let path = agents_dir.join(&dir_name).join("routing.json");
         if let Ok(content) = tokio::fs::read_to_string(&path).await {
@@ -387,8 +395,9 @@ pub async fn deliver_to_agent(
                     .or_else(|| routing["parent_tab"].as_str())
                     .map(|s| s.to_string());
 
-                if target.is_some() {
-                    routing_target = target;
+                if let Some(t) = target {
+                    routing_target = Some(t);
+                    routing_parent_tab = routing["parent_tab"].as_str().map(|s| s.to_string());
                     break;
                 }
             }
@@ -403,7 +412,13 @@ pub async fn deliver_to_agent(
             chars = message.len(),
             "Injecting message via routing.json"
         );
-        let outcome = match tmux_events::inject_input(&target, message, project_dir).await {
+        let worktree = if let Some(ref parent_tab) = routing_parent_tab {
+            crate::services::resolve_worktree_from_tab(parent_tab)
+        } else {
+            crate::services::resolve_working_dir(agent_key)
+        };
+        let effective_pd = project_dir.join(worktree);
+        let outcome = match tmux_events::inject_input(&target, message, &effective_pd).await {
             Ok(()) => "success",
             Err(e) => {
                 warn!(target = %target, error = %e, "tmux inject_input failed (routing.json)");
@@ -429,7 +444,13 @@ pub async fn deliver_to_agent(
         chars = message.len(),
         "Injecting message into agent pane via tmux"
     );
-    let outcome = match tmux_events::inject_input(tmux_target, message, project_dir).await {
+    let worktree = if tmux_target == "TL" {
+        std::path::PathBuf::from(".")
+    } else {
+        crate::services::resolve_worktree_from_tab(tmux_target)
+    };
+    let effective_pd = project_dir.join(worktree);
+    let outcome = match tmux_events::inject_input(tmux_target, message, &effective_pd).await {
         Ok(()) => "success",
         Err(e) => {
             warn!(target = %tmux_target, error = %e, "tmux inject_input failed (fallback)");
