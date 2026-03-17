@@ -67,6 +67,7 @@ library wasm-guest-internal
         ExoMonad.Guest.Tools.MergePR
         ExoMonad.Guest.Tools.Spawn
         ExoMonad.Guest.Tools.Events
+        ExoMonad.Guest.Tools.Tasks
         ExoMonad.Guest.Prompt
         ExoMonad.Guest.Events
         ExoMonad.Guest.Events.Templates
@@ -101,6 +102,7 @@ library wasm-guest-internal
         ExoMonad.Effects.Coordination
         ExoMonad.Effects.Events
         ExoMonad.Effects.Session
+        ExoMonad.Effects.Tasks
         ExoMonad.Effects.KV
         ExoMonad.Effects.Process
         -- Types

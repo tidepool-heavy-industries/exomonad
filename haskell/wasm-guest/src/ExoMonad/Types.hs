@@ -144,6 +144,10 @@ teamRegistrationPostToolUse hookInput =
                 Log.errorRequestFields = ""
               })
       pure (postToolUseResponse Nothing)
+    Just "TeamDelete" -> do
+      void $ suspendEffect_ @Session.SessionDeregisterTeam
+        Session.DeregisterTeamRequest
+      pure (postToolUseResponse Nothing)
     _ -> pure (postToolUseResponse Nothing)
 
 -- | Extract team_name from TeamCreate's tool_response JSON.

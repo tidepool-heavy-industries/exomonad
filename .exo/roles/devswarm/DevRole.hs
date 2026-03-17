@@ -16,6 +16,11 @@ import ExoMonad.Guest.Tools.Events
   ( notifyParentCore, notifyParentDescription, notifyParentSchema, NotifyParentArgs (..), NotifyStatus (..),
     shutdownCore, shutdownDescription, shutdownSchema, ShutdownArgs
   )
+import ExoMonad.Guest.Tools.Tasks
+  ( taskListCore, taskListDescription, taskListSchema, TaskListArgs,
+    taskGetCore, taskGetDescription, taskGetSchema, TaskGetArgs,
+    taskUpdateCore, taskUpdateDescription, taskUpdateSchema, TaskUpdateArgs
+  )
 import ExoMonad.Guest.StateMachine (applyEvent)
 import DevPhase (DevPhase (..), DevEvent (..))
 import HttpDevHooks (httpDevHooks)
@@ -68,11 +73,53 @@ instance MCPTool DevShutdown where
     void $ applyEvent @DevPhase @DevEvent DevSpawned ShutdownRequested
     shutdownCore args
 
+data DevTaskList
+
+instance MCPTool DevTaskList where
+  type ToolArgs DevTaskList = TaskListArgs
+  toolName = "task_list"
+  toolDescription = taskListDescription
+  toolSchema = taskListSchema
+  toolHandlerEff args = do
+    result <- taskListCore args
+    case result of
+      Left err -> pure $ errorResult err
+      Right output -> pure $ successResult output
+
+data DevTaskGet
+
+instance MCPTool DevTaskGet where
+  type ToolArgs DevTaskGet = TaskGetArgs
+  toolName = "task_get"
+  toolDescription = taskGetDescription
+  toolSchema = taskGetSchema
+  toolHandlerEff args = do
+    result <- taskGetCore args
+    case result of
+      Left err -> pure $ errorResult err
+      Right output -> pure $ successResult output
+
+data DevTaskUpdate
+
+instance MCPTool DevTaskUpdate where
+  type ToolArgs DevTaskUpdate = TaskUpdateArgs
+  toolName = "task_update"
+  toolDescription = taskUpdateDescription
+  toolSchema = taskUpdateSchema
+  toolHandlerEff args = do
+    result <- taskUpdateCore args
+    case result of
+      Left err -> pure $ errorResult err
+      Right output -> pure $ successResult output
+
 data Tools mode = Tools
   { pr :: mode :- DevFilePR,
     notifyParent :: mode :- DevNotifyParent,
     sendMessage :: mode :- SendMessage,
-    shutdown :: mode :- DevShutdown
+    shutdown :: mode :- DevShutdown,
+    taskList :: mode :- DevTaskList,
+    taskGet :: mode :- DevTaskGet,
+    taskUpdate :: mode :- DevTaskUpdate
   }
   deriving (Generic)
 
@@ -85,7 +132,10 @@ config =
           { pr = mkHandler @DevFilePR,
             notifyParent = mkHandler @DevNotifyParent,
             sendMessage = mkHandler @SendMessage,
-            shutdown = mkHandler @DevShutdown
+            shutdown = mkHandler @DevShutdown,
+            taskList = mkHandler @DevTaskList,
+            taskGet = mkHandler @DevTaskGet,
+            taskUpdate = mkHandler @DevTaskUpdate
           },
       hooks = httpDevHooks,
       eventHandlers = prReviewEventHandlers
