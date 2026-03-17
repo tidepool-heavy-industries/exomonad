@@ -30,7 +30,7 @@ services:
           memory: 512M
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.4.0
     container_name: exo-grafana
     restart: unless-stopped
     ports:
