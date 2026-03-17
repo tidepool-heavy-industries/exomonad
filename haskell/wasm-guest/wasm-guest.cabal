@@ -86,6 +86,11 @@ library wasm-guest-internal
         ExoMonad.Guest.Effects.StopHook
         -- Proto helpers
         ExoMonad.Guest.Proto
+        -- Compatibility Shims (DEPRECATED)
+        ExoMonad.Guest.Lifecycle.DevState
+        ExoMonad.Guest.Lifecycle.DevTransitions
+        ExoMonad.Guest.Lifecycle.PhaseEffect
+        ExoMonad.Guest.Lifecycle.TLTransitions
         -- Extensible effects (for external consumers)
         ExoMonad.Guest.Effect
         -- Effect typeclass and namespace-based effects

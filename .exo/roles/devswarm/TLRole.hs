@@ -34,9 +34,7 @@ tlStopCheck = do
       result <- checkExit @TLPhase @TLEvent TLPlanning
       case result of
         MustBlock msg -> pure $ blockStopResponse msg
-        ShouldNudge msg -> do
-          -- If SM says clean, also check uncommitted work
-          pure $ StopHookOutput Allow (Just msg)
+        ShouldNudge msg -> pure $ StopHookOutput Allow (Just msg)
         Clean -> do
           nudge <- checkUncommittedWork branch
           case nudge of

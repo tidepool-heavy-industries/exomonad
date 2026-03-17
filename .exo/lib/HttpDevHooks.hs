@@ -14,6 +14,7 @@ import Control.Monad.Freer (Eff)
 import Data.Aeson (Value (..))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KM
+import Data.ByteString.Lazy qualified as BSL
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
