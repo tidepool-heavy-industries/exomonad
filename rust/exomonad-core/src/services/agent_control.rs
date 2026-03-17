@@ -1506,14 +1506,6 @@ impl AgentControlService {
     /// and removes per-agent config directory (`.exo/agents/{name}/`).
     #[tracing::instrument(skip(self))]
     pub async fn cleanup_agent(&self, identifier: &str) -> Result<()> {
-        // Remove synthetic team member registration (non-fatal if not registered)
-        let team_name = format!("exo-{}", self.birth_branch);
-        if let Err(e) =
-            crate::services::synthetic_members::remove_synthetic_member(&team_name, identifier)
-        {
-            warn!(team = %team_name, member = %identifier, error = %e, "Failed to remove synthetic team member (non-fatal)");
-        }
-
         // Try to find agent in list (for metadata and window matching).
         // Failure here is non-fatal to allow cleaning up worker panes (invisible to list_agents).
         let agents = self.list_agents().await.unwrap_or_default();
@@ -1526,17 +1518,35 @@ impl AgentControlService {
         );
 
         // Reconstruct names for paths and exact window matching.
-        // If agent not found, assume gemini worker (Phase 1 convention).
-        let (agent_type, display_name) = match agent {
+        // Invariant: identifier can be a clean slug ("my-feature") or an internal name ("my-feature-gemini").
+        // We must derive the clean slug for window matching (e.g. "💎 my-feature") and
+        // the internal_name for config directory lookup and worker cleanup.
+        // This prevents suffix doubling (e.g. "my-feature-gemini-gemini") if called with the internal name.
+        let (agent_type, slug) = match agent {
             Some(a) => {
                 let at = a.agent_type.unwrap_or(AgentType::Gemini);
-                let emoji = at.emoji();
-                (at, Some(format!("{} {}", emoji, identifier)))
+                let s = a.slug.as_ref().map(|s| s.as_str()).unwrap_or(identifier);
+                // If slug still contains suffix, strip it to get the clean slug for window name
+                let suffix = format!("-{}", at.suffix());
+                (at, s.strip_suffix(&suffix).unwrap_or(s).to_string())
             }
-            None => (AgentType::Gemini, None),
+            None => {
+                let at = AgentType::from_dir_name(identifier);
+                let suffix = format!("-{}", at.suffix());
+                (at, identifier.strip_suffix(&suffix).unwrap_or(identifier).to_string())
+            }
         };
 
-        let internal_name = format!("{}-{}", identifier, agent_type.suffix());
+        // Remove synthetic team member registration (non-fatal if not registered)
+        let team_name = format!("exo-{}", self.birth_branch);
+        if let Err(e) =
+            crate::services::synthetic_members::remove_synthetic_member(&team_name, &slug)
+        {
+            warn!(team = %team_name, member = %slug, error = %e, "Failed to remove synthetic team member (non-fatal)");
+        }
+
+        let internal_name = format!("{}-{}", slug, agent_type.suffix());
+        let display_name = Some(format!("{} {}", agent_type.emoji(), slug));
 
         // Remove per-agent config directory (.exo/agents/{name}/)
         let agent_config_dir = self
@@ -1757,7 +1767,9 @@ impl AgentControlService {
                         } else {
                             AgentType::Gemini
                         };
-                        let display_name = format!("{} {}", agent_type.emoji(), name);
+                        let suffix = format!("-{}", agent_type.suffix());
+                        let slug_str = name.strip_suffix(&suffix).unwrap_or(name);
+                        let display_name = format!("{} {}", agent_type.emoji(), slug_str);
 
                         let has_tab = windows.iter().any(|t| t == &display_name);
 
@@ -1766,7 +1778,7 @@ impl AgentControlService {
                             has_tab,
                             topology: Topology::WorktreePerAgent,
                             agent_dir: Some(path.clone()),
-                            slug: Some(AgentName::from(name)),
+                            slug: Some(AgentName::from(slug_str)),
                             agent_type: Some(agent_type),
                             pr: None,
                         });
@@ -1808,6 +1820,16 @@ impl AgentControlService {
                 // Workers are currently Gemini-only
                 if name.ends_with("-gemini") {
                     let base_name = name.strip_suffix("-gemini").unwrap_or(name);
+
+                    // Skip if this is actually a worktree-based agent (leaf subtree or teammate)
+                    // found by the worktree scan.
+                    if agents
+                        .iter()
+                        .any(|a| a.slug.as_ref().map(|s| s.as_str()) == Some(base_name))
+                    {
+                        continue;
+                    }
+
                     let display_name = format!("{} {}", AgentType::Gemini.emoji(), base_name);
 
                     // Liveness: for workers, they might be panes in a window.

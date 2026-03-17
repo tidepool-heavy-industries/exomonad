@@ -155,7 +155,7 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
             serde_json::json!({
                 "type": "stdio",
                 "command": "exomonad",
-                "args": ["mcp-stdio", "--role", "tl", "--name", "root"]
+                "args": ["mcp-stdio", "--role", "root", "--name", "root"]
             }),
         );
         for (name, server) in &config.extra_mcp_servers {
@@ -239,7 +239,7 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
         serde_json::json!({
             "type": "stdio",
             "command": "exomonad",
-            "args": ["mcp-stdio", "--role", "tl", "--name", "root"]
+            "args": ["mcp-stdio", "--role", "root", "--name", "root"]
         }),
     );
 
