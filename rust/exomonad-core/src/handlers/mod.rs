@@ -30,6 +30,7 @@ pub mod log;
 pub mod merge_pr;
 pub mod process;
 pub mod session;
+pub mod tasks;
 pub use agent::AgentHandler;
 pub use coordination::CoordinationHandler;
 pub use copilot::CopilotHandler;
@@ -45,6 +46,7 @@ pub use log::LogHandler;
 pub use merge_pr::MergePRHandler;
 pub use process::ProcessHandler;
 pub use session::SessionHandler;
+pub use tasks::TasksHandler;
 
 // ============================================================================
 // Proto field helpers — shared across handlers

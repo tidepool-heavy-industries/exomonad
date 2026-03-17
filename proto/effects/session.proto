@@ -18,7 +18,14 @@ message RegisterTeamResponse {
   bool success = 1;
 }
 
+message DeregisterTeamRequest {}
+
+message DeregisterTeamResponse {
+  bool success = 1;
+}
+
 service SessionEffects {
   rpc RegisterClaudeId(RegisterClaudeSessionRequest) returns (RegisterClaudeSessionResponse);
   rpc RegisterTeam(RegisterTeamRequest) returns (RegisterTeamResponse);
+  rpc DeregisterTeam(DeregisterTeamRequest) returns (DeregisterTeamResponse);
 }

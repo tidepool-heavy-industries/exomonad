@@ -16,7 +16,8 @@ use claude_teams_bridge::TeamRegistry;
 
 use super::{
     AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
-    GitHandler, GitHubHandler, KvHandler, LogHandler, MergePRHandler, ProcessHandler, SessionHandler,
+    GitHandler, GitHubHandler, KvHandler, LogHandler, MergePRHandler, ProcessHandler,
+    SessionHandler, TasksHandler,
 };
 
 /// Core handlers every consumer needs: logging, key-value store, filesystem.
@@ -98,10 +99,15 @@ pub fn orchestration_handlers(
         event_handler = event_handler.with_event_log(log.clone());
     }
 
+    let tasks_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".claude/tasks");
+
     vec![
         Box::new(agent_handler),
         Box::new(event_handler),
-        Box::new(SessionHandler::new(claude_session_registry).with_team_registry(team_registry)),
+        Box::new(SessionHandler::new(claude_session_registry).with_team_registry(team_registry.clone())),
+        Box::new(TasksHandler::new(tasks_dir, Some(team_registry))),
         Box::new(CoordinationHandler::new(mutex_registry)),
     ]
 }

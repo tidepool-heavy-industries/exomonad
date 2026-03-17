@@ -116,6 +116,38 @@ impl SessionEffects for SessionHandler {
 
         Ok(RegisterTeamResponse { success: true })
     }
+
+    async fn deregister_team(
+        &self,
+        _req: DeregisterTeamRequest,
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<DeregisterTeamResponse> {
+        let agent_name = &ctx.agent_name;
+        let key = if agent_name.as_str().is_empty() {
+            "root".to_string()
+        } else {
+            agent_name.to_string()
+        };
+
+        info!(key = %key, "Deregistering Claude Teams info via effect");
+
+        if let Some(ref team_registry) = self.team_registry {
+            team_registry.deregister(&key).await;
+
+            // Also deregister under birth_branch
+            let bb = ctx.birth_branch.to_string();
+            if bb != key {
+                team_registry.deregister(&bb).await;
+            }
+
+            // Also deregister slug variant
+            if let Some(slug) = key.strip_suffix("-claude") {
+                team_registry.deregister(slug).await;
+            }
+        }
+
+        Ok(DeregisterTeamResponse { success: true })
+    }
 }
 
 #[cfg(test)]
@@ -181,6 +213,39 @@ mod tests {
         // Verify it was registered under birth_branch (main)
         let info_bb = team_registry.get("main").await.unwrap();
         assert_eq!(info_bb.team_name, "test-team");
+    }
+
+    #[tokio::test]
+    async fn test_deregister_team() {
+        let registry = Arc::new(ClaudeSessionRegistry::new());
+        let team_registry = Arc::new(TeamRegistry::new());
+        let handler = SessionHandler::new(registry).with_team_registry(team_registry.clone());
+        let ctx = test_ctx();
+
+        // Register first
+        handler
+            .register_team(
+                RegisterTeamRequest {
+                    team_name: "test-team".into(),
+                    inbox_name: "test-inbox".into(),
+                },
+                &ctx,
+            )
+            .await
+            .unwrap();
+
+        assert!(team_registry.get("test").await.is_some());
+        assert!(team_registry.get("main").await.is_some());
+
+        // Deregister
+        let resp = handler
+            .deregister_team(DeregisterTeamRequest {}, &ctx)
+            .await
+            .unwrap();
+        assert!(resp.success);
+
+        assert!(team_registry.get("test").await.is_none());
+        assert!(team_registry.get("main").await.is_none());
     }
 
     #[tokio::test]

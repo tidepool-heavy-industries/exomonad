@@ -50,6 +50,12 @@ impl TeamRegistry {
         let map = self.inner.lock().await;
         map.get(key).cloned()
     }
+
+    pub async fn deregister(&self, key: &str) {
+        info!(key = %key, "Deregistering Claude Teams info");
+        let mut map = self.inner.lock().await;
+        map.remove(key);
+    }
 }
 
 #[cfg(test)]
@@ -76,6 +82,22 @@ mod tests {
         let result = reg.get("root").await.unwrap();
         assert_eq!(result.team_name, "exo-root");
         assert_eq!(result.inbox_name, "root-inbox");
+    }
+
+    #[tokio::test]
+    async fn test_deregister() {
+        let reg = TeamRegistry::new();
+        reg.register(
+            "root",
+            TeamInfo {
+                team_name: "exo-root".into(),
+                inbox_name: "root-inbox".into(),
+            },
+        )
+        .await;
+        assert!(reg.get("root").await.is_some());
+        reg.deregister("root").await;
+        assert!(reg.get("root").await.is_none());
     }
 
     #[tokio::test]

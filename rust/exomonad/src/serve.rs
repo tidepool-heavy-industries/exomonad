@@ -780,6 +780,7 @@ Run `exomonad recompile` first to build it.",
             "events".to_string(),
             "session".to_string(),
             "coordination".to_string(),
+            "tasks".to_string(),
         ]);
 
     builder = builder.with_handlers(exomonad_core::core_handlers(
