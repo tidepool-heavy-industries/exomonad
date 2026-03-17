@@ -50,6 +50,7 @@ executable wasm-guest-devswarm
         WorkerRole
         DevPhase
         TLPhase
+        TLStopCheck
         WorkerPhase
         HttpDevHooks
         PRReviewHandler

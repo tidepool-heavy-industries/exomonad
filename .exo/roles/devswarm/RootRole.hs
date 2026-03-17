@@ -10,21 +10,19 @@ module RootRole (config, Tools) where
 
 import Control.Monad (void, forM_, when)
 import Control.Monad.Freer (Eff)
-import Data.Aeson (object, (.=))
-import Data.Aeson qualified as Aeson
 import ExoMonad
-import ExoMonad.Guest.StateMachine (applyEvent, StopCheckResult(..), checkExit)
-import ExoMonad.Guest.Effects.StopHook (checkUncommittedWork, getCurrentBranch)
+import ExoMonad.Guest.StateMachine (applyEvent)
 import ExoMonad.Guest.Tools.MergePR (mergePRCore, mergePRDescription, mergePRSchema, mergePRRender, MergePRArgs (..), MergePROutput (..), extractSlug)
 import ExoMonad.Guest.Tools.Spawn
   ( forkWaveCore, forkWaveDescription, forkWaveSchema, forkWaveRender, ForkWaveArgs (..), ForkWaveResult (..),
     spawnLeafSubtreeCore, spawnLeafSubtreeDescription, spawnLeafSubtreeSchema, spawnLeafRender, SpawnLeafSubtreeArgs (..)
   )
 import ExoMonad.Guest.Effects.AgentControl (SpawnResult (..))
-import ExoMonad.Guest.Types (StopDecision(..), StopHookOutput(..), blockStopResponse, allowStopResponse, allowResponse)
-import ExoMonad.Types (HookConfig (..), Effects, defaultSessionStartHook, teamRegistrationPostToolUse)
+import ExoMonad.Guest.Types (allowResponse)
+import ExoMonad.Types (HookConfig (..), defaultSessionStartHook, teamRegistrationPostToolUse)
 import PRReviewHandler (prReviewEventHandlers)
 import TLPhase (TLPhase (..), TLEvent (..), ChildHandle (..))
+import TLStopCheck (tlStopCheck)
 
 data RootForkWave
 instance MCPTool RootForkWave where
@@ -82,22 +80,6 @@ data Tools mode = Tools
   }
   deriving (Generic)
 
-rootStopCheck :: Eff Effects StopHookOutput
-rootStopCheck = do
-  branch <- getCurrentBranch
-  if branch `elem` ["main", "master"]
-    then pure allowStopResponse
-    else do
-      result <- checkExit @TLPhase @TLEvent TLPlanning
-      case result of
-        MustBlock msg -> pure $ blockStopResponse msg
-        ShouldNudge msg -> pure $ StopHookOutput Allow (Just msg)
-        Clean -> do
-          nudge <- checkUncommittedWork branch
-          case nudge of
-            Just msg -> pure $ StopHookOutput Allow (Just msg)
-            Nothing -> pure allowStopResponse
-
 config :: RoleConfig (Tools AsHandler)
 config =
   RoleConfig
@@ -111,8 +93,8 @@ config =
       hooks = HookConfig
         { preToolUse       = \_ -> pure (allowResponse Nothing),
           postToolUse      = teamRegistrationPostToolUse,
-          onStop           = \_ -> rootStopCheck,
-          onSubagentStop   = \_ -> rootStopCheck,
+          onStop           = \_ -> tlStopCheck,
+          onSubagentStop   = \_ -> tlStopCheck,
           onSessionStart   = defaultSessionStartHook
         },
       eventHandlers = prReviewEventHandlers
