@@ -71,6 +71,8 @@ library wasm-guest-internal
         ExoMonad.Guest.Events
         ExoMonad.Guest.Events.Templates
         ExoMonad.Guest.Lifecycle
+        -- State machine primitive
+        ExoMonad.Guest.StateMachine
         -- SpawnSpec compiler
         ExoMonad.Guest.SpawnSpec.Types
         ExoMonad.Guest.SpawnSpec.Zones
