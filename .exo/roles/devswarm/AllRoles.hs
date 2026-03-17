@@ -33,6 +33,7 @@ import ExoMonad.Types (EventHandlerConfig, HookConfig (..), RoleConfig (..))
 
 -- Import all role configs under unique module names.
 import qualified DevRole
+import qualified RootRole
 import qualified TLRole
 import qualified WorkerRole
 
@@ -90,7 +91,8 @@ roleEventHandlers (SomeRoleConfig caps) = rcEventHandlers caps
 allConfigs :: Map Text SomeRoleConfig
 allConfigs =
   Map.fromList
-    [ ("tl", mkSomeRoleConfig TLRole.config),
+    [ ("root", mkSomeRoleConfig RootRole.config),
+      ("tl", mkSomeRoleConfig TLRole.config),
       ("dev", mkSomeRoleConfig DevRole.config),
       ("worker", mkSomeRoleConfig WorkerRole.config)
     ]
