@@ -8,6 +8,7 @@
 
 mod app_state;
 mod init;
+mod new;
 mod logging;
 mod mcp_stdio;
 mod serve;
@@ -63,6 +64,14 @@ enum Commands {
         /// Delete existing session and create fresh (use after binary/layout updates)
         #[arg(long)]
         recreate: bool,
+    },
+
+    /// Initialize a new exomonad project in the current directory.
+    /// Creates .exo/config.toml, .gitignore entries, copies WASM, and rules template.
+    New {
+        /// Project name (unused, reserved for future)
+        #[arg(long)]
+        name: Option<String>,
     },
 
     /// Recompile WASM plugin from Haskell source
@@ -215,6 +224,10 @@ async fn main() -> Result<()> {
 
         Commands::Init { session, recreate } => {
             init::run(session, recreate).await?;
+        }
+
+        Commands::New { name } => {
+            new::run(name).await?;
         }
 
         Commands::Reply { id, payload, cancel } => {

@@ -10,19 +10,10 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     use exomonad_core::services::tmux_ipc::TmuxIpc;
     use exomonad_core::services::AgentType;
 
-    // Bootstrap: create .exo/config.toml if missing
     let cwd = std::env::current_dir()?;
     let config_path = cwd.join(".exo/config.toml");
     if !config_path.exists() {
-        info!("Bootstrapping .exo/config.toml");
-        std::fs::create_dir_all(cwd.join(".exo"))?;
-        std::fs::write(
-            &config_path,
-            "# ExoMonad project config\n# All fields are optional — see docs for overrides\n",
-        )?;
-
-        // Add gitignore entries
-        ensure_gitignore(&cwd)?;
+        anyhow::bail!("No exomonad project found. Run `exomonad new` first.");
     }
 
     // Resolve config

@@ -25,6 +25,7 @@ exomonad hook pre-tool-use        # Handle Claude Code hook
 exomonad mcp-stdio                # Stdio MCP server (single agent)
 exomonad serve                    # UDS MCP server (multi-agent, hot reload)
 exomonad recompile [--role ROLE]  # Build WASM from Haskell source
+exomonad new                      # Initialize new project (.exo/config.toml, WASM, rules)
 exomonad init [--session NAME]    # Initialize tmux session (Server window + TL window)
 exomonad reload                   # Clear WASM plugin cache (hot reload)
 exomonad shutdown                 # Gracefully shut down the running server
@@ -32,11 +33,17 @@ exomonad shutdown                 # Gracefully shut down the running server
 
 **Observability:** Structured OTel spans via axum middleware. Every agent request (`/agents/{role}/{name}/...`) gets an `agent_request` span with `agent_id`, `agent.role`, `agent.parent`, and `swarm.run_id` — no per-call-site annotation needed. `swarm.run_id` is persisted to `.exo/run_id` and set as an OTel resource attribute; child processes inherit it via `EXOMONAD_SWARM_RUN_ID` env var. Query all spans in a run: `resource.swarm.run_id = '{id}'`. Reconstruct spawn tree: `groupBy agent.parent, agent_id`.
 
+### New Command
+
+`exomonad new` is the project bootstrap command. It auto-creates `.exo/config.toml` (empty, all defaults) and `.gitignore` entries if missing. It also copies WASM plugins from `~/.exo/wasm/` and rules templates to `.claude/rules/`. Works in any project directory.
+
 ### Init Command
 
 `exomonad init` creates a two-window tmux session:
 - **Server window**: Runs `exomonad serve` (binds .exo/server.sock)
 - **TL window**: Runs the configured shell command (focused by default)
+
+`exomonad init` requires `exomonad new` to have been run first to bootstrap the project configuration and WASM plugins.
 
 Claude MCP is auto-registered during init. For Gemini, register manually (`gemini mcp add ...`).
 
@@ -52,7 +59,7 @@ wasm_dir = ".exo/wasm"        # project-local default
 wasm_name = "devswarm"        # auto-detected from .exo/roles/ if exactly one exists
 ```
 
-**Bootstrap:** `exomonad init` auto-creates `.exo/config.toml` (empty, all defaults) and `.gitignore` entries if missing. Works in any project directory.
+**Bootstrap:** `exomonad new` auto-creates `.exo/config.toml` (empty, all defaults) and `.gitignore` entries if missing.
 
 **WASM resolution:** project `.exo/wasm/` → build from `.exo/roles/` → copy from `~/.exo/wasm/` (global install via `just install-all`).
 

@@ -75,7 +75,9 @@ if !status.success() {
 
 ### Session Entry Point
 
-**`exomonad init` is THE entry point for development sessions.** It creates a tmux session with:
+**`exomonad new` is the one-time project bootstrap.** It creates `.exo/config.toml`, `.gitignore`, and copies WASM plugins and rules templates.
+
+**`exomonad init` is the idempotent entry point for development sessions.** It creates a tmux session with:
 - **Server window**: Runs `exomonad serve` (the MCP server, binds to `.exo/server.sock`)
 - **TL window**: Runs `nix develop` (where you launch `claude` or work directly)
 
@@ -83,12 +85,18 @@ The server must be running before Claude Code or Gemini can use MCP tools. Witho
 
 ```bash
 cd exomonad/                  # Run from the project root
+exomonad new                  # One-time setup: creates config, WASM, rules
 exomonad init                 # Creates tmux session, starts server
 # Then in the TL window:
 claude                        # MCP tools available immediately
 ```
 
 Use `--recreate` to tear down and rebuild the session (e.g., after binary updates).
+
+**Project setup:**
+```bash
+exomonad new                     # Bootstrap new project (.exo/config.toml, WASM, rules)
+```
 
 **Server management:**
 ```bash
@@ -109,14 +117,11 @@ After running `just install-all` (which installs WASM to `~/.exo/wasm/`), any pr
 
 ```bash
 cd ~/new-project && git init
-exomonad init
-# → Bootstraps .exo/config.toml (empty, all defaults)
-# → Copies WASM from ~/.exo/wasm/ (global install)
-# → Starts server, registers Claude MCP via .mcp.json
-# → Creates tmux session
+exomonad new                  # Creates .exo/config.toml, copies WASM from ~/.exo/wasm/
+exomonad init                 # Starts server, registers Claude MCP, creates tmux session
 ```
 
-For custom roles, copy `.exo/roles/` and `.exo/lib/` from exomonad and `exomonad init` will build WASM from source instead.
+For custom roles, copy `.exo/roles/` and `.exo/lib/` from exomonad and `exomonad new` will build WASM from source instead.
 
 ### Building
 
@@ -156,7 +161,7 @@ cargo build -p exomonad
 
 ### Configuration
 
-**Bootstrap:** `exomonad init` auto-creates `.exo/config.toml` (empty, all defaults) and `.gitignore` entries if missing. Works in any project directory. All fields are optional — auto-detection handles the common case. **Claude rules:** `exomonad init` copies `.exo/rules/exomonad.md` → `.claude/rules/exomonad.md` (if the template exists and the destination doesn't). Template resolution: project-local `.exo/rules/` → global `~/.exo/rules/`. This gives fresh Claude instances automatic knowledge of exomonad MCP tools.
+**Bootstrap:** `exomonad new` auto-creates `.exo/config.toml` (empty, all defaults) and `.gitignore` entries if missing. Works in any project directory. All fields are optional — auto-detection handles the common case. **Claude rules:** `exomonad new` copies `.exo/rules/exomonad.md` → `.claude/rules/exomonad.md` (if the template exists and the destination doesn't). Template resolution: project-local `.exo/rules/` → global `~/.exo/rules/`. This gives fresh Claude instances automatic knowledge of exomonad MCP tools.
 
 ```toml
 # All fields below are optional — shown with their auto-detected defaults
