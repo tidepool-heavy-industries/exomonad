@@ -512,6 +512,31 @@ Since the TL doesn't iterate on specs, the v1 spec must be production-quality. E
 - **Name every file.** Not "update the proto" but "edit `proto/effects/agent.proto` AND `rust/exomonad-proto/proto/effects/agent.proto`".
 - **Specs are self-contained.** The leaf has no context from previous attempts. Every spec must stand alone with complete code snippets and full file paths.
 
+### Scaffold-Fork-Converge
+
+The recursive execution pattern. Every TL at every level follows this protocol:
+
+1. **Scaffold** — Before spawning children, commit the shared foundation:
+   - Types/interfaces that children implement against
+   - Test harness/fixtures children will use
+   - Stub files showing where children put their code
+   - CLAUDE.md additions scoping this TL's domain
+   - Commit and push. Children fork from this commit.
+
+2. **Fork** — Spawn wave N children. Zero deps between siblings in the same wave.
+   - Sub-TLs: `fork_wave` (Claude, full context inheritance) — they already know the plan
+   - Devs: `spawn_leaf_subtree` (Gemini, spec-only) — they get CLAUDE.md from scaffolding
+
+3. **Converge** — Wait for child notifications. Merge their PRs. Write an integration commit:
+   - Wire children's outputs together
+   - Run integration tests, fix integration bugs
+
+4. **Next wave** — If wave N+1 exists, repeat from step 2. Wave N+1 depends on merged wave N.
+
+5. **PR to parent** — After all waves merged and integrated, file PR to parent's branch.
+
+This is recursive — sub-TLs follow the same pattern. A 4-level-deep tree means 4 levels of scaffold-fork-converge, each TL independently managing its subtree.
+
 ### Parallelization
 
 Spawn multiple leaves when tasks are independent (no file conflicts, no ordering dependency). The TL spawns a wave, returns, and gets poked as each leaf completes. Examples:

@@ -62,7 +62,7 @@ Claude-only permissions system using the `ClaudePermissions` DSL.
 Pure Haskell prompt assembly for worker/leaf agents. Replaces the former template effect round-trip (Haskell → proto → Rust disk I/O → proto → Haskell) with direct string composition.
 
 - Builder monoid: `task`, `boundary`, `steps`, `context`, `verify`, `doneCriteria`, `readFirst`, `raw`
-- Inline profiles: `leafProfile`, `workerProfile`, `researchProfile`, `generalProfile`, `rustProfile`, `haskellProfile`
+- Inline profiles: `tlProfile`, `leafProfile`, `workerProfile`, `researchProfile`, `generalProfile`, `rustProfile`, `haskellProfile`
 
 ### SDK/Role Split
 
