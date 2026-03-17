@@ -14,7 +14,6 @@ haskell/proto/
     │   ├── Ffi.hs          # Generated from ffi.proto
     │   ├── Common.hs       # Generated from common.proto
     │   ├── Hook.hs         # Generated from hook.proto
-    │   ├── Agent.hs        # Generated from agent.proto
     │   └── Popup.hs        # Generated from popup.proto
     └── Effects/
         ├── Agent.hs         # Generated from effects/agent.proto
@@ -127,16 +126,6 @@ Claude Code hooks:
 - `SessionEndInput/Output` - Session end hook
 - `SubagentStopInput/Output` - Subagent stop hook
 - `HookInput/Output` - Generic envelopes
-
-### ExoMonad.Agent
-
-Agent management:
-- `AgentType` - Claude/Gemini enum
-- `AgentStatus` - Running/stopped/failed enum
-- `SpawnOptions` - Agent creation parameters
-- `AgentInfo` - Agent state
-- `WorktreeInfo` - Git worktree state
-- Batch operations: `SpawnAgentsRequest`, `CleanupAgentsRequest`, etc.
 
 ### ExoMonad.Popup
 

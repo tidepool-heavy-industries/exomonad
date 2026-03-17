@@ -36,7 +36,6 @@ library
     ExoMonad.Ffi
     ExoMonad.Common
     ExoMonad.Hook
-    ExoMonad.Agent
     -- Generated effect types (from proto/effects/*.proto)
     Effects.EffectError
     Effects.Envelope

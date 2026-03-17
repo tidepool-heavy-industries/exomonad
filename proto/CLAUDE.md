@@ -122,15 +122,11 @@ Claude Code hooks:
 ### agent.proto
 
 Agent management:
-- `AgentType` (enum): Claude/Gemini
-- `AgentStatus` (enum): Running/stopped/failed
-- `SpawnOptions`: Agent creation parameters
-- `AgentInfo`: Agent state and metadata
-- `WorktreeInfo`: Git worktree state
-- `IssueAssignment`: Issue-to-agent mapping
-- `SpawnAgentsRequest/Result`: Batch spawning
-- `CleanupAgentsRequest/Result`: Batch cleanup
-- `ListAgentsRequest/Response`: Active agent listing
+- `AgentType` (enum): Claude/Gemini/Shoal
+- `AgentInfo`: Agent metadata with `alive` bool (tmux liveness)
+- Spawn messages: `SpawnRequest`, `SpawnBatchRequest`, `SpawnGeminiTeammateRequest`, `SpawnSubtreeRequest`, `SpawnLeafSubtreeRequest`, `SpawnWorkerRequest`, `SpawnAcpRequest`
+- Cleanup messages: `CleanupRequest`, `CleanupBatchRequest`, `CleanupMergedRequest`
+- `ListRequest/Response`: Active agent listing
 
 ## Effects Proto Reference
 

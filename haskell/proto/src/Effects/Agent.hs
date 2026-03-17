@@ -92,56 +92,6 @@ instance (HsJSONPB.ToJSON AgentType) where
 instance (HsJSONPB.FromJSON AgentType) where
   parseJSON = HsJSONPB.parseJSONPB
 instance (HsProtobuf.Finite AgentType)
-data AgentStatus
-  = AgentStatusAGENT_STATUS_UNSPECIFIED |
-    AgentStatusAGENT_STATUS_RUNNING |
-    AgentStatusAGENT_STATUS_STOPPED |
-    AgentStatusAGENT_STATUS_FAILED |
-    AgentStatusAGENT_STATUS_WAITING
-  deriving (Hs.Show, Hs.Eq, Hs.Generic, Hs.NFData)
-instance (HsProtobuf.Named AgentStatus) where
-  nameOf _ = Hs.fromString "AgentStatus"
-instance (HsProtobuf.HasDefault AgentStatus)
-instance (Hs.Bounded AgentStatus) where
-  minBound = AgentStatusAGENT_STATUS_UNSPECIFIED
-  maxBound = AgentStatusAGENT_STATUS_WAITING
-instance (Hs.Ord AgentStatus) where
-  compare x y
-    = Hs.compare
-        (HsProtobuf.fromProtoEnum x) (HsProtobuf.fromProtoEnum y)
-instance (HsProtobuf.ProtoEnum AgentStatus) where
-  toProtoEnumMay 0 = Hs.Just AgentStatusAGENT_STATUS_UNSPECIFIED
-  toProtoEnumMay 1 = Hs.Just AgentStatusAGENT_STATUS_RUNNING
-  toProtoEnumMay 2 = Hs.Just AgentStatusAGENT_STATUS_STOPPED
-  toProtoEnumMay 3 = Hs.Just AgentStatusAGENT_STATUS_FAILED
-  toProtoEnumMay 4 = Hs.Just AgentStatusAGENT_STATUS_WAITING
-  toProtoEnumMay _ = Hs.Nothing
-  fromProtoEnum AgentStatusAGENT_STATUS_UNSPECIFIED = 0
-  fromProtoEnum AgentStatusAGENT_STATUS_RUNNING = 1
-  fromProtoEnum AgentStatusAGENT_STATUS_STOPPED = 2
-  fromProtoEnum AgentStatusAGENT_STATUS_FAILED = 3
-  fromProtoEnum AgentStatusAGENT_STATUS_WAITING = 4
-instance (HsJSONPB.ToJSONPB AgentStatus) where
-  toJSONPB x _ = HsJSONPB.enumFieldString x
-  toEncodingPB x _ = HsJSONPB.enumFieldEncoding x
-instance (HsJSONPB.FromJSONPB AgentStatus) where
-  parseJSONPB (HsJSONPB.String "AGENT_STATUS_UNSPECIFIED")
-    = Hs.pure AgentStatusAGENT_STATUS_UNSPECIFIED
-  parseJSONPB (HsJSONPB.String "AGENT_STATUS_RUNNING")
-    = Hs.pure AgentStatusAGENT_STATUS_RUNNING
-  parseJSONPB (HsJSONPB.String "AGENT_STATUS_STOPPED")
-    = Hs.pure AgentStatusAGENT_STATUS_STOPPED
-  parseJSONPB (HsJSONPB.String "AGENT_STATUS_FAILED")
-    = Hs.pure AgentStatusAGENT_STATUS_FAILED
-  parseJSONPB (HsJSONPB.String "AGENT_STATUS_WAITING")
-    = Hs.pure AgentStatusAGENT_STATUS_WAITING
-  parseJSONPB v = HsJSONPB.typeMismatch "AgentStatus" v
-instance (HsJSONPB.ToJSON AgentStatus) where
-  toJSON = HsJSONPB.toAesonValue
-  toEncoding = HsJSONPB.toAesonEncoding
-instance (HsJSONPB.FromJSON AgentStatus) where
-  parseJSON = HsJSONPB.parseJSONPB
-instance (HsProtobuf.Finite AgentStatus)
 data WorkspaceTopology
   = WorkspaceTopologyWORKSPACE_TOPOLOGY_UNSPECIFIED |
     WorkspaceTopologyWORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT |
@@ -195,7 +145,7 @@ data AgentInfo
                agentInfoBranchName :: Hs.Text,
                agentInfoAgentType :: (HsProtobuf.Enumerated Effects.Agent.AgentType),
                agentInfoRole :: (HsProtobuf.Enumerated ExoMonad.Common.Role),
-               agentInfoStatus :: (HsProtobuf.Enumerated Effects.Agent.AgentStatus),
+               agentInfoAlive :: Hs.Bool,
                agentInfoMuxWindow :: Hs.Text,
                agentInfoError :: Hs.Text,
                agentInfoPrNumber :: Hs.Int32,
@@ -211,7 +161,7 @@ instance (HsProtobuf.Message AgentInfo) where
     _
     AgentInfo {agentInfoId, agentInfoIssue, agentInfoWorktreePath,
                agentInfoBranchName, agentInfoAgentType, agentInfoRole,
-               agentInfoStatus, agentInfoMuxWindow, agentInfoError,
+               agentInfoAlive, agentInfoMuxWindow, agentInfoError,
                agentInfoPrNumber, agentInfoPrUrl, agentInfoTopology}
     = Hs.mappend
         (Hs.mappend
@@ -245,7 +195,7 @@ instance (HsProtobuf.Message AgentInfo) where
                           (HsProtobuf.encodeMessageField
                              (HsProtobuf.FieldNumber 6) agentInfoRole))
                        (HsProtobuf.encodeMessageField
-                          (HsProtobuf.FieldNumber 7) agentInfoStatus))
+                          (HsProtobuf.FieldNumber 7) agentInfoAlive))
                     (HsProtobuf.encodeMessageField
                        (HsProtobuf.FieldNumber 8)
                        ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
@@ -337,10 +287,8 @@ instance (HsProtobuf.Message AgentInfo) where
                   (HsProtobufAST.Path ("exomonad" Hs.:| ["common", "Role"])))))
          (HsProtobufAST.Single "role") [] "",
        HsProtobufAST.DotProtoField
-         (HsProtobuf.FieldNumber 7)
-         (HsProtobufAST.Prim
-            (HsProtobufAST.Named (HsProtobufAST.Single "AgentStatus")))
-         (HsProtobufAST.Single "status") [] "",
+         (HsProtobuf.FieldNumber 7) (HsProtobufAST.Prim HsProtobufAST.Bool)
+         (HsProtobufAST.Single "alive") [] "",
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 8)
          (HsProtobufAST.Prim HsProtobufAST.String)
@@ -371,7 +319,7 @@ instance (HsJSONPB.ToJSONPB AgentInfo) where
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
          "branch_name"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4),
-         "agent_type" .= f5, "role" .= f6, "status" .= f7,
+         "agent_type" .= f5, "role" .= f6, "alive" .= f7,
          "mux_window"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f8),
          "error" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f9),
@@ -387,7 +335,7 @@ instance (HsJSONPB.ToJSONPB AgentInfo) where
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
          "branch_name"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4),
-         "agent_type" .= f5, "role" .= f6, "status" .= f7,
+         "agent_type" .= f5, "role" .= f6, "alive" .= f7,
          "mux_window"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f8),
          "error" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f9),
@@ -415,7 +363,7 @@ instance (HsJSONPB.FromJSONPB AgentInfo) where
                      (obj .: "branch_name"))
                 <*> obj .: "agent_type"
                 <*> obj .: "role"
-                <*> obj .: "status"
+                <*> obj .: "alive"
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
                      (obj .: "mux_window"))
@@ -1802,7 +1750,7 @@ instance (HsJSONPB.ToJSON CleanupMergedResponse) where
 instance (HsJSONPB.FromJSON CleanupMergedResponse) where
   parseJSON = HsJSONPB.parseJSONPB
 data ListRequest
-  = ListRequest {listRequestFilterStatus :: (HsProtobuf.Enumerated Effects.Agent.AgentStatus),
+  = ListRequest {listRequestFilterAliveOnly :: Hs.Bool,
                  listRequestFilterRole :: (HsProtobuf.Enumerated ExoMonad.Common.Role),
                  listRequestSubrepo :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
@@ -1813,12 +1761,12 @@ instance (HsProtobuf.HasDefault ListRequest)
 instance (HsProtobuf.Message ListRequest) where
   encodeMessage
     _
-    ListRequest {listRequestFilterStatus, listRequestFilterRole,
+    ListRequest {listRequestFilterAliveOnly, listRequestFilterRole,
                  listRequestSubrepo}
     = Hs.mappend
         (Hs.mappend
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 1) listRequestFilterStatus)
+              (HsProtobuf.FieldNumber 1) listRequestFilterAliveOnly)
            (HsProtobuf.encodeMessageField
               (HsProtobuf.FieldNumber 2) listRequestFilterRole))
         (HsProtobuf.encodeMessageField
@@ -1839,10 +1787,8 @@ instance (HsProtobuf.Message ListRequest) where
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)))
   dotProto _
     = [HsProtobufAST.DotProtoField
-         (HsProtobuf.FieldNumber 1)
-         (HsProtobufAST.Prim
-            (HsProtobufAST.Named (HsProtobufAST.Single "AgentStatus")))
-         (HsProtobufAST.Single "filter_status") [] "",
+         (HsProtobuf.FieldNumber 1) (HsProtobufAST.Prim HsProtobufAST.Bool)
+         (HsProtobufAST.Single "filter_alive_only") [] "",
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 2)
          (HsProtobufAST.Prim
@@ -1857,12 +1803,12 @@ instance (HsProtobuf.Message ListRequest) where
 instance (HsJSONPB.ToJSONPB ListRequest) where
   toJSONPB (ListRequest f1 f2 f3)
     = HsJSONPB.object
-        ["filter_status" .= f1, "filter_role" .= f2,
+        ["filter_alive_only" .= f1, "filter_role" .= f2,
          "subrepo"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
   toEncodingPB (ListRequest f1 f2 f3)
     = HsJSONPB.pairs
-        ["filter_status" .= f1, "filter_role" .= f2,
+        ["filter_alive_only" .= f1, "filter_role" .= f2,
          "subrepo"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
 instance (HsJSONPB.FromJSONPB ListRequest) where
@@ -1870,7 +1816,7 @@ instance (HsJSONPB.FromJSONPB ListRequest) where
     = HsJSONPB.withObject
         "ListRequest"
         (\ obj
-           -> Hs.pure ListRequest <*> obj .: "filter_status"
+           -> Hs.pure ListRequest <*> obj .: "filter_alive_only"
                 <*> obj .: "filter_role"
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)

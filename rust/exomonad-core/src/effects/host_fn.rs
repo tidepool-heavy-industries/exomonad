@@ -251,7 +251,7 @@ mod tests {
             branch_name: "gh-123/fix-bug".into(),
             agent_type: 1, // CLAUDE
             role: 1,       // DEV
-            status: 1,     // RUNNING
+            alive: true,
             mux_window: "123-fix-bug".into(),
             error: String::new(),
             pr_number: 0,
@@ -278,7 +278,7 @@ mod tests {
                 assert_eq!(agent.id, "gh-123-claude");
                 assert_eq!(agent.issue, "123");
                 assert_eq!(agent.branch_name, "gh-123/fix-bug");
-                assert_eq!(agent.status, 1);
+                assert!(agent.alive);
             }
             _ => panic!("Expected Payload response"),
         }
