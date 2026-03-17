@@ -1,38 +1,33 @@
--- | Spawn tool record for hylo primitives.
+-- | Spawn core re-exports for role code.
 module ExoMonad.Guest.Records.Spawn
-  ( SpawnTools (..),
-    spawnToolsHandler,
-    spawnToolsSchema,
-    spawnTools,
+  ( -- * ForkWave
+    ForkWaveArgs (..),
+    ForkWaveChild (..),
+    ForkWaveResult (..),
+    forkWaveCore,
+    forkWaveRender,
+    forkWaveDescription,
+    forkWaveSchema,
+
+    -- * SpawnLeafSubtree
+    SpawnLeafSubtreeArgs (..),
+    spawnLeafSubtreeCore,
+    spawnLeafRender,
+    spawnLeafSubtreeDescription,
+    spawnLeafSubtreeSchema,
+
+    -- * SpawnWorkers
+    SpawnWorkersArgs (..),
+    WorkerSpec (..),
+    WorkerType (..),
+    spawnWorkersCore,
+    spawnWorkersDescription,
+    spawnWorkersSchema,
+
+    -- * SpawnAcp
+    SpawnAcpArgs (..),
+    spawnAcpCore,
   )
 where
 
-import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, ToolMode ((:-)), mkHandler, mkSchema)
-import ExoMonad.Guest.Tools.Spawn (ForkWave, SpawnLeafSubtree, SpawnWorkers)
-import GHC.Generics (Generic)
-
-data SpawnTools mode = SpawnTools
-  { forkWave :: mode :- ForkWave,
-    spawnLeafSubtree :: mode :- SpawnLeafSubtree,
-    spawnWorkers :: mode :- SpawnWorkers
-  }
-  deriving (Generic)
-
-spawnToolsHandler :: SpawnTools AsHandler
-spawnToolsHandler =
-  SpawnTools
-    { forkWave = mkHandler @ForkWave,
-      spawnLeafSubtree = mkHandler @SpawnLeafSubtree,
-      spawnWorkers = mkHandler @SpawnWorkers
-    }
-
-spawnToolsSchema :: SpawnTools AsSchema
-spawnToolsSchema =
-  SpawnTools
-    { forkWave = mkSchema @ForkWave,
-      spawnLeafSubtree = mkSchema @SpawnLeafSubtree,
-      spawnWorkers = mkSchema @SpawnWorkers
-    }
-
-spawnTools :: SpawnTools AsHandler
-spawnTools = spawnToolsHandler
+import ExoMonad.Guest.Tools.Spawn

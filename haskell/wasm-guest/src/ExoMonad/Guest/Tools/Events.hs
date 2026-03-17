@@ -3,10 +3,35 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- | Event tools: notify_parent, send_message, shutdown.
+--
+-- Core I/O functions ('notifyParentCore', 'shutdownCore') are role-agnostic.
+-- Role-specific MCPTool wrappers apply their own state transitions.
+-- 'SendMessage' stays in the SDK (no state transitions needed).
 module ExoMonad.Guest.Tools.Events
-  ( NotifyParent (..),
+  ( -- * Marker types
+    NotifyParent (..),
     SendMessage (..),
     Shutdown,
+
+    -- * Core functions (role wrappers call these)
+    notifyParentCore,
+    shutdownCore,
+
+    -- * Shared descriptions/schemas (role wrappers reuse these)
+    notifyParentDescription,
+    notifyParentSchema,
+    shutdownDescription,
+    shutdownSchema,
+
+    -- * Args types (role wrappers need these)
+    NotifyParentArgs (..),
+    NotifyStatus (..),
+    TaskReport (..),
+    ShutdownArgs (..),
+
+    -- * Helpers
+    composeNotifyMessage,
   )
 where
 
@@ -23,11 +48,10 @@ import Effects.Log qualified as Log
 import ExoMonad.Effects.Agent qualified as ProtoAgent
 import ExoMonad.Effects.Events qualified as ProtoEvents
 import ExoMonad.Effects.Log (LogEmitEvent)
-import ExoMonad.Guest.StateMachine (applyEvent)
-import DevPhase (DevPhase(..), DevEvent(..))
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (JsonSchema (..), genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
+import ExoMonad.Guest.Types (Effects)
 import GHC.Generics (Generic)
 
 -- | Notify parent tool (for workers/subtrees to call on completion)
@@ -94,49 +118,50 @@ instance ToJSON NotifyParentArgs where
         "tasks_completed" .= npTasksCompleted args
       ]
 
-instance MCPTool NotifyParent where
-  type ToolArgs NotifyParent = NotifyParentArgs
-  toolName = "notify_parent"
-  toolDescription = "Send a message to your parent agent. Use for status updates, progress reports, or failure escalation. Messages are delivered as-is with lightweight attribution. For PR-based workflows, the system auto-notifies your parent when Copilot approves — you don't need to signal completion yourself."
-  toolSchema =
-    genericToolSchemaWith @NotifyParentArgs
-      [ ("status", "'success' = normal message (status update, progress report). 'failure' = escalation, something went wrong."),
-        ("message", "The message to send. Be concise — one or two sentences."),
-        ("pr_number", "PR number if relevant. Helps parent locate the PR without searching."),
-        ("tasks_completed", "Array of {what, how} pairs. 'what' = task description, 'how' = verification command that was run.")
-      ]
-  toolHandlerEff args = do
-    -- Emit event via suspend
-    let eventPayload = BSL.toStrict $ Aeson.encode $ object
-          [ "status" .= npStatus args,
-            "message" .= npMessage args,
-            "pr_number" .= npPrNumber args,
-            "tasks_completed" .= npTasksCompleted args
-          ]
-    void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
-      { Log.emitEventRequestEventType = "agent.completed",
-        Log.emitEventRequestPayload = eventPayload,
-        Log.emitEventRequestTimestamp = 0
-      })
+-- | Shared tool description for notify_parent.
+notifyParentDescription :: Text
+notifyParentDescription = "Send a message to your parent agent. Use for status updates, progress reports, or failure escalation. Messages are delivered as-is with lightweight attribution. For PR-based workflows, the system auto-notifies your parent when Copilot approves — you don't need to signal completion yourself."
 
-    let richMessage = composeNotifyMessage args
-    let statusText = case npStatus args of
-          Success -> "success" :: Text
-          Failure -> "failure"
-    result <- suspendEffect @ProtoEvents.EventsNotifyParent
-                (ProtoEvents.NotifyParentRequest
-                  { ProtoEvents.notifyParentRequestAgentId = "",
-                    ProtoEvents.notifyParentRequestStatus = TL.fromStrict statusText,
-                    ProtoEvents.notifyParentRequestMessage = TL.fromStrict richMessage
-                  })
-    case result of
-      Left err -> pure $ errorResult (T.pack (show err))
-      Right _ -> do
-        -- Set terminal phase based on status
-        case npStatus args of
-          Success -> void $ applyEvent @DevPhase @DevEvent DevSpawned (NotifyParentSuccess (npMessage args))
-          Failure -> void $ applyEvent @DevPhase @DevEvent DevSpawned (NotifyParentFailure (npMessage args))
-        pure $ successResult $ object ["success" .= True]
+-- | Shared tool schema for notify_parent.
+notifyParentSchema :: Aeson.Object
+notifyParentSchema =
+  genericToolSchemaWith @NotifyParentArgs
+    [ ("status", "'success' = normal message (status update, progress report). 'failure' = escalation, something went wrong."),
+      ("message", "The message to send. Be concise — one or two sentences."),
+      ("pr_number", "PR number if relevant. Helps parent locate the PR without searching."),
+      ("tasks_completed", "Array of {what, how} pairs. 'what' = task description, 'how' = verification command that was run.")
+    ]
+
+-- | Core notify_parent I/O: emit event + deliver message to parent.
+-- Returns Left on delivery failure, Right () on success.
+notifyParentCore :: NotifyParentArgs -> Eff Effects (Either Text ())
+notifyParentCore args = do
+  -- Emit event via suspend
+  let eventPayload = BSL.toStrict $ Aeson.encode $ object
+        [ "status" .= npStatus args,
+          "message" .= npMessage args,
+          "pr_number" .= npPrNumber args,
+          "tasks_completed" .= npTasksCompleted args
+        ]
+  void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
+    { Log.emitEventRequestEventType = "agent.completed",
+      Log.emitEventRequestPayload = eventPayload,
+      Log.emitEventRequestTimestamp = 0
+    })
+
+  let richMessage = composeNotifyMessage args
+  let statusText = case npStatus args of
+        Success -> "success" :: Text
+        Failure -> "failure"
+  result <- suspendEffect @ProtoEvents.EventsNotifyParent
+              (ProtoEvents.NotifyParentRequest
+                { ProtoEvents.notifyParentRequestAgentId = "",
+                  ProtoEvents.notifyParentRequestStatus = TL.fromStrict statusText,
+                  ProtoEvents.notifyParentRequestMessage = TL.fromStrict richMessage
+                })
+  case result of
+    Left err -> pure $ Left (T.pack (show err))
+    Right _ -> pure $ Right ()
 
 -- | Compose enriched notification message with PR number and task reports.
 composeNotifyMessage :: NotifyParentArgs -> Text
@@ -150,7 +175,7 @@ composeNotifyMessage args =
         Nothing -> ""
    in base <> prSuffix <> taskLines
 
--- | Send message tool
+-- | Send message tool (stays in SDK — no state transitions needed)
 data SendMessage = SendMessage
 
 data SendMessageArgs = SendMessageArgs
@@ -214,24 +239,28 @@ instance FromJSON ShutdownArgs where
 instance ToJSON ShutdownArgs where
   toJSON args = object ["message" .= sdMessage args]
 
-instance MCPTool Shutdown where
-  type ToolArgs Shutdown = ShutdownArgs
-  toolName = "shutdown"
-  toolDescription = "Gracefully shut down this agent. Sends a final message to your parent, then exits. Call this when instructed to shut down or when your work is complete."
-  toolSchema =
-    genericToolSchemaWith @ShutdownArgs
-      [("message", "Optional final message to send to parent before shutting down")]
-  toolHandlerEff args = do
-    let msg = maybe "Shutting down." id (sdMessage args)
-    let statusText = "success" :: Text
-    void $ applyEvent @DevPhase @DevEvent DevSpawned ShutdownRequested
-    void $ suspendEffect @ProtoEvents.EventsNotifyParent
-      (ProtoEvents.NotifyParentRequest
-        { ProtoEvents.notifyParentRequestAgentId = "",
-          ProtoEvents.notifyParentRequestStatus = TL.fromStrict statusText,
-          ProtoEvents.notifyParentRequestMessage = TL.fromStrict msg
-        })
-    void $ suspendEffect @ProtoAgent.AgentCloseSelf
-      (AgentProto.CloseSelfRequest
-        { AgentProto.closeSelfRequestReason = TL.fromStrict msg })
-    pure $ successResult $ object ["shutdown" .= True]
+-- | Shared tool description for shutdown.
+shutdownDescription :: Text
+shutdownDescription = "Gracefully shut down this agent. Sends a final message to your parent, then exits. Call this when instructed to shut down or when your work is complete."
+
+-- | Shared tool schema for shutdown.
+shutdownSchema :: Aeson.Object
+shutdownSchema =
+  genericToolSchemaWith @ShutdownArgs
+    [("message", "Optional final message to send to parent before shutting down")]
+
+-- | Core shutdown I/O: notify parent + close self.
+shutdownCore :: ShutdownArgs -> Eff Effects MCPCallOutput
+shutdownCore args = do
+  let msg = maybe "Shutting down." id (sdMessage args)
+  let statusText = "success" :: Text
+  void $ suspendEffect @ProtoEvents.EventsNotifyParent
+    (ProtoEvents.NotifyParentRequest
+      { ProtoEvents.notifyParentRequestAgentId = "",
+        ProtoEvents.notifyParentRequestStatus = TL.fromStrict statusText,
+        ProtoEvents.notifyParentRequestMessage = TL.fromStrict msg
+      })
+  void $ suspendEffect @ProtoAgent.AgentCloseSelf
+    (AgentProto.CloseSelfRequest
+      { AgentProto.closeSelfRequestReason = TL.fromStrict msg })
+  pure $ successResult $ object ["shutdown" .= True]

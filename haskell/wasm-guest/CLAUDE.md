@@ -64,19 +64,26 @@ Pure Haskell prompt assembly for worker/leaf agents. Replaces the former templat
 - Builder monoid: `task`, `boundary`, `steps`, `context`, `verify`, `doneCriteria`, `readFirst`, `raw`
 - Inline profiles: `leafProfile`, `workerProfile`, `researchProfile`, `generalProfile`, `rustProfile`, `haskellProfile`
 
-### Other Tools
+### SDK/Role Split
 
-- `file_pr` (tl, dev roles)
-- `merge_pr` (tl role)
-- `notify_parent` (all roles)
+The SDK (`wasm-guest`) exports **core I/O functions** and **shared descriptions/schemas**. Role code (`.exo/roles/devswarm/`) defines **MCPTool instances** that call the core and apply role-specific state transitions.
+
+| SDK Module | Exports | Used by |
+|-----------|---------|---------|
+| `Tools.FilePR` | `filePRCore`, `filePRDescription`, `filePRSchema`, `FilePRArgs`, `FilePROutput` | `DevFilePR`, `TLFilePR` |
+| `Tools.Events` | `notifyParentCore`, `shutdownCore`, descriptions/schemas, `MCPTool SendMessage` | `DevNotifyParent`, `TLNotifyParent`, `WorkerNotifyParent`, `DevShutdown`, `WorkerShutdown` |
+| `Tools.MergePR` | `mergePRCore`, `mergePRRender`, description/schema, `extractSlug` | `TLMergePR` |
+| `Tools.Spawn` | `forkWaveCore`, `spawnLeafSubtreeCore`, `spawnWorkersCore`, descriptions/schemas, render functions | `TLForkWave`, `TLSpawnLeaf`, `TLSpawnWorkers` |
+
+`SendMessage` is the only tool with an `MCPTool` instance in the SDK (no state transitions needed).
 
 ### Roles
 
-| Role | Tools | Spawned by |
-|------|-------|------------|
-| **tl** | spawn (3), merge_pr, file_pr, notify_parent, send_message | `fork_wave` |
-| **dev** | file_pr, notify_parent, send_message, shutdown | `spawn_leaf_subtree` |
-| **worker** | notify_parent, send_message, shutdown | `spawn_workers` |
+| Role | Tools | State Machine | Spawned by |
+|------|-------|---------------|------------|
+| **tl** | `TLForkWave`, `TLSpawnLeaf`, `TLSpawnWorkers`, `TLMergePR`, `TLFilePR`, `TLNotifyParent`, `SendMessage` | `TLPhase` (tracks children via `ChildSpawned`/`ChildCompleted`) | `fork_wave` |
+| **dev** | `DevFilePR`, `DevNotifyParent`, `SendMessage`, `DevShutdown` | `DevPhase` (tracks PR lifecycle) | `spawn_leaf_subtree` |
+| **worker** | `WorkerNotifyParent`, `SendMessage`, `WorkerShutdown` | None (ephemeral) | `spawn_workers` |
 
 ## Hooks
 

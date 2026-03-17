@@ -45,7 +45,7 @@ data DevEvent
 instance StateMachine DevPhase DevEvent where
   machineName = "dev"
 
-  transition _phase event = case event of
+  transition phase event = case event of
     PRCreated prNum url _branch ->
       Transitioned (DevPRFiled prNum url)
     NotifyParentSuccess _ ->
@@ -59,12 +59,12 @@ instance StateMachine DevPhase DevEvent where
     ReviewApprovedEv prNum ->
       Transitioned (DevApproved prNum)
     FixesPushedEv prNum _ci ->
-      let round = case _phase of
+      let round = case phase of
             DevUnderReview _ r -> r + 1
             _ -> 1
        in Transitioned (DevUnderReview prNum round)
     CommitsPushedEv prNum _ci ->
-      let round = case _phase of
+      let round = case phase of
             DevUnderReview _ r -> r + 1
             _ -> 1
        in Transitioned (DevUnderReview prNum round)

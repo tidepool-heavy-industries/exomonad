@@ -9,25 +9,22 @@ module ExoMonad.Guest.Tools.FilePR
     FilePRArgs (..),
     FilePROutput (..),
     filePRCore,
+    filePRDescription,
+    filePRSchema,
   )
 where
 
 import Control.Monad (void)
 import Control.Monad.Freer (Eff)
-import Data.Aeson (FromJSON, Value, object, withObject, (.:), (.:?), (.=))
+import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
-import Effects.EffectError (EffectError (..))
 import Effects.FilePr qualified as FP
 import Effects.Log qualified as Log
 import ExoMonad.Effects.FilePR (FilePRFilePr)
 import ExoMonad.Effects.Log (LogError, LogInfo)
-import ExoMonad.Guest.StateMachine (applyEvent, getPhase, setPhase, StopCheckResult(..))
-import DevPhase (DevPhase(..), DevEvent(..))
-import TLPhase (TLPhase(..), TLEvent(..))
-import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Types (Effects)
@@ -71,6 +68,19 @@ instance Aeson.ToJSON FilePROutput where
         "created" .= c
       ]
 
+-- | Shared tool description (reused by role-specific MCPTool instances).
+filePRDescription :: Text
+filePRDescription = "Create or update a pull request for the current branch. Idempotent — safe to call multiple times (updates existing PR). Pushes the branch automatically. Base branch auto-detected from dot-separated naming (e.g. main.foo.bar targets main.foo)."
+
+-- | Shared tool schema (reused by role-specific MCPTool instances).
+filePRSchema :: Aeson.Object
+filePRSchema =
+  genericToolSchemaWith @FilePRArgs
+    [ ("title", "PR title"),
+      ("body", "PR body/description"),
+      ("base_branch", "Target branch. Auto-detected from dot-separated naming if omitted (main.foo.bar targets main.foo). Only set to override.")
+    ]
+
 -- | Shared I/O logic for filing a PR. Role-specific tools call this
 -- and apply their own state transitions on the result.
 filePRCore :: FilePRArgs -> Eff Effects (Either Text FilePROutput)
@@ -101,38 +111,3 @@ filePRCore args = do
               }
       void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("FilePR: Success - PR #" <> T.pack (show $ fpoNumber output)), Log.infoRequestFields = ""})
       pure $ Right output
-
-instance MCPTool FilePR where
-  type ToolArgs FilePR = FilePRArgs
-  toolName = "file_pr"
-  toolDescription = "Create or update a pull request for the current branch. Idempotent — safe to call multiple times (updates existing PR). Pushes the branch automatically. Base branch auto-detected from dot-separated naming (e.g. main.foo.bar targets main.foo)."
-  toolSchema =
-    genericToolSchemaWith @FilePRArgs
-      [ ("title", "PR title"),
-        ("body", "PR body/description"),
-        ("base_branch", "Target branch. Auto-detected from dot-separated naming if omitted (main.foo.bar targets main.foo). Only set to override.")
-      ]
-  toolHandlerEff args = do
-    -- Phase check: log warning for unexpected phases, auto-init if no phase set
-    mDevPhase <- getPhase @DevPhase @DevEvent
-    mTLPhase <- getPhase @TLPhase @TLEvent
-    case (mDevPhase, mTLPhase) of
-      (_, Just _) -> pure () -- TL role, skip dev phase check
-      (Just DevWorking, _) -> pure ()
-      (Just DevSpawned, _) -> setPhase @DevPhase @DevEvent DevWorking
-      (Just other, _) ->
-        void $ suspendEffect_ @LogInfo (Log.InfoRequest
-          { Log.infoRequestMessage = TL.fromStrict $ "FilePR: unexpected phase " <> T.pack (show other) <> ", proceeding anyway"
-          , Log.infoRequestFields = ""
-          })
-      (Nothing, Nothing) -> setPhase @DevPhase @DevEvent DevWorking
-
-    result <- filePRCore args
-    case result of
-      Left err -> pure $ errorResult err
-      Right output -> do
-        mTLPhaseAfter <- getPhase @TLPhase @TLEvent
-        case mTLPhaseAfter of
-          Just _ -> void $ applyEvent @TLPhase @TLEvent TLPlanning (OwnPRFiled (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
-          Nothing -> void $ applyEvent @DevPhase @DevEvent DevSpawned (PRCreated (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
-        pure $ successResult (Aeson.toJSON output)

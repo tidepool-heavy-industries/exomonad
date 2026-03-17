@@ -18,6 +18,7 @@ module ExoMonad.Guest.StateMachine
 
     -- * Framework functions
     getPhase,
+    setPhase,
     applyEvent,
     checkExit,
   )
@@ -114,7 +115,7 @@ checkExit :: forall phase event. StateMachine phase event => phase -> Eff Effect
 checkExit defaultPhase = do
   mPhase <- getPhase @phase @event
   let current = maybe defaultPhase id mPhase
-  pure (canExit current)
+  pure (canExit @phase @event current)
 
 -- | Log a state transition.
 logTransition :: Text -> Text -> Text -> Eff Effects ()
