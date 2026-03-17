@@ -239,3 +239,63 @@ instance (HsJSONPB.ToJSON RegisterTeamResponse) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON RegisterTeamResponse) where
   parseJSON = HsJSONPB.parseJSONPB
+data DeregisterTeamRequest
+  = DeregisterTeamRequest {}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData DeregisterTeamRequest)
+instance (HsProtobuf.Named DeregisterTeamRequest) where
+  nameOf _ = Hs.fromString "DeregisterTeamRequest"
+instance (HsProtobuf.HasDefault DeregisterTeamRequest)
+instance (HsProtobuf.Message DeregisterTeamRequest) where
+  encodeMessage _ DeregisterTeamRequest {} = Hs.mempty
+  decodeMessage _ = Hs.pure DeregisterTeamRequest
+  dotProto _ = []
+instance (HsJSONPB.ToJSONPB DeregisterTeamRequest) where
+  toJSONPB DeregisterTeamRequest = HsJSONPB.object []
+  toEncodingPB DeregisterTeamRequest = HsJSONPB.pairs []
+instance (HsJSONPB.FromJSONPB DeregisterTeamRequest) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "DeregisterTeamRequest" (\ obj -> Hs.pure DeregisterTeamRequest)
+instance (HsJSONPB.ToJSON DeregisterTeamRequest) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON DeregisterTeamRequest) where
+  parseJSON = HsJSONPB.parseJSONPB
+newtype DeregisterTeamResponse
+  = DeregisterTeamResponse {deregisterTeamResponseSuccess :: Hs.Bool}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData DeregisterTeamResponse)
+instance (HsProtobuf.Named DeregisterTeamResponse) where
+  nameOf _ = Hs.fromString "DeregisterTeamResponse"
+instance (HsProtobuf.HasDefault DeregisterTeamResponse)
+instance (HsProtobuf.Message DeregisterTeamResponse) where
+  encodeMessage
+    _
+    DeregisterTeamResponse {deregisterTeamResponseSuccess}
+    = (HsProtobuf.encodeMessageField
+         (HsProtobuf.FieldNumber 1) deregisterTeamResponseSuccess)
+  decodeMessage _
+    = Hs.pure DeregisterTeamResponse
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1) (HsProtobufAST.Prim HsProtobufAST.Bool)
+         (HsProtobufAST.Single "success") [] ""]
+instance (HsJSONPB.ToJSONPB DeregisterTeamResponse) where
+  toJSONPB (DeregisterTeamResponse f1)
+    = HsJSONPB.object ["success" .= f1]
+  toEncodingPB (DeregisterTeamResponse f1)
+    = HsJSONPB.pairs ["success" .= f1]
+instance (HsJSONPB.FromJSONPB DeregisterTeamResponse) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "DeregisterTeamResponse"
+        (\ obj -> Hs.pure DeregisterTeamResponse <*> obj .: "success")
+instance (HsJSONPB.ToJSON DeregisterTeamResponse) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON DeregisterTeamResponse) where
+  parseJSON = HsJSONPB.parseJSONPB

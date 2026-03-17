@@ -53,6 +53,7 @@ library
     Effects.Events
     Effects.MergePr
     Effects.Session
+    Effects.Tasks
     -- Hand-written compatibility layer
     ExoMonad.Compat
   build-depends:
