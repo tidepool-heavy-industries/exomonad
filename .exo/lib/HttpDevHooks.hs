@@ -14,18 +14,21 @@ import Control.Monad.Freer (Eff)
 import Data.Aeson (Value (..))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KM
+import Data.ByteString.Lazy qualified as BSL
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Encoding qualified as TLE
 import Effects.Log qualified as Log
-import ExoMonad.Effects.Log (LogInfo)
-import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
+import ExoMonad.Effects.Log (LogEmitEvent, LogInfo)
+import ExoMonad.Guest.Effects.StopHook (getCurrentBranch, checkUncommittedWork)
+import ExoMonad.Guest.StateMachine (StopCheckResult(..), checkExit, describeStopResult)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
-import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), Runtime (..), allowResponse, denyResponse, postToolUseResponse)
+import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), Runtime (..), StopDecision(..), StopHookOutput(..), allowResponse, denyResponse, postToolUseResponse, allowStopResponse, blockStopResponse)
 import ExoMonad.Permissions (PermissionCheck (..), checkAgentPermissions)
 import ExoMonad.Types (HookConfig (..), Effects, defaultSessionStartHook)
+import DevPhase (DevPhase(..), DevEvent)
 
 -- ============================================================================
 -- Gemini Tool Types
@@ -82,10 +85,32 @@ httpDevHooks =
   HookConfig
     { preToolUse = permissionCascade,
       postToolUse = \_ -> pure (postToolUseResponse Nothing),
-      onStop = \_ -> runStopHookChecks,
-      onSubagentStop = \_ -> runStopHookChecks,
+      onStop = \_ -> devStopCheck,
+      onSubagentStop = \_ -> devStopCheck,
       onSessionStart = defaultSessionStartHook
     }
+
+devStopCheck :: Eff Effects StopHookOutput
+devStopCheck = do
+  branch <- getCurrentBranch
+  if branch `elem` ["main", "master"]
+    then pure allowStopResponse
+    else do
+      result <- checkExit @DevPhase @DevEvent DevSpawned
+      -- Log for observability
+      void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
+        { Log.emitEventRequestEventType = "agent.stop_check",
+          Log.emitEventRequestPayload = BSL.toStrict $ Aeson.encode $ Aeson.object ["branch" Aeson..= branch, "result" Aeson..= describeStopResult result],
+          Log.emitEventRequestTimestamp = 0
+        })
+      case result of
+        MustBlock msg -> pure $ blockStopResponse msg
+        ShouldNudge msg -> pure $ StopHookOutput Allow (Just msg)
+        Clean -> do
+          nudge <- checkUncommittedWork branch
+          case nudge of
+            Just msg -> pure $ StopHookOutput Allow (Just msg)
+            Nothing -> pure allowStopResponse
 
 -- | Permission cascade with tool-specific guards.
 permissionCascade :: HookInput -> Eff Effects HookOutput
