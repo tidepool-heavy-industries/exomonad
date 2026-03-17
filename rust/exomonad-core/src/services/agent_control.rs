@@ -1484,14 +1484,6 @@ impl AgentControlService {
     /// and removes per-agent config directory (`.exo/agents/{name}/`).
     #[tracing::instrument(skip(self))]
     pub async fn cleanup_agent(&self, identifier: &str) -> Result<()> {
-        // Remove synthetic team member registration (non-fatal if not registered)
-        let team_name = format!("exo-{}", self.birth_branch);
-        if let Err(e) =
-            crate::services::synthetic_members::remove_synthetic_member(&team_name, identifier)
-        {
-            warn!(team = %team_name, member = %identifier, error = %e, "Failed to remove synthetic team member (non-fatal)");
-        }
-
         // Try to find agent in list (for metadata and window matching).
         // Failure here is non-fatal to allow cleaning up worker panes (invisible to list_agents).
         let agents = self.list_agents().await.unwrap_or_default();
@@ -1522,6 +1514,14 @@ impl AgentControlService {
                 (at, identifier.strip_suffix(&suffix).unwrap_or(identifier).to_string())
             }
         };
+
+        // Remove synthetic team member registration (non-fatal if not registered)
+        let team_name = format!("exo-{}", self.birth_branch);
+        if let Err(e) =
+            crate::services::synthetic_members::remove_synthetic_member(&team_name, &slug)
+        {
+            warn!(team = %team_name, member = %slug, error = %e, "Failed to remove synthetic team member (non-fatal)");
+        }
 
         let internal_name = format!("{}-{}", slug, agent_type.suffix());
         let display_name = Some(format!("{} {}", agent_type.emoji(), slug));
@@ -1752,7 +1752,7 @@ impl AgentControlService {
                         let has_tab = windows.iter().any(|t| t == &display_name);
 
                         agents.push(AgentInfo {
-                            issue_id: slug_str.to_string(),
+                            issue_id: name.to_string(),
                             has_tab,
                             topology: Topology::WorktreePerAgent,
                             agent_dir: Some(path.clone()),

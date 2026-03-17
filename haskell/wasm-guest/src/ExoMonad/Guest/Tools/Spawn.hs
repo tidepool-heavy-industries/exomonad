@@ -67,7 +67,7 @@ import ExoMonad.Effects.Git (GitGetStatus, GitHasUnpushedCommits)
 import Effects.Log qualified as Log
 import ExoMonad.Effects.Log (LogEmitEvent)
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
-import ExoMonad.Guest.Tool.Class (MCPCallOutput, errorResult, successResult)
+import ExoMonad.Guest.Tool.Class (MCPCallOutput(..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (JsonSchema (..), genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Types (Effects)
@@ -106,7 +106,7 @@ data ForkWave
 data ForkWaveChild = ForkWaveChild
   { fwcSlug :: Text,
     fwcTask :: Text,
-    fwcForkSession :: Bool
+    fwcForkSession :: Maybe Bool
   }
   deriving (Show, Eq, Generic)
 
@@ -115,7 +115,7 @@ instance FromJSON ForkWaveChild where
     ForkWaveChild
       <$> v .: "slug"
       <*> v .: "task"
-      <*> (fromMaybe False <$> v .:? "fork_session")
+      <*> v .:? "fork_session"
 
 instance JsonSchema ForkWaveChild where
   toSchema =
@@ -179,7 +179,7 @@ forkWaveCore args = do
             let cfg = AC.SpawnSubtreeConfig
                   { AC.stcTask = fwcTask child
                   , AC.stcBranchName = fwcSlug child
-                  , AC.stcForkSession = fwcForkSession child
+                  , AC.stcForkSession = fromMaybe False (fwcForkSession child)
                   , AC.stcRole = Nothing
                   , AC.stcAgentType = AC.Claude
                   , AC.stcPerms = AC.defaultPermFlags
@@ -451,7 +451,11 @@ instance FromJSON GeminiIsolation where
     "standalone" -> pure StandaloneIsolation
     t -> fail $ "Unknown isolation mode: " <> T.unpack t
 
-instance JsonSchema GeminiIsolation
+instance JsonSchema GeminiIsolation where
+  toSchema = object
+    [ "type" .= ("string" :: Text)
+    , "enum" .= (["worktree", "inline", "standalone"] :: [Text])
+    ]
 
 data SpawnGeminiArgs = SpawnGeminiArgs
   { sgName        :: Text
@@ -562,8 +566,10 @@ spawnGeminiCore args = case sgIsolation args of
           , wsAllowedTools     = sgAllowedTools args
           , wsDisallowedTools  = sgDisallowedTools args
           }
-    result <- spawnWorkersCore (SpawnWorkersArgs [spec])
-    pure $ Right Nothing  -- inline workers don't return SpawnResult
+    output <- spawnWorkersCore (SpawnWorkersArgs [spec])
+    if success output
+      then pure $ Right Nothing
+      else pure $ Left (fromMaybe "Inline spawn failed" (mcpError output))
 
 buildGeminiTask :: SpawnGeminiArgs -> Text
 buildGeminiTask args =

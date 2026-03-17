@@ -10,12 +10,13 @@ module RootRole (config, Tools) where
 
 import Control.Monad (void, forM_, when)
 import Control.Monad.Freer (Eff)
+import Data.Aeson (object, (.=))
 import ExoMonad
 import ExoMonad.Guest.StateMachine (applyEvent)
 import ExoMonad.Guest.Tools.MergePR (mergePRCore, mergePRDescription, mergePRSchema, mergePRRender, MergePRArgs (..), MergePROutput (..), extractSlug)
 import ExoMonad.Guest.Tools.Spawn
   ( forkWaveCore, forkWaveDescription, forkWaveSchema, forkWaveRender, ForkWaveArgs (..), ForkWaveResult (..),
-    spawnLeafSubtreeCore, spawnLeafSubtreeDescription, spawnLeafSubtreeSchema, spawnLeafRender, SpawnLeafSubtreeArgs (..)
+    spawnGeminiCore, spawnGeminiDescription, spawnGeminiSchema, spawnLeafRender, SpawnGeminiArgs (..)
   )
 import ExoMonad.Guest.Effects.AgentControl (SpawnResult (..))
 import ExoMonad.Guest.Types (allowResponse)
@@ -42,18 +43,20 @@ instance MCPTool RootForkWave where
 
 data RootSpawnGemini
 instance MCPTool RootSpawnGemini where
-  type ToolArgs RootSpawnGemini = SpawnLeafSubtreeArgs
+  type ToolArgs RootSpawnGemini = SpawnGeminiArgs
   toolName = "spawn_gemini"
-  toolDescription = spawnLeafSubtreeDescription
-  toolSchema = spawnLeafSubtreeSchema
+  toolDescription = spawnGeminiDescription
+  toolSchema = spawnGeminiSchema
   toolHandlerEff args = do
-    result <- spawnLeafSubtreeCore args
+    result <- spawnGeminiCore args
     case result of
       Left err -> pure $ errorResult err
-      Right (slug, sr) -> do
+      Right (Just (slug, sr)) -> do
         let handle = ChildHandle { chSlug = slug, chBranch = branchName sr, chAgentType = agentTypeResult sr }
         void $ applyEvent @TLPhase @TLEvent TLPlanning (ChildSpawned handle)
-        pure $ spawnLeafRender result
+        pure $ spawnLeafRender (Right (slug, sr))
+      Right Nothing ->
+        pure $ successResult $ object ["spawned" .= True]
 
 data RootMergePR
 instance MCPTool RootMergePR where
