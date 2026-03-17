@@ -14,7 +14,8 @@ import Data.Text.Lazy qualified as TL
 import ExoMonad.Effects.Log qualified as Log
 import ExoMonad.Guest.Events (CIStatusEvent (..), EventAction (..), EventHandlerConfig (..), PRReviewEvent (..), SiblingMergedEvent (..), defaultEventHandlers)
 import ExoMonad.Guest.Events.Templates qualified as Tpl
-import ExoMonad.Guest.Lifecycle.DevTransitions (applyDevEvent, DevEvent (..))
+import ExoMonad.Guest.StateMachine (applyEvent)
+import DevPhase (DevPhase(..), DevEvent(..))
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
 import ExoMonad.Guest.Types (Effects)
 
@@ -31,12 +32,12 @@ prReviewEventHandlers =
 prReviewHandler :: PRReviewEvent -> Eff Effects EventAction
 prReviewHandler (ReviewReceived n comments_) = do
   logHandler $ "Review received on PR #" <> T.pack (show n)
-  applyDevEvent (ReviewReceivedEv n comments_)
+  void $ applyEvent @DevPhase @DevEvent DevSpawned (ReviewReceivedEv n comments_)
   pure (InjectMessage (Tpl.copilotReviewReceived n comments_))
 
 prReviewHandler (ReviewApproved n) = do
   logHandler $ "PR #" <> T.pack (show n) <> " approved by Copilot"
-  applyDevEvent (ReviewApprovedEv n)
+  void $ applyEvent @DevPhase @DevEvent DevSpawned (ReviewApprovedEv n)
   pure (NotifyParentAction (Tpl.prReady n) n)
 
 prReviewHandler (ReviewTimeout n mins) = do
@@ -45,12 +46,12 @@ prReviewHandler (ReviewTimeout n mins) = do
 
 prReviewHandler (FixesPushed n ci) = do
   logHandler $ "Fixes pushed on PR #" <> T.pack (show n) <> ", CI: " <> ci
-  applyDevEvent (FixesPushedEv n ci)
+  void $ applyEvent @DevPhase @DevEvent DevSpawned (FixesPushedEv n ci)
   pure (NotifyParentAction (Tpl.fixesPushed n ci) n)
 
 prReviewHandler (CommitsPushed n ci) = do
   logHandler $ "New commits pushed on PR #" <> T.pack (show n) <> ", CI: " <> ci
-  applyDevEvent (CommitsPushedEv n ci)
+  void $ applyEvent @DevPhase @DevEvent DevSpawned (CommitsPushedEv n ci)
   pure (NotifyParentAction (Tpl.commitsPushed n ci) n)
 
 -- | Handle sibling merged events.

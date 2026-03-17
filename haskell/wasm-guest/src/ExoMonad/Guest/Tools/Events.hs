@@ -23,7 +23,8 @@ import Effects.Log qualified as Log
 import ExoMonad.Effects.Agent qualified as ProtoAgent
 import ExoMonad.Effects.Events qualified as ProtoEvents
 import ExoMonad.Effects.Log (LogEmitEvent)
-import ExoMonad.Guest.Lifecycle.DevTransitions (applyDevEvent, DevEvent (..))
+import ExoMonad.Guest.StateMachine (applyEvent)
+import DevPhase (DevPhase(..), DevEvent(..))
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (JsonSchema (..), genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
@@ -133,8 +134,8 @@ instance MCPTool NotifyParent where
       Right _ -> do
         -- Set terminal phase based on status
         case npStatus args of
-          Success -> applyDevEvent (NotifyParentSuccess (npMessage args))
-          Failure -> applyDevEvent (NotifyParentFailure (npMessage args))
+          Success -> void $ applyEvent @DevPhase @DevEvent DevSpawned (NotifyParentSuccess (npMessage args))
+          Failure -> void $ applyEvent @DevPhase @DevEvent DevSpawned (NotifyParentFailure (npMessage args))
         pure $ successResult $ object ["success" .= True]
 
 -- | Compose enriched notification message with PR number and task reports.
@@ -223,7 +224,7 @@ instance MCPTool Shutdown where
   toolHandlerEff args = do
     let msg = maybe "Shutting down." id (sdMessage args)
     let statusText = "success" :: Text
-    applyDevEvent ShutdownRequested
+    void $ applyEvent @DevPhase @DevEvent DevSpawned ShutdownRequested
     void $ suspendEffect @ProtoEvents.EventsNotifyParent
       (ProtoEvents.NotifyParentRequest
         { ProtoEvents.notifyParentRequestAgentId = "",

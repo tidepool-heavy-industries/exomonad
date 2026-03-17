@@ -24,10 +24,9 @@ import Effects.FilePr qualified as FP
 import Effects.Log qualified as Log
 import ExoMonad.Effects.FilePR (FilePRFilePr)
 import ExoMonad.Effects.Log (LogError, LogInfo)
-import ExoMonad.Guest.Lifecycle.DevState (SomeDevState (..), DevState (..), describeDevPhase)
-import ExoMonad.Guest.Lifecycle.DevTransitions (applyDevEvent, DevEvent (..))
-import ExoMonad.Guest.Lifecycle.PhaseEffect (getDevPhase, setDevPhase, getTLPhase)
-import ExoMonad.Guest.Lifecycle.TLTransitions (applyTLEvent, TLEvent (..))
+import ExoMonad.Guest.StateMachine (applyEvent, getPhase, setPhase, StopCheckResult(..))
+import DevPhase (DevPhase(..), DevEvent(..))
+import TLPhase (TLPhase(..), TLEvent(..))
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
@@ -115,25 +114,25 @@ instance MCPTool FilePR where
       ]
   toolHandlerEff args = do
     -- Phase check: log warning for unexpected phases, auto-init if no phase set
-    mState <- getDevPhase
-    mTLState <- getTLPhase
-    case (mState, mTLState) of
+    mDevPhase <- getPhase @DevPhase @DevEvent
+    mTLPhase <- getPhase @TLPhase @TLEvent
+    case (mDevPhase, mTLPhase) of
       (_, Just _) -> pure () -- TL role, skip dev phase check
-      (Just (SomeDevState SWorking), _) -> pure ()
-      (Just (SomeDevState SSpawned), _) -> setDevPhase (SomeDevState SWorking)
+      (Just DevWorking, _) -> pure ()
+      (Just DevSpawned, _) -> setPhase @DevPhase @DevEvent DevWorking
       (Just other, _) ->
         void $ suspendEffect_ @LogInfo (Log.InfoRequest
-          { Log.infoRequestMessage = TL.fromStrict $ "FilePR: unexpected phase " <> describeDevPhase other <> ", proceeding anyway"
+          { Log.infoRequestMessage = TL.fromStrict $ "FilePR: unexpected phase " <> T.pack (show other) <> ", proceeding anyway"
           , Log.infoRequestFields = ""
           })
-      (Nothing, Nothing) -> setDevPhase (SomeDevState SWorking)
+      (Nothing, Nothing) -> setPhase @DevPhase @DevEvent DevWorking
 
     result <- filePRCore args
     case result of
       Left err -> pure $ errorResult err
       Right output -> do
-        mTLStateAfter <- getTLPhase
-        case mTLStateAfter of
-          Just _ -> applyTLEvent (OwnPRFiled (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
-          Nothing -> applyDevEvent (PRCreated (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
+        mTLPhaseAfter <- getPhase @TLPhase @TLEvent
+        case mTLPhaseAfter of
+          Just _ -> void $ applyEvent @TLPhase @TLEvent TLPlanning (OwnPRFiled (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
+          Nothing -> void $ applyEvent @DevPhase @DevEvent DevSpawned (PRCreated (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
         pure $ successResult (Aeson.toJSON output)
