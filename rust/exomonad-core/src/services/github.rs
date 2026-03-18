@@ -117,17 +117,19 @@ pub struct Issue {
 
 impl FFIBoundary for Issue {}
 
-impl From<models::issues::Issue> for Issue {
-    fn from(i: models::issues::Issue) -> Self {
-        Self {
-            number: IssueNumber::try_from(i.number).expect("GitHub issue numbers are always positive"),
+impl TryFrom<models::issues::Issue> for Issue {
+    type Error = anyhow::Error;
+
+    fn try_from(i: models::issues::Issue) -> Result<Self> {
+        Ok(Self {
+            number: IssueNumber::try_from(i.number)?,
             title: i.title,
             body: i.body.unwrap_or_default(),
             state: octocrab_issue_state(i.state),
             url: i.html_url.to_string(),
             author: i.user.login,
             labels: i.labels.into_iter().map(|l| l.name).collect(),
-        }
+        })
     }
 }
 
@@ -172,21 +174,23 @@ pub struct PullRequest {
 
 impl FFIBoundary for PullRequest {}
 
-impl From<models::pulls::PullRequest> for PullRequest {
-    fn from(pr: models::pulls::PullRequest) -> Self {
-        Self {
-            number: PRNumber::new(pr.number),
+impl TryFrom<models::pulls::PullRequest> for PullRequest {
+    type Error = anyhow::Error;
+
+    fn try_from(pr: models::pulls::PullRequest) -> Result<Self> {
+        Ok(Self {
+            number: PRNumber::try_from(pr.number)?,
             title: pr.title.unwrap_or_default(),
             body: pr.body.unwrap_or_default(),
             state: octocrab_optional_issue_state(pr.state),
             url: pr.html_url.map(|u| u.to_string()).unwrap_or_default(),
             author: pr.user.map(|u| u.login).unwrap_or_else(|| "unknown".into()),
-            head_ref: BranchName::from(pr.head.ref_field.as_str()),
-            head_sha: CommitSha::from(pr.head.sha.as_str()),
-            base_ref: BranchName::from(pr.base.ref_field.as_str()),
+            head_ref: BranchName::try_from(pr.head.ref_field)?,
+            head_sha: CommitSha::try_from(pr.head.sha)?,
+            base_ref: BranchName::try_from(pr.base.ref_field)?,
             created_at: pr.created_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
             merged_at: pr.merged_at.map(|t| t.to_rfc3339()),
-        }
+        })
     }
 }
 
@@ -409,7 +413,7 @@ impl GitHubService {
             "GitHub API: List issues successful"
         );
 
-        Ok(issues.into_iter().map(Issue::from).collect())
+        issues.into_iter().map(Issue::try_from).collect()
     }
 
     #[tracing::instrument(skip(self))]
@@ -433,7 +437,7 @@ impl GitHubService {
 
         info!(repo = %repo_name, number = number.as_u64(), "GitHub API: Get issue successful");
 
-        Ok(Issue::from(issue))
+        Ok(issue.try_into()?)
     }
 
     #[tracing::instrument(skip(self))]
@@ -463,7 +467,7 @@ impl GitHubService {
             "GitHub API: Create PR successful"
         );
 
-        Ok(PullRequest::from(pr))
+        Ok(pr.try_into()?)
     }
 
     #[tracing::instrument(skip(self))]
@@ -506,7 +510,7 @@ impl GitHubService {
             "GitHub API: List PRs successful (page 1)"
         );
 
-        Ok(page.into_iter().map(PullRequest::from).collect())
+        page.into_iter().map(PullRequest::try_from).collect()
     }
 
     /// Get a single pull request by number.
@@ -527,7 +531,7 @@ impl GitHubService {
             number = number.as_u64(), "GitHub API: Get PR successful"
         );
 
-        Ok(PullRequest::from(pr))
+        Ok(pr.try_into()?)
     }
 
     /// Get reviews for a pull request.
@@ -621,7 +625,7 @@ impl GitHubService {
             None => tracing::info!(head = head.as_str(), "No PR found for branch"),
         }
 
-        Ok(pr.map(PullRequest::from))
+        Ok(pr.map(PullRequest::try_from).transpose()?)
     }
 
     #[tracing::instrument(skip(self))]
