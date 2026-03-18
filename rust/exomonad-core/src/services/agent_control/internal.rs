@@ -265,12 +265,9 @@ impl AgentControlService {
         let window_name = name.to_string();
         let window_cwd = cwd.to_path_buf();
 
-        let window_id = tokio::task::spawn_blocking(move || {
-            tmux.new_window(&window_name, &window_cwd, &shell, &full_command)
-        })
-        .await
-        .context("tokio task join error")?
-        .context("Failed to create tmux window")?;
+        let window_id = tmux.new_window(&window_name, &window_cwd, &shell, &full_command)
+            .await
+            .context("Failed to create tmux window")?;
 
         Ok(window_id)
     }
@@ -287,7 +284,7 @@ impl AgentControlService {
 
         let result = timeout(
             TMUX_TIMEOUT,
-            tokio::task::spawn_blocking(move || tmux.list_windows()),
+            tmux.list_windows(),
         )
         .await
         .map_err(|_| {
@@ -295,8 +292,7 @@ impl AgentControlService {
                 "tmux list-windows timed out after {}s",
                 TMUX_TIMEOUT.as_secs()
             )
-        })?
-        .context("tokio task join error")?;
+        })?;
 
         match result {
             Ok(windows) => Ok(windows.into_iter().map(|w| w.window_name).collect()),
@@ -322,21 +318,19 @@ impl AgentControlService {
         let tmux = self.tmux()?;
         let window_name = name.to_string();
 
-        let window_id = tokio::task::spawn_blocking(move || {
-            let windows = tmux.list_windows()?;
+        let window_id = {
+            let windows = tmux.list_windows().await?;
             windows
                 .into_iter()
                 .find(|w| w.window_name == window_name)
                 .map(|w| w.window_id)
-                .ok_or_else(|| anyhow!("Window not found: {}", window_name))
-        })
-        .await
-        .context("tokio task join error")??;
+                .ok_or_else(|| anyhow!("Window not found: {}", window_name))?
+        };
 
         let tmux = self.tmux()?;
         timeout(
             TMUX_TIMEOUT,
-            tokio::task::spawn_blocking(move || tmux.kill_window(&window_id)),
+            tmux.kill_window(&window_id),
         )
         .await
         .map_err(|_| {
@@ -346,9 +340,7 @@ impl AgentControlService {
                     TMUX_TIMEOUT.as_secs()
                 ),
             })
-        })?
-        .context("tokio task join error")?
-        .context("tmux kill-window failed")?;
+        })??;
 
         info!(name, "tmux kill-window successful");
         Ok(())
@@ -382,10 +374,7 @@ impl AgentControlService {
         // Find parent window ID by name
         let target_window = if let Some(wname) = parent_window_name {
             let wname = wname.to_string();
-            let t = tmux.clone();
-            let windows = tokio::task::spawn_blocking(move || t.list_windows())
-                .await
-                .context("tokio task join error")?
+            let windows = tmux.list_windows().await
                 .context("Failed to list tmux windows")?;
             windows
                 .iter()
@@ -399,10 +388,7 @@ impl AgentControlService {
                 })?
         } else {
             // Default to first window if no name provided
-            let t = tmux.clone();
-            let windows = tokio::task::spawn_blocking(move || t.list_windows())
-                .await
-                .context("tokio task join error")?
+            let windows = tmux.list_windows().await
                 .context("Failed to list tmux windows")?;
             windows
                 .first()
@@ -416,19 +402,14 @@ impl AgentControlService {
         };
 
         let pane_cwd = cwd.to_path_buf();
-        let t = tmux.clone();
-        let pane_id = tokio::task::spawn_blocking(move || {
-            let pane_id = t.split_window(&target_window, &pane_cwd, &shell, &full_command)?;
-            // Rebalance panes into a grid after each split to prevent
-            // exponential height decay (60 → 29 → 14 → 6 → 2 → 1 lines).
-            if let Err(e) = t.select_layout(&target_window, "tiled") {
-                tracing::warn!(error = %e, "Failed to apply tiled layout (non-fatal)");
-            }
-            Ok::<_, anyhow::Error>(pane_id)
-        })
-        .await
-        .context("tokio task join error")?
-        .context("Failed to create tmux pane")?;
+        let pane_id = tmux.split_window(&target_window, &pane_cwd, &shell, &full_command).await
+            .context("Failed to create tmux pane")?;
+
+        // Rebalance panes into a grid after each split to prevent
+        // exponential height decay (60 → 29 → 14 → 6 → 2 → 1 lines).
+        if let Err(e) = tmux.select_layout(&target_window, "tiled").await {
+            tracing::warn!(error = %e, "Failed to apply tiled layout (non-fatal)");
+        }
 
         info!(name, pane_id = %pane_id, "Successfully created tmux pane");
         Ok(pane_id)

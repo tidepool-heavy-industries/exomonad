@@ -1,27 +1,28 @@
 //! tmux CLI wrapper for session, window, and pane management.
 //!
-//! All methods are synchronous (blocking `Command::new("tmux")`).
-//! Callers wrap in `tokio::task::spawn_blocking` as needed.
+//! All methods are asynchronous (using `tokio::process::Command`).
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
-use std::sync::Mutex as StdMutex;
+use tokio::process::Command;
+use tokio::sync::Mutex as AsyncMutex;
 use tracing::{debug, info, warn};
 
-/// Per-target injection lock. Serializes inject_input calls to the same
-/// tmux target, preventing concurrent paste-buffer/send-keys interleaving.
 /// Per-target injection locks. Uses Weak references so entries are automatically
 /// reclaimable when no inject_input call holds the Arc.
+///
+/// Uses tokio::sync::Mutex for per-target locks because they are held across
+/// await points during tmux CLI calls and debounce sleeps.
 static INJECTION_LOCKS: std::sync::LazyLock<
-    StdMutex<HashMap<String, std::sync::Weak<StdMutex<()>>>>,
-> = std::sync::LazyLock::new(|| StdMutex::new(HashMap::new()));
+    std::sync::Mutex<HashMap<String, std::sync::Weak<AsyncMutex<()>>>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
 /// Stable tmux window identifier (@N format, base-index immune).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WindowId(String);
-
+// ... (WindowId and PaneId implementations remain same, skipping for brevity in thought, but I must include them in new_string)
 impl WindowId {
     pub fn parse(s: &str) -> Result<Self> {
         anyhow::ensure!(s.starts_with('@'), "WindowId must start with '@': {}", s);
@@ -99,8 +100,8 @@ impl TmuxIpc {
     // -- Session management (static, no &self) --
 
     /// Create a new tmux session. Returns the stable window ID (@N) of the initial window.
-    pub fn new_session(name: &str, cwd: &Path) -> Result<WindowId> {
-        let output = std::process::Command::new("tmux")
+    pub async fn new_session(name: &str, cwd: &Path) -> Result<WindowId> {
+        let output = Command::new("tmux")
             .args([
                 "new-session",
                 "-d",
@@ -113,6 +114,7 @@ impl TmuxIpc {
                 &cwd.to_string_lossy(),
             ])
             .output()
+            .await
             .context("Failed to run tmux new-session")?;
         if !output.status.success() {
             anyhow::bail!(
@@ -127,18 +129,20 @@ impl TmuxIpc {
         Ok(window_id)
     }
 
-    pub fn has_session(name: &str) -> Result<bool> {
-        let status = std::process::Command::new("tmux")
+    pub async fn has_session(name: &str) -> Result<bool> {
+        let status = Command::new("tmux")
             .args(["has-session", "-t", name])
             .status()
+            .await
             .context("Failed to run tmux has-session")?;
         Ok(status.success())
     }
 
-    pub fn kill_session(name: &str) -> Result<()> {
-        let output = std::process::Command::new("tmux")
+    pub async fn kill_session(name: &str) -> Result<()> {
+        let output = Command::new("tmux")
             .args(["kill-session", "-t", name])
             .output()
+            .await
             .context("Failed to run tmux kill-session")?;
         if !output.status.success() {
             anyhow::bail!(
@@ -151,7 +155,7 @@ impl TmuxIpc {
     }
 
     /// Exec into tmux attach (replaces current process).
-    pub fn attach_session(name: &str) -> Result<()> {
+    pub async fn attach_session(name: &str) -> Result<()> {
         use std::os::unix::process::CommandExt;
         let err = std::process::Command::new("tmux")
             .args(["attach-session", "-t", name])
@@ -162,14 +166,14 @@ impl TmuxIpc {
     // -- Window management --
 
     /// Create a new window. Returns window_id (@N).
-    pub fn new_window(
+    pub async fn new_window(
         &self,
         name: &str,
         cwd: &Path,
         shell: &str,
         command: &str,
     ) -> Result<WindowId> {
-        let output = std::process::Command::new("tmux")
+        let output = Command::new("tmux")
             .args([
                 "new-window",
                 "-P",
@@ -187,6 +191,7 @@ impl TmuxIpc {
                 command,
             ])
             .output()
+            .await
             .context("Failed to run tmux new-window")?;
         if !output.status.success() {
             anyhow::bail!(
@@ -201,8 +206,8 @@ impl TmuxIpc {
         Ok(window_id)
     }
 
-    pub fn list_windows(&self) -> Result<Vec<WindowInfo>> {
-        let output = std::process::Command::new("tmux")
+    pub async fn list_windows(&self) -> Result<Vec<WindowInfo>> {
+        let output = Command::new("tmux")
             .args([
                 "list-windows",
                 "-t",
@@ -211,6 +216,7 @@ impl TmuxIpc {
                 "#{window_id}\t#{window_name}\t#{pane_id}",
             ])
             .output()
+            .await
             .context("Failed to run tmux list-windows")?;
         if !output.status.success() {
             anyhow::bail!(
@@ -253,10 +259,11 @@ impl TmuxIpc {
         Ok(windows)
     }
 
-    pub fn kill_window(&self, window_id: &WindowId) -> Result<()> {
-        let output = std::process::Command::new("tmux")
+    pub async fn kill_window(&self, window_id: &WindowId) -> Result<()> {
+        let output = Command::new("tmux")
             .args(["kill-window", "-t", window_id.as_str()])
             .output()
+            .await
             .context("Failed to run tmux kill-window")?;
         if !output.status.success() {
             anyhow::bail!(
@@ -268,10 +275,11 @@ impl TmuxIpc {
         Ok(())
     }
 
-    pub fn select_window(&self, window_id: &WindowId) -> Result<()> {
-        let output = std::process::Command::new("tmux")
+    pub async fn select_window(&self, window_id: &WindowId) -> Result<()> {
+        let output = Command::new("tmux")
             .args(["select-window", "-t", window_id.as_str()])
             .output()
+            .await
             .context("Failed to run tmux select-window")?;
         if !output.status.success() {
             anyhow::bail!(
@@ -285,14 +293,14 @@ impl TmuxIpc {
     // -- Pane management --
 
     /// Split the window to create a new pane. Returns pane_id (%N).
-    pub fn split_window(
+    pub async fn split_window(
         &self,
         window_id: &WindowId,
         cwd: &Path,
         shell: &str,
         command: &str,
     ) -> Result<PaneId> {
-        let output = std::process::Command::new("tmux")
+        let output = Command::new("tmux")
             .args([
                 "split-window",
                 "-P",
@@ -308,6 +316,7 @@ impl TmuxIpc {
                 command,
             ])
             .output()
+            .await
             .context("Failed to run tmux split-window")?;
         if !output.status.success() {
             anyhow::bail!(
@@ -323,11 +332,12 @@ impl TmuxIpc {
     }
 
     /// Apply a tmux layout to a window (e.g. "tiled", "even-vertical", "even-horizontal").
-    pub fn select_layout(&self, window_id: &WindowId, layout: &str) -> Result<()> {
+    pub async fn select_layout(&self, window_id: &WindowId, layout: &str) -> Result<()> {
         let qualified = format!("{}:{}", self.session_name, window_id.as_str());
-        let output = std::process::Command::new("tmux")
+        let output = Command::new("tmux")
             .args(["select-layout", "-t", &qualified, layout])
             .output()
+            .await
             .context("Failed to run tmux select-layout")?;
         if !output.status.success() {
             anyhow::bail!(
@@ -339,10 +349,11 @@ impl TmuxIpc {
         Ok(())
     }
 
-    pub fn kill_pane(&self, pane_id: &PaneId) -> Result<()> {
-        let output = std::process::Command::new("tmux")
+    pub async fn kill_pane(&self, pane_id: &PaneId) -> Result<()> {
+        let output = Command::new("tmux")
             .args(["kill-pane", "-t", pane_id.as_str()])
             .output()
+            .await
             .context("Failed to run tmux kill-pane")?;
         if !output.status.success() {
             anyhow::bail!(
@@ -367,7 +378,7 @@ impl TmuxIpc {
     /// commands resolve to the same pane. Without qualification, tmux resolves
     /// display-name targets against the "most recently used" session, which is
     /// nondeterministic for subprocess calls.
-    pub fn inject_input(&self, target: &str, text: &str) -> Result<()> {
+    pub async fn inject_input(&self, target: &str, text: &str) -> Result<()> {
         // Session-qualify the target so paste-buffer and send-keys resolve
         // to the same pane deterministically.
         let qualified_target = format!("{}:{}", self.session_name, target);
@@ -382,19 +393,17 @@ impl TmuxIpc {
                 .get(&qualified_target)
                 .and_then(|w| w.upgrade())
                 .unwrap_or_else(|| {
-                    let arc = std::sync::Arc::new(StdMutex::new(()));
+                    let arc = std::sync::Arc::new(AsyncMutex::new(()));
                     map.insert(qualified_target.clone(), std::sync::Arc::downgrade(&arc));
                     arc
                 });
             arc
         };
-        let _guard = target_lock
-            .lock()
-            .expect("per-target injection lock poisoned");
+        let _guard = target_lock.lock().await;
 
         // Exit copy/scroll mode if active — copy mode intercepts input,
         // preventing paste-buffer from reaching the underlying process.
-        let mode_output = std::process::Command::new("tmux")
+        let mode_output = Command::new("tmux")
             .args([
                 "display-message",
                 "-p",
@@ -402,13 +411,15 @@ impl TmuxIpc {
                 &qualified_target,
                 "#{pane_in_mode}",
             ])
-            .output();
+            .output()
+            .await;
         if let Ok(output) = mode_output {
             if output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "1" {
-                let _ = std::process::Command::new("tmux")
+                let _ = Command::new("tmux")
                     .args(["send-keys", "-t", &qualified_target, "-X", "cancel"])
-                    .output();
-                std::thread::sleep(std::time::Duration::from_millis(50));
+                    .output()
+                    .await;
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
         }
 
@@ -418,14 +429,17 @@ impl TmuxIpc {
         // Strip trailing newlines so paste-buffer doesn't trigger submission;
         // send-keys Enter below is the sole execution trigger.
         let payload = text.trim_end_matches('\n').trim_end_matches('\r');
-        std::fs::write(&tmp_path, payload).context("Failed to write temp buffer file")?;
+        tokio::fs::write(&tmp_path, payload)
+            .await
+            .context("Failed to write temp buffer file")?;
 
-        let load_result = std::process::Command::new("tmux")
+        let load_result = Command::new("tmux")
             .args(["load-buffer", "-b", &buf_name, &tmp_path])
-            .output();
+            .output()
+            .await;
 
         // Clean up temp file regardless of result
-        let _ = std::fs::remove_file(&tmp_path);
+        let _ = tokio::fs::remove_file(&tmp_path).await;
 
         let load_output = load_result.context("Failed to run tmux load-buffer")?;
         if !load_output.status.success() {
@@ -438,15 +452,17 @@ impl TmuxIpc {
         // No -p flag: bracketed paste (\e[200~...\e[201~) crashes Claude Code's
         // Ink TUI and breaks Gemini CLI's readline. Plain paste streams bytes
         // as standard keyboard input.
-        let paste_output = std::process::Command::new("tmux")
+        let paste_output = Command::new("tmux")
             .args(["paste-buffer", "-b", &buf_name, "-t", &qualified_target])
             .output()
+            .await
             .context("Failed to run tmux paste-buffer")?;
 
         // Delete the named buffer
-        match std::process::Command::new("tmux")
+        match Command::new("tmux")
             .args(["delete-buffer", "-b", &buf_name])
             .output()
+            .await
         {
             Ok(output) if !output.status.success() => {
                 warn!(
@@ -469,18 +485,19 @@ impl TmuxIpc {
 
         // Debounce: allow TUI (Claude Code Ink, Gemini CLI readline) to process
         // the pasted text before sending Enter.
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
         // Submit with retry — TUIs may drop the first Enter keystroke
         // if still processing pasted text.
         let mut last_err = None;
         for attempt in 0..3 {
             if attempt > 0 {
-                std::thread::sleep(std::time::Duration::from_millis(200));
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             }
-            match std::process::Command::new("tmux")
+            match Command::new("tmux")
                 .args(["send-keys", "-t", &qualified_target, "Enter"])
                 .output()
+                .await
             {
                 Ok(output) if output.status.success() => {
                     last_err = None;
@@ -502,8 +519,8 @@ impl TmuxIpc {
         }
 
         // Wake the target pane's TUI event loop via SIGWINCH so it processes
-        // the injected input. Non-fatal \u{2014} input was already delivered.
-        if let Err(e) = self.wake_pane(target) {
+        // the injected input. Non-fatal — input was already delivered.
+        if let Err(e) = self.wake_pane(target).await {
             warn!(target = %qualified_target, error = %e, "SIGWINCH wake failed (non-fatal)");
         }
 
@@ -516,11 +533,11 @@ impl TmuxIpc {
     /// TUI frameworks (Ink, readline) in non-focused panes may not poll stdin
     /// until a terminal event arrives. A +1/-1 column resize triggers SIGWINCH,
     /// which wakes the event loop to process buffered input.
-    pub fn wake_pane(&self, target: &str) -> Result<()> {
+    pub async fn wake_pane(&self, target: &str) -> Result<()> {
         let qualified = format!("{}:{}", self.session_name, target);
 
         // Read current window dimensions
-        let output = std::process::Command::new("tmux")
+        let output = Command::new("tmux")
             .args([
                 "display-message",
                 "-t",
@@ -529,6 +546,7 @@ impl TmuxIpc {
                 "#{window_width} #{window_height}",
             ])
             .output()
+            .await
             .context("Failed to query window dimensions")?;
 
         if !output.status.success() {
@@ -548,7 +566,7 @@ impl TmuxIpc {
         let height: u32 = parts[1].parse().context("Failed to parse window height")?;
 
         // Resize +1 column
-        let _ = std::process::Command::new("tmux")
+        let _ = Command::new("tmux")
             .args([
                 "resize-window",
                 "-t",
@@ -558,12 +576,13 @@ impl TmuxIpc {
                 "-y",
                 &height.to_string(),
             ])
-            .output();
+            .output()
+            .await;
 
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         // Restore original size
-        let _ = std::process::Command::new("tmux")
+        let _ = Command::new("tmux")
             .args([
                 "resize-window",
                 "-t",
@@ -573,18 +592,20 @@ impl TmuxIpc {
                 "-y",
                 &height.to_string(),
             ])
-            .output();
+            .output()
+            .await;
 
-        debug!(target = %qualified, "SIGWINCH wake: resized {}x{} \u{2192} {}x{} \u{2192} {}x{}", width, height, width + 1, height, width, height);
+        debug!(target = %qualified, "SIGWINCH wake: resized {}x{} → {}x{} → {}x{}", width, height, width + 1, height, width, height);
         Ok(())
     }
 
     // -- Query --
 
-    pub fn pane_exists(&self, pane_id: &PaneId) -> Result<bool> {
-        let status = std::process::Command::new("tmux")
+    pub async fn pane_exists(&self, pane_id: &PaneId) -> Result<bool> {
+        let status = Command::new("tmux")
             .args(["display-message", "-t", pane_id.as_str(), "-p", ""])
             .status()
+            .await
             .context("Failed to run tmux display-message")?;
         Ok(status.success())
     }
@@ -677,92 +698,91 @@ mod tests {
         assert_eq!(pid.to_string(), "%456");
     }
 
-    #[test]
-    fn test_injection_lock_serializes_same_target() {
+    #[tokio::test]
+    async fn test_injection_lock_serializes_same_target() {
         use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
 
         let counter = Arc::new(AtomicU32::new(0));
-        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
 
-        let handles: Vec<_> = (0..2)
-            .map(|_| {
-                let counter = counter.clone();
-                let barrier = barrier.clone();
-                std::thread::spawn(move || {
-                    barrier.wait();
-                    let lock = {
-                        let mut map = INJECTION_LOCKS.lock().unwrap();
-                        map.retain(|_, weak| weak.strong_count() > 0);
-                        map.get("test-serialization-target")
-                            .and_then(|w| w.upgrade())
-                            .unwrap_or_else(|| {
-                                let arc = Arc::new(StdMutex::new(()));
-                                map.insert(
-                                    "test-serialization-target".to_string(),
-                                    Arc::downgrade(&arc),
-                                );
-                                arc
-                            })
-                    };
-                    let _guard = lock.lock().unwrap();
-                    // Simulate work under lock
-                    let val = counter.load(Ordering::SeqCst);
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                    counter.store(val + 1, Ordering::SeqCst);
-                })
-            })
-            .collect();
+        let mut handles = Vec::new();
+        for _ in 0..2 {
+            let counter = counter.clone();
+            let barrier = barrier.clone();
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                let lock = {
+                    let mut map = INJECTION_LOCKS.lock().unwrap();
+                    map.retain(|_, weak| weak.strong_count() > 0);
+                    map.get("test-serialization-target")
+                        .and_then(|w| w.upgrade())
+                        .unwrap_or_else(|| {
+                            let arc = Arc::new(AsyncMutex::new(()));
+                            map.insert(
+                                "test-serialization-target".to_string(),
+                                Arc::downgrade(&arc),
+                            );
+                            arc
+                        })
+                };
+                let _guard = lock.lock().await;
+                // Simulate work under lock
+                let val = counter.load(Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                counter.store(val + 1, Ordering::SeqCst);
+            }));
+        }
 
         for h in handles {
-            h.join().unwrap();
+            h.await.unwrap();
         }
         // If serialized correctly, counter == 2 (no lost increments)
         assert_eq!(counter.load(Ordering::SeqCst), 2);
     }
 
-    #[test]
-    fn test_injection_lock_different_targets_independent() {
+    #[tokio::test]
+    async fn test_injection_lock_different_targets_independent() {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
 
         // Verify two different targets can be locked concurrently (no deadlock,
         // and both threads reach the barrier while holding their respective locks).
         let both_reached_barrier = Arc::new(AtomicBool::new(false));
-        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
 
         let flag = both_reached_barrier.clone();
         let b1 = barrier.clone();
 
-        let h1 = std::thread::spawn(move || {
-            let lock = Arc::new(StdMutex::new(()));
-            let _guard = lock.lock().unwrap();
+        let h1 = tokio::spawn(async move {
+            let lock = Arc::new(AsyncMutex::new(()));
+            let _guard = lock.lock().await;
             // Both threads wait here — if locks were shared (same target),
             // the second thread would block on lock() and never reach the barrier.
-            b1.wait();
+            b1.wait().await;
             flag.store(true, Ordering::SeqCst);
         });
 
-        let h2 = std::thread::spawn(move || {
-            let lock = Arc::new(StdMutex::new(()));
-            let _guard = lock.lock().unwrap();
-            barrier.wait();
+        let h2 = tokio::spawn(async move {
+            let lock = Arc::new(AsyncMutex::new(()));
+            let _guard = lock.lock().await;
+            barrier.wait().await;
         });
 
-        h1.join().unwrap();
-        h2.join().unwrap();
+        h1.await.unwrap();
+        h2.await.unwrap();
         assert!(
             both_reached_barrier.load(Ordering::SeqCst),
             "Both threads should hold independent locks concurrently"
         );
     }
 
-    #[test]
-    fn test_wake_pane_requires_session() {
+    #[tokio::test]
+    async fn test_wake_pane_requires_session() {
         // wake_pane runs tmux commands that will fail without a real tmux session,
         // but it should not panic — it returns a Result
         let ipc = TmuxIpc::new("nonexistent-test-session");
-        let result = ipc.wake_pane("test-target");
+        let result = ipc.wake_pane("test-target").await;
         assert!(
             result.is_err(),
             "wake_pane should fail without a real tmux session"

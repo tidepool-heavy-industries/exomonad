@@ -68,16 +68,13 @@ impl AgentControlService {
             if let Some(wid_str) = routing.window_id {
                 if let Ok(wid) = crate::services::tmux_ipc::WindowId::parse(&wid_str) {
                     let tmux = self.tmux()?;
-                    match tokio::task::spawn_blocking(move || tmux.kill_window(&wid)).await {
-                        Ok(Ok(())) => {
+                    match tmux.kill_window(&wid).await {
+                        Ok(()) => {
                             info!(identifier, "Closed tmux window via stored window_id");
                             window_closed = true;
                         }
-                        Ok(Err(e)) => {
-                            warn!(identifier, error = %e, "kill_window by stored ID failed, falling back to name match");
-                        }
                         Err(e) => {
-                            warn!(identifier, error = %e, "spawn_blocking join error");
+                            warn!(identifier, error = %e, "kill_window by stored ID failed, falling back to name match");
                         }
                     }
                 }
