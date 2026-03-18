@@ -742,7 +742,7 @@ impl AgentControlService {
                 owner: options.owner.clone(),
                 name: options.repo.clone(),
             };
-            let issue = github.get_issue(&repo, issue_number.as_u64()).await?;
+            let issue = github.get_issue(&repo, issue_number).await?;
 
             // Generate slug and agent name
             let slug = slugify(&issue.title);

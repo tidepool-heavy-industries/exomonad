@@ -1,4 +1,4 @@
-use crate::domain::ItemState;
+use crate::domain::{BranchName, CommitSha, IssueNumber, ItemState, PRNumber, ReviewState as DomainReviewState};
 use crate::{FFIBoundary, GithubOwner, GithubRepo};
 use anyhow::{anyhow, Result};
 use octocrab::{models, params, Octocrab, OctocrabBuilder};
@@ -66,10 +66,10 @@ pub struct CreatePRSpec {
     pub body: String,
 
     /// Head branch (source branch containing changes).
-    pub head: String,
+    pub head: BranchName,
 
     /// Base branch (target branch to merge into, usually "main").
-    pub base: String,
+    pub base: BranchName,
 }
 
 impl FFIBoundary for CreatePRSpec {}
@@ -94,7 +94,7 @@ impl FFIBoundary for PRFilter {}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Issue {
     /// Issue number (unique within repository).
-    pub number: u64,
+    pub number: IssueNumber,
 
     /// Issue title.
     pub title: String,
@@ -120,7 +120,7 @@ impl FFIBoundary for Issue {}
 impl From<models::issues::Issue> for Issue {
     fn from(i: models::issues::Issue) -> Self {
         Self {
-            number: i.number,
+            number: IssueNumber::try_from(i.number).expect("GitHub issue numbers are always positive"),
             title: i.title,
             body: i.body.unwrap_or_default(),
             state: octocrab_issue_state(i.state),
@@ -137,7 +137,7 @@ impl From<models::issues::Issue> for Issue {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PullRequest {
     /// PR number (unique within repository).
-    pub number: u64,
+    pub number: PRNumber,
 
     /// PR title.
     pub title: String,
@@ -155,10 +155,10 @@ pub struct PullRequest {
     pub author: String,
 
     /// Head branch (source branch with changes).
-    pub head_ref: String,
+    pub head_ref: BranchName,
 
     /// Base branch (target branch for merge).
-    pub base_ref: String,
+    pub base_ref: BranchName,
 
     /// Creation timestamp (ISO 8601).
     pub created_at: String,
@@ -167,7 +167,7 @@ pub struct PullRequest {
     pub merged_at: Option<String>,
 
     /// SHA of the current HEAD commit on the PR branch.
-    pub head_sha: String,
+    pub head_sha: CommitSha,
 }
 
 impl FFIBoundary for PullRequest {}
@@ -175,15 +175,15 @@ impl FFIBoundary for PullRequest {}
 impl From<models::pulls::PullRequest> for PullRequest {
     fn from(pr: models::pulls::PullRequest) -> Self {
         Self {
-            number: pr.number,
+            number: PRNumber::new(pr.number),
             title: pr.title.unwrap_or_default(),
             body: pr.body.unwrap_or_default(),
             state: octocrab_optional_issue_state(pr.state),
             url: pr.html_url.map(|u| u.to_string()).unwrap_or_default(),
             author: pr.user.map(|u| u.login).unwrap_or_else(|| "unknown".into()),
-            head_ref: pr.head.ref_field.clone(),
-            head_sha: pr.head.sha,
-            base_ref: pr.base.ref_field,
+            head_ref: BranchName::from(pr.head.ref_field.as_str()),
+            head_sha: CommitSha::from(pr.head.sha.as_str()),
+            base_ref: BranchName::from(pr.base.ref_field.as_str()),
             created_at: pr.created_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
             merged_at: pr.merged_at.map(|t| t.to_rfc3339()),
         }
@@ -202,13 +202,13 @@ pub struct Review {
     pub author: String,
 
     /// Review state (APPROVED, CHANGES_REQUESTED, COMMENTED, PENDING).
-    pub state: String,
+    pub state: DomainReviewState,
 
     /// Review body text.
     pub body: String,
 
     /// SHA of the commit that was HEAD when this review was submitted.
-    pub commit_id: String,
+    pub commit_id: CommitSha,
 }
 
 impl FFIBoundary for Review {}
@@ -250,7 +250,7 @@ impl FFIBoundary for GithubListIssuesInput {}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GithubGetIssueInput {
     pub repo: Repo,
-    pub number: u64,
+    pub number: IssueNumber,
 }
 
 impl FFIBoundary for GithubGetIssueInput {}
@@ -274,7 +274,7 @@ impl FFIBoundary for GithubListPRsInput {}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GithubGetPRForBranchInput {
     pub repo: Repo,
-    pub head: String,
+    pub head: BranchName,
 }
 
 impl FFIBoundary for GithubGetPRForBranchInput {}
@@ -282,7 +282,7 @@ impl FFIBoundary for GithubGetPRForBranchInput {}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GithubGetPRReviewCommentsInput {
     pub repo: Repo,
-    pub pr_number: u64,
+    pub pr_number: PRNumber,
 }
 
 impl FFIBoundary for GithubGetPRReviewCommentsInput {}
@@ -413,15 +413,15 @@ impl GitHubService {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn get_issue(&self, repo: &Repo, number: u64) -> Result<Issue> {
+    pub async fn get_issue(&self, repo: &Repo, number: IssueNumber) -> Result<Issue> {
         let repo_name = format!("{}/{}", repo.owner, repo.name);
-        info!(repo = %repo_name, number, "GitHub API: Get issue");
+        info!(repo = %repo_name, number = number.as_u64(), "GitHub API: Get issue");
 
         let issue = timeout(
             API_TIMEOUT,
             self.client
                 .issues(repo.owner.as_str(), repo.name.as_str())
-                .get(number),
+                .get(number.as_u64()),
         )
         .await
         .map_err(|_| {
@@ -431,7 +431,7 @@ impl GitHubService {
             )
         })??;
 
-        info!(repo = %repo_name, number, "GitHub API: Get issue successful");
+        info!(repo = %repo_name, number = number.as_u64(), "GitHub API: Get issue successful");
 
         Ok(Issue::from(issue))
     }
@@ -445,7 +445,7 @@ impl GitHubService {
             API_TIMEOUT,
             self.client
                 .pulls(repo.owner.as_str(), repo.name.as_str())
-                .create(spec.title, spec.head, spec.base)
+                .create(spec.title, spec.head.to_string(), spec.base.to_string())
                 .body(spec.body)
                 .send(),
         )
@@ -511,9 +511,9 @@ impl GitHubService {
 
     /// Get a single pull request by number.
     #[tracing::instrument(skip(self))]
-    pub async fn get_pr(&self, repo: &Repo, number: u64) -> Result<PullRequest> {
+    pub async fn get_pr(&self, repo: &Repo, number: PRNumber) -> Result<PullRequest> {
         let pulls_handler = self.client.pulls(repo.owner.as_str(), repo.name.as_str());
-        let pr = timeout(API_TIMEOUT, pulls_handler.get(number))
+        let pr = timeout(API_TIMEOUT, pulls_handler.get(number.as_u64()))
             .await
             .map_err(|_| {
                 anyhow!(
@@ -524,7 +524,7 @@ impl GitHubService {
 
         info!(
             repo = format!("{}/{}", repo.owner, repo.name),
-            number, "GitHub API: Get PR successful"
+            number = number.as_u64(), "GitHub API: Get PR successful"
         );
 
         Ok(PullRequest::from(pr))
@@ -532,14 +532,17 @@ impl GitHubService {
 
     /// Get reviews for a pull request.
     #[tracing::instrument(skip(self))]
-    pub async fn get_pr_reviews(&self, repo: &Repo, number: u64) -> Result<Vec<Review>> {
+    pub async fn get_pr_reviews(&self, repo: &Repo, number: PRNumber) -> Result<Vec<Review>> {
         let route = format!(
             "/repos/{}/{}/pulls/{}/reviews",
-            repo.owner, repo.name, number
+            repo.owner,
+            repo.name,
+            number.as_u64()
         );
         info!(
             repo = format!("{}/{}", repo.owner, repo.name),
-            number, "GitHub API: Get PR reviews"
+            number = number.as_u64(),
+            "GitHub API: Get PR reviews"
         );
 
         let response: Vec<serde_json::Value> =
@@ -554,12 +557,28 @@ impl GitHubService {
 
         let reviews: Vec<Review> = response
             .into_iter()
-            .map(|v| Review {
-                id: v["id"].as_u64().unwrap_or(0),
-                author: v["user"]["login"].as_str().unwrap_or("unknown").to_string(),
-                state: v["state"].as_str().unwrap_or("").to_string(),
-                body: v["body"].as_str().unwrap_or("").to_string(),
-                commit_id: v["commit_id"].as_str().unwrap_or("").to_string(),
+            .map(|v| {
+                let state_str = v["state"].as_str().unwrap_or("");
+                let state = match state_str {
+                    "APPROVED" => DomainReviewState::Approved,
+                    "CHANGES_REQUESTED" => DomainReviewState::ChangesRequested,
+                    "COMMENTED" => DomainReviewState::Commented,
+                    "PENDING" => DomainReviewState::Pending,
+                    "DISMISSED" => DomainReviewState::Dismissed,
+                    _ => DomainReviewState::Pending,
+                };
+                let commit_str = v["commit_id"].as_str().unwrap_or("");
+                Review {
+                    id: v["id"].as_u64().unwrap_or(0),
+                    author: v["user"]["login"].as_str().unwrap_or("unknown").to_string(),
+                    state,
+                    body: v["body"].as_str().unwrap_or("").to_string(),
+                    commit_id: if commit_str.is_empty() {
+                        CommitSha::from("unknown")
+                    } else {
+                        CommitSha::from(commit_str)
+                    },
+                }
             })
             .collect();
 
@@ -571,14 +590,18 @@ impl GitHubService {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn get_pr_for_branch(&self, repo: &Repo, head: &str) -> Result<Option<PullRequest>> {
+    pub async fn get_pr_for_branch(
+        &self,
+        repo: &Repo,
+        head: &BranchName,
+    ) -> Result<Option<PullRequest>> {
         let pulls_handler = self.client.pulls(repo.owner.as_str(), repo.name.as_str());
         let page = timeout(
             API_TIMEOUT,
             pulls_handler
                 .list()
                 .state(params::State::Open)
-                .head(format!("{}:{}", repo.owner, head))
+                .head(format!("{}:{}", repo.owner, head.as_str()))
                 .send(),
         )
         .await
@@ -592,8 +615,10 @@ impl GitHubService {
         let pr = page.into_iter().next();
 
         match &pr {
-            Some(p) => tracing::info!(number = p.number, head, "Found PR for branch"),
-            None => tracing::info!(head, "No PR found for branch"),
+            Some(p) => {
+                tracing::info!(number = p.number, head = head.as_str(), "Found PR for branch")
+            }
+            None => tracing::info!(head = head.as_str(), "No PR found for branch"),
         }
 
         Ok(pr.map(PullRequest::from))
@@ -603,10 +628,10 @@ impl GitHubService {
     pub async fn get_pr_review_comments(
         &self,
         _repo: &Repo,
-        pr_number: u64,
+        pr_number: PRNumber,
     ) -> Result<Vec<ReviewComment>> {
         tracing::debug!(
-            pr_number,
+            pr_number = pr_number.as_u64(),
             "Review comment checking is simplified - returning empty"
         );
         Ok(vec![])
@@ -714,8 +739,11 @@ mod tests {
             name: "repo".into(),
         };
 
-        let issue = service.get_issue(&repo, 1).await.unwrap();
-        assert_eq!(issue.number, 1);
+        let issue = service
+            .get_issue(&repo, IssueNumber::try_from(1u64).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(issue.number.as_u64(), 1);
         assert_eq!(issue.title, "Test Issue");
     }
 
@@ -762,12 +790,12 @@ mod tests {
         let spec = CreatePRSpec {
             title: "New PR".to_string(),
             body: "PR Body".to_string(),
-            head: "feature".to_string(),
-            base: "main".to_string(),
+            head: BranchName::from("feature"),
+            base: BranchName::from("main"),
         };
 
         let pr = service.create_pr(&repo, spec).await.unwrap();
-        assert_eq!(pr.number, 2);
+        assert_eq!(pr.number.as_u64(), 2);
         assert_eq!(pr.title, "New PR");
     }
 
