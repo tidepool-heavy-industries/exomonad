@@ -3,7 +3,7 @@
 // Shells out to `gh` for PR operations. `gh` handles auth, fork awareness,
 // and provides clear error messages. Octocrab stays for other GitHub operations.
 
-use crate::domain::PRNumber;
+use crate::domain::{BranchName, PRNumber};
 use crate::services::git;
 use crate::services::git_worktree::GitWorktreeService;
 use anyhow::{Context, Result};
@@ -22,7 +22,7 @@ use super::tmux_events;
 pub struct FilePRInput {
     pub title: String,
     pub body: String,
-    pub base_branch: Option<String>,
+    pub base_branch: Option<BranchName>,
     pub working_dir: Option<String>,
 }
 
@@ -30,8 +30,8 @@ pub struct FilePRInput {
 pub struct FilePROutput {
     pub pr_url: String,
     pub pr_number: PRNumber,
-    pub head_branch: String,
-    pub base_branch: String,
+    pub head_branch: BranchName,
+    pub base_branch: BranchName,
     pub created: bool,
 }
 
@@ -41,8 +41,8 @@ pub struct FilePROutput {
 struct GhPr {
     number: u64,
     url: String,
-    head_ref_name: String,
-    base_ref_name: String,
+    head_ref_name: BranchName,
+    base_ref_name: BranchName,
 }
 
 /// Structured errors for file_pr operations.
@@ -151,8 +151,8 @@ fn create_pr(
     Ok(GhPr {
         number,
         url,
-        head_ref_name: head.to_string(),
-        base_ref_name: base.to_string(),
+        head_ref_name: BranchName::from(head),
+        base_ref_name: BranchName::from(base),
     })
 }
 
@@ -181,14 +181,14 @@ pub async fn file_pr_async(
         .context("Failed to get workspace bookmark")?
         .ok_or_else(|| anyhow::anyhow!("No bookmark found for workspace at {}", dir))?;
 
-    let base = detect_base_branch(&head, input.base_branch.as_deref());
+    let base = BranchName::from(detect_base_branch(&head, input.base_branch.as_ref().map(|b| b.as_str())).as_str());
 
     info!("[FilePR] head={} base={} dir={}", head, base, dir);
 
     // Push first
     {
         let dir_path = std::path::PathBuf::from(dir);
-        let bookmark = crate::domain::BranchName::from(head.as_str());
+        let bookmark = BranchName::from(head.as_str());
         let git_wt_clone = git_wt.clone();
         tokio::task::spawn_blocking(move || git_wt_clone.push_bookmark(&dir_path, &bookmark))
             .await
@@ -225,7 +225,7 @@ pub async fn file_pr_async(
     let (title, body, base_clone, head_clone, dir_string) = (
         input.title.clone(),
         input.body.clone(),
-        base.clone(),
+        base.to_string(),
         head.clone(),
         dir.to_string(),
     );
@@ -242,7 +242,7 @@ pub async fn file_pr_async(
                 Ok(agent_id) => {
                     let event = crate::ui_protocol::AgentEvent::PrFiled {
                         agent_id,
-                        pr_number: pr.number,
+                        pr_number: PRNumber::new(pr.number),
                         timestamp: tmux_events::now_iso8601(),
                     };
                     if let Err(e) = tmux_events::emit_event(&session, &event) {

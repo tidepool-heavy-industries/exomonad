@@ -6,6 +6,7 @@
 //! - **Telemetry**: Real-time progress and logs
 //! - **Control**: Commands for agent lifecycle management
 
+use crate::domain::PRNumber;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -70,7 +71,7 @@ pub enum AgentEvent {
     #[serde(rename = "pr:filed")]
     PrFiled {
         agent_id: AgentId,
-        pr_number: u64,
+        pr_number: PRNumber,
         timestamp: String,
     },
     #[serde(rename = "copilot:reviewed")]

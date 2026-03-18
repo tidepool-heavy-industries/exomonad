@@ -1,3 +1,4 @@
+use crate::domain::TeamName;
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -7,7 +8,7 @@ use tracing::info;
 ///
 /// Reads the existing config, appends to the members array, writes back atomically.
 pub fn register_synthetic_member(
-    team_name: &str,
+    team_name: &TeamName,
     member_name: &str,
     agent_type: &str,
 ) -> Result<()> {
@@ -17,7 +18,7 @@ pub fn register_synthetic_member(
 
 fn register_synthetic_member_at_path(
     config_path: &PathBuf,
-    team_name: &str,
+    team_name: &TeamName,
     member_name: &str,
     agent_type: &str,
 ) -> Result<()> {
@@ -71,14 +72,14 @@ fn register_synthetic_member_at_path(
 }
 
 /// Remove a synthetic member from a Claude Teams config.json.
-pub fn remove_synthetic_member(team_name: &str, member_name: &str) -> Result<()> {
+pub fn remove_synthetic_member(team_name: &TeamName, member_name: &str) -> Result<()> {
     let config_path = team_config_path(team_name)?;
     remove_synthetic_member_at_path(&config_path, team_name, member_name)
 }
 
 fn remove_synthetic_member_at_path(
     config_path: &PathBuf,
-    team_name: &str,
+    team_name: &TeamName,
     member_name: &str,
 ) -> Result<()> {
     let content = std::fs::read_to_string(config_path)
@@ -99,12 +100,12 @@ fn remove_synthetic_member_at_path(
     Ok(())
 }
 
-fn team_config_path(team_name: &str) -> Result<PathBuf> {
+fn team_config_path(team_name: &TeamName) -> Result<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("HOME directory not found"))?;
     Ok(home
         .join(".claude")
         .join("teams")
-        .join(team_name)
+        .join(team_name.as_str())
         .join("config.json"))
 }
 
@@ -117,7 +118,7 @@ mod tests {
     #[test]
     fn test_synthetic_member_lifecycle() -> Result<()> {
         let dir = tempdir()?;
-        let team_name = "test-team";
+        let team_name = TeamName::from("test-team");
         let config_path = dir.path().join("config.json");
 
         let initial_config = serde_json::json!({
@@ -132,7 +133,7 @@ mod tests {
         fs::write(&config_path, serde_json::to_string_pretty(&initial_config)?)?;
 
         // Register new member
-        register_synthetic_member_at_path(&config_path, team_name, "gemini-1", "gemini-worker")?;
+        register_synthetic_member_at_path(&config_path, &team_name, "gemini-1", "gemini-worker")?;
 
         let content = fs::read_to_string(&config_path)?;
         let config: Value = serde_json::from_str(&content)?;
@@ -141,13 +142,13 @@ mod tests {
         assert!(members.iter().any(|m| m["name"] == "gemini-1"));
 
         // Idempotent registration
-        register_synthetic_member_at_path(&config_path, team_name, "gemini-1", "gemini-worker")?;
+        register_synthetic_member_at_path(&config_path, &team_name, "gemini-1", "gemini-worker")?;
         let content = fs::read_to_string(&config_path)?;
         let config: Value = serde_json::from_str(&content)?;
         assert_eq!(config["members"].as_array().unwrap().len(), 2);
 
         // Remove member
-        remove_synthetic_member_at_path(&config_path, team_name, "gemini-1")?;
+        remove_synthetic_member_at_path(&config_path, &team_name, "gemini-1")?;
         let content = fs::read_to_string(&config_path)?;
         let config: Value = serde_json::from_str(&content)?;
         let members = config["members"].as_array().unwrap();

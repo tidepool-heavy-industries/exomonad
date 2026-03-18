@@ -3,6 +3,7 @@
 //! Uses proto-generated types from `exomonad_proto::effects::file_pr`.
 
 use super::non_empty;
+use crate::domain::BranchName;
 use crate::effects::{
     dispatch_file_pr_effect, EffectHandler, EffectResult, FilePrEffects, ResultExt,
 };
@@ -62,7 +63,7 @@ impl FilePrEffects for FilePRHandler {
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<FilePrResponse> {
         tracing::info!(title = %req.title, "[FilePR] file_pr starting");
-        let base_branch = non_empty(req.base_branch);
+        let base_branch = non_empty(req.base_branch).map(|s| BranchName::from(s.as_str()));
 
         let working_dir = ctx.working_dir.clone();
 
@@ -108,8 +109,8 @@ impl FilePrEffects for FilePRHandler {
                 &serde_json::json!({
                     "pr_number": output.pr_number.as_u64(),
                     "pr_url": output.pr_url,
-                    "head_branch": output.head_branch,
-                    "base_branch": output.base_branch,
+                    "head_branch": output.head_branch.to_string(),
+                    "base_branch": output.base_branch.to_string(),
                     "created": output.created,
                     "title": input.title,
                 }),
@@ -121,8 +122,8 @@ impl FilePrEffects for FilePRHandler {
         Ok(FilePrResponse {
             pr_url: output.pr_url,
             pr_number: output.pr_number.as_u64() as i64,
-            head_branch: output.head_branch,
-            base_branch: output.base_branch,
+            head_branch: output.head_branch.to_string(),
+            base_branch: output.base_branch.to_string(),
             created: output.created,
         })
     }
