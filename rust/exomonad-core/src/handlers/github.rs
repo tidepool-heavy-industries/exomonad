@@ -2,6 +2,7 @@
 //!
 //! Uses proto-generated types from `exomonad_proto::effects::github`.
 
+use crate::domain::{BranchName, IssueNumber, PRNumber};
 use crate::effects::{
     dispatch_github_effect, EffectError, EffectHandler, EffectResult, GitHubEffects,
 };
@@ -92,9 +93,12 @@ impl GitHubEffects for GitHubHandler {
         tracing::info!(owner = %req.owner, repo = %req.repo, number = req.number, "[GitHub] get_issue starting");
         let repo = make_repo(&req.owner, &req.repo);
 
+        let issue_number = IssueNumber::try_from(req.number as u64)
+            .map_err(|e| EffectError::invalid_input(e.to_string()))?;
+
         let raw_issue = self
             .service
-            .get_issue(&repo, req.number as u64)
+            .get_issue(&repo, issue_number)
             .await
             .map_err(|e| EffectError::network_error(e.to_string()))?;
 
@@ -147,9 +151,12 @@ impl GitHubEffects for GitHubHandler {
         tracing::info!(owner = %req.owner, repo = %req.repo, number = req.number, include_reviews = req.include_reviews, "[GitHub] get_pull_request starting");
         let repo = make_repo(&req.owner, &req.repo);
 
+        let pr_number = PRNumber::try_from(req.number as u64)
+            .map_err(|e| EffectError::invalid_input(e.to_string()))?;
+
         let raw_pr = self
             .service
-            .get_pr(&repo, req.number as u64)
+            .get_pr(&repo, pr_number)
             .await
             .map_err(|e| EffectError::network_error(e.to_string()))?;
 
@@ -158,7 +165,7 @@ impl GitHubEffects for GitHubHandler {
         let reviews: Vec<Review> = if req.include_reviews {
             let raw_reviews = self
                 .service
-                .get_pr_reviews(&repo, req.number as u64)
+                .get_pr_reviews(&repo, pr_number)
                 .await
                 .map_err(|e| EffectError::network_error(e.to_string()))?;
             tracing::info!(count = raw_reviews.len(), "[GitHub] fetched reviews");
@@ -186,9 +193,11 @@ impl GitHubEffects for GitHubHandler {
         tracing::info!(owner = %req.owner, repo = %req.repo, branch = %req.branch, "[GitHub] get_pull_request_for_branch starting");
         let repo = make_repo(&req.owner, &req.repo);
 
+        let branch = BranchName::from(req.branch.as_str());
+
         let result = self
             .service
-            .get_pr_for_branch(&repo, &req.branch)
+            .get_pr_for_branch(&repo, &branch)
             .await
             .map_err(|e| EffectError::network_error(e.to_string()))?;
 
@@ -211,11 +220,11 @@ impl GitHubEffects for GitHubHandler {
         let spec = CreatePRSpec {
             title: req.title,
             body: req.body,
-            head: req.head.clone(),
+            head: BranchName::from(req.head.as_str()),
             base: if req.base.is_empty() {
-                "main".to_string()
+                BranchName::from("main")
             } else {
-                req.base
+                BranchName::from(req.base.as_str())
             },
         };
 
@@ -279,7 +288,7 @@ fn item_state_to_proto(state: crate::domain::ItemState) -> i32 {
 
 fn convert_issue(i: crate::services::github::Issue) -> Issue {
     Issue {
-        number: i.number as i32,
+        number: i.number.as_u64() as i32,
         title: i.title,
         body: i.body,
         state: item_state_to_proto(i.state),
@@ -305,7 +314,7 @@ fn convert_issue(i: crate::services::github::Issue) -> Issue {
 
 fn convert_pr(pr: crate::services::github::PullRequest) -> PullRequest {
     PullRequest {
-        number: pr.number as i32,
+        number: pr.number.as_u64() as i32,
         title: pr.title,
         body: pr.body,
         state: item_state_to_proto(pr.state),
@@ -314,24 +323,24 @@ fn convert_pr(pr: crate::services::github::PullRequest) -> PullRequest {
             id: 0,
             avatar_url: String::new(),
         }),
-        head_ref: pr.head_ref,
-        base_ref: pr.base_ref,
+        head_ref: pr.head_ref.to_string(),
+        base_ref: pr.base_ref.to_string(),
         merged: pr.merged_at.is_some(),
         draft: false,
         labels: Vec::new(),
         created_at: 0,
         updated_at: 0,
-        head_sha: pr.head_sha,
+        head_sha: pr.head_sha.to_string(),
     }
 }
 
-fn review_state_to_proto(state: &str) -> i32 {
+fn review_state_to_proto(state: crate::domain::ReviewState) -> i32 {
     match state {
-        "APPROVED" => ReviewState::Approved as i32,
-        "CHANGES_REQUESTED" => ReviewState::ChangesRequested as i32,
-        "COMMENTED" => ReviewState::Commented as i32,
-        "PENDING" => ReviewState::Pending as i32,
-        _ => ReviewState::Unspecified as i32,
+        crate::domain::ReviewState::Approved => ReviewState::Approved as i32,
+        crate::domain::ReviewState::ChangesRequested => ReviewState::ChangesRequested as i32,
+        crate::domain::ReviewState::Commented => ReviewState::Commented as i32,
+        crate::domain::ReviewState::Pending => ReviewState::Pending as i32,
+        crate::domain::ReviewState::Dismissed => ReviewState::Unspecified as i32,
     }
 }
 
@@ -343,10 +352,10 @@ fn convert_review(r: crate::services::github::Review) -> Review {
             id: 0,
             avatar_url: String::new(),
         }),
-        state: review_state_to_proto(&r.state),
+        state: review_state_to_proto(r.state),
         body: r.body,
         submitted_at: 0,
-        commit_id: r.commit_id,
+        commit_id: r.commit_id.to_string(),
     }
 }
 
