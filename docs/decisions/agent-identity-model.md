@@ -12,7 +12,7 @@ There are no UUIDs, no registration databases, no coordination protocols. The fi
 
 ### Identity = Birth-Branch
 
-When `spawn_subtree` creates a new agent on branch `main.feature.auth`, that agent's identity is `main.feature.auth`. The root TL's identity is `root`.
+When `fork_wave` creates a new agent on branch `main.feature.auth`, that agent's identity is `main.feature.auth`. The root TL's identity is `root`.
 
 The identity is:
 - **Immutable**: Set at spawn, never changes
@@ -37,7 +37,7 @@ This means `notify_parent` doesn't need a "parent address" parameter — the ser
 Agents are discovered by scanning the filesystem:
 - **Worktree agents**: `.exo/worktrees/{slug}/` directories
 - **Ephemeral workers**: `.exo/agents/{name}/` directories
-- **Liveness**: Cross-referenced with Zellij tab/pane presence
+- **Liveness**: Cross-referenced with tmux window/pane presence
 
 No central registry to keep in sync. If a worktree directory exists, the agent exists (or existed).
 
