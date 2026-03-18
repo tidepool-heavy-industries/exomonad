@@ -102,54 +102,18 @@ impl ServerClient {
 
     /// Low-level GET over UDS. Returns response body bytes.
     async fn raw_get(&self, path: &str) -> Result<Vec<u8>> {
-        use http_body_util::{BodyExt, Empty};
-        use hyper::Request;
-        use hyper_util::rt::TokioIo;
-        use tokio::net::UnixStream;
-
-        let stream = UnixStream::connect(&self.socket)
-            .await
-            .with_context(|| format!("Failed to connect to {}", self.socket.display()))?;
-        let io = TokioIo::new(stream);
-
-        let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
-            .await
-            .context("HTTP handshake failed")?;
-        tokio::spawn(async move {
-            let _ = conn.await;
-        });
-
-        let req = Request::get(path)
-            .header("host", "localhost")
-            .body(Empty::<hyper::body::Bytes>::new())?;
-
-        let resp = sender
-            .send_request(req)
-            .await
-            .context("GET request failed")?;
-        let status = resp.status().as_u16();
-        let body = resp
-            .into_body()
-            .collect()
-            .await
-            .context("Failed to read response body")?
-            .to_bytes()
-            .to_vec();
-
-        if !(200..300).contains(&status) {
-            return Err(anyhow::anyhow!(
-                "Server returned {} for {}: {}",
-                status,
-                path,
-                String::from_utf8_lossy(&body)
-            ));
-        }
-
-        Ok(body)
+        use hyper::Method;
+        self.raw_request(Method::GET, path, None).await
     }
 
     /// Low-level POST over UDS. Returns response body bytes.
     async fn raw_post(&self, path: &str, body: &[u8]) -> Result<Vec<u8>> {
+        use hyper::Method;
+        self.raw_request(Method::POST, path, Some(body)).await
+    }
+
+    /// Shared low-level request logic over UDS.
+    async fn raw_request(&self, method: hyper::Method, path: &str, body: Option<&[u8]>) -> Result<Vec<u8>> {
         use http_body_util::{BodyExt, Full};
         use hyper::Request;
         use hyper_util::rt::TokioIo;
@@ -167,15 +131,25 @@ impl ServerClient {
             let _ = conn.await;
         });
 
-        let req = Request::post(path)
-            .header("host", "localhost")
-            .header("content-type", "application/json")
-            .body(Full::new(hyper::body::Bytes::from(body.to_vec())))?;
+        let mut req_builder = Request::builder()
+            .method(&method)
+            .uri(path)
+            .header("host", "localhost");
+
+        if body.is_some() {
+            req_builder = req_builder.header("content-type", "application/json");
+        }
+
+        let req = if let Some(b) = body {
+            req_builder.body(Full::new(hyper::body::Bytes::from(b.to_vec())))?
+        } else {
+            req_builder.body(Full::new(hyper::body::Bytes::new()))?
+        };
 
         let resp = sender
             .send_request(req)
             .await
-            .context("POST request failed")?;
+            .context(format!("{} request failed", method))?;
         let status = resp.status().as_u16();
         let resp_body = resp
             .into_body()

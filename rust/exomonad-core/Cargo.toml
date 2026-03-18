@@ -38,6 +38,9 @@ runtime = [
     "dep:thiserror",
     "dep:axum",
     "dep:tower-http",
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:http-body-util",
     "dep:futures-util",
     "dep:agent-client-protocol",
     "dep:agent-client-protocol-schema",
@@ -100,6 +103,9 @@ url = { version = "2", optional = true }
 # Runtime feature: HTTP transport
 axum = { version = "0.8", optional = true }
 tower-http = { version = "0.6", features = ["cors"], optional = true }
+hyper = { workspace = true, optional = true }
+hyper-util = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }

@@ -129,8 +129,10 @@ async fn deliver_via_uds(
     message: &str,
     summary: &str,
 ) -> Result<(), String> {
+    use http_body_util::{BodyExt, Full};
+    use hyper::Request;
+    use hyper_util::rt::TokioIo;
     use std::time::Duration;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::UnixStream;
 
     let body = serde_json::json!({
@@ -140,34 +142,45 @@ async fn deliver_via_uds(
     });
     let body_bytes = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
 
-    let request = format!(
-        "POST /notify HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body_bytes.len()
-    );
-
     let result = tokio::time::timeout(Duration::from_secs(5), async {
-        let mut stream = UnixStream::connect(socket_path)
+        let stream = UnixStream::connect(socket_path)
             .await
             .map_err(|e| e.to_string())?;
-        stream
-            .write_all(request.as_bytes())
-            .await
-            .map_err(|e| e.to_string())?;
-        stream
-            .write_all(&body_bytes)
-            .await
-            .map_err(|e| e.to_string())?;
-        stream.flush().await.map_err(|e| e.to_string())?;
+        let io = TokioIo::new(stream);
 
-        let mut buf = [0u8; 128];
-        let n = stream.read(&mut buf).await.map_err(|e| e.to_string())?;
-        let response = String::from_utf8_lossy(&buf[..n]);
-        if response.contains("200") || response.contains("204") || response.contains("202") {
+        let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        tokio::spawn(async move {
+            let _ = conn.await;
+        });
+
+        let req = Request::post("/notify")
+            .header("host", "localhost")
+            .header("content-type", "application/json")
+            .body(Full::new(hyper::body::Bytes::from(body_bytes)))
+            .map_err(|e| e.to_string())?;
+
+        let resp = sender
+            .send_request(req)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let status = resp.status();
+        if status.is_success() {
             Ok(())
         } else {
+            let body_bytes = resp
+                .into_body()
+                .collect()
+                .await
+                .map_err(|e| e.to_string())?
+                .to_bytes();
             Err(format!(
-                "UDS server responded: {}",
-                response.lines().next().unwrap_or("empty")
+                "UDS server responded: {} - {}",
+                status,
+                String::from_utf8_lossy(&body_bytes).lines().next().unwrap_or("empty")
             ))
         }
     })
