@@ -45,6 +45,8 @@ exomonad shutdown                 # Gracefully shut down the running server
 
 `exomonad init` requires `exomonad new` to have been run first to bootstrap the project configuration and WASM plugins.
 
+Init also refreshes project-local WASM from `~/.exo/wasm/` if the global copy is newer (consuming projects only, not source projects with `.exo/roles/`).
+
 Claude MCP is auto-registered during init. For Gemini, register manually (`gemini mcp add ...`).
 
 Use `--recreate` to delete an existing session and create fresh (e.g., after binary updates).
