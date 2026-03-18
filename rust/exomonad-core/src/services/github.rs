@@ -2,13 +2,45 @@ use crate::domain::{
     BranchName, CommitSha, IssueNumber, ItemState, PRNumber, ReviewState as DomainReviewState,
 };
 use crate::{FFIBoundary, GithubOwner, GithubRepo};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use octocrab::{models, params, Octocrab, OctocrabBuilder};
 use serde::{Deserialize, Serialize};
 use tokio::time::{timeout, Duration};
 use tracing::info;
 
 const API_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Build an Octocrab client from GITHUB_TOKEN environment variable.
+///
+/// Returns actionable error messages if the token is missing.
+pub fn build_octocrab() -> Result<Octocrab> {
+    let token = std::env::var("GITHUB_TOKEN").map_err(|_| {
+        anyhow!("GitHub token required. Set GITHUB_TOKEN environment variable or run `gh auth login` to authenticate.")
+    })?;
+
+    if token.is_empty() {
+        return Err(anyhow!("GitHub token is empty. Set GITHUB_TOKEN environment variable or run `gh auth login` to authenticate."));
+    }
+
+    let client = OctocrabBuilder::new()
+        .personal_token(token)
+        .build()
+        .context("Failed to build Octocrab client")?;
+
+    Ok(client)
+}
+
+/// Map octocrab errors to user-friendly messages for GitHub API operations.
+pub fn map_octo_err(e: octocrab::Error) -> String {
+    if let octocrab::Error::GitHub { source, .. } = &e {
+        match source.status_code.as_u16() {
+            401 => return "GitHub authentication failed. Token may be expired. Run `gh auth login` to refresh, or set a valid GITHUB_TOKEN.".to_string(),
+            403 => return "GitHub token lacks required permissions. Ensure your token has `repo` scope.".to_string(),
+            _ => {}
+        }
+    }
+    e.to_string()
+}
 
 fn octocrab_issue_state(state: models::IssueState) -> ItemState {
     match state {
@@ -654,6 +686,23 @@ mod tests {
     use super::*;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn test_build_octocrab_missing_token() {
+        // Ensure GITHUB_TOKEN is not set for this test
+        let old_token = std::env::var("GITHUB_TOKEN").ok();
+        std::env::remove_var("GITHUB_TOKEN");
+        
+        let result = build_octocrab();
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("GitHub token required"));
+        
+        // Restore token if it was set
+        if let Some(t) = old_token {
+            std::env::set_var("GITHUB_TOKEN", t);
+        }
+    }
 
     async fn create_mock_service() -> (GitHubService, MockServer) {
         let mock_server = MockServer::start().await;

@@ -1,11 +1,12 @@
 use crate::domain::PRNumber;
-use anyhow::{Context, Result};
+use crate::services::git_worktree::GitWorktreeService;
+use crate::services::github::{build_octocrab, map_octo_err};
+use crate::services::repo;
+use anyhow::Result;
+use octocrab::params::pulls::MergeMethod;
 use std::sync::Arc;
-use tokio::process::Command;
 use tokio::time::Duration;
 use tracing::{error, info};
-
-use crate::services::git_worktree::GitWorktreeService;
 
 const MERGE_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -40,60 +41,67 @@ pub async fn merge_pr_async(
         "Merging PR"
     );
 
-    // Get branch name before merge to identify potential worktree
-    let branch_output = tokio::time::timeout(
-        Duration::from_secs(10),
-        Command::new("gh")
-            .args([
-                "pr",
-                "view",
-                &pr_number.to_string(),
-                "--json",
-                "headRefName",
-                "-q",
-                ".headRefName",
-            ])
-            .current_dir(dir)
-            .output(),
-    )
-    .await;
+    let octo = build_octocrab()?;
+    let repo_info = repo::get_repo_info(dir).await?;
 
-    let branch_name = match branch_output {
-        Ok(Ok(output)) if output.status.success() => {
-            String::from_utf8_lossy(&output.stdout).trim().to_string()
-        }
-        _ => String::new(),
+    // Get branch name before merge to identify potential worktree
+    let pr = match tokio::time::timeout(
+        Duration::from_secs(10),
+        octo.pulls(&repo_info.owner, &repo_info.repo)
+            .get(pr_number.as_u64()),
+    )
+    .await
+    {
+        Ok(Ok(pr)) => Some(pr),
+        _ => None,
     };
+
+    let branch_name = pr
+        .as_ref()
+        .map(|p| p.head.ref_field.clone())
+        .unwrap_or_default();
 
     if !branch_name.is_empty() {
         info!(branch_name = %branch_name, "PR branch name identified");
     }
 
-    // Step 1: gh pr merge
-    let strategy_flag = format!("--{}", strat);
-    let output = tokio::time::timeout(
-        MERGE_TIMEOUT,
-        Command::new("gh")
-            .args(["pr", "merge", &pr_number.to_string(), &strategy_flag])
-            .current_dir(dir)
-            .output(),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("gh pr merge timed out after {}s", MERGE_TIMEOUT.as_secs()))?
-    .context("Failed to run gh pr merge")?;
+    // Step 1: merge PR
+    let merge_method = match strat {
+        "merge" => MergeMethod::Merge,
+        "squash" => MergeMethod::Squash,
+        "rebase" => MergeMethod::Rebase,
+        _ => MergeMethod::Squash,
+    };
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        error!(stderr = %stderr, "gh pr merge failed");
+    let result = tokio::time::timeout(
+        MERGE_TIMEOUT,
+        octo.pulls(&repo_info.owner, &repo_info.repo)
+            .merge(pr_number.as_u64())
+            .method(merge_method)
+            .send(),
+    )
+    .await;
+
+    let merge_res = match result {
+        Ok(Ok(res)) => Ok(res),
+        Ok(Err(e)) => Err(anyhow::anyhow!("GitHub merge failed: {}", map_octo_err(e))),
+        Err(_) => Err(anyhow::anyhow!(
+            "GitHub merge timed out after {}s",
+            MERGE_TIMEOUT.as_secs()
+        )),
+    };
+
+    if let Err(e) = merge_res {
+        error!(error = %e, "GitHub merge failed");
         return Ok(MergePROutput {
             success: false,
-            message: format!("gh pr merge failed: {}", stderr),
+            message: e.to_string(),
             git_fetched: false,
             branch_name,
         });
     }
 
-    let merge_msg = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let merge_res = merge_res.unwrap();
     info!(pr_number = pr_number.as_u64(), "PR merged successfully");
 
     // Step 2: git fetch (best-effort, pulls merged changes)
@@ -118,10 +126,14 @@ pub async fn merge_pr_async(
 
     Ok(MergePROutput {
         success: true,
-        message: if merge_msg.is_empty() {
-            format!("PR #{} merged via {}", pr_number, strat)
+        message: if let Some(msg) = merge_res.message {
+            if msg.is_empty() {
+                format!("PR #{} merged via {}", pr_number, strat)
+            } else {
+                msg
+            }
         } else {
-            merge_msg
+            format!("PR #{} merged via {}", pr_number, strat)
         },
         git_fetched,
         branch_name,
