@@ -359,15 +359,15 @@ mod tests {
 
         // 1. Init git repo
         use std::process::Command;
-        Command::new("git").args(["init", "-b", "main"]).current_dir(dir).status()?;
-        Command::new("git").args(["config", "user.email", "test@example.com"]).current_dir(dir).status()?;
-        Command::new("git").args(["config", "user.name", "Test"]).current_dir(dir).status()?;
+        assert!(Command::new("git").args(["init", "-b", "main"]).current_dir(dir).status()?.success());
+        assert!(Command::new("git").args(["config", "user.email", "test@example.com"]).current_dir(dir).status()?.success());
+        assert!(Command::new("git").args(["config", "user.name", "Test"]).current_dir(dir).status()?.success());
         std::fs::write(dir.join("README.md"), "test")?;
-        Command::new("git").args(["add", "README.md"]).current_dir(dir).status()?;
-        Command::new("git").args(["commit", "-m", "init"]).current_dir(dir).status()?;
+        assert!(Command::new("git").args(["add", "README.md"]).current_dir(dir).status()?.success());
+        assert!(Command::new("git").args(["commit", "-m", "init"]).current_dir(dir).status()?.success());
 
         // 2. Create a feature branch
-        Command::new("git").args(["checkout", "-b", "feature-branch"]).current_dir(dir).status()?;
+        assert!(Command::new("git").args(["checkout", "-b", "feature-branch"]).current_dir(dir).status()?.success());
         let git_wt = Arc::new(GitWorktreeService::new(dir.to_path_buf()));
 
         let input = FilePRInput {

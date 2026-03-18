@@ -15,11 +15,11 @@ const API_TIMEOUT: Duration = Duration::from_secs(30);
 /// Returns actionable error messages if the token is missing.
 pub fn build_octocrab() -> Result<Octocrab> {
     let token = std::env::var("GITHUB_TOKEN").map_err(|_| {
-        anyhow!("GitHub token required. Set GITHUB_TOKEN environment variable or run `gh auth login` to authenticate.")
+        anyhow!("GitHub token required. Set the GITHUB_TOKEN environment variable.")
     })?;
 
     if token.is_empty() {
-        return Err(anyhow!("GitHub token is empty. Set GITHUB_TOKEN environment variable or run `gh auth login` to authenticate."));
+        return Err(anyhow!("GitHub token is empty. Set the GITHUB_TOKEN environment variable."));
     }
 
     let client = OctocrabBuilder::new()
@@ -34,7 +34,7 @@ pub fn build_octocrab() -> Result<Octocrab> {
 pub fn map_octo_err(e: octocrab::Error) -> String {
     if let octocrab::Error::GitHub { source, .. } = &e {
         match source.status_code.as_u16() {
-            401 => return "GitHub authentication failed. Token may be expired. Run `gh auth login` to refresh, or set a valid GITHUB_TOKEN.".to_string(),
+            401 => return "GitHub authentication failed. Token may be expired or invalid. Set a valid GITHUB_TOKEN.".to_string(),
             403 => return "GitHub token lacks required permissions. Ensure your token has `repo` scope.".to_string(),
             _ => {}
         }

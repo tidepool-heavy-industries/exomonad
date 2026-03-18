@@ -149,7 +149,7 @@ impl ServerClient {
         let resp = sender
             .send_request(req)
             .await
-            .context(format!("{} request failed", method))?;
+            .with_context(|| format!("{} request failed", method))?;
         let status = resp.status().as_u16();
         let resp_body = resp
             .into_body()
