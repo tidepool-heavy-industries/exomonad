@@ -195,7 +195,7 @@ impl GitWorktreeService {
         workspace_path: &Path,
     ) -> Result<Option<String>, WorktreeError> {
         let output = std::process::Command::new("git")
-            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .args(["branch", "--show-current"])
             .current_dir(workspace_path)
             .output()
             .map_err(|e| WorktreeError::GitError {
@@ -336,7 +336,7 @@ mod tests {
 
     fn get_default_branch(repo_dir: &std::path::Path) -> String {
         let output = Command::new("git")
-            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .args(["branch", "--show-current"])
             .current_dir(repo_dir)
             .output()
             .expect("failed to get default branch");

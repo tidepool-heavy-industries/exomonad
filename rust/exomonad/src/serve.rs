@@ -158,15 +158,17 @@ pub async fn resolve_agent_birth_branch(
     // 1. Try worktree (subtrees have their own git branch)
     let worktree_path = worktree_base.join(slug);
     match tokio::process::Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .args(["branch", "--show-current"])
         .current_dir(&worktree_path)
         .output()
         .await
     {
         Ok(output) if output.status.success() => {
             let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            tracing::debug!(agent = %agent_name, branch = %branch, "Resolved agent birth branch from worktree");
-            return Ok(BirthBranch::from(branch.as_str()));
+            if !branch.is_empty() {
+                tracing::debug!(agent = %agent_name, branch = %branch, "Resolved agent birth branch from worktree");
+                return Ok(BirthBranch::from(branch.as_str()));
+            }
         }
         _ => {}
     }

@@ -152,19 +152,19 @@ impl BirthBranch {
     /// Returns an error if git is not available or HEAD is detached.
     pub fn root() -> std::result::Result<Self, anyhow::Error> {
         let output = std::process::Command::new("git")
-            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .args(["branch", "--show-current"])
             .output()
-            .map_err(|e| anyhow::anyhow!("Failed to execute git rev-parse: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to execute git branch: {}", e))?;
 
         if !output.status.success() {
             anyhow::bail!(
-                "git rev-parse failed: {}",
+                "git branch --show-current failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
         }
 
         let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if branch.is_empty() || branch == "HEAD" {
+        if branch.is_empty() {
             anyhow::bail!("HEAD is detached or branch name is empty");
         }
 
