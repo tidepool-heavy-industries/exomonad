@@ -3,10 +3,12 @@ use crate::plugin_manager::PluginManager;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::AgentType;
 use crate::services::event_queue::EventQueue;
+use crate::services::github::{build_octocrab, map_octo_err};
 use crate::services::repo;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use claude_teams_bridge::TeamRegistry;
 use exomonad_proto::effects::events::{event::EventType, AgentMessage, Event};
+use octocrab::{params, Octocrab};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -28,6 +30,7 @@ pub struct GitHubPoller {
     acp_registry: Option<Arc<AcpRegistry>>,
     plugins: Option<PluginMap>,
     event_log: Option<Arc<super::event_log::EventLog>>,
+    octo: Option<Octocrab>,
 }
 
 /// A Copilot review comment with optional file context.
@@ -71,11 +74,6 @@ enum PendingAction {
         comments: Option<Vec<CopilotComment>>,
         reviews: Option<Vec<CopilotReview>>,
     },
-}
-
-#[derive(Deserialize)]
-struct GitHubUser {
-    login: String,
 }
 
 #[derive(Debug, Clone)]
@@ -285,6 +283,7 @@ impl GitHubPoller {
             acp_registry: None,
             plugins: None,
             event_log: None,
+            octo: build_octocrab().ok(),
         }
     }
 
@@ -522,45 +521,47 @@ impl GitHubPoller {
         }
 
         // 2. Fetch all open PRs
-        let endpoint = format!("/repos/{}/{}/pulls?state=open&per_page=100", owner, repo);
-        let output = Command::new("gh").args(["api", &endpoint]).output().await?;
+        let octo = match &self.octo {
+            Some(o) => o,
+            None => {
+                tracing::debug!("GitHubPoller: no octocrab client, skipping cycle");
+                return Ok(());
+            }
+        };
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!("Failed to fetch PRs: {}", stderr.trim());
-            return Ok(());
-        }
+        let prs_page = octo
+            .pulls(&owner, &repo)
+            .list()
+            .state(params::State::Open)
+            .per_page(100)
+            .send()
+            .await;
 
-        #[derive(Deserialize)]
-        struct PR {
-            number: u64,
-            head: Head,
-        }
-        #[derive(Deserialize)]
-        struct Head {
-            sha: String,
-            #[serde(rename = "ref")]
-            ref_name: String,
-        }
-
-        let prs: Vec<PR> =
-            serde_json::from_slice(&output.stdout).context("Failed to parse PRs JSON")?;
+        let prs = match prs_page {
+            Ok(page) => page.into_iter().collect::<Vec<_>>(),
+            Err(e) => {
+                warn!("Failed to fetch PRs via Octocrab: {}", map_octo_err(e));
+                return Ok(());
+            }
+        };
 
         let mut pr_map = HashMap::new();
         for pr in prs {
-            pr_map.insert(pr.head.ref_name.clone(), pr);
+            let ref_name = pr.head.ref_field.clone();
+            let sha = pr.head.sha.clone();
+            pr_map.insert(ref_name, (pr.number, sha));
         }
 
         // 3. Match branches to PRs
         for wb in branches {
-            if let Some(pr) = pr_map.get(wb.branch.as_str()) {
+            if let Some((pr_number, pr_sha)) = pr_map.get(wb.branch.as_str()) {
                 if let Err(e) = self
                     .process_pr(
                         &owner,
                         &repo,
                         wb.branch.as_str(),
-                        PRNumber::new(pr.number),
-                        &pr.head.sha,
+                        PRNumber::new(*pr_number),
+                        pr_sha,
                         wb.agent_type,
                     )
                     .await
@@ -803,71 +804,63 @@ impl GitHubPoller {
         Ok(())
     }
 
-    /// Fetch Copilot review activity on a PR.
-    ///
-    /// Returns (inline_comments, review_bodies) where inline comments include
-    /// file path and diff hunk context for actionable feedback.
     async fn fetch_copilot_activity(
         &self,
         owner: &str,
         repo: &str,
         pr_number: PRNumber,
     ) -> Result<(Vec<CopilotComment>, Vec<CopilotReview>)> {
+        let octo = match &self.octo {
+            Some(o) => o,
+            None => return Ok((Vec::new(), Vec::new())),
+        };
+
         // Inline comments (with file context)
-        let endpoint = format!("/repos/{}/{}/pulls/{}/comments", owner, repo, pr_number);
-        let output = Command::new("gh").args(["api", &endpoint]).output().await?;
         let mut inline_comments = Vec::new();
+        let comments_page = octo
+            .pulls(owner, repo)
+            .list_comments(Some(pr_number.as_u64()))
+            .send()
+            .await;
 
-        if output.status.success() {
-            #[derive(Deserialize)]
-            struct Comment {
-                body: String,
-                user: GitHubUser,
-                path: Option<String>,
-                diff_hunk: Option<String>,
-            }
-
-            if let Ok(comments) = serde_json::from_slice::<Vec<Comment>>(&output.stdout) {
-                for c in comments {
-                    if c.user.login.to_lowercase().contains("copilot") {
-                        inline_comments.push(CopilotComment {
-                            body: c.body,
-                            path: c.path,
-                            diff_hunk: c.diff_hunk,
-                        });
-                    }
+        if let Ok(page) = comments_page {
+            for c in page {
+                let user_login = c.user.as_ref().map(|u| u.login.clone()).unwrap_or_default();
+                if user_login.to_lowercase().contains("copilot") {
+                    inline_comments.push(CopilotComment {
+                        body: c.body,
+                        path: Some(c.path),
+                        diff_hunk: Some(c.diff_hunk),
+                    });
                 }
             }
         }
 
         // Reviews (with body text and state)
-        let endpoint_reviews = format!("/repos/{}/{}/pulls/{}/reviews", owner, repo, pr_number);
-        let output_reviews = Command::new("gh")
-            .args(["api", &endpoint_reviews])
-            .output()
-            .await?;
         let mut copilot_reviews = Vec::new();
+        let reviews_page = octo
+            .pulls(owner, repo)
+            .list_reviews(pr_number.as_u64())
+            .send()
+            .await;
 
-        if output_reviews.status.success() {
-            #[derive(Deserialize)]
-            struct Review {
-                body: Option<String>,
-                state: String,
-                user: GitHubUser,
-            }
-            if let Ok(reviews) = serde_json::from_slice::<Vec<Review>>(&output_reviews.stdout) {
-                for r in reviews {
-                    if r.user.login.to_lowercase().contains("copilot") {
-                        let state = match r.state.as_str() {
-                            "APPROVED" => ReviewState::Approved,
-                            "CHANGES_REQUESTED" => ReviewState::ChangesRequested,
-                            _ => ReviewState::None,
-                        };
-                        copilot_reviews.push(CopilotReview {
-                            body: r.body.unwrap_or_default(),
-                            state,
-                        });
-                    }
+        if let Ok(page) = reviews_page {
+            for r in page {
+                let user_login = r.user.as_ref().map(|u| u.login.clone()).unwrap_or_default();
+                if user_login.to_lowercase().contains("copilot") {
+                    let state = match r.state {
+                        Some(octocrab::models::pulls::ReviewState::Approved) => {
+                            ReviewState::Approved
+                        }
+                        Some(octocrab::models::pulls::ReviewState::ChangesRequested) => {
+                            ReviewState::ChangesRequested
+                        }
+                        _ => ReviewState::None,
+                    };
+                    copilot_reviews.push(CopilotReview {
+                        body: r.body.unwrap_or_default(),
+                        state,
+                    });
                 }
             }
         }
@@ -876,25 +869,20 @@ impl GitHubPoller {
     }
 
     async fn fetch_ci_status(&self, owner: &str, repo: &str, sha: &str) -> Result<String> {
-        // gh api repos/{owner}/{repo}/commits/{sha}/check-runs
-        let endpoint = format!("/repos/{}/{}/commits/{}/check-runs", owner, repo, sha);
-        let output = Command::new("gh").args(["api", &endpoint]).output().await?;
+        let octo = match &self.octo {
+            Some(o) => o,
+            None => return Ok("unknown".to_string()),
+        };
 
-        if !output.status.success() {
-            return Ok("unknown".to_string());
-        }
-
-        #[derive(Deserialize)]
-        struct CheckRuns {
-            check_runs: Vec<CheckRun>,
-        }
-        #[derive(Deserialize)]
-        struct CheckRun {
-            conclusion: Option<String>,
-            status: String,
-        }
-
-        let runs: CheckRuns = serde_json::from_slice(&output.stdout)?;
+        let runs = match octo
+            .checks(owner, repo)
+            .list_check_runs_for_git_ref(octocrab::params::repos::Commitish(sha.to_string()))
+            .send()
+            .await
+        {
+            Ok(runs) => runs,
+            Err(_) => return Ok("unknown".to_string()),
+        };
 
         // Simplified logic: if any failure -> failure. If all success -> success. Else pending.
         let mut any_failure = false;
@@ -912,7 +900,7 @@ impl GitHubPoller {
                 _ => {
                     // Pending, skipped, neutral, etc.
                     // If it's not success or failure, it means we are not 'all_success'.
-                    if run.status == "in_progress" || run.status == "queued" {
+                    if run.completed_at.is_none() {
                         all_success = false;
                     }
                     // For now, if skipped, we treat as neutral (don't break all_success?)

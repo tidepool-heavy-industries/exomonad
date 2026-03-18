@@ -1,13 +1,14 @@
-// File PR service - creates/updates GitHub PRs using `gh` CLI
+// File PR service - creates/updates GitHub PRs using GitHub API via octocrab
 //
-// Shells out to `gh` for PR operations. `gh` handles auth, fork awareness,
-// and provides clear error messages. Octocrab stays for other GitHub operations.
+// Replaces `gh` CLI subprocess calls with octocrab typed API.
 
 use crate::domain::{BranchName, PRNumber};
 use crate::services::git;
 use crate::services::git_worktree::GitWorktreeService;
+use crate::services::github::{build_octocrab, map_octo_err};
+use crate::services::repo;
 use anyhow::{Context, Result};
-use duct::cmd;
+use octocrab::params;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -35,7 +36,7 @@ pub struct FilePROutput {
     pub created: bool,
 }
 
-/// Parsed from `gh pr list/create/view --json` output.
+/// Parsed from GitHub API response.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GhPr {
@@ -51,13 +52,13 @@ enum FilePrError {
     #[error("push failed: {0}")]
     Push(String),
 
-    #[error("gh pr create failed: {0}")]
+    #[error("GitHub PR create failed: {0}")]
     Create(String),
 
-    #[error("gh pr edit failed: {0}")]
+    #[error("GitHub PR edit failed: {0}")]
     Update(String),
 
-    #[error("gh pr list failed: {0}")]
+    #[error("GitHub PR list failed: {0}")]
     List(String),
 }
 
@@ -85,92 +86,89 @@ fn detect_base_branch(head: &str, explicit: Option<&str>) -> String {
 }
 
 // ============================================================================
-// `gh` CLI operations
+// Octocrab operations
 // ============================================================================
 
-fn find_existing_pr(head_branch: &str, dir: &str) -> Result<Option<GhPr>, FilePrError> {
-    let json = cmd!(
-        "gh",
-        "pr",
-        "list",
-        "--head",
-        head_branch,
-        "--state",
-        "open",
-        "--json",
-        "number,url,headRefName,baseRefName",
-        "--limit",
-        "1"
-    )
-    .dir(dir)
-    .read()
-    .map_err(|e| FilePrError::List(e.to_string()))?;
+async fn find_existing_pr(
+    octo: &octocrab::Octocrab,
+    owner: &str,
+    repo: &str,
+    head_branch: &str,
+) -> Result<Option<GhPr>, FilePrError> {
+    let page = octo
+        .pulls(owner, repo)
+        .list()
+        .head(head_branch)
+        .state(params::State::Open)
+        .per_page(1)
+        .send()
+        .await
+        .map_err(|e| FilePrError::List(map_octo_err(e)))?;
 
-    let prs: Vec<GhPr> =
-        serde_json::from_str(&json).map_err(|e| FilePrError::List(format!("JSON parse: {e}")))?;
-    Ok(prs.into_iter().next())
+    let pr = page.into_iter().next().map(|p| GhPr {
+        number: p.number,
+        url: p.html_url.map(|u| u.to_string()).unwrap_or_default(),
+        head_ref_name: BranchName::from(p.head.ref_field.as_str()),
+        base_ref_name: BranchName::from(p.base.ref_field.as_str()),
+    });
+    Ok(pr)
 }
 
-fn update_pr(number: PRNumber, title: &str, body: &str, dir: &str) -> Result<(), FilePrError> {
-    cmd!(
-        "gh",
-        "pr",
-        "edit",
-        number.to_string(),
-        "--title",
-        title,
-        "--body",
-        body
-    )
-    .dir(dir)
-    .read()
-    .map_err(|e| FilePrError::Update(e.to_string()))?;
+async fn update_pr(
+    octo: &octocrab::Octocrab,
+    owner: &str,
+    repo: &str,
+    number: PRNumber,
+    title: &str,
+    body: &str,
+) -> Result<(), FilePrError> {
+    octo.pulls(owner, repo)
+        .update(number.as_u64())
+        .title(title)
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| FilePrError::Update(map_octo_err(e)))?;
     Ok(())
 }
 
-fn create_pr(
+async fn create_pr(
+    octo: &octocrab::Octocrab,
+    owner: &str,
+    repo: &str,
     title: &str,
     body: &str,
     base: &str,
     head: &str,
-    dir: &str,
 ) -> Result<GhPr, FilePrError> {
-    // gh pr create outputs the PR URL to stdout (no --json support)
-    let url = cmd!(
-        "gh", "pr", "create", "--title", title, "--body", body, "--base", base, "--head", head
-    )
-    .dir(dir)
-    .read()
-    .map_err(|e| FilePrError::Create(e.to_string()))?;
-    let url = url.trim().to_string();
-    info!("[FilePR] Created PR: {}", url);
-
-    let number = parse_pr_number_from_url(&url)
-        .ok_or_else(|| FilePrError::Create(format!("could not parse PR number from URL: {url}")))?;
+    let pr = octo
+        .pulls(owner, repo)
+        .create(title, head, base)
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| FilePrError::Create(map_octo_err(e)))?;
 
     Ok(GhPr {
-        number,
-        url,
-        head_ref_name: BranchName::from(head),
-        base_ref_name: BranchName::from(base),
+        number: pr.number,
+        url: pr.html_url.map(|u| u.to_string()).unwrap_or_default(),
+        head_ref_name: BranchName::from(pr.head.ref_field.as_str()),
+        base_ref_name: BranchName::from(pr.base.ref_field.as_str()),
     })
-}
-
-/// Parse a PR number from a GitHub PR URL (e.g., "https://github.com/.../pull/123" → 123).
-fn parse_pr_number_from_url(url: &str) -> Option<u64> {
-    url.rsplit('/').next().and_then(|s| s.parse().ok())
 }
 
 // ============================================================================
 // Main implementation
 // ============================================================================
 
-/// File a PR using `gh` CLI. Pushes the branch, creates or updates the PR.
+/// File a PR using GitHub API. Pushes the branch, creates or updates the PR.
 pub async fn file_pr_async(
     input: &FilePRInput,
     git_wt: Arc<GitWorktreeService>,
 ) -> Result<FilePROutput> {
     let dir = input.working_dir.as_deref().unwrap_or(".");
+    let octo = build_octocrab()?;
+    let repo_info = repo::get_repo_info(dir).await?;
 
     // Get branch from the agent's working directory, not server CWD
     let dir_path = std::path::PathBuf::from(dir);
@@ -200,18 +198,19 @@ pub async fn file_pr_async(
     }
 
     // Check for existing PR
-    let head_clone = head.clone();
-    let dir_string = dir.to_string();
-    let existing = tokio::task::spawn_blocking(move || find_existing_pr(&head_clone, &dir_string))
-        .await
-        .context("spawn_blocking failed")??;
+    let existing = find_existing_pr(&octo, &repo_info.owner, &repo_info.repo, &head).await?;
     if let Some(pr) = existing {
         let pr_number = PRNumber::new(pr.number);
         info!("[FilePR] Updating existing PR #{}", pr_number);
-        let (title, body, dir_s) = (input.title.clone(), input.body.clone(), dir.to_string());
-        tokio::task::spawn_blocking(move || update_pr(pr_number, &title, &body, &dir_s))
-            .await
-            .context("spawn_blocking failed")??;
+        update_pr(
+            &octo,
+            &repo_info.owner,
+            &repo_info.repo,
+            pr_number,
+            &input.title,
+            &input.body,
+        )
+        .await?;
         info!("[FilePR] Updated PR #{}: {}", pr_number, pr.url);
         return Ok(FilePROutput {
             pr_url: pr.url,
@@ -224,18 +223,16 @@ pub async fn file_pr_async(
 
     // Create new PR
     info!("[FilePR] Creating PR: {}", input.title);
-    let (title, body, base_clone, head_clone, dir_string) = (
-        input.title.clone(),
-        input.body.clone(),
-        base.to_string(),
-        head.clone(),
-        dir.to_string(),
-    );
-    let pr = tokio::task::spawn_blocking(move || {
-        create_pr(&title, &body, &base_clone, &head_clone, &dir_string)
-    })
-    .await
-    .context("spawn_blocking failed")??;
+    let pr = create_pr(
+        &octo,
+        &repo_info.owner,
+        &repo_info.repo,
+        &input.title,
+        &input.body,
+        base.as_str(),
+        &head,
+    )
+    .await?;
 
     // Emit pr:filed event (only if in tmux session)
     if let Ok(session) = std::env::var("EXOMONAD_TMUX_SESSION") {
@@ -273,24 +270,6 @@ pub async fn file_pr_async(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_pr_number_from_url() {
-        assert_eq!(
-            parse_pr_number_from_url("https://github.com/owner/repo/pull/123"),
-            Some(123)
-        );
-        assert_eq!(
-            parse_pr_number_from_url("https://github.com/owner/repo/pull/1"),
-            Some(1)
-        );
-        assert_eq!(parse_pr_number_from_url("not-a-url"), None);
-        assert_eq!(parse_pr_number_from_url(""), None);
-        assert_eq!(
-            parse_pr_number_from_url("https://github.com/owner/repo/pull/abc"),
-            None
-        );
-    }
 
     #[test]
     fn test_detect_base_branch_explicit() {
@@ -379,19 +358,16 @@ mod tests {
         let dir = temp_dir.path();
 
         // 1. Init git repo
-        cmd!("git", "init", "-b", "main").dir(dir).read()?;
-        cmd!("git", "config", "user.email", "test@example.com")
-            .dir(dir)
-            .read()?;
-        cmd!("git", "config", "user.name", "Test").dir(dir).read()?;
+        use std::process::Command;
+        Command::new("git").args(["init", "-b", "main"]).current_dir(dir).status()?;
+        Command::new("git").args(["config", "user.email", "test@example.com"]).current_dir(dir).status()?;
+        Command::new("git").args(["config", "user.name", "Test"]).current_dir(dir).status()?;
         std::fs::write(dir.join("README.md"), "test")?;
-        cmd!("git", "add", "README.md").dir(dir).read()?;
-        cmd!("git", "commit", "-m", "init").dir(dir).read()?;
+        Command::new("git").args(["add", "README.md"]).current_dir(dir).status()?;
+        Command::new("git").args(["commit", "-m", "init"]).current_dir(dir).status()?;
 
         // 2. Create a feature branch
-        cmd!("git", "checkout", "-b", "feature-branch")
-            .dir(dir)
-            .read()?;
+        Command::new("git").args(["checkout", "-b", "feature-branch"]).current_dir(dir).status()?;
         let git_wt = Arc::new(GitWorktreeService::new(dir.to_path_buf()));
 
         let input = FilePRInput {
