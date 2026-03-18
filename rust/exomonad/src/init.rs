@@ -7,9 +7,9 @@ use tracing::{debug, info, warn};
 
 /// Run the init command: create or attach to tmux session.
 pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()> {
-    use exomonad_core::services::tmux_ipc::TmuxIpc;
-    use exomonad_core::services::AgentType;
-
+use exomonad_core::services::tmux_ipc::TmuxIpc;
+use exomonad_core::services::AgentType;
+use std::io::{IsTerminal, Write};
     let cwd = std::env::current_dir()?;
     let config_path = cwd.join(".exo/config.toml");
     if !config_path.exists() {
@@ -48,8 +48,12 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
 
             if reachable {
                 info!(endpoint = %endpoint, "OTel endpoint reachable");
+            } else if config.yolo || !std::io::stdin().is_terminal() {
+                warn!(
+                    endpoint = %endpoint,
+                    "OTel endpoint unreachable — proceeding without tracing (YOLO or headless)"
+                );
             } else {
-                use std::io::Write;
                 eprint!(
                     "OTel endpoint {} unreachable — continue without tracing? [y/N] ",
                     endpoint
