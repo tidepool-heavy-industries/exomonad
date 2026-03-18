@@ -38,7 +38,7 @@ impl Drop for FileLock {
 
 **Changes:**
 - Create `services/file_lock.rs`
-- Modify `services/teams_mailbox.rs`: wrap read-modify-write in lock acquire/release
+- Modify `claude-teams-bridge/src/inbox.rs`: wrap read-modify-write in lock acquire/release
 - Add `fsync` on directory after rename (currently missing)
 - Lock path: `{inbox_file}.lock` (e.g., `inboxes/team-lead.json.lock`)
 
@@ -50,13 +50,13 @@ impl Drop for FileLock {
 
 **Priority:** Medium — reliability improvement.
 
-Currently `delivery::deliver_to_agent()` tries Teams once, then Zellij once, then gives up. If both fail, the event is lost (only the JSONL log preserves it).
+Currently `delivery::deliver_to_agent()` tries Teams once, then tmux once, then gives up. If both fail, the event is lost (only the JSONL log preserves it).
 
 **Design:**
 
 Add retry with backoff to `delivery.rs`:
 - Teams: retry 2x with 100ms backoff (transient lock contention)
-- Zellij: no retry (if the pane doesn't exist, retrying won't help)
+- tmux: no retry (if the pane doesn't exist, retrying won't help)
 - If both fail after retries: log error, return `DeliveryResult::Failed`
 
 **Changes:**
@@ -87,7 +87,7 @@ New function `teams_mailbox::compact_inbox()`:
 - Or: periodic background task (every 5 minutes)
 
 **Changes:**
-- Add `compact_inbox()` to `services/teams_mailbox.rs`
+- Add `compact_inbox()` to `claude-teams-bridge/src/inbox.rs`
 - Call from `write_to_inbox()` when array exceeds threshold, or from a background task
 
 ## Wave 3 (Future)
@@ -96,13 +96,13 @@ New function `teams_mailbox::compact_inbox()`:
 
 3-tier permission model: agent < TL < human. Typed permission checking for sensitive operations (git push, file deletion, external API calls). Requires its own design pass — deferred.
 
-### Zellij Popup Approval UI
+### tmux Popup Approval UI
 
-Human escalation via structured popup dialogs. Infrastructure exists in `exomonad-plugin` but is disabled because it blocks the WASM plugin lock for the entire popup duration. Needs suspend/resume mechanism.
+Human escalation via structured popup dialogs. Deferred. Requires structured approval UX in tmux (popup or pane).
 
 ### Headless Mode
 
-Zellij fallback unavailable in headless/CI environments. Teams-only delivery works but depends on Claude Code polling. No current workaround for environments without Zellij.
+tmux fallback unavailable in headless/CI environments. Teams-only delivery works but depends on Claude Code polling. No current workaround for environments without tmux.
 
 ### Message Ordering
 

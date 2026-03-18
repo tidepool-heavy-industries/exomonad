@@ -14,9 +14,9 @@ The problem: Claude is trained to use `SendMessage` for teammate communication. 
 
 **Synthetic team members + filesystem watcher.**
 
-ExoMonad registers Gemini workers as "synthetic" members in the Claude team's `config.json`. When Claude sends a `SendMessage` to a synthetic member, Claude Code writes to `inboxes/{member}.json` as usual. ExoMonad's serve process watches these inbox files (inotify) and routes messages to the Gemini worker's Zellij pane.
+ExoMonad registers Gemini workers as "synthetic" members in the Claude team's `config.json`. When Claude sends a `SendMessage` to a synthetic member, Claude Code writes to `inboxes/{member}.json` as usual. ExoMonad's serve process watches these inbox files (inotify) and routes messages to the Gemini worker's tmux pane.
 
-The reverse direction (Gemini→Claude) uses the unified delivery helper (`services/delivery.rs`): Teams inbox first, Zellij injection fallback.
+The reverse direction (Gemini→Claude) uses the unified delivery helper (`services/delivery.rs`): Teams inbox first, tmux injection fallback.
 
 ### On-disk format
 
@@ -63,12 +63,12 @@ Claude→Gemini:
   → Claude Code writes to inboxes/rust-impl.json
   → ExoMonad InboxWatcher (inotify) detects write
   → Looks up rust-impl in synthetic member registry
-  → Injects message text into Gemini's Zellij pane
+  → Injects message text into Gemini's tmux pane
 
 Gemini→Claude:
   Gemini calls notify_parent(status="success", message="...")
   → delivery::deliver_to_agent() resolves parent's team info from TeamRegistry
-  → Writes to inboxes/team-lead.json (or falls back to Zellij injection)
+  → Writes to inboxes/team-lead.json (or falls back to tmux injection)
   → Claude Code polls the file and delivers as <teammate-message>
 ```
 
@@ -88,17 +88,17 @@ Gemini→Claude:
    - `remove_synthetic(team_name, member_name)` — remove from members array
 
 2. **InboxWatcher** (`services/inbox_watcher.rs`) — inotify-based service watching synthetic member inbox files
-   - On write: parse new messages, route to Gemini pane via Zellij injection
+   - On write: parse new messages, route to Gemini pane via tmux injection
    - Track read cursor (last seen array length) to only process new messages
    - Debounce: 100ms after inotify event before reading (atomic writes)
 
-3. **Delivery helper** (`services/delivery.rs`) — Unified Teams+Zellij delivery for Gemini→Claude direction
+3. **Delivery helper** (`services/delivery.rs`) — Unified Teams+tmux delivery for Gemini→Claude direction
    - Called by `notify_parent` (events.rs) and GitHub poller
    - Replaces the old `.exo/messages/` inbox system (deleted)
 
-4. **teams_mailbox.rs** — Writes to Claude Code's Teams inbox format (JSON array, atomic temp+rename)
+4. **claude-teams-bridge** (`claude-teams-bridge/src/inbox.rs`) — Writes to Claude Code's Teams inbox format (JSON array, atomic temp+rename)
 
-5. **spawn_workers/spawn_leaf_subtree** — After spawning a Gemini agent, registers it as a synthetic member in the parent's team
+5. **spawn_worker/spawn_gemini** — After spawning a Gemini agent, registers it as a synthetic member in the parent's team
 
 ### What changes where
 
@@ -107,8 +107,8 @@ Gemini→Claude:
 | SyntheticMemberService | `services/synthetic_members.rs` | Built |
 | InboxWatcher | `services/inbox_watcher.rs` | Built |
 | Delivery helper | `services/delivery.rs` | Built |
-| teams_mailbox | `services/teams_mailbox.rs` | Built |
-| Register on spawn | `services/agent_control.rs` | Built |
+| teams_mailbox | `claude-teams-bridge/src/inbox.rs` | Built |
+| Register on spawn | `services/agent_control/` | Built |
 | Wire into server | `exomonad/src/main.rs` | Built |
 
 ## Open Work
@@ -118,10 +118,10 @@ See [teams-roadmap.md](teams-roadmap.md) for consolidated open items (lock coord
 ## Consequences
 
 - Claude agents use native `SendMessage` for ALL teammates — zero tool shadowing
-- ExoMonad becomes invisible transport layer between Claude Teams and Zellij
+- ExoMonad becomes invisible transport layer between Claude Teams and tmux
 - Gemini workers appear as first-class teammates from Claude's perspective
 - Filesystem is the message bus — simple, debuggable, no custom protocol
-- inotify adds a dependency on Linux (acceptable — ExoMonad is Linux-only via Zellij)
+- inotify adds a dependency on Linux (acceptable — ExoMonad targets Linux)
 - Small latency (100ms debounce + inotify delay) for Claude→Gemini messages
 
 ## Alternatives Rejected
@@ -130,4 +130,4 @@ See [teams-roadmap.md](teams-roadmap.md) for consolidated open items (lock coord
 
 **B. PreToolUse hook intercept** — Block `SendMessage` for synthetic members, reroute via ExoMonad. Complex, requires spoofing tool results, fragile.
 
-**C. Claude adapter per Gemini worker** — Spawn a tiny Claude that bridges Teams↔Zellij. Works but absurdly expensive in Claude tokens.
+**C. Claude adapter per Gemini worker** — Spawn a tiny Claude that bridges Teams↔tmux. Works but absurdly expensive in Claude tokens.

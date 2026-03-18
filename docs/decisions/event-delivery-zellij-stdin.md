@@ -1,10 +1,10 @@
-# Event Delivery: Teams Inbox + Zellij Fallback
+# Event Delivery: Teams Inbox + tmux Fallback
 
-**Status:** Implemented
+**Status:** Superseded — tmux replaced the previous engine (2026-03-13). Delivery model unchanged: Teams inbox primary, tmux STDIN injection fallback.
 
 ## Decision
 
-Events are delivered via a two-tier strategy: **Claude Teams inbox first, Zellij STDIN injection as fallback.** This is implemented in a single shared helper (`services/delivery.rs`).
+Events are delivered via a two-tier strategy: **Claude Teams inbox first, tmux STDIN injection as fallback.** This is implemented in a single shared helper (`services/delivery.rs`).
 
 ### How It Works
 
@@ -14,35 +14,34 @@ Events are delivered via a two-tier strategy: **Claude Teams inbox first, Zellij
    - Looks up agent in `TeamRegistry` (populated by `session.register_team` effect at SessionStart)
    - Writes to `~/.claude/teams/{team}/inboxes/{inbox}.json` via `teams_mailbox::write_to_inbox()`
    - Claude Code polls the inbox file and injects the message into the conversation
-4. If Teams delivery fails (no registry entry, directory missing, write error), falls back to Zellij injection:
-   - Resolves the target agent's Zellij pane from its identity (birth-branch hierarchy)
-   - Injects text into the pane via the Zellij plugin pipe (`inject_input`)
+4. If Teams delivery fails (no registry entry, directory missing, write error), falls back to tmux injection:
+   - Resolves the target agent's tmux pane from its identity (birth-branch hierarchy)
+   - Injects text into the pane via the tmux buffer pattern (`load-buffer` + `paste-buffer`)
    - Agent sees it as a user message and responds
-
-The Zellij fallback has a constraint: the **Ink paste problem**. React Ink (used by Claude Code and Gemini CLI) treats multi-byte stdin writes arriving in the same event loop tick as clipboard paste events. The Zellij plugin defers the Enter keypress by ~100ms via `set_timeout(0.1)` + `Timer` event, ensuring Ink processes it as an isolated keypress.
 
 ### Event Sources
 
 | Source | Trigger | Mechanism |
 |--------|---------|-----------|
-| Child completion | Child calls `notify_parent` | MCP tool → `deliver_to_agent()` → Teams inbox or Zellij injection |
-| Copilot review | GitHub API poll | Background poller → `deliver_to_agent()` → Teams inbox or Zellij injection |
-| CI status change | GitHub API poll | Background poller → `deliver_to_agent()` → Teams inbox or Zellij injection |
+| Child completion | Child calls `notify_parent` | MCP tool → `deliver_to_agent()` → Teams inbox or tmux injection |
+| Copilot review | GitHub API poll | Background poller → `deliver_to_agent()` → Teams inbox or tmux injection |
+| CI status change | GitHub API poll | Background poller → `deliver_to_agent()` → Teams inbox or tmux injection |
 
 ### Delivery Helper (`services/delivery.rs`)
 
 ```rust
 pub async fn deliver_to_agent(
     team_registry: Option<&TeamRegistry>,
+    acp_registry: Option<&AcpRegistry>,
+    project_dir: &Path,
     agent_key: &str,          // TeamRegistry lookup key
-    zellij_tab_name: &str,    // Fallback tab name
+    tmux_target: &str,        // Fallback tmux target
     from: &str,               // Sender name
     message: &str,            // Message content
     summary: &str,            // Short summary for Teams
-    color: &str,              // Teams message color
 ) -> DeliveryResult { ... }
 
-pub enum DeliveryResult { Teams, Zellij, Failed }
+pub enum DeliveryResult { Teams, Acp, Uds, Tmux, Failed }
 ```
 
 All callers (events.rs, github_poller.rs) use this single code path.
@@ -53,7 +52,7 @@ Implicit from spawn. The branch hierarchy (`main.feature.auth` → parent `main.
 
 ### Implementation
 
-- **Delivery helper**: `services/delivery.rs` — shared Teams+Zellij delivery
+- **Delivery helper**: `services/delivery.rs` — shared Teams+tmux delivery
 - **Event handler**: `handlers/events.rs` — `notify_parent` calls `deliver_to_agent()`
 - **GitHub poller**: `services/github_poller.rs` — PR/CI notifications call `deliver_to_agent()`
 - **Event log**: `.exo/logs/{agent_id}.jsonl` — per-agent append-only JSONL (durable record, independent of delivery)
@@ -61,10 +60,10 @@ Implicit from spawn. The branch hierarchy (`main.feature.auth` → parent `main.
 ## Consequences
 
 - Teams inbox provides durable delivery (messages survive agent turn boundaries)
-- Zellij fallback provides immediate delivery when Teams is unavailable
+- tmux fallback provides immediate delivery when Teams is unavailable
 - Zero token cost while an agent is dormant (no polling loop on agent side)
 - Natural integration with Claude Code's conversation model
-- Coupled to Zellij for fallback — can't run fully headless without adaptation
+- Coupled to tmux for fallback — can't run fully headless without adaptation
 
 ## Open Work
 
