@@ -1,4 +1,4 @@
-use crate::domain::PRNumber;
+use crate::domain::{BranchName, CommitSha, PRNumber};
 use crate::plugin_manager::PluginManager;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::AgentType;
@@ -47,7 +47,7 @@ struct CopilotReview {
 
 /// Branch info discovered from a worktree directory.
 struct WorktreeBranch {
-    branch: String,
+    branch: BranchName,
     agent_type: AgentType,
 }
 
@@ -82,12 +82,12 @@ struct GitHubUser {
 struct PRState {
     last_copilot_comment_count: usize,
     last_ci_status: String,
-    branch_name: String,
+    branch_name: BranchName,
     agent_type: AgentType,
     first_seen: Instant,
     notified_parent_timeout: bool,
     last_review_state: ReviewState,
-    last_sha: String,
+    last_sha: CommitSha,
     notified_parent_approved: bool,
     addressed_changes: bool,
 }
@@ -103,12 +103,12 @@ impl PRState {
         Self {
             last_copilot_comment_count: copilot_count,
             last_ci_status: ci_status.to_string(),
-            branch_name: branch.to_string(),
+            branch_name: BranchName::from(branch),
             agent_type,
             first_seen: Instant::now(),
             notified_parent_timeout: false,
             last_review_state: ReviewState::None,
-            last_sha: sha.to_string(),
+            last_sha: CommitSha::from(sha),
             notified_parent_approved: false,
             addressed_changes: false,
         }
@@ -131,8 +131,8 @@ fn compute_pr_actions(
     let copilot_count = copilot_comments.len() + copilot_reviews.len();
 
     // Reset review tracking if new commits pushed
-    if pr_sha != old_state.last_sha {
-        old_state.last_sha = pr_sha.to_string();
+    if pr_sha != old_state.last_sha.as_str() {
+        old_state.last_sha = CommitSha::from(pr_sha);
         if old_state.last_review_state == ReviewState::ChangesRequested {
             old_state.last_review_state = ReviewState::None;
             old_state.notified_parent_timeout = false;
@@ -544,12 +544,12 @@ impl GitHubPoller {
 
         // 3. Match branches to PRs
         for wb in branches {
-            if let Some(pr) = pr_map.get(&wb.branch) {
+            if let Some(pr) = pr_map.get(wb.branch.as_str()) {
                 if let Err(e) = self
                     .process_pr(
                         &owner,
                         &repo,
-                        &wb.branch,
+                        wb.branch.as_str(),
                         PRNumber::new(pr.number),
                         &pr.head.sha,
                         wb.agent_type,
@@ -566,7 +566,7 @@ impl GitHubPoller {
         let mut removed_prs = Vec::new();
         {
             let mut state_guard = self.state.lock().await;
-            let tracked: Vec<(PRNumber, String)> = state_guard
+            let tracked: Vec<(PRNumber, BranchName)> = state_guard
                 .iter()
                 .map(|(n, s)| (*n, s.branch_name.clone()))
                 .collect();
@@ -574,6 +574,7 @@ impl GitHubPoller {
             for (pr_num, branch) in &tracked {
                 if !pr_map.contains_key(branch.as_str()) {
                     let parent_branch = branch
+                        .as_str()
                         .rsplit_once('.')
                         .map(|(parent, _)| parent)
                         .unwrap_or("main");
@@ -584,6 +585,7 @@ impl GitHubPoller {
                         }
                         let sib_parent = sib_state
                             .branch_name
+                            .as_str()
                             .rsplit_once('.')
                             .map(|(p, _)| p)
                             .unwrap_or("main");
@@ -591,11 +593,11 @@ impl GitHubPoller {
                             && pr_map.contains_key(sib_state.branch_name.as_str())
                         {
                             sibling_events.push((
-                                sib_state.branch_name.clone(),
+                                sib_state.branch_name.as_str().to_string(),
                                 sib_state.agent_type,
                                 *sib_num,
                                 serde_json::json!({
-                                    "merged_branch": branch,
+                                    "merged_branch": branch.as_str(),
                                     "parent_branch": parent_branch,
                                     "sibling_pr_number": sib_num.as_u64(),
                                 }),
@@ -612,9 +614,9 @@ impl GitHubPoller {
                         "[event] agent.sibling_merged"
                     );
                     if let Some(ref log) = self.event_log {
-                        let _ = log.append("agent.sibling_merged", branch, &serde_json::json!({
+                        let _ = log.append("agent.sibling_merged", branch.as_str(), &serde_json::json!({
                             "pr_number": pr_num.as_u64(),
-                            "branch": branch,
+                            "branch": branch.as_str(),
                             "parent": parent_branch,
                         }));
                     }
@@ -688,7 +690,10 @@ impl GitHubPoller {
             if output.status.success() {
                 let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !branch.is_empty() {
-                    branches.push(WorktreeBranch { branch, agent_type });
+                    branches.push(WorktreeBranch {
+                        branch: BranchName::from(branch.as_str()),
+                        agent_type,
+                    });
                 }
             }
         }
