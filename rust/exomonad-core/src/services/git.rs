@@ -133,10 +133,12 @@ impl GitService {
 
     #[tracing::instrument(skip(self))]
     pub async fn get_branch(&self, dir: &str) -> Result<String> {
-        let output = self
-            .exec_git(dir, &["branch", "--show-current"])
-            .await?;
-        Ok(output.trim().to_string())
+        let output = self.exec_git(dir, &["branch", "--show-current"]).await?;
+        let branch = output.trim().to_string();
+        if branch.is_empty() {
+            anyhow::bail!("HEAD is detached or branch name is empty");
+        }
+        Ok(branch)
     }
 
     #[tracing::instrument(skip(self))]
