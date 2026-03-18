@@ -7,7 +7,7 @@
 
 use crate::common::TimeoutError;
 use crate::domain::{
-    AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, ItemState, RoutingInfo,
+    AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, ItemState, RoutingInfo, TeamName,
 };
 use crate::effects::EffectError;
 use crate::ffi::FFIBoundary;
@@ -1143,7 +1143,7 @@ impl AgentControlService {
                 .await?;
 
             // Register as synthetic team member for Claude Teams messaging
-            let team_name = format!("exo-{}", self.effective_birth_branch(Some(&ctx.birth_branch)));
+            let team_name = TeamName::from(format!("exo-{}", self.effective_birth_branch(Some(&ctx.birth_branch))).as_str());
             if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
                 &team_name, &slug, "gemini-worker",
             ) {
@@ -1462,7 +1462,7 @@ impl AgentControlService {
                 .await?;
 
             // Register as synthetic team member for Claude Teams messaging
-            let team_name = format!("exo-{}", effective_birth);
+            let team_name = TeamName::from(format!("exo-{}", effective_birth).as_str());
             if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
                 &team_name, &slug, "gemini-leaf",
             ) {
@@ -1529,7 +1529,7 @@ impl AgentControlService {
         };
 
         // Remove synthetic team member registration (non-fatal if not registered)
-        let team_name = format!("exo-{}", self.birth_branch);
+        let team_name = TeamName::from(format!("exo-{}", self.birth_branch).as_str());
         if let Err(e) =
             crate::services::synthetic_members::remove_synthetic_member(&team_name, &slug)
         {

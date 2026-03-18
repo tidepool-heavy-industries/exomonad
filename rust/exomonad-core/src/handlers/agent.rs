@@ -2,7 +2,7 @@
 //!
 //! Uses proto-generated types from `exomonad_proto::effects::agent`.
 
-use crate::domain::{AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid};
+use crate::domain::{AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, TeamName};
 use crate::effects::{
     dispatch_agent_effect, AgentEffects, EffectError, EffectHandler, EffectResult, ResultExt,
     ResultExtPreserve,
@@ -437,7 +437,7 @@ impl AgentEffects for AgentHandler {
         registry.register(agent_name.clone(), conn).await;
 
         // Register as synthetic team member for Teams inbox delivery
-        let team_name = format!("exo-{}", ctx.birth_branch);
+        let team_name = TeamName::from(format!("exo-{}", ctx.birth_branch).as_str());
         if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
             &team_name,
             agent_name,
