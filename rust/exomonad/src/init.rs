@@ -220,7 +220,7 @@ use std::io::{IsTerminal, Write};
         }
     }
 
-    let session_alive = TmuxIpc::has_session(&session)?;
+    let session_alive = TmuxIpc::has_session(&session).await?;
 
     if recreate {
         // Kill the running server process before tearing down the session
@@ -238,7 +238,7 @@ use std::io::{IsTerminal, Write};
                             if signal::kill(pid, None).is_err() {
                                 break;
                             }
-                            std::thread::sleep(Duration::from_millis(200));
+                            tokio::time::sleep(Duration::from_millis(200)).await;
                         }
                     }
                 }
@@ -253,12 +253,12 @@ use std::io::{IsTerminal, Write};
 
         if session_alive {
             info!(session = %session, "Deleting session (--recreate)");
-            TmuxIpc::kill_session(&session)?;
+            TmuxIpc::kill_session(&session).await?;
         }
     } else if session_alive {
         // Attach to running session
         info!(session = %session, "Attaching to session");
-        return TmuxIpc::attach_session(&session);
+        return TmuxIpc::attach_session(&session).await;
     }
 
     // Create fresh session
@@ -295,10 +295,10 @@ use std::io::{IsTerminal, Write};
     info!("Wrote .mcp.json with {} MCP server(s)", mcp_servers.len());
 
     // 2. Create session in background
-    let server_window_id = TmuxIpc::new_session(&session, &cwd)?;
+    let server_window_id = TmuxIpc::new_session(&session, &cwd).await?;
 
     // Verify session
-    if !TmuxIpc::has_session(&session)? {
+    if !TmuxIpc::has_session(&session).await? {
         anyhow::bail!(
             "tmux session '{}' was created but is not responding.",
             session
@@ -381,14 +381,14 @@ use std::io::{IsTerminal, Write};
         None => base_command,
     };
 
-    let _ = ipc.new_window("TL", &cwd, &shell, &tl_command)?;
+    let _ = ipc.new_window("TL", &cwd, &shell, &tl_command).await?;
 
     // 4. Poll for server socket
     wait_for_server_socket(&cwd).await?;
 
     // 5. Attach
     info!(session = %session, "Attaching to session");
-    TmuxIpc::attach_session(&session)
+    TmuxIpc::attach_session(&session).await
 }
 
 pub fn ensure_gitignore(project_dir: &Path) -> Result<()> {

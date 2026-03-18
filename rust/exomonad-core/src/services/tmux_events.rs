@@ -106,9 +106,7 @@ pub async fn inject_input(target: &str, text: &str, project_dir: &Path) -> Resul
         );
 
         let target = target.to_string();
-        tokio::task::spawn_blocking(move || ipc.inject_input(&target, &pointer))
-            .await
-            .context("spawn_blocking join error")?
+        ipc.inject_input(&target, &pointer).await
     } else {
         info!(
             "[TmuxEvents] Injecting input to target '{}': {} chars",
@@ -118,9 +116,7 @@ pub async fn inject_input(target: &str, text: &str, project_dir: &Path) -> Resul
 
         let target = target.to_string();
         let text = text.to_string();
-        tokio::task::spawn_blocking(move || ipc.inject_input(&target, &text))
-            .await
-            .context("spawn_blocking join error")?
+        ipc.inject_input(&target, &text).await
     }
 }
 
@@ -134,9 +130,7 @@ pub async fn close_worker_pane(pane_id: &str) -> Result<()> {
     let pid = PaneId::parse(pane_id).context("Invalid pane_id")?;
     let ipc = TmuxIpc::new(&session);
 
-    tokio::task::spawn_blocking(move || ipc.kill_pane(&pid))
-        .await
-        .context("spawn_blocking join error")?
+    ipc.kill_pane(&pid).await
 }
 
 /// Helper to get current timestamp in ISO 8601 format.
