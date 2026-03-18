@@ -3,7 +3,7 @@ use crate::uds_client;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Run the init command: create or attach to tmux session.
 pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()> {
@@ -74,9 +74,11 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     // Auto-build or copy WASM if it doesn't exist yet
     let wasm_filename = format!("wasm-guest-{}.wasm", config.wasm_name);
     let wasm_path = config.wasm_dir.join(&wasm_filename);
+    let roles_dir = cwd.join(".exo/roles");
+    let has_roles = roles_dir.is_dir();
+
     if !wasm_path.exists() {
-        let roles_dir = cwd.join(".exo/roles");
-        if roles_dir.is_dir() {
+        if has_roles {
             info!(path = %wasm_path.display(), "WASM not found, building...");
             exomonad::recompile::run_recompile(
                 &config.wasm_name,
@@ -107,6 +109,32 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
                 path = %wasm_path.display(),
                 "No WASM found locally or at ~/.exo/wasm/. Run 'just install-all' in the exomonad repo, or copy roles: cp -r /path/to/exomonad/.exo/roles .exo/roles"
             );
+        }
+    } else if !has_roles {
+        // Refresh stale WASM from global install if it's newer
+        if let Ok(home) = std::env::var("HOME") {
+            let global_wasm = PathBuf::from(home).join(".exo/wasm").join(&wasm_filename);
+            if global_wasm.exists() {
+                let local_mtime = std::fs::metadata(&wasm_path).and_then(|m| m.modified());
+                let global_mtime = std::fs::metadata(&global_wasm).and_then(|m| m.modified());
+
+                match (local_mtime, global_mtime) {
+                    (Ok(local), Ok(global)) if global > local => {
+                        info!(
+                            src = %global_wasm.display(),
+                            dst = %wasm_path.display(),
+                            local_mtime = ?local,
+                            global_mtime = ?global,
+                            "Refreshing project WASM from global install (global is newer)"
+                        );
+                        std::fs::copy(&global_wasm, &wasm_path)?;
+                    }
+                    (Err(e), _) | (_, Err(e)) => {
+                        debug!(error = %e, "Failed to compare WASM mtimes, skipping refresh");
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 
