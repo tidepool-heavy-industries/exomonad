@@ -191,7 +191,7 @@ pub async fn resolve_agent_birth_branch(
         agent = %agent_name,
         "Failed to resolve birth branch from worktree or config, falling back to root"
     );
-    Ok(BirthBranch::root().context("Failed to resolve root birth branch")?)
+    BirthBranch::root().context("Failed to resolve root birth branch")
 }
 
 // ============================================================================

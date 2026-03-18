@@ -377,18 +377,18 @@ mod tests {
             working_dir: Some(dir.to_string_lossy().to_string()),
         };
 
-        // Since we didn't setup an origin remote, push will fail.
+        // Without GITHUB_TOKEN or origin remote, this will fail early.
         let result = file_pr_async(&input, git_wt).await;
 
         if let Err(ref e) = result {
             let err_msg = e.to_string();
             assert!(
-                err_msg.contains("push failed"),
-                "Expected push failed error, got: {}",
+                err_msg.contains("push failed") || err_msg.contains("GitHub token"),
+                "Expected push or token error, got: {}",
                 err_msg
             );
         } else {
-            panic!("Expected file_pr_async to fail on push, but it succeeded?!");
+            panic!("Expected file_pr_async to fail, but it succeeded?!");
         }
 
         Ok(())
