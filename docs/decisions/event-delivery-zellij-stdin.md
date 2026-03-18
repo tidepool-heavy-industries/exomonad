@@ -32,15 +32,16 @@ Events are delivered via a two-tier strategy: **Claude Teams inbox first, tmux S
 ```rust
 pub async fn deliver_to_agent(
     team_registry: Option<&TeamRegistry>,
+    acp_registry: Option<&AcpRegistry>,
+    project_dir: &Path,
     agent_key: &str,          // TeamRegistry lookup key
-    tmux_pane_id: &str,       // Fallback pane ID
+    tmux_target: &str,        // Fallback tmux target
     from: &str,               // Sender name
     message: &str,            // Message content
     summary: &str,            // Short summary for Teams
-    color: &str,              // Teams message color
 ) -> DeliveryResult { ... }
 
-pub enum DeliveryResult { Teams, Tmux, Failed }
+pub enum DeliveryResult { Teams, Acp, Uds, Tmux, Failed }
 ```
 
 All callers (events.rs, github_poller.rs) use this single code path.

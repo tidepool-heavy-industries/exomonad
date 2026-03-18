@@ -2,7 +2,7 @@
 
 **Status:** Active
 
-Open work items for the Claude Teams integration. Consolidated from individual ADRs (`claude-teams-integration.md`, `event-delivery-tmux-stdin.md`, `teams-synthetic-members.md`).
+Open work items for the Claude Teams integration. Consolidated from individual ADRs (`claude-teams-integration.md`, `event-delivery-zellij-stdin.md`, `teams-synthetic-members.md`).
 
 ## Wave 2a (Parallel)
 
