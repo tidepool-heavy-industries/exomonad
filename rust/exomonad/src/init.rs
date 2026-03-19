@@ -386,7 +386,66 @@ use std::io::{IsTerminal, Write};
     // 4. Poll for server socket
     wait_for_server_socket(&cwd).await?;
 
-    // 5. Attach
+    // 5. Spawn companion agents
+    for companion in &config.companions {
+        info!(name = %companion.name, role = %companion.role, "Spawning companion agent");
+
+        // Create agent identity directory
+        let agent_dir = cwd.join(".exo/agents").join(&companion.name);
+        std::fs::create_dir_all(&agent_dir)?;
+
+        // Write birth_branch identity
+        let birth_branch = format!(
+            "{}.{}",
+            std::process::Command::new("git")
+                .args(["branch", "--show-current"])
+                .current_dir(&cwd)
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_else(|_| "main".to_string()),
+            companion.name
+        );
+        std::fs::write(agent_dir.join(".birth_branch"), &birth_branch)?;
+
+        // Write .mcp.json for companion
+        let companion_mcp = serde_json::json!({
+            "mcpServers": {
+                "exomonad": {
+                    "type": "stdio",
+                    "command": "exomonad",
+                    "args": ["mcp-stdio", "--role", &companion.role, "--name", &companion.name]
+                }
+            }
+        });
+        std::fs::write(
+            agent_dir.join(".mcp.json"),
+            serde_json::to_string_pretty(&companion_mcp)?,
+        )?;
+
+        // Write hook config for companion
+        exomonad_core::hooks::HookConfig::write_persistent(&agent_dir, &binary_path, None)
+            .context("Failed to write companion hook configuration")?;
+
+        // Create tmux window for companion
+        let window_id = ipc.new_window(&companion.name, &cwd, &shell, &format!(
+            "{} '{}'",
+            companion.command,
+            companion.task.replace('\'', "'\\''")
+        )).await?;
+
+        // Write routing.json with window_id
+        let routing = serde_json::json!({
+            "window_id": window_id.as_str()
+        });
+        std::fs::write(
+            agent_dir.join("routing.json"),
+            serde_json::to_string_pretty(&routing)?,
+        )?;
+
+        info!(name = %companion.name, window = %window_id.as_str(), "Companion agent spawned");
+    }
+
+    // 6. Attach
     info!(session = %session, "Attaching to session");
     TmuxIpc::attach_session(&session).await
 }
