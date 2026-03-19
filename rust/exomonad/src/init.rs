@@ -464,6 +464,22 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
             let branch_name = format!("companion/{}", companion.name);
 
             if !worktree_path.exists() {
+                // Ensure HEAD exists — worktree creation needs a valid ref
+                let head_valid = std::process::Command::new("git")
+                    .args(["rev-parse", "--verify", "HEAD"])
+                    .current_dir(&cwd)
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+
+                if !head_valid {
+                    info!("No commits in repo, creating initial commit for worktree support");
+                    let _ = std::process::Command::new("git")
+                        .args(["commit", "--allow-empty", "-m", "initial commit"])
+                        .current_dir(&cwd)
+                        .output();
+                }
+
                 // Create worktree (reuse branch if it already exists)
                 let branch_exists = std::process::Command::new("git")
                     .args(["rev-parse", "--verify", &branch_name])

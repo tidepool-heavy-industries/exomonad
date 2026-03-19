@@ -218,6 +218,14 @@ url = "http://localhost:8080"
 type = "stdio"
 command = "notebooklm-mcp"
 args = []
+
+# Companion agents spawned alongside the root TL during init.
+[[companions]]
+name = "sleeptime"
+agent_type = "claude"          # claude | gemini | shoal
+role = "sleeptime"             # WASM role for MCP tools (default: "worker")
+command = "claude --dangerously-skip-permissions"
+task = "You are sleeptime"     # optional — omit for interactive session
 ```
 
 **Config hierarchy:**
@@ -235,6 +243,18 @@ The `SessionStart` hook is critical — it registers the Claude session UUID in 
 Gemini agents get settings via `GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var (NOT `.gemini/settings.json`).
 
 **Claude Code settings help:** We have a Claude Code configuration specialist (preloaded with official documentation) available as an oracle for hook syntax, settings structure, MCP setup, and debugging.
+
+### Companion Agents
+
+Companion agents are persistent agents spawned alongside the root TL during `exomonad init`. Claude companions get their own git worktree at `.exo/companions/{name}/` on branch `companion/{name}`, providing isolated `.mcp.json` discovery via CWD — the same mechanism that makes `fork_wave` reliable.
+
+Each Claude companion worktree contains:
+- `.mcp.json` — MCP config with the companion's role/name identity
+- `.claude/settings.local.json` — hooks (SessionStart, PreToolUse, etc.)
+- `.exo/server.sock` — symlink to project root's server socket
+- `.git` — worktree git file pointing to the main repo
+
+Worktrees persist across `--recreate` (only the tmux session is torn down). Gemini/Shoal companions use their existing env-var/flag-based config approach.
 
 ---
 

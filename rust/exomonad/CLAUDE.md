@@ -39,9 +39,10 @@ exomonad shutdown                 # Gracefully shut down the running server
 
 ### Init Command
 
-`exomonad init` creates a two-window tmux session:
+`exomonad init` creates a tmux session with:
 - **Server window**: Runs `exomonad serve` (binds .exo/server.sock)
 - **TL window**: Runs the configured shell command (focused by default)
+- **Companion windows**: One per `[[companions]]` entry in config. Claude companions get isolated git worktrees at `.exo/companions/{name}/` with `.mcp.json`, hooks, and socket symlink. Worktrees persist across `--recreate`.
 
 `exomonad init` requires `exomonad new` to have been run first to bootstrap the project configuration and WASM plugins.
 
