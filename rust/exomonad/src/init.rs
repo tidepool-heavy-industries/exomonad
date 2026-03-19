@@ -388,24 +388,23 @@ use std::io::{IsTerminal, Write};
 
     // 5. Spawn companion agents
     for companion in &config.companions {
+        // Validate companion name (alphanumeric, hyphens, underscores only)
+        if !companion.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            anyhow::bail!(
+                "Invalid companion name '{}': must contain only [A-Za-z0-9_-]",
+                companion.name
+            );
+        }
+
         info!(name = %companion.name, role = %companion.role, "Spawning companion agent");
 
         // Create agent identity directory
         let agent_dir = cwd.join(".exo/agents").join(&companion.name);
         std::fs::create_dir_all(&agent_dir)?;
 
-        // Write birth_branch identity
-        let birth_branch = format!(
-            "{}.{}",
-            std::process::Command::new("git")
-                .args(["branch", "--show-current"])
-                .current_dir(&cwd)
-                .output()
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                .unwrap_or_else(|_| "main".to_string()),
-            companion.name
-        );
-        std::fs::write(agent_dir.join(".birth_branch"), &birth_branch)?;
+        // Write birth_branch identity — no dots, so resolve_working_dir returns "."
+        // (companions run in the project root, not in a worktree)
+        std::fs::write(agent_dir.join(".birth_branch"), &companion.name)?;
 
         // Write .mcp.json for companion
         let companion_mcp = serde_json::json!({
@@ -427,11 +426,12 @@ use std::io::{IsTerminal, Write};
             .context("Failed to write companion hook configuration")?;
 
         // Create tmux window for companion
-        let window_id = ipc.new_window(&companion.name, &cwd, &shell, &format!(
+        let companion_cmd = format!(
             "{} '{}'",
             companion.command,
             companion.task.replace('\'', "'\\''")
-        )).await?;
+        );
+        let window_id = ipc.new_window(&companion.name, &cwd, &shell, &companion_cmd).await?;
 
         // Write routing.json with window_id
         let routing = serde_json::json!({
