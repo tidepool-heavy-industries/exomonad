@@ -96,7 +96,7 @@ devStopCheck = do
   if branch `elem` ["main", "master"]
     then pure allowStopResponse
     else do
-      result <- checkExit @DevPhase @DevEvent DevSpawned
+      result <- checkExit @DevPhase @DevEvent branch DevSpawned
       -- Log for observability
       void $ suspendEffect_ @LogEmitEvent (Log.EmitEventRequest
         { Log.emitEventRequestEventType = "agent.stop_check",

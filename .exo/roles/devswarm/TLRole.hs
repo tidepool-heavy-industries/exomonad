@@ -47,7 +47,8 @@ instance MCPTool TLFilePR where
     case result of
       Left err -> pure $ errorResult err
       Right output -> do
-        void $ applyEvent @TLPhase @TLEvent TLPlanning
+        branch <- getCurrentBranch
+        void $ applyEvent @TLPhase @TLEvent branch TLPlanning
           (OwnPRFiled (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
         pure $ successResult (Aeson.toJSON output)
 
@@ -66,7 +67,9 @@ instance MCPTool TLMergePR where
       Right output -> do
         when (mpoSuccess output) $ do
           case extractSlug (mpoBranchName output) of
-            Just slug -> void $ applyEvent @TLPhase @TLEvent TLPlanning (ChildCompleted slug)
+            Just slug -> do
+              branch <- getCurrentBranch
+              void $ applyEvent @TLPhase @TLEvent branch TLPlanning (ChildCompleted slug)
             Nothing -> pure ()
         pure $ mergePRRender output
 
@@ -89,7 +92,8 @@ instance MCPTool TLForkWave where
                 , chBranch = branchName sr
                 , chAgentType = agentTypeResult sr
                 }
-          void $ applyEvent @TLPhase @TLEvent TLPlanning (ChildSpawned handle)
+          branch <- getCurrentBranch
+          void $ applyEvent @TLPhase @TLEvent branch TLPlanning (ChildSpawned handle)
         pure $ forkWaveRender fwResult
 
 -- | TL-specific spawn_gemini: worktree spawn fires ChildSpawned.
@@ -110,7 +114,8 @@ instance MCPTool TLSpawnGemini where
               , chBranch = branchName sr
               , chAgentType = agentTypeResult sr
               }
-        void $ applyEvent @TLPhase @TLEvent TLPlanning (ChildSpawned handle)
+        branch <- getCurrentBranch
+        void $ applyEvent @TLPhase @TLEvent branch TLPlanning (ChildSpawned handle)
         pure $ spawnLeafRender (Right (slug, sr))
 
 -- | TL-specific spawn_worker: ephemeral pane, no state transition.

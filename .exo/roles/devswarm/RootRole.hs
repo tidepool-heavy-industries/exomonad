@@ -11,6 +11,7 @@ module RootRole (config, Tools) where
 import Control.Monad (void, forM_, when)
 import ExoMonad
 import ExoMonad.Guest.StateMachine (applyEvent)
+import ExoMonad.Guest.Effects.StopHook (getCurrentBranch)
 import ExoMonad.Guest.Tools.MergePR (mergePRCore, mergePRDescription, mergePRSchema, mergePRRender, MergePRArgs (..), MergePROutput (..), extractSlug)
 import ExoMonad.Guest.Tools.Spawn
   ( forkWaveCore, forkWaveDescription, forkWaveSchema, forkWaveRender, ForkWaveArgs (..), ForkWaveResult (..),
@@ -36,7 +37,8 @@ instance MCPTool RootForkWave where
       Right fwResult -> do
         forM_ (fwrSpawned fwResult) $ \(slug, sr) -> do
           let handle = ChildHandle { chSlug = slug, chBranch = branchName sr, chAgentType = agentTypeResult sr }
-          void $ applyEvent @TLPhase @TLEvent TLPlanning (ChildSpawned handle)
+          branch <- getCurrentBranch
+          void $ applyEvent @TLPhase @TLEvent branch TLPlanning (ChildSpawned handle)
         pure $ forkWaveRender fwResult
 
 data RootSpawnGemini
@@ -51,7 +53,8 @@ instance MCPTool RootSpawnGemini where
       Left err -> pure $ errorResult err
       Right (slug, sr) -> do
         let handle = ChildHandle { chSlug = slug, chBranch = branchName sr, chAgentType = agentTypeResult sr }
-        void $ applyEvent @TLPhase @TLEvent TLPlanning (ChildSpawned handle)
+        branch <- getCurrentBranch
+        void $ applyEvent @TLPhase @TLEvent branch TLPlanning (ChildSpawned handle)
         pure $ spawnLeafRender (Right (slug, sr))
 
 data RootSpawnWorker
@@ -75,7 +78,9 @@ instance MCPTool RootMergePR where
       Right output -> do
         when (mpoSuccess output) $ do
           case extractSlug (mpoBranchName output) of
-            Just slug -> void $ applyEvent @TLPhase @TLEvent TLPlanning (ChildCompleted slug)
+            Just slug -> do
+              branch <- getCurrentBranch
+              void $ applyEvent @TLPhase @TLEvent branch TLPlanning (ChildCompleted slug)
             Nothing -> pure ()
         pure $ mergePRRender output
 

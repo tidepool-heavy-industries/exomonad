@@ -17,7 +17,7 @@ tlStopCheck = do
   if branch `elem` ["main", "master"]
     then pure allowStopResponse
     else do
-      result <- checkExit @TLPhase @TLEvent TLPlanning
+      result <- checkExit @TLPhase @TLEvent branch TLPlanning
       case result of
         MustBlock msg -> pure $ blockStopResponse msg
         ShouldNudge msg -> pure $ StopHookOutput Allow (Just msg)
