@@ -38,8 +38,8 @@ pub struct CompanionConfig {
     pub agent_type: Option<AgentType>,
     /// Command to launch (e.g., "claude --dangerously-skip-permissions -c").
     pub command: String,
-    /// Task/prompt passed as positional arg to the command.
-    pub task: String,
+    /// Task/prompt passed as positional arg to the command. None = interactive (no initial prompt).
+    pub task: Option<String>,
 }
 
 fn default_companion_role() -> String {
@@ -485,6 +485,10 @@ mod tests {
         assert_eq!(raw.companions[0].name, "sleeptime");
         assert_eq!(raw.companions[0].role, "worker");
         assert!(raw.companions[0].agent_type.is_none());
+        assert_eq!(
+            raw.companions[0].task,
+            Some("You are sleeptime".to_string())
+        );
     }
 
     #[test]
@@ -506,5 +510,19 @@ mod tests {
         assert_eq!(raw.companions.len(), 2);
         assert_eq!(raw.companions[0].agent_type, Some(AgentType::Claude));
         assert_eq!(raw.companions[1].agent_type, Some(AgentType::Gemini));
+    }
+
+    #[test]
+    fn test_raw_config_parse_companion_without_task() {
+        let content = r#"
+            [[companions]]
+            name = "sleeptime"
+            agent_type = "claude"
+            command = "claude --dangerously-skip-permissions -c"
+        "#;
+        let raw: RawConfig = toml::from_str(content).unwrap();
+        assert_eq!(raw.companions.len(), 1);
+        assert_eq!(raw.companions[0].name, "sleeptime");
+        assert!(raw.companions[0].task.is_none());
     }
 }
