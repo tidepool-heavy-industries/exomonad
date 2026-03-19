@@ -57,17 +57,19 @@ import Proto3.Suite.Types (Enumerated (..))
 -- ============================================================================
 
 -- | Agent type for spawned agents.
-data AgentType = Claude | Gemini
+data AgentType = Claude | Gemini | Shoal
   deriving (Show, Eq, Generic)
 
 instance ToJSON AgentType where
   toJSON Claude = "claude"
   toJSON Gemini = "gemini"
+  toJSON Shoal = "shoal"
 
 instance FromJSON AgentType where
   parseJSON = withText "AgentType" $ \case
     "claude" -> pure Claude
     "gemini" -> pure Gemini
+    "shoal" -> pure Shoal
     other -> fail $ "Invalid agent type: " <> T.unpack other
 
 -- | Result of spawning an agent.
@@ -264,6 +266,7 @@ runAgentControlSuspend = interpret $ \case
 toProtoAgentType :: AgentType -> PA.AgentType
 toProtoAgentType Claude = PA.AgentTypeAGENT_TYPE_CLAUDE
 toProtoAgentType Gemini = PA.AgentTypeAGENT_TYPE_GEMINI
+toProtoAgentType Shoal = PA.AgentTypeAGENT_TYPE_SHOAL
 
 permissionsToProto :: ClaudePermissions -> PA.Permissions
 permissionsToProto perms =
@@ -282,5 +285,6 @@ protoAgentInfoToSpawnResult info =
       agentTypeResult = case PA.agentInfoAgentType info of
         Enumerated (Right PA.AgentTypeAGENT_TYPE_CLAUDE) -> "claude"
         Enumerated (Right PA.AgentTypeAGENT_TYPE_GEMINI) -> "gemini"
+        Enumerated (Right PA.AgentTypeAGENT_TYPE_SHOAL) -> "shoal"
         _ -> "unknown"
     }
