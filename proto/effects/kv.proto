@@ -37,10 +37,22 @@ message SetResponse {
 }
 
 // ============================================================================
+// Cleanup - Remove KV files for dead branches
+// ============================================================================
+
+message CleanupStalePhasesRequest {}
+
+message CleanupStalePhasesResponse {
+  // List of keys (filenames without .json) that were deleted.
+  repeated string deleted_keys = 1;
+}
+
+// ============================================================================
 // Service definition (for schema generation, not gRPC)
 // ============================================================================
 
 service KvEffects {
   rpc Get(GetRequest) returns (GetResponse);
   rpc Set(SetRequest) returns (SetResponse);
+  rpc CleanupStalePhases(CleanupStalePhasesRequest) returns (CleanupStalePhasesResponse);
 }

@@ -119,6 +119,75 @@ impl KvEffects for KvHandler {
         tracing::info!(key = %req.key, "kv.set: success");
         Ok(SetResponse { success: true })
     }
+
+    async fn cleanup_stale_phases(
+        &self,
+        _req: CleanupStalePhasesRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<CleanupStalePhasesResponse> {
+        let dir = self.kv_dir();
+        let mut deleted_keys = Vec::new();
+
+        if !dir.exists() {
+            return Ok(CleanupStalePhasesResponse { deleted_keys });
+        }
+
+        let mut entries = tokio::fs::read_dir(&dir).await.map_err(|e| {
+            EffectError::custom("kv_error", format!("Failed to read kv directory: {}", e))
+        })?;
+
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            let file_name = match path.file_name().and_then(|s| s.to_str()) {
+                Some(s) => s,
+                None => continue,
+            };
+
+            if !file_name.starts_with("phase-") || !file_name.ends_with(".json") {
+                continue;
+            }
+
+            let key = &file_name[..file_name.len() - 5]; // Remove .json
+
+            // Determine if it should be deleted
+            let should_delete = if let Some(pos) = key.find("--") {
+                let sanitized_branch = &key[pos + 2..];
+                let branch = sanitized_branch.replace("--", ".");
+
+                // Check if branch exists
+                let output = tokio::process::Command::new("git")
+                    .current_dir(&self.project_dir)
+                    .args(["branch", "--list", &branch])
+                    .output()
+                    .await;
+
+                match output {
+                    Ok(out) => {
+                        let exists = !String::from_utf8_lossy(&out.stdout).trim().is_empty();
+                        !exists
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, branch = %branch, "kv.cleanup: git branch check failed");
+                        false // Don't delete if we can't check
+                    }
+                }
+            } else {
+                // Legacy unscoped phase file (no -- branch suffix)
+                true
+            };
+
+            if should_delete {
+                tracing::info!(key = %key, path = %path.display(), "kv.cleanup: deleting stale phase file");
+                if let Err(e) = tokio::fs::remove_file(&path).await {
+                    tracing::error!(path = %path.display(), error = %e, "kv.cleanup: failed to delete file");
+                } else {
+                    deleted_keys.push(key.to_string());
+                }
+            }
+        }
+
+        Ok(CleanupStalePhasesResponse { deleted_keys })
+    }
 }
 
 #[cfg(test)]
@@ -238,6 +307,90 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.value, "v2");
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_stale_phases() {
+        let dir = tempfile::tempdir().unwrap();
+        let kv_dir = dir.path().join(".exo").join("kv");
+        tokio::fs::create_dir_all(&kv_dir).await.unwrap();
+
+        // Initialize git repo so we can check branches
+        tokio::process::Command::new("git")
+            .arg("init")
+            .current_dir(dir.path())
+            .output()
+            .await
+            .unwrap();
+
+        // Configure git so we can commit
+        tokio::process::Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(dir.path())
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["config", "user.name", "test"])
+            .current_dir(dir.path())
+            .output()
+            .await
+            .unwrap();
+
+        // Create main branch
+        tokio::fs::write(dir.path().join("file"), "").await.unwrap();
+        tokio::process::Command::new("git")
+            .args(["add", "file"])
+            .current_dir(dir.path())
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(dir.path())
+            .output()
+            .await
+            .unwrap();
+        tokio::process::Command::new("git")
+            .args(["branch", "-m", "main"])
+            .current_dir(dir.path())
+            .output()
+            .await
+            .unwrap();
+
+        let handler = KvHandler::new(dir.path().to_path_buf());
+        let ctx = test_ctx();
+
+        // Create some files
+        // 1. Valid branch "main"
+        tokio::fs::write(kv_dir.join("phase-tl--main.json"), "{}")
+            .await
+            .unwrap();
+        // 2. Dead branch
+        tokio::fs::write(kv_dir.join("phase-tl--dead--branch.json"), "{}")
+            .await
+            .unwrap();
+        // 3. Legacy file
+        tokio::fs::write(kv_dir.join("phase-tl.json"), "{}")
+            .await
+            .unwrap();
+        // 4. Non-phase file (should be ignored)
+        tokio::fs::write(kv_dir.join("other.json"), "{}")
+            .await
+            .unwrap();
+
+        let resp = handler
+            .cleanup_stale_phases(CleanupStalePhasesRequest {}, &ctx)
+            .await
+            .unwrap();
+
+        // Should have deleted: phase-tl--dead--branch and phase-tl
+        assert!(resp.deleted_keys.contains(&"phase-tl--dead--branch".to_string()));
+        assert!(resp.deleted_keys.contains(&"phase-tl".to_string()));
+        assert_eq!(resp.deleted_keys.len(), 2);
+
+        assert!(kv_dir.join("phase-tl--main.json").exists());
+        assert!(kv_dir.join("other.json").exists());
     }
 
     #[tokio::test]

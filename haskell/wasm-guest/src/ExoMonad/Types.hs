@@ -26,6 +26,7 @@ import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import ExoMonad.Effects.Log (LogError, LogInfo)
 import ExoMonad.Effects.Log qualified as Log
+import ExoMonad.Effects.KV (KVCleanupStalePhases, CleanupStalePhasesRequest (..))
 import ExoMonad.Effects.Session qualified as Session
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Events (EventHandlerConfig, defaultEventHandlers)
@@ -92,6 +93,7 @@ defaultSessionStartHook hookInput = do
         Nothing -> hiSessionId hookInput
   void $ suspendEffect_ @Session.SessionRegisterClaudeId
     (Session.RegisterClaudeSessionRequest { Session.registerClaudeSessionRequestClaudeSessionId = TL.fromStrict claudeUuid })
+  void $ suspendEffect_ @KVCleanupStalePhases (CleanupStalePhasesRequest {})
   let instruction = "Create a team using TeamCreate before proceeding."
   pure $
     HookOutput

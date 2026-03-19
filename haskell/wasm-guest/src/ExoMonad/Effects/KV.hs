@@ -21,6 +21,7 @@ module ExoMonad.Effects.KV
   ( -- * Effect Types
     KVGet,
     KVSet,
+    KVCleanupStalePhases,
 
     -- * Re-exported proto types
     module Effects.Kv,
@@ -48,3 +49,10 @@ instance Effect KVSet where
   type Input KVSet = SetRequest
   type Output KVSet = SetResponse
   effectId = "kv.set"
+
+data KVCleanupStalePhases
+
+instance Effect KVCleanupStalePhases where
+  type Input KVCleanupStalePhases = CleanupStalePhasesRequest
+  type Output KVCleanupStalePhases = CleanupStalePhasesResponse
+  effectId = "kv.cleanup_stale_phases"

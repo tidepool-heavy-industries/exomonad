@@ -241,3 +241,90 @@ instance (HsJSONPB.ToJSON SetResponse) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON SetResponse) where
   parseJSON = HsJSONPB.parseJSONPB
+data CleanupStalePhasesRequest
+  = CleanupStalePhasesRequest {}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData CleanupStalePhasesRequest)
+instance (HsProtobuf.Named CleanupStalePhasesRequest) where
+  nameOf _ = Hs.fromString "CleanupStalePhasesRequest"
+instance (HsProtobuf.HasDefault CleanupStalePhasesRequest)
+instance (HsProtobuf.Message CleanupStalePhasesRequest) where
+  encodeMessage _ CleanupStalePhasesRequest {} = Hs.mempty
+  decodeMessage _ = Hs.pure CleanupStalePhasesRequest
+  dotProto _ = []
+instance (HsJSONPB.ToJSONPB CleanupStalePhasesRequest) where
+  toJSONPB CleanupStalePhasesRequest = HsJSONPB.object []
+  toEncodingPB CleanupStalePhasesRequest = HsJSONPB.pairs []
+instance (HsJSONPB.FromJSONPB CleanupStalePhasesRequest) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "CleanupStalePhasesRequest"
+        (\ obj -> Hs.pure CleanupStalePhasesRequest)
+instance (HsJSONPB.ToJSON CleanupStalePhasesRequest) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON CleanupStalePhasesRequest) where
+  parseJSON = HsJSONPB.parseJSONPB
+newtype CleanupStalePhasesResponse
+  = CleanupStalePhasesResponse {cleanupStalePhasesResponseDeletedKeys :: (Hs.Vector Hs.Text)}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData CleanupStalePhasesResponse)
+instance (HsProtobuf.Named CleanupStalePhasesResponse) where
+  nameOf _ = Hs.fromString "CleanupStalePhasesResponse"
+instance (HsProtobuf.HasDefault CleanupStalePhasesResponse)
+instance (HsProtobuf.Message CleanupStalePhasesResponse) where
+  encodeMessage
+    _
+    CleanupStalePhasesResponse {cleanupStalePhasesResponseDeletedKeys}
+    = (HsProtobuf.encodeMessageField
+         (HsProtobuf.FieldNumber 1)
+         ((Hs.coerce
+             @(Hs.Vector Hs.Text)
+             @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+            cleanupStalePhasesResponseDeletedKeys))
+  decodeMessage _
+    = Hs.pure CleanupStalePhasesResponse
+        <*>
+          ((HsProtobuf.coerceOver
+              @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text))
+              @(Hs.Vector Hs.Text))
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1)
+         (HsProtobufAST.Repeated HsProtobufAST.String)
+         (HsProtobufAST.Single "deleted_keys") [] ""]
+instance (HsJSONPB.ToJSONPB CleanupStalePhasesResponse) where
+  toJSONPB (CleanupStalePhasesResponse f1)
+    = HsJSONPB.object
+        ["deleted_keys"
+           .=
+             ((Hs.coerce
+                 @(Hs.Vector Hs.Text)
+                 @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                f1)]
+  toEncodingPB (CleanupStalePhasesResponse f1)
+    = HsJSONPB.pairs
+        ["deleted_keys"
+           .=
+             ((Hs.coerce
+                 @(Hs.Vector Hs.Text)
+                 @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                f1)]
+instance (HsJSONPB.FromJSONPB CleanupStalePhasesResponse) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "CleanupStalePhasesResponse"
+        (\ obj
+           -> Hs.pure CleanupStalePhasesResponse
+                <*>
+                  ((HsProtobuf.coerceOver
+                      @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text))
+                      @(Hs.Vector Hs.Text))
+                     (obj .: "deleted_keys")))
+instance (HsJSONPB.ToJSON CleanupStalePhasesResponse) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON CleanupStalePhasesResponse) where
+  parseJSON = HsJSONPB.parseJSONPB
