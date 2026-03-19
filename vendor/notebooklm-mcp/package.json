@@ -43,7 +43,7 @@
     "dotenv": "^16.4.0",
     "env-paths": "^3.0.0",
     "globby": "^14.1.0",
-    "patchright": "^1.48.2",
+    "patchright": "^1.57.0",
     "zod": "^3.22.0"
   },
   "devDependencies": {

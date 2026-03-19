@@ -216,8 +216,8 @@ url = "http://localhost:8080"
 
 [extra_mcp_servers.notebooklm]
 type = "stdio"
-command = "node"
-args = ["vendor/notebooklm-mcp/dist/index.js"]
+command = "notebooklm-mcp"
+args = []
 ```
 
 **Config hierarchy:**

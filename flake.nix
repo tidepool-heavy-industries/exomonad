@@ -58,6 +58,31 @@
           jujutsu  # jj
         ];
 
+        # NotebookLM MCP server (vendored, optional)
+        notebooklm-mcp = pkgs.buildNpmPackage {
+          pname = "notebooklm-mcp";
+          version = "1.2.1";
+          src = ./vendor/notebooklm-mcp;
+          npmDepsHash = "sha256-z55OeM4lrGhjsJutmXHfD82Lt5NIoeUoAfC+0FMwZYQ=";
+
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+
+          # Patchright tries to download browsers at install time — skip it
+          npmFlags = [ "--ignore-scripts" ];
+          dontNpmBuild = false;
+
+          postInstall = ''
+            wrapProgram $out/bin/notebooklm-mcp \
+              --set PLAYWRIGHT_BROWSERS_PATH ${pkgs.playwright-driver.browsers} \
+              --set PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS true
+          '';
+
+          meta = {
+            description = "MCP server for NotebookLM via browser automation (patchright)";
+            license = pkgs.lib.licenses.mit;
+          };
+        };
+
       in {
         devShells = {
           # Default: Full development environment
@@ -67,7 +92,8 @@
               ++ rustPkgs
               ++ orchestrationPkgs
               ++ [ pkgs.sqlite pkgs.duckdb ]
-              ++ [ proto3SuitePkg ];  # For compile-proto-file (Haskell proto codegen)
+              ++ [ proto3SuitePkg ]  # For compile-proto-file (Haskell proto codegen)
+              ++ [ notebooklm-mcp ]; # NotebookLM MCP server (opt-in via config.toml)
 
             shellHook = ''
               # nix mkShell overrides TMPDIR to /tmp/nix-shell.*, which breaks
@@ -133,6 +159,7 @@
             echo "ExoMonad environment check"
             echo "Run 'nix develop' to enter the development shell"
           '';
+          inherit notebooklm-mcp;
         };
       }
     );
