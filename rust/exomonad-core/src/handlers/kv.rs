@@ -385,7 +385,9 @@ mod tests {
             .unwrap();
 
         // Should have deleted: phase-tl--dead--branch and phase-tl
-        assert!(resp.deleted_keys.contains(&"phase-tl--dead--branch".to_string()));
+        assert!(resp
+            .deleted_keys
+            .contains(&"phase-tl--dead--branch".to_string()));
         assert!(resp.deleted_keys.contains(&"phase-tl".to_string()));
         assert_eq!(resp.deleted_keys.len(), 2);
 

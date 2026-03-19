@@ -70,7 +70,12 @@ pub async fn merge_pr_async(
         "merge" => MergeMethod::Merge,
         "squash" => MergeMethod::Squash,
         "rebase" => MergeMethod::Rebase,
-        other => return Err(anyhow::anyhow!("Unknown merge strategy '{}'. Valid options: merge, squash, rebase", other)),
+        other => {
+            return Err(anyhow::anyhow!(
+                "Unknown merge strategy '{}'. Valid options: merge, squash, rebase",
+                other
+            ))
+        }
     };
 
     let result = tokio::time::timeout(

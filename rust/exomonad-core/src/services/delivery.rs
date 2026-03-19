@@ -162,10 +162,7 @@ async fn deliver_via_uds(
             .body(Full::new(hyper::body::Bytes::from(body_bytes)))
             .map_err(|e| e.to_string())?;
 
-        let resp = sender
-            .send_request(req)
-            .await
-            .map_err(|e| e.to_string())?;
+        let resp = sender.send_request(req).await.map_err(|e| e.to_string())?;
 
         let status = resp.status();
         if status.is_success() {
@@ -180,7 +177,10 @@ async fn deliver_via_uds(
             Err(format!(
                 "UDS server responded: {} - {}",
                 status,
-                String::from_utf8_lossy(&body_bytes).lines().next().unwrap_or("empty")
+                String::from_utf8_lossy(&body_bytes)
+                    .lines()
+                    .next()
+                    .unwrap_or("empty")
             ))
         }
     })

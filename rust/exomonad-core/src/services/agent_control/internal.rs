@@ -265,7 +265,8 @@ impl AgentControlService {
         let window_name = name.to_string();
         let window_cwd = cwd.to_path_buf();
 
-        let window_id = tmux.new_window(&window_name, &window_cwd, &shell, &full_command)
+        let window_id = tmux
+            .new_window(&window_name, &window_cwd, &shell, &full_command)
             .await
             .context("Failed to create tmux window")?;
 
@@ -282,17 +283,14 @@ impl AgentControlService {
             }
         };
 
-        let result = timeout(
-            TMUX_TIMEOUT,
-            tmux.list_windows(),
-        )
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "tmux list-windows timed out after {}s",
-                TMUX_TIMEOUT.as_secs()
-            )
-        })?;
+        let result = timeout(TMUX_TIMEOUT, tmux.list_windows())
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "tmux list-windows timed out after {}s",
+                    TMUX_TIMEOUT.as_secs()
+                )
+            })?;
 
         match result {
             Ok(windows) => Ok(windows.into_iter().map(|w| w.window_name).collect()),
@@ -328,19 +326,16 @@ impl AgentControlService {
         };
 
         let tmux = self.tmux()?;
-        timeout(
-            TMUX_TIMEOUT,
-            tmux.kill_window(&window_id),
-        )
-        .await
-        .map_err(|_| {
-            anyhow::Error::new(TimeoutError {
-                message: format!(
-                    "tmux kill-window timed out after {}s",
-                    TMUX_TIMEOUT.as_secs()
-                ),
-            })
-        })??;
+        timeout(TMUX_TIMEOUT, tmux.kill_window(&window_id))
+            .await
+            .map_err(|_| {
+                anyhow::Error::new(TimeoutError {
+                    message: format!(
+                        "tmux kill-window timed out after {}s",
+                        TMUX_TIMEOUT.as_secs()
+                    ),
+                })
+            })??;
 
         info!(name, "tmux kill-window successful");
         Ok(())
@@ -374,7 +369,9 @@ impl AgentControlService {
         // Find parent window ID by name
         let target_window = if let Some(wname) = parent_window_name {
             let wname = wname.to_string();
-            let windows = tmux.list_windows().await
+            let windows = tmux
+                .list_windows()
+                .await
                 .context("Failed to list tmux windows")?;
             windows
                 .iter()
@@ -388,7 +385,9 @@ impl AgentControlService {
                 })?
         } else {
             // Default to first window if no name provided
-            let windows = tmux.list_windows().await
+            let windows = tmux
+                .list_windows()
+                .await
                 .context("Failed to list tmux windows")?;
             windows
                 .first()
@@ -402,7 +401,9 @@ impl AgentControlService {
         };
 
         let pane_cwd = cwd.to_path_buf();
-        let pane_id = tmux.split_window(&target_window, &pane_cwd, &shell, &full_command).await
+        let pane_id = tmux
+            .split_window(&target_window, &pane_cwd, &shell, &full_command)
+            .await
             .context("Failed to create tmux pane")?;
 
         // Rebalance panes into a grid after each split to prevent

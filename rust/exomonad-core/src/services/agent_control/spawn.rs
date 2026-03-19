@@ -377,13 +377,31 @@ impl AgentControlService {
                 .join(&internal_name);
             let settings_path = agent_config_dir.join("settings.json");
             if settings_path.exists() {
-                info!(name = %options.name, path = %settings_path.display(), "Worker already spawned, returning existing");
-                return Ok(SpawnResult {
-                    agent_dir: PathBuf::new(),
-                    tab_name: internal_name,
-                    issue_title: options.name.clone(),
-                    agent_type: AgentType::Gemini,
-                });
+                // Check tmux pane liveness — settings.json can outlive the pane
+                let pane_alive = match RoutingInfo::read_from_dir(&agent_config_dir).await {
+                    Ok(routing) => match routing.pane_id {
+                        Some(ref pid) => match PaneId::parse(pid) {
+                            Ok(pane_id) => self.tmux()?.pane_exists(&pane_id).await.unwrap_or(false),
+                            Err(_) => false,
+                        },
+                        None => false,
+                    },
+                    Err(_) => false,
+                };
+                if pane_alive {
+                    info!(name = %options.name, "Worker pane still alive, returning existing");
+                    return Ok(SpawnResult {
+                        agent_dir: PathBuf::new(),
+                        tab_name: internal_name,
+                        issue_title: options.name.clone(),
+                        agent_type: AgentType::Gemini,
+                    });
+                }
+                // Stale: pane is dead but config dir remains. Clean up and respawn.
+                info!(name = %options.name, path = %agent_config_dir.display(), "Stale worker detected (pane dead), cleaning up and respawning");
+                if let Err(e) = fs::remove_dir_all(&agent_config_dir).await {
+                    warn!(name = %options.name, error = %e, "Failed to clean up stale worker config dir");
+                }
             }
 
             let mut env_vars = self.common_spawn_env(&internal_name, self.effective_birth_branch(Some(&ctx.birth_branch)).as_ref(), "worker");

@@ -9,6 +9,7 @@ mod cleanup;
 mod internal;
 mod spawn;
 
+pub(crate) use super::tmux_ipc::PaneId;
 pub(crate) use crate::common::TimeoutError;
 pub(crate) use crate::domain::{
     AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, ItemState, RoutingInfo, TeamName,

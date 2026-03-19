@@ -133,9 +133,7 @@ impl GitService {
 
     #[tracing::instrument(skip(self))]
     pub async fn get_branch(&self, dir: &str) -> Result<String> {
-        let output = self
-            .exec_git(dir, &["branch", "--show-current"])
-            .await?;
+        let output = self.exec_git(dir, &["branch", "--show-current"]).await?;
         Ok(output.trim().to_string())
     }
 

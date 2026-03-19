@@ -19,7 +19,9 @@ pub fn build_octocrab() -> Result<Octocrab> {
     })?;
 
     if token.is_empty() {
-        return Err(anyhow!("GitHub token is empty. Set the GITHUB_TOKEN environment variable."));
+        return Err(anyhow!(
+            "GitHub token is empty. Set the GITHUB_TOKEN environment variable."
+        ));
     }
 
     let client = OctocrabBuilder::new()
@@ -692,12 +694,12 @@ mod tests {
         // Ensure GITHUB_TOKEN is not set for this test
         let old_token = std::env::var("GITHUB_TOKEN").ok();
         std::env::remove_var("GITHUB_TOKEN");
-        
+
         let result = build_octocrab();
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("GitHub token required"));
-        
+
         // Restore token if it was set
         if let Some(t) = old_token {
             std::env::set_var("GITHUB_TOKEN", t);

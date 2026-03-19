@@ -524,7 +524,9 @@ impl GitHubPoller {
         let octo = match &self.octo {
             Some(o) => o,
             None => {
-                tracing::warn!("GitHubPoller: no octocrab client (GITHUB_TOKEN not set), skipping cycle");
+                tracing::warn!(
+                    "GitHubPoller: no octocrab client (GITHUB_TOKEN not set), skipping cycle"
+                );
                 return Ok(());
             }
         };
