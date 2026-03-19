@@ -129,7 +129,41 @@ pub async fn resolve_plugin(
 ) -> anyhow::Result<Arc<PluginManager>> {
     let agent_name = AgentName::from(name);
 
-    // Fast path: check plugin cache
+    // Root's birth branch tracks the current git branch, which can change
+    // between sessions. Always re-resolve and invalidate if it drifted.
+    if name == "root" {
+        let birth_branch = BirthBranch::root()?;
+        {
+            let cache = plugins.read().await;
+            if let Some(p) = cache.get(&agent_name) {
+                if p.effect_context().birth_branch == birth_branch {
+                    return Ok(p.clone());
+                }
+                tracing::info!(
+                    old = %p.effect_context().birth_branch,
+                    new = %birth_branch,
+                    "Root birth branch changed, recreating plugin"
+                );
+            }
+        }
+        let working_dir =
+            exomonad_core::services::agent_control::resolve_working_dir(birth_branch.as_str());
+        let ctx = exomonad_core::effects::EffectContext {
+            agent_name: agent_name.clone(),
+            birth_branch,
+            working_dir,
+        };
+        let p = Arc::new(
+            PluginManager::from_file(wasm_path, registry.clone(), ctx)
+                .await
+                .with_context(|| "Failed to create plugin for root agent")?,
+        );
+        let mut cache = plugins.write().await;
+        cache.insert(agent_name, p.clone());
+        return Ok(p);
+    }
+
+    // Non-root agents: stable identity, normal cache
     {
         let cache = plugins.read().await;
         if let Some(p) = cache.get(&agent_name) {
@@ -137,13 +171,7 @@ pub async fn resolve_plugin(
         }
     }
 
-    // Slow path: resolve birth branch and create plugin
-    let birth_branch = if name == "root" {
-        BirthBranch::root()?
-    } else {
-        resolve_agent_birth_branch(worktree_base, name).await?
-    };
-
+    let birth_branch = resolve_agent_birth_branch(worktree_base, name).await?;
     get_or_create_plugin(plugins, agent_name, birth_branch, registry, wasm_path).await
 }
 
