@@ -16,6 +16,10 @@ module ExoMonad.Guest.StateMachine
     StopCheckResult (..),
     describeStopResult,
 
+    -- * Branch scoping
+    sanitizeBranch,
+    scopedPhaseKey,
+
     -- * Framework functions
     getPhase,
     setPhase,
@@ -71,14 +75,18 @@ class (ToJSON phase, FromJSON phase, Typeable phase, Show phase) => StateMachine
   canExit :: phase -> StopCheckResult
   machineName :: Text
 
--- | KV key scoped by machine name.
-phaseKey :: forall phase event. StateMachine phase event => Text
-phaseKey = "phase-" <> (machineName @phase @event)
+-- | Sanitize branch name for KV keys (replace dots with double-hyphens).
+sanitizeBranch :: Text -> Text
+sanitizeBranch = T.replace "." "--"
+
+-- | KV key scoped by machine name and branch.
+scopedPhaseKey :: forall phase event. StateMachine phase event => Text -> Text
+scopedPhaseKey scope = "phase-" <> machineName @phase @event <> "--" <> sanitizeBranch scope
 
 -- | Read the current phase from KV.
-getPhase :: forall phase event. StateMachine phase event => Eff Effects (Maybe phase)
-getPhase = do
-  result <- suspendEffect @KVGet (KV.GetRequest {KV.getRequestKey = TL.fromStrict (phaseKey @phase @event)})
+getPhase :: forall phase event. StateMachine phase event => Text -> Eff Effects (Maybe phase)
+getPhase scope = do
+  result <- suspendEffect @KVGet (KV.GetRequest {KV.getRequestKey = TL.fromStrict (scopedPhaseKey @phase @event scope)})
   case result of
     Left _ -> pure Nothing
     Right resp
@@ -89,21 +97,21 @@ getPhase = do
             Right phase -> pure (Just phase)
 
 -- | Set the current phase in KV.
-setPhase :: forall phase event. StateMachine phase event => phase -> Eff Effects ()
-setPhase phase = do
+setPhase :: forall phase event. StateMachine phase event => Text -> phase -> Eff Effects ()
+setPhase scope phase = do
   let json = TL.toStrict (decodeUtf8 (Aeson.encode phase))
-  _ <- suspendEffect @KVSet (KV.SetRequest {KV.setRequestKey = TL.fromStrict (phaseKey @phase @event), KV.setRequestValue = TL.fromStrict json})
+  _ <- suspendEffect @KVSet (KV.SetRequest {KV.setRequestKey = TL.fromStrict (scopedPhaseKey @phase @event scope), KV.setRequestValue = TL.fromStrict json})
   pure ()
 
 -- | Apply an event to the current phase, persisting the result.
 -- Reads current phase from KV, applies transition, writes new phase + logs.
-applyEvent :: forall phase event. (StateMachine phase event, Show event) => phase -> event -> Eff Effects (Maybe phase)
-applyEvent defaultPhase event = do
-  mCurrent <- getPhase @phase @event
+applyEvent :: forall phase event. (StateMachine phase event, Show event) => Text -> phase -> event -> Eff Effects (Maybe phase)
+applyEvent scope defaultPhase event = do
+  mCurrent <- getPhase @phase @event scope
   let current = maybe defaultPhase id mCurrent
   case transition current event of
     Transitioned newPhase -> do
-      setPhase @phase @event newPhase
+      setPhase @phase @event scope newPhase
       logTransition (machineName @phase @event) (T.pack (show current)) (T.pack (show newPhase))
       pure (Just newPhase)
     InvalidTransition reason -> do
@@ -111,9 +119,9 @@ applyEvent defaultPhase event = do
       pure Nothing
 
 -- | Check whether the agent can exit based on its current phase.
-checkExit :: forall phase event. StateMachine phase event => phase -> Eff Effects StopCheckResult
-checkExit defaultPhase = do
-  mPhase <- getPhase @phase @event
+checkExit :: forall phase event. StateMachine phase event => Text -> phase -> Eff Effects StopCheckResult
+checkExit scope defaultPhase = do
+  mPhase <- getPhase @phase @event scope
   let current = maybe defaultPhase id mPhase
   pure (canExit @phase @event current)
 

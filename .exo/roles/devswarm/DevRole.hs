@@ -22,6 +22,7 @@ import ExoMonad.Guest.Tools.Tasks
     taskUpdateCore, taskUpdateDescription, taskUpdateSchema, TaskUpdateArgs
   )
 import ExoMonad.Guest.StateMachine (applyEvent)
+import ExoMonad.Guest.Effects.StopHook (getCurrentBranch)
 import DevPhase (DevPhase (..), DevEvent (..))
 import HttpDevHooks (httpDevHooks)
 import PRReviewHandler (prReviewEventHandlers)
@@ -39,7 +40,8 @@ instance MCPTool DevFilePR where
     case result of
       Left err -> pure $ errorResult err
       Right output -> do
-        void $ applyEvent @DevPhase @DevEvent DevSpawned
+        branch <- getCurrentBranch
+        void $ applyEvent @DevPhase @DevEvent branch DevSpawned
           (PRCreated (fpoNumber output) (fpoUrl output) (fpoHeadBranch output))
         pure $ successResult (Aeson.toJSON output)
 
@@ -56,9 +58,10 @@ instance MCPTool DevNotifyParent where
     case result of
       Left err -> pure $ errorResult err
       Right _ -> do
+        branch <- getCurrentBranch
         case npStatus args of
-          Success -> void $ applyEvent @DevPhase @DevEvent DevSpawned (NotifyParentSuccess (npMessage args))
-          Failure -> void $ applyEvent @DevPhase @DevEvent DevSpawned (NotifyParentFailure (npMessage args))
+          Success -> void $ applyEvent @DevPhase @DevEvent branch DevSpawned (NotifyParentSuccess (npMessage args))
+          Failure -> void $ applyEvent @DevPhase @DevEvent branch DevSpawned (NotifyParentFailure (npMessage args))
         pure $ successResult $ object ["success" .= True]
 
 -- | Dev-specific shutdown: transitions to DevDone, then exits.
@@ -70,7 +73,8 @@ instance MCPTool DevShutdown where
   toolDescription = shutdownDescription
   toolSchema = shutdownSchema
   toolHandlerEff args = do
-    void $ applyEvent @DevPhase @DevEvent DevSpawned ShutdownRequested
+    branch <- getCurrentBranch
+    void $ applyEvent @DevPhase @DevEvent branch DevSpawned ShutdownRequested
     shutdownCore args
 
 data DevTaskList
