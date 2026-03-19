@@ -18,11 +18,10 @@ import ExoMonad.Guest.Tools.Spawn
     spawnWorkerToolCore, spawnWorkerToolDescription, spawnWorkerToolSchema, SpawnWorkerToolArgs
   )
 import ExoMonad.Guest.Effects.AgentControl (SpawnResult (..))
-import ExoMonad.Guest.Types (allowResponse)
+import ExoMonad.Guest.Types (allowResponse, allowStopResponse)
 import ExoMonad.Types (HookConfig (..), defaultSessionStartHook, teamRegistrationPostToolUse)
 import PRReviewHandler (prReviewEventHandlers)
 import TLPhase (TLPhase (..), TLEvent (..), ChildHandle (..))
-import TLStopCheck (tlStopCheck)
 
 data RootForkWave
 instance MCPTool RootForkWave where
@@ -103,8 +102,8 @@ config =
       hooks = HookConfig
         { preToolUse       = \_ -> pure (allowResponse Nothing),
           postToolUse      = teamRegistrationPostToolUse,
-          onStop           = \_ -> tlStopCheck,
-          onSubagentStop   = \_ -> tlStopCheck,
+          onStop           = \_ -> pure allowStopResponse,
+          onSubagentStop   = \_ -> pure allowStopResponse,
           onSessionStart   = defaultSessionStartHook
         },
       eventHandlers = prReviewEventHandlers

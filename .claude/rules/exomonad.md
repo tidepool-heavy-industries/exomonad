@@ -4,6 +4,10 @@ description: "ExoMonad agent orchestration rules — loaded into every agent's c
 
 # ExoMonad Agent Rules
 
+## Model
+
+ExoMonad is a hylomorphism over context windows. Unfold = plan + scaffold + spawn. Fold = merge + integrate + PR upward. Each agent is a triad: worktree (filesystem) + context window (attention) + actor (messages). See `CLAUDE.md` § Model for the full conceptual framework.
+
 ## MCP Tools
 
 Use exomonad MCP tools for orchestration. Git and GitHub operations use `git` and `gh` CLI commands, NOT MCP tools.

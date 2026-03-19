@@ -4,6 +4,44 @@ Type-safe LLM agent orchestration. Haskell WASM defines all logic (tool schemas,
 
 ---
 
+## Model
+
+ExoMonad is a **hylomorphism over context windows**. The unfold is planning + scaffolding + spawning. The fold is merging + integrating + PR-upward. The recursion scheme gives you the entire system.
+
+### The Agent Triad
+
+Each node in the tree is three things born, living, and dying together:
+
+- **Worktree** — filesystem state (code isolation via git worktree)
+- **Context window** — attention state (what the agent knows and can reason about)
+- **Actor** — message-processing entity (receives notifications, yields effects)
+
+These are 1:1:1. You cannot have a worktree without a context window to operate on it, or a context window without an actor to drive it. When the actor shuts down, the worktree is cleaned up and the context window is gone. The triad IS the agent.
+
+### The Hylomorphism
+
+**Unfold (coalgebra = the scaffold commit).** A TL plans one level down, commits the shared foundation (types, interfaces, stubs, CLAUDE.md), and spawns children. The scaffold commit is the coalgebra — it defines the shape of the decomposition. This is the most important thing a TL does. Children fork from this commit and cannot see each other.
+
+**Fold (algebra = merge + integrate).** As children complete, the TL merges their PRs, wires outputs together, and writes an integration commit. Each merge is paramorphic — the TL accumulates understanding from what children produced. This accumulated context informs the next wave's specs. After all waves are folded, the TL files a PR upward, and its parent folds it in turn.
+
+The operational realization is **Scaffold-Fork-Converge** (see [Tech Lead Praxis](#scaffold-fork-converge)).
+
+### Depth over Breadth
+
+Sub-TLs are **compression boundaries**. A root TL with 3 sub-TLs, each managing 4 leaves, sees O(3) — not O(12). The sub-TL absorbs implementation detail into its context window, and surfaces only the integrated result upward.
+
+This is why the tree prevents context window drift: each node's cognitive load is proportional to its fan-out, not the total number of leaves beneath it. A 4-level-deep tree with branching factor 3 has 81 leaves, but no single context window ever reasons about more than 3 children.
+
+### Waves as Rhythm
+
+Within a single TL's scope, work proceeds in waves. Wave N produces merged code. Wave N+1 builds on it. The wave boundary is where understanding accumulates — the TL reads the merged diffs, learns what the children actually built, and uses that knowledge to write sharper specs for the next wave.
+
+### Branch Naming as Coordinate System
+
+`{parent}.{slug}` (dot separator) encodes tree address. `dev.auth.oauth-provider` tells you: root is `dev`, first-level TL is `auth`, leaf is `oauth-provider`. PRs target the parent branch, not main — merged via recursive fold up the tree. The git DAG IS the computation trace.
+
+---
+
 ## Rules
 
 ### Style
@@ -298,10 +336,10 @@ Human in tmux session
     └── Claude Code + exomonad (Rust + Haskell WASM)
             ├── MCP tools via WASM (fork_wave, spawn_gemini, spawn_worker, etc.)
             └── Agent tree:
-                ├── worktree: main.feature-a (TL role, can spawn children)
+                ├── worktree: dev.feature-a (TL role, can spawn children)
                 │   ├── worker: rust-impl (Gemini, in-place pane)
                 │   └── worker: haskell-impl (Gemini, in-place pane)
-                └── worktree: main.feature-b (TL role)
+                └── worktree: dev.feature-b (TL role)
                     └── ...
 ```
 
@@ -383,35 +421,6 @@ All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/To
 
 ---
 
-## Documentation Tree
-
-```
-CLAUDE.md  ← YOU ARE HERE (project overview)
-├── proto/CLAUDE.md    ← Protocol buffers (FFI boundary types)
-├── haskell/CLAUDE.md  ← Haskell package organization
-│   ├── wasm-guest/CLAUDE.md    ← MCP tool definitions (WASM guest logic)
-│   └── proto/CLAUDE.md         ← Generated Haskell types for proto
-├── rust/CLAUDE.md             ← Rust workspace overview (3 crates)
-│   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (binary)
-│   ├── exomonad-core/CLAUDE.md ← Unified library: framework, handlers, services, protocol, UI types
-│   └── exomonad-proto/     ← Proto-generated types (prost) for FFI + effects
-└── docs/decisions/            ← Architecture decision records (living docs)
-```
-
-| I want to... | Read this |
-|--------------|-----------|
-| Add FFI boundary types | `proto/CLAUDE.md` |
-| Understand MCP tool architecture | `rust/exomonad/CLAUDE.md` |
-| Work on exomonad-core framework | `rust/exomonad-core/CLAUDE.md` |
-| Work on effect handlers or services | `rust/exomonad-core/` (handlers/, services/) |
-| Extend the effect framework | `rust/exomonad-core/` (effects/) |
-| Understand shared protocol types | `rust/exomonad-core/` (protocol/) |
-| Work with external service clients | `rust/exomonad-core/` (services/external/) |
-| Work on WASM guest (MCP tools) | `haskell/wasm-guest/CLAUDE.md` |
-| Understand architectural decisions | `docs/decisions/` |
-
----
-
 ## Developing ExoMonad
 
 ### Package Inventory
@@ -460,7 +469,11 @@ GitHub Issues. Branch naming: `gh-{number}/{description}`. Reference issue in co
 
 ## Tech Lead Praxis
 
-How to coordinate heterogeneous agent teams. The TL is a compiler: it transforms high-level intent into leaf-executable specs, then gets out of the way.
+The operational manual for executing the hylomorphism (see [Model](#model)). The TL is the recursion's driver at each node: it performs the unfold (scaffold + spawn), idles while children work, then performs the fold (merge + integrate + PR upward). Everything below is how to do that well.
+
+### Depth over Breadth
+
+Use sub-TLs to keep each context window sharp. If a task decomposes into more than ~4 independent leaves, interpose a sub-TL. The root should never reason about implementation details — only about the decomposition structure and integration points. Sub-TLs absorb complexity; root sees summaries.
 
 ### Intelligence Gradient
 
@@ -563,6 +576,35 @@ The TL is idle between spawning and receiving notifications. It wakes up for:
 - GitHub poller notifications (CI status, PR merge conflicts).
 
 The TL does NOT wake up for intermediate progress, Copilot comments, or partial results. The convergence loop (leaf + Copilot) runs without TL involvement.
+
+---
+
+## Documentation Tree
+
+```
+CLAUDE.md  ← YOU ARE HERE (project overview)
+├── proto/CLAUDE.md    ← Protocol buffers (FFI boundary types)
+├── haskell/CLAUDE.md  ← Haskell package organization
+│   ├── wasm-guest/CLAUDE.md    ← MCP tool definitions (WASM guest logic)
+│   └── proto/CLAUDE.md         ← Generated Haskell types for proto
+├── rust/CLAUDE.md             ← Rust workspace overview (3 crates)
+│   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (binary)
+│   ├── exomonad-core/CLAUDE.md ← Unified library: framework, handlers, services, protocol, UI types
+│   └── exomonad-proto/     ← Proto-generated types (prost) for FFI + effects
+└── docs/decisions/            ← Architecture decision records (living docs)
+```
+
+| I want to... | Read this |
+|--------------|-----------|
+| Add FFI boundary types | `proto/CLAUDE.md` |
+| Understand MCP tool architecture | `rust/exomonad/CLAUDE.md` |
+| Work on exomonad-core framework | `rust/exomonad-core/CLAUDE.md` |
+| Work on effect handlers or services | `rust/exomonad-core/` (handlers/, services/) |
+| Extend the effect framework | `rust/exomonad-core/` (effects/) |
+| Understand shared protocol types | `rust/exomonad-core/` (protocol/) |
+| Work with external service clients | `rust/exomonad-core/` (services/external/) |
+| Work on WASM guest (MCP tools) | `haskell/wasm-guest/CLAUDE.md` |
+| Understand architectural decisions | `docs/decisions/` |
 
 ---
 
