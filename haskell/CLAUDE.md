@@ -16,8 +16,8 @@ All Haskell packages live here.
 ## Design Patterns
 
 - **Algebraic effects**: freer-simple `Eff` with coroutine-based yield/resume
-- **IO-blind WASM guest**: All logic in Haskell, all I/O in Rust effect handlers
-- **Embedded DSL**: Haskell WASM as pure logic, hosted by Rust runtime
+- **Typed config DSL**: Haskell WASM defines tool schemas, dispatch, hooks, event routing — everything that would otherwise be scattered config files, but with a type system and effect system
+- **Effect boundary**: WASM yields typed effects, Rust executes the I/O. Agents themselves have full tool access (bash, files, git)
 
 ## Role System
 

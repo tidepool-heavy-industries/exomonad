@@ -71,11 +71,11 @@ exomonad init
 
 | Layer | What | Why |
 |-------|------|-----|
-| **Haskell WASM** | Tool definitions, schemas, decision logic | Pure logic, no I/O, hot-reloadable |
+| **Haskell WASM** | Typed config DSL: tool schemas, dispatch, hooks, event routing | Deterministic, testable, hot-reloadable |
 | **Rust runtime** | Executes effects (git, GitHub API, filesystem, tmux CLI) | Performance, safety |
 | **tmux** | Process isolation (windows for subtrees, panes for workers) | Multiplexing without Docker |
 
-Agents are IO-blind state machines compiled to WASM. They yield typed effects; Rust executes them. This means tool logic is deterministic, testable, and hot-reloadable — edit a Haskell tool, run `just wasm-all`, and the next MCP call picks up the change.
+Haskell WASM is a typed configuration DSL — tool schemas, dispatch logic, hooks, event routing — with the full power of a type system and effect system. The WASM yields typed effects; Rust executes the I/O. This means tool logic is deterministic, testable, and hot-reloadable — edit a Haskell tool, run `just wasm-all`, and the next MCP call picks up the change.
 
 **Agent types:**
 

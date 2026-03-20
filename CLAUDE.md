@@ -1,6 +1,6 @@
 # ExoMonad
 
-Type-safe LLM agent orchestration. Haskell WASM defines all logic (tool schemas, handlers, decision trees). Rust executes I/O effects. tmux provides isolation and multiplexing. Agents are IO-blind state machines that yield typed effects.
+Type-safe LLM agent orchestration. Haskell WASM is a typed configuration DSL — tool schemas, handlers, decision trees, hook logic, event routing — with the full power of a type system and effect system behind it. Rust executes the I/O effects that the DSL yields. tmux provides isolation and multiplexing.
 
 ---
 
@@ -473,7 +473,7 @@ GitHub Issues. Branch naming: `gh-{number}/{description}`. Reference issue in co
 ### Key Design Decisions
 
 1. **freer-simple for effects** — Standardized on freer-simple for reified continuations (WASM yield/resume)
-2. **IO-blind agents** — All IO in Rust runners, enables WASM + deterministic testing
+2. **Haskell WASM as typed config DSL** — All tool/hook/event logic in Haskell, all I/O in Rust runners. The WASM yields effects; Rust executes them. Agents themselves have full tool access (bash, files, git).
 3. **Haskell WASM = embedded DSL** — All logic in Haskell, Rust handles I/O only
 
 ---

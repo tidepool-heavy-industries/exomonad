@@ -49,7 +49,7 @@ If a PR adds tool schemas, argument parsing, or dispatch logic to Rust code, fla
 
 ## Review Focus
 
-1. **IO-blindness** — Haskell WASM must not escape its effect sandbox
+1. **Effect boundary** — Haskell WASM yields effects, Rust executes I/O. WASM must not escape its effect sandbox
 2. **Effect boundary** — New I/O in Rust, new logic in Haskell, proto types bridge them
 3. **Logging** — Subprocess calls must log before/after/error per CLAUDE.md policy
 4. **No dead code** — No `todo!()`, placeholder variants, or half-done heuristics
