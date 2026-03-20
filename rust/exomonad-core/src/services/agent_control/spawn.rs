@@ -315,7 +315,7 @@ impl AgentControlService {
     /// Constructs the JSON configuration including MCP server connection and lifecycle hooks.
     /// Note: Gemini hooks must be PascalCase (e.g. AfterAgent).
     /// Generate settings.json for a Gemini worker using stdio MCP transport.
-    pub(crate) fn generate_gemini_worker_settings(agent_name: &str) -> serde_json::Value {
+    pub(crate) fn generate_gemini_worker_settings(agent_name: &str, wasm_name: &str) -> serde_json::Value {
         serde_json::json!({
             "mcpServers": {
                 "exomonad": {
@@ -323,6 +323,9 @@ impl AgentControlService {
                     "command": "exomonad",
                     "args": ["mcp-stdio", "--role", "worker", "--name", agent_name]
                 }
+            },
+            "context": {
+                "fileName": ["GEMINI.md", format!(".exo/roles/{}/context/worker.md", wasm_name)]
             },
             "hooks": {
                 "BeforeTool": [
@@ -413,7 +416,7 @@ impl AgentControlService {
             // Workers don't have worktrees, so git-based resolution fails. This file is the fallback.
             let parent_bb = self.effective_birth_branch(Some(&ctx.birth_branch));
             fs::write(agent_config_dir.join(".birth_branch"), parent_bb.as_str()).await?;
-            let settings = Self::generate_gemini_worker_settings(&internal_name);
+            let settings = Self::generate_gemini_worker_settings(&internal_name, &self.wasm_name);
             fs::write(&settings_path, serde_json::to_string_pretty(&settings)?).await?;
             info!(
                 path = %settings_path.display(),
@@ -431,6 +434,12 @@ impl AgentControlService {
             let caller_worktree = ctx.working_dir.clone();
             let absolute_worktree = self.project_dir.join(caller_worktree);
 
+            // Prepend worker role context to prompt
+            let mut full_prompt = options.prompt.clone();
+            if let Some(context) = self.read_role_context("worker") {
+                full_prompt = format!("{}\n\n---\n\n{}", context, full_prompt);
+            }
+
             // Write routing info so send_message can target this pane correctly.
             // Workers are panes in the parent's tab — pane_id is the stable identifier
             // Spawn pane in caller's tab, cwd = caller's worktree
@@ -438,7 +447,7 @@ impl AgentControlService {
                 &display_name,
                 &absolute_worktree,
                 AgentType::Gemini,
-                Some(&options.prompt),
+                Some(&full_prompt),
                 env_vars,
                 Some(&caller_tab),
                 Some(&options.claude_flags),
@@ -551,6 +560,23 @@ impl AgentControlService {
             self.create_socket_symlink(&worktree_path).await;
 
             let role = options.role.as_deref().unwrap_or("tl");
+
+            // Symlink role context for Claude subtree
+            if agent_type == AgentType::Claude {
+                if let Some(context_src) = self.resolve_role_context(role) {
+                    let rules_dir = worktree_path.join(".claude/rules");
+                    let _ = fs::create_dir_all(&rules_dir).await;
+                    let link = rules_dir.join("exomonad_role.md");
+                    let _ = fs::remove_file(&link).await;
+                    let relative = pathdiff::diff_paths(&context_src, &rules_dir)
+                        .unwrap_or(context_src.clone());
+                    match tokio::fs::symlink(&relative, &link).await {
+                        Ok(()) => info!(role = %role, link = %link.display(), "Symlinked role context in worktree"),
+                        Err(e) => warn!(role = %role, error = %e, "Failed to symlink role context (non-fatal)"),
+                    }
+                }
+            }
+
             let mut env_vars = self.common_spawn_env(&internal_name, &branch_name, role);
             // Enable Claude Code Agent Teams for native inter-agent messaging
             env_vars.insert(

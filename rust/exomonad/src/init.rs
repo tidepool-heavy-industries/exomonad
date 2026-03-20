@@ -193,6 +193,24 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
         }
     }
 
+    // Symlink role context for root agent
+    {
+        let context_source = resolve_role_context_path(&cwd, &config.wasm_name, "root");
+        if let Some(src) = context_source {
+            let rules_dir = cwd.join(".claude/rules");
+            std::fs::create_dir_all(&rules_dir)?;
+            let link = rules_dir.join("exomonad_role.md");
+            let _ = std::fs::remove_file(&link); // idempotent
+            // Compute relative path from .claude/rules/ to the source
+            let relative = pathdiff::diff_paths(&src, &rules_dir)
+                .unwrap_or(src.clone());
+            match std::os::unix::fs::symlink(&relative, &link) {
+                Ok(()) => info!(src = %src.display(), link = %link.display(), "Symlinked role context for root"),
+                Err(e) => warn!(error = %e, "Failed to symlink role context (non-fatal)"),
+            }
+        }
+    }
+
     // Write Gemini MCP configuration if root agent is Gemini
     if config.root_agent_type == AgentType::Gemini {
         let gemini_dir = cwd.join(".gemini");
@@ -562,6 +580,23 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
             )
             .context("Failed to write companion hook configuration")?;
 
+            // Symlink role context for Claude companion
+            {
+                let context_source = resolve_role_context_path(&cwd, &config.wasm_name, &companion.role);
+                if let Some(src) = context_source {
+                    let rules_dir = worktree_path.join(".claude/rules");
+                    let _ = std::fs::create_dir_all(&rules_dir);
+                    let link = rules_dir.join("exomonad_role.md");
+                    let _ = std::fs::remove_file(&link); // idempotent
+                    let relative = pathdiff::diff_paths(&src, &rules_dir)
+                        .unwrap_or(src.clone());
+                    match std::os::unix::fs::symlink(&relative, &link) {
+                        Ok(()) => info!(name = %companion.name, src = %src.display(), link = %link.display(), "Symlinked role context for companion"),
+                        Err(e) => warn!(name = %companion.name, error = %e, "Failed to symlink role context (non-fatal)"),
+                    }
+                }
+            }
+
             // Symlink server socket into worktree's .exo/
             let worktree_exo = worktree_path.join(".exo");
             std::fs::create_dir_all(&worktree_exo)?;
@@ -736,4 +771,19 @@ pub async fn wait_for_server_socket(project_dir: &Path) -> Result<()> {
     }
 
     anyhow::bail!("Server socket exists but health check failed.")
+}
+
+/// Resolve role context file with two-tier fallback: project-local > global.
+fn resolve_role_context_path(project_dir: &Path, wasm_name: &str, role: &str) -> Option<PathBuf> {
+    let local = project_dir.join(format!(".exo/roles/{}/context/{}.md", wasm_name, role));
+    if local.exists() {
+        return Some(local);
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let global = PathBuf::from(home).join(format!(".exo/roles/{}/context/{}.md", wasm_name, role));
+        if global.exists() {
+            return Some(global);
+        }
+    }
+    None
 }

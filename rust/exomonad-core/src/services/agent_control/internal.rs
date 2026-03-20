@@ -432,7 +432,7 @@ impl AgentControlService {
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
 
-        let mcp_content = Self::generate_mcp_config(agent_name, agent_type, role);
+        let mcp_content = Self::generate_mcp_config(agent_name, agent_type, role, &self.wasm_name);
 
         match agent_type {
             AgentType::Claude => {
@@ -496,8 +496,25 @@ impl AgentControlService {
         }
     }
 
+    /// Resolve role context file with two-tier fallback: project-local > global.
+    pub(crate) fn resolve_role_context(&self, role: &str) -> Option<PathBuf> {
+        let local = self.project_dir.join(format!(".exo/roles/{}/context/{}.md", self.wasm_name, role));
+        if local.exists() { return Some(local); }
+        if let Ok(home) = std::env::var("HOME") {
+            let global = PathBuf::from(home).join(format!(".exo/roles/{}/context/{}.md", self.wasm_name, role));
+            if global.exists() { return Some(global); }
+        }
+        None
+    }
+
+    /// Read role context file contents. Used for worker prompt prepending.
+    pub(crate) fn read_role_context(&self, role: &str) -> Option<String> {
+        let path = self.resolve_role_context(role)?;
+        std::fs::read_to_string(&path).ok()
+    }
+
     /// Generate MCP configuration JSON for an agent using stdio transport.
-    pub(crate) fn generate_mcp_config(name: &str, agent_type: AgentType, role: &str) -> String {
+    pub(crate) fn generate_mcp_config(name: &str, agent_type: AgentType, role: &str, wasm_name: &str) -> String {
         match agent_type {
             AgentType::Claude => serde_json::to_string_pretty(&serde_json::json!({
                 "mcpServers": {
@@ -516,6 +533,9 @@ impl AgentControlService {
                         "command": "exomonad",
                         "args": ["mcp-stdio", "--role", role, "--name", name]
                     }
+                },
+                "context": {
+                    "fileName": ["GEMINI.md", format!(".exo/roles/{}/context/{}.md", wasm_name, role)]
                 },
                 "hooks": {
                     "BeforeTool": [
@@ -661,7 +681,7 @@ mod tests {
     #[test]
     fn test_claude_mcp_config_format() {
         let config =
-            AgentControlService::generate_mcp_config("test-claude", AgentType::Claude, "tl");
+            AgentControlService::generate_mcp_config("test-claude", AgentType::Claude, "tl", "devswarm");
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(parsed["mcpServers"]["exomonad"]["type"], "stdio");
         assert_eq!(parsed["mcpServers"]["exomonad"]["command"], "exomonad");
@@ -675,7 +695,7 @@ mod tests {
     #[test]
     fn test_gemini_mcp_config_format() {
         let config =
-            AgentControlService::generate_mcp_config("test-gemini", AgentType::Gemini, "dev");
+            AgentControlService::generate_mcp_config("test-gemini", AgentType::Gemini, "dev", "devswarm");
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(parsed["mcpServers"]["exomonad"]["command"], "exomonad");
         let args = parsed["mcpServers"]["exomonad"]["args"].as_array().unwrap();
@@ -705,7 +725,7 @@ mod tests {
 
     #[test]
     fn test_gemini_worker_settings_schema_compliance() {
-        let settings = AgentControlService::generate_gemini_worker_settings("test-worker");
+        let settings = AgentControlService::generate_gemini_worker_settings("test-worker", "devswarm");
 
         // 1. MCP config uses stdio transport
         assert_eq!(settings["mcpServers"]["exomonad"]["type"], "stdio");
