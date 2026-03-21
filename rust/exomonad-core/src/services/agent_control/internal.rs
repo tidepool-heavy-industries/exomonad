@@ -150,9 +150,13 @@ impl AgentControlService {
     /// Build the full shell command string for an agent.
     /// Handles: agent CLI + prompt/flags → env var prefix → nix develop wrapping.
     /// Used by both `new_tmux_window_inner` and `new_tmux_pane`.
+    ///
+    /// `prompt_file` is an absolute path to a file containing the prompt text.
+    /// The prompt is read at runtime via `$(cat ...)` to avoid shell quoting issues
+    /// with arbitrary prompt content (apostrophes, backticks, $(), etc.).
     pub(crate) fn build_agent_command(
         agent_type: AgentType,
-        prompt: Option<&str>,
+        prompt_file: Option<&Path>,
         fork_session_id: Option<&str>,
         env_vars: &HashMap<String, String>,
         cwd: &Path,
@@ -195,22 +199,20 @@ impl AgentControlService {
             AgentType::Shoal => String::new(),
         };
 
-        let agent_command = match (prompt, fork_session_id) {
-            (Some(p), Some(session_id)) => {
-                let escaped_prompt = Self::escape_for_shell_command(p);
+        let agent_command = match (prompt_file, fork_session_id) {
+            (Some(pf), Some(session_id)) => {
                 let escaped_session = Self::escape_for_shell_command(session_id);
                 format!(
-                    "{}{} --resume {} --fork-session {}",
-                    cmd, perms_flags, escaped_session, escaped_prompt
+                    "{}{} --resume {} --fork-session \"$(cat '{}')\"",
+                    cmd, perms_flags, escaped_session, pf.display()
                 )
             }
-            (Some(p), None) => {
-                let escaped_prompt = Self::escape_for_shell_command(p);
+            (Some(pf), None) => {
                 let flag = agent_type.prompt_flag();
                 if flag.is_empty() {
-                    format!("{}{} {}", cmd, perms_flags, escaped_prompt)
+                    format!("{}{} \"$(cat '{}')\"", cmd, perms_flags, pf.display())
                 } else {
-                    format!("{}{} {} {}", cmd, perms_flags, flag, escaped_prompt)
+                    format!("{}{} {} \"$(cat '{}')\"", cmd, perms_flags, flag, pf.display())
                 }
             }
             _ => format!("{}{}", cmd, perms_flags),
@@ -238,6 +240,29 @@ impl AgentControlService {
         }
     }
 
+    /// Write a prompt to a temp file and return the absolute path.
+    /// Files are written to `.exo/tmp/` in the project directory.
+    pub(crate) async fn write_prompt_file(
+        project_dir: &Path,
+        agent_name: &str,
+        prompt: &str,
+    ) -> Result<PathBuf> {
+        let tmp_dir = project_dir.join(".exo/tmp");
+        tokio::fs::create_dir_all(&tmp_dir).await
+            .context("Failed to create .exo/tmp/")?;
+        // Sanitize agent name for filesystem safety (emojis, spaces, etc.)
+        let safe_name: String = agent_name
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        let safe_name = if safe_name.is_empty() { "agent".to_string() } else { safe_name };
+        let path = tmp_dir.join(format!("prompt-{}.txt", safe_name));
+        tokio::fs::write(&path, prompt).await
+            .context("Failed to write prompt file")?;
+        info!(path = %path.display(), agent = %agent_name, "Wrote prompt to temp file");
+        Ok(path)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new_tmux_window_inner(
         &self,
@@ -251,9 +276,15 @@ impl AgentControlService {
     ) -> Result<super::tmux_ipc::WindowId> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating tmux window");
 
+        // Write prompt to file to avoid shell quoting issues
+        let prompt_file = match prompt {
+            Some(p) => Some(Self::write_prompt_file(&self.project_dir, name, p).await?),
+            None => None,
+        };
+
         let full_command = Self::build_agent_command(
             agent_type,
-            prompt,
+            prompt_file.as_deref(),
             fork_session_id,
             &env_vars,
             cwd,
@@ -354,9 +385,15 @@ impl AgentControlService {
     ) -> Result<super::tmux_ipc::PaneId> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, parent = ?parent_window_name, "Creating tmux pane");
 
+        // Write prompt to file to avoid shell quoting issues
+        let prompt_file = match prompt {
+            Some(p) => Some(Self::write_prompt_file(&self.project_dir, name, p).await?),
+            None => None,
+        };
+
         let full_command = Self::build_agent_command(
             agent_type,
-            prompt,
+            prompt_file.as_deref(),
             None,
             &env_vars,
             cwd,
@@ -510,11 +547,6 @@ impl AgentControlService {
         None
     }
 
-    /// Read role context file contents. Used for worker prompt prepending.
-    pub(crate) fn read_role_context(&self, role: &str) -> Option<String> {
-        let path = self.resolve_role_context(role)?;
-        std::fs::read_to_string(&path).ok()
-    }
 
     /// Generate MCP configuration JSON for an agent using stdio transport.
     pub(crate) fn generate_mcp_config(name: &str, agent_type: AgentType, role: &str, wasm_name: &str) -> String {
@@ -612,7 +644,7 @@ impl AgentControlService {
     /// Escape a string for safe use in shell command with single quotes.
     ///
     /// Wraps the string in single quotes and escapes any embedded single quotes.
-    /// This is suitable for: sh -c "claude --prompt '...'"
+    /// Used for fork_session_id (branch names). Prompts use file-based passing instead.
     ///
     /// Example: "user's issue" -> "'user'\''s issue'"
     pub(crate) fn escape_for_shell_command(s: &str) -> String {

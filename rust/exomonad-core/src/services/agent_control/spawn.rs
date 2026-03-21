@@ -434,11 +434,8 @@ impl AgentControlService {
             let caller_worktree = ctx.working_dir.clone();
             let absolute_worktree = self.project_dir.join(caller_worktree);
 
-            // Prepend worker role context to prompt
-            let mut full_prompt = options.prompt.clone();
-            if let Some(context) = self.read_role_context("worker") {
-                full_prompt = format!("{}\n\n---\n\n{}", context, full_prompt);
-            }
+            // Worker role context is loaded via context.fileName in settings.json.
+            // Prompt goes through a temp file to avoid shell quoting issues.
 
             // Write routing info so send_message can target this pane correctly.
             // Workers are panes in the parent's tab — pane_id is the stable identifier
@@ -447,7 +444,7 @@ impl AgentControlService {
                 &display_name,
                 &absolute_worktree,
                 AgentType::Gemini,
-                Some(&full_prompt),
+                Some(&options.prompt),
                 env_vars,
                 Some(&caller_tab),
                 Some(&options.claude_flags),
