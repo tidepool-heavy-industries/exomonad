@@ -482,6 +482,8 @@ pub struct AgentControlService {
     pub(crate) acp_registry: Option<Arc<AcpRegistry>>,
     /// When true, spawned Gemini agents receive `--yolo` flag.
     pub(crate) yolo: bool,
+    /// WASM name for role context resolution (default: "devswarm").
+    pub(crate) wasm_name: String,
 }
 
 impl AgentControlService {
@@ -502,12 +504,19 @@ impl AgentControlService {
             git_wt,
             acp_registry: None,
             yolo: false,
+            wasm_name: "devswarm".to_string(),
         }
     }
 
     /// Set the worktree base directory.
     pub fn with_worktree_base(mut self, base: PathBuf) -> Self {
         self.worktree_base = base;
+        self
+    }
+
+    /// Set the WASM name for role context resolution.
+    pub fn with_wasm_name(mut self, wasm_name: String) -> Self {
+        self.wasm_name = wasm_name;
         self
     }
 
@@ -608,6 +617,7 @@ impl AgentControlService {
             git_wt,
             acp_registry: None,
             yolo: false,
+            wasm_name: "devswarm".to_string(),
         })
     }
 
@@ -711,6 +721,24 @@ impl AgentControlService {
         }
         Ok(())
     }
+}
+
+/// Resolve role context file with two-tier fallback: project-local > global.
+///
+/// Checks `.exo/roles/{wasm_name}/context/{role}.md` in the project directory first,
+/// then falls back to `~/.exo/roles/{wasm_name}/context/{role}.md`.
+pub fn resolve_role_context_path(project_dir: &Path, wasm_name: &str, role: &str) -> Option<PathBuf> {
+    let local = project_dir.join(format!(".exo/roles/{}/context/{}.md", wasm_name, role));
+    if local.exists() {
+        return Some(local);
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let global = PathBuf::from(home).join(format!(".exo/roles/{}/context/{}.md", wasm_name, role));
+        if global.exists() {
+            return Some(global);
+        }
+    }
+    None
 }
 
 /// Create a URL-safe slug from a title.

@@ -33,6 +33,7 @@ toml = "0.8"
 uuid = { workspace = true }
 urlencoding = "2"
 prost = { workspace = true }
+pathdiff = "0.2"
 exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"] }
 
 opentelemetry = { workspace = true }

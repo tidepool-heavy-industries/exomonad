@@ -113,7 +113,12 @@ impl ServerClient {
     }
 
     /// Shared low-level request logic over UDS.
-    async fn raw_request(&self, method: hyper::Method, path: &str, body: Option<&[u8]>) -> Result<Vec<u8>> {
+    async fn raw_request(
+        &self,
+        method: hyper::Method,
+        path: &str,
+        body: Option<&[u8]>,
+    ) -> Result<Vec<u8>> {
         use http_body_util::{BodyExt, Full};
         use hyper::Request;
         use hyper_util::rt::TokioIo;

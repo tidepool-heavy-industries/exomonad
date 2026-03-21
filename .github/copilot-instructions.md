@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-ExoMonad is a heterogeneous LLM agent orchestration system. Haskell WASM defines all logic (tool schemas, handlers, hooks, event routing). Rust executes I/O effects. Agents are IO-blind state machines that yield typed effects.
+ExoMonad is a heterogeneous LLM agent orchestration system. Haskell WASM is a typed configuration DSL — tool schemas, handlers, hooks, event routing — with the full power of a type system and effect system. Rust executes the I/O effects that the DSL yields.
 
 ## Architecture
 

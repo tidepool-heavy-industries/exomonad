@@ -403,7 +403,8 @@ impl AgentEffects for AgentHandler {
 
         // Generate MCP settings for the agent using stdio transport
         let agent_name = &req.name;
-        let settings_json = AgentControlService::generate_gemini_worker_settings(agent_name);
+        let context_path = self.service.resolve_role_context("worker");
+        let settings_json = AgentControlService::generate_gemini_worker_settings(agent_name, context_path.as_deref());
 
         // Write settings to agent config dir
         let agent_dir = working_dir.join(format!(".exo/agents/{}", agent_name));

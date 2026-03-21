@@ -99,6 +99,10 @@ _install profile:
     cp "target/${TARGET_DIR}/exomonad" ~/.cargo/bin/
     cp .exo/wasm/wasm-guest-devswarm.wasm ~/.exo/wasm/
 
+    # Install role context files for consuming repos
+    mkdir -p ~/.exo/roles/devswarm/context
+    cp .exo/roles/devswarm/context/*.md ~/.exo/roles/devswarm/context/
+
     # macOS: remove quarantine and ad-hoc sign to avoid sandbox/Gatekeeper issues
     if [ "$(uname)" = "Darwin" ]; then
         xattr -d com.apple.quarantine ~/.cargo/bin/exomonad 2>/dev/null || true

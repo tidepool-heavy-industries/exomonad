@@ -90,6 +90,7 @@ impl HookConfig {
         cwd: &Path,
         binary_path: &Path,
         permissions: Option<&crate::domain::AgentPermissions>,
+        parent_project_dir: Option<&Path>,
     ) -> Result<()> {
         let claude_dir = cwd.join(".claude");
         let settings_path = claude_dir.join("settings.local.json");
@@ -144,6 +145,29 @@ impl HookConfig {
                 perm_obj["defaultMode"] = serde_json::json!(mode);
             }
             settings["permissions"] = perm_obj;
+        }
+
+        // Exclude parent project's context files from worktree children.
+        // Claude Code's boundary detection bug (CC #16600) causes worktrees
+        // nested inside a parent repo to inherit the parent's project root
+        // (it looks for .git/ directories, not .git files). This means the
+        // parent's CLAUDE.md and .claude/rules/ are loaded into the child.
+        //
+        // claudeMdExcludes matches against CANONICAL (realpath-resolved) paths,
+        // not logical symlink paths. The parent's .claude/rules/exomonad_role.md
+        // is a symlink to .exo/roles/{wasm}/context/{role}.md — we must exclude
+        // the canonical target path, not just .claude/rules/**.
+        if let Some(parent_dir) = parent_project_dir {
+            let canonical = parent_dir.canonicalize().unwrap_or(parent_dir.to_path_buf());
+            let parent = canonical.to_string_lossy();
+            settings["claudeMdExcludes"] = json!([
+                format!("{}/CLAUDE.md", parent),
+                format!("{}/CLAUDE.local.md", parent),
+                // Non-symlinked rules (canonical path matches logical path)
+                format!("{}/.claude/rules/**", parent),
+                // Symlinked role context files (canonical path after realpath resolution)
+                format!("{}/.exo/roles/**/context/**", parent),
+            ]);
         }
 
         let content =

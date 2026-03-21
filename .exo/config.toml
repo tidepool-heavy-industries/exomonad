@@ -4,3 +4,8 @@ tmux_session = "EXOMONAD"
 port = 7433
 yolo = true
 otlp_endpoint = "http://localhost:4317"
+
+[extra_mcp_servers.notebooklm]
+type = "stdio"
+command = "vendor/notebooklm-mcp/result/bin/notebooklm-mcp"
+args = []

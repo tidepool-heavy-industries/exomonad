@@ -413,9 +413,12 @@ spawnWorkersSchema =
 spawnWorkersCore :: SpawnWorkersArgs -> Eff Effects MCPCallOutput
 spawnWorkersCore args = do
   results <- forM (swsSpecs args) $ \spec -> do
-    let prompt = case wsPrompt spec of
+    let protocol = case wsType spec of
+              Just Research -> researchProfileText
+              _             -> workerProfileText
+        prompt = case wsPrompt spec of
           Just p -> p
-          Nothing -> renderWorkerPrompt spec
+          Nothing -> renderSpec spec <> "\n\n" <> protocol
         perms = AC.PermissionFlags
           { AC.permMode = wsPermissionMode spec,
             AC.allowedTools = fromMaybe [] (wsAllowedTools spec),
@@ -506,7 +509,7 @@ buildGeminiTask args =
         , wsType = Nothing
         , wsPermissionMode = Nothing, wsAllowedTools = Nothing, wsDisallowedTools = Nothing
         }
-  in renderWorkerPrompt spec
+  in renderSpec spec
 
 -- ============================================================================
 -- SpawnWorkerTool (inline — ephemeral pane, no branch)
@@ -620,9 +623,10 @@ emitSpawnEvent slug agentType taskSummary = do
 -- Raw Text prompt builders (WASM32 workaround)
 -- ============================================================================
 
--- | Render a structured worker prompt as raw Text.
-renderWorkerPrompt :: WorkerSpec -> Text
-renderWorkerPrompt spec =
+-- | Render a structured spec as raw Text (body only, no completion protocol).
+-- Callers append the appropriate protocol for the agent's identity.
+renderSpec :: WorkerSpec -> Text
+renderSpec spec =
   T.intercalate "\n\n" $ filter (not . T.null) $
     [ "## TASK\n" <> wsTask spec ]
     <> maybe [] (\items -> ["## BOUNDARY\n" <> T.intercalate "\n" (map ("- " <>) items)]) (wsBoundary spec)
@@ -631,12 +635,6 @@ renderWorkerPrompt spec =
     <> maybe [] (\t -> if T.null t then [] else ["## CONTEXT\n" <> t]) (wsContext spec)
     <> maybe [] (\items -> ["## VERIFY\n" <> T.intercalate "\n" (map (\c -> "- `" <> c <> "`") items)]) (wsVerify spec)
     <> maybe [] (\items -> ["## DONE CRITERIA\n" <> T.intercalate "\n" (map ("- " <>) items)]) (wsDoneCriteria spec)
-    <> [profileTextFor (fromMaybe Implementation (wsType spec))]
-
--- | Select the profile text for a worker type.
-profileTextFor :: WorkerType -> Text
-profileTextFor Implementation = workerProfileText
-profileTextFor Research = researchProfileText
 
 -- | Pre-rendered leaf profile text.
 leafProfileText :: Text

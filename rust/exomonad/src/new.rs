@@ -69,7 +69,7 @@ pub async fn run(_name: Option<String>) -> Result<()> {
 
     // Write hook configuration
     let binary_path = exomonad_core::find_exomonad_binary();
-    exomonad_core::hooks::HookConfig::write_persistent(&cwd, &binary_path, None)
+    exomonad_core::hooks::HookConfig::write_persistent(&cwd, &binary_path, None, None)
         .context("Failed to write hook configuration")?;
     info!("Hook configuration written to .claude/settings.local.json");
 

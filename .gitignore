@@ -70,6 +70,8 @@ rust/exomonad/.exo/
 
 # Temporary task files for worktree dispatch
 *.md.tmp
+# Prompt temp files (created by spawn, read by agents via $(cat ...))
+.exo/tmp/
 
 # Cargo build artifacts (workspace and per-crate)
 **/target/
@@ -87,6 +89,9 @@ tests/integration/external-consumer/.exo/wasm/
 # Jujutsu state
 .jj/
 .gemini/settings.json
+
+# Generated symlinks (provisioned by init/spawn, source in .exo/roles/)
+.claude/rules/exomonad_*.md
 
 # try-exomonad/ pre-built artifacts (staged by run.sh from host)
 try-exomonad/artifacts/

@@ -8,7 +8,7 @@ use tracing::{debug, info, warn};
 /// Run the init command: create or attach to tmux session.
 pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()> {
     use exomonad_core::services::tmux_ipc::TmuxIpc;
-    use exomonad_core::services::AgentType;
+    use exomonad_core::services::{resolve_role_context_path, AgentType};
     use std::io::{IsTerminal, Write};
     let cwd = std::env::current_dir()?;
     let config_path = cwd.join(".exo/config.toml");
@@ -162,7 +162,7 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
 
     // Write hook configuration (SessionStart registers Claude UUID for --fork-session)
     let binary_path = exomonad_core::find_exomonad_binary();
-    exomonad_core::hooks::HookConfig::write_persistent(&cwd, &binary_path, None)
+    exomonad_core::hooks::HookConfig::write_persistent(&cwd, &binary_path, None, None)
         .context("Failed to write hook configuration")?;
     info!("Hook configuration written to .claude/settings.local.json");
 
@@ -189,6 +189,24 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
                     src = %src.display(),
                     "Copied Claude rules to .claude/rules/exomonad.md"
                 );
+            }
+        }
+    }
+
+    // Symlink role context for root agent
+    {
+        let context_source = resolve_role_context_path(&cwd, &config.wasm_name, "root");
+        if let Some(src) = context_source {
+            let rules_dir = cwd.join(".claude/rules");
+            std::fs::create_dir_all(&rules_dir)?;
+            let link = rules_dir.join("exomonad_role.md");
+            let _ = std::fs::remove_file(&link); // idempotent
+            // Compute relative path from .claude/rules/ to the source
+            let relative = pathdiff::diff_paths(&src, &rules_dir)
+                .unwrap_or(src.clone());
+            match std::os::unix::fs::symlink(&relative, &link) {
+                Ok(()) => info!(src = %src.display(), link = %link.display(), "Symlinked role context for root"),
+                Err(e) => warn!(error = %e, "Failed to symlink role context (non-fatal)"),
             }
         }
     }
@@ -351,6 +369,18 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
         warn!(
             "tmux set-environment failed: {}",
             String::from_utf8_lossy(&env_output.stderr)
+        );
+    }
+
+    // Set EXOMONAD_ROLE=root so hook CLI passes &role=root to server
+    let role_output = std::process::Command::new("tmux")
+        .args(["set-environment", "-t", &session, "EXOMONAD_ROLE", "root"])
+        .output()
+        .context("Failed to set EXOMONAD_ROLE in tmux session")?;
+    if !role_output.status.success() {
+        warn!(
+            "tmux set-environment EXOMONAD_ROLE failed: {}",
+            String::from_utf8_lossy(&role_output.stderr)
         );
     }
 
@@ -575,8 +605,27 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
                 &worktree_path,
                 &binary_path,
                 None,
+                Some(&cwd),
             )
             .context("Failed to write companion hook configuration")?;
+
+            // Copy role context into companion's rules dir.
+            // Must be a copy, not a symlink — symlinks escape the worktree boundary
+            // and cause Claude Code to discover parent context files.
+            {
+                let context_source = resolve_role_context_path(&cwd, &config.wasm_name, &companion.role);
+                if let Some(src) = context_source {
+                    let rules_dir = worktree_path.join(".claude/rules");
+                    let _ = std::fs::create_dir_all(&rules_dir);
+                    let dest = rules_dir.join("exomonad_role.md");
+                    let _ = std::fs::remove_file(&dest); // idempotent
+                    match std::fs::copy(&src, &dest) {
+                        Ok(_) => info!(name = %companion.name, src = %src.display(), dest = %dest.display(), "Copied role context for companion"),
+                        Err(e) => warn!(name = %companion.name, error = %e, "Failed to copy role context (non-fatal)"),
+                    }
+                }
+            }
+
 
             // Symlink server socket into worktree's .exo/
             let worktree_exo = worktree_path.join(".exo");
@@ -753,3 +802,4 @@ pub async fn wait_for_server_socket(project_dir: &Path) -> Result<()> {
 
     anyhow::bail!("Server socket exists but health check failed.")
 }
+
