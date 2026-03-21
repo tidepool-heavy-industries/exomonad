@@ -202,17 +202,19 @@ impl AgentControlService {
         let agent_command = match (prompt_file, fork_session_id) {
             (Some(pf), Some(session_id)) => {
                 let escaped_session = Self::escape_for_shell_command(session_id);
+                let escaped_path = Self::escape_for_shell_command(&pf.display().to_string());
                 format!(
-                    "{}{} --resume {} --fork-session \"$(cat '{}')\"",
-                    cmd, perms_flags, escaped_session, pf.display()
+                    "{}{} --resume {} --fork-session \"$(cat {})\"",
+                    cmd, perms_flags, escaped_session, escaped_path
                 )
             }
             (Some(pf), None) => {
+                let escaped_path = Self::escape_for_shell_command(&pf.display().to_string());
                 let flag = agent_type.prompt_flag();
                 if flag.is_empty() {
-                    format!("{}{} \"$(cat '{}')\"", cmd, perms_flags, pf.display())
+                    format!("{}{} \"$(cat {})\"", cmd, perms_flags, escaped_path)
                 } else {
-                    format!("{}{} {} \"$(cat '{}')\"", cmd, perms_flags, flag, pf.display())
+                    format!("{}{} {} \"$(cat {})\"", cmd, perms_flags, flag, escaped_path)
                 }
             }
             _ => format!("{}{}", cmd, perms_flags),
@@ -242,6 +244,7 @@ impl AgentControlService {
 
     /// Write a prompt to a temp file and return the absolute path.
     /// Files are written to `.exo/tmp/` in the project directory.
+    /// Uses UUID filenames to avoid races when multiple agents spawn concurrently.
     pub(crate) async fn write_prompt_file(
         project_dir: &Path,
         agent_name: &str,
@@ -250,13 +253,11 @@ impl AgentControlService {
         let tmp_dir = project_dir.join(".exo/tmp");
         tokio::fs::create_dir_all(&tmp_dir).await
             .context("Failed to create .exo/tmp/")?;
-        // Sanitize agent name for filesystem safety (emojis, spaces, etc.)
-        let safe_name: String = agent_name
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-            .collect();
-        let safe_name = if safe_name.is_empty() { "agent".to_string() } else { safe_name };
-        let path = tmp_dir.join(format!("prompt-{}.txt", safe_name));
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = tmp_dir.join(format!("prompt-{}-{}.txt", ts, std::process::id()));
         tokio::fs::write(&path, prompt).await
             .context("Failed to write prompt file")?;
         info!(path = %path.display(), agent = %agent_name, "Wrote prompt to temp file");
