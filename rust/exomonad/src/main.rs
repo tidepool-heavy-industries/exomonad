@@ -1,3 +1,4 @@
+// test spawn
 //! exomonad: Rust host with embedded Haskell WASM plugin.
 //!
 //! This binary runs as a sidecar in each agent container, handling:
