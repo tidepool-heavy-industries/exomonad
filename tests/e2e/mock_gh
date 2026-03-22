@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Mock gh CLI for E2E testing.
+# Records all invocations to $GH_MOCK_LOG and returns canned JSON.
+# TODO: implement (Wave 1, Leaf C)
