@@ -4,14 +4,13 @@
 //! `DebugEvent`s via `tokio::sync::broadcast` and supports barriers for synchronous
 //! probing at effect boundaries.
 
-use std::fs::File;
-use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::{broadcast, oneshot, Mutex, Notify};
 
 use super::*;
@@ -44,7 +43,7 @@ pub struct DebugEvent {
 /// Core test hooks state.
 pub struct TestHooks {
     tx: broadcast::Sender<DebugEvent>,
-    writer: Option<Arc<Mutex<BufWriter<File>>>>,
+    writer: Option<Arc<Mutex<BufWriter<tokio::fs::File>>>>,
     #[allow(clippy::type_complexity)]
     barriers: Arc<Mutex<Vec<(String, Arc<Notify>, Option<oneshot::Sender<DebugEvent>>)>>>,
 }
@@ -64,9 +63,11 @@ impl TestHooks {
     }
 
     /// Create new test hooks that also log to a JSONL file.
-    pub fn with_jsonl(path: &Path) -> std::io::Result<(Self, broadcast::Receiver<DebugEvent>)> {
+    pub async fn with_jsonl(
+        path: &Path,
+    ) -> tokio::io::Result<(Self, broadcast::Receiver<DebugEvent>)> {
         let (tx, rx) = broadcast::channel(1024);
-        let file = File::create(path)?;
+        let file = tokio::fs::File::create(path).await?;
         let writer = Arc::new(Mutex::new(BufWriter::new(file)));
 
         Ok((
@@ -101,8 +102,9 @@ impl TestHooks {
         if let Some(writer) = &self.writer {
             if let Ok(line) = serde_json::to_string(&event) {
                 let mut w = writer.lock().await;
-                let _ = writeln!(w, "{}", line);
-                let _ = w.flush();
+                let _ = w.write_all(line.as_bytes()).await;
+                let _ = w.write_all(b"\n").await;
+                let _ = w.flush().await;
             }
         }
     }
@@ -172,7 +174,7 @@ impl<D: EffectDispatch> EffectDispatch for WithTestHooks<D> {
         }
 
         if let Some(i) = matched_barrier {
-            let (_, notify, tx_opt) = &mut barriers[i];
+            let (_, notify, mut tx_opt) = barriers.swap_remove(i);
             let notify = notify.clone();
             if let Some(tx) = tx_opt.take() {
                 let _ = tx.send(event_before.clone());
@@ -294,9 +296,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_barrier_removed_after_use() {
+        let (hooks, _rx) = TestHooks::new();
+        let hooks = Arc::new(hooks);
+        let dispatcher = WithTestHooks::new(MockDispatch, hooks.clone());
+        let ctx = test_ctx();
+
+        let mut barrier = hooks.set_barrier("mock.once").await;
+
+        // First dispatch should hit barrier
+        let dispatch_handle1 = tokio::spawn({
+            let dispatcher = WithTestHooks::new(MockDispatch, hooks.clone());
+            let ctx = ctx.clone();
+            async move { dispatcher.dispatch("mock.once", &[], &ctx).await.unwrap() }
+        });
+
+        barrier.wait().await;
+        barrier.release();
+        dispatch_handle1.await.unwrap();
+
+        // Second dispatch should NOT hit barrier (it was removed)
+        let dispatch_handle2 = tokio::spawn({
+            let dispatcher = WithTestHooks::new(MockDispatch, hooks.clone());
+            let ctx = ctx.clone();
+            async move { dispatcher.dispatch("mock.once", &[], &ctx).await.unwrap() }
+        });
+
+        // This should complete immediately without blocking on a barrier
+        let result = tokio::time::timeout(std::time::Duration::from_millis(100), dispatch_handle2)
+            .await
+            .expect("Second dispatch timed out - barrier was likely not removed")
+            .unwrap();
+        assert_eq!(result, vec![42]);
+    }
+
+    #[tokio::test]
     async fn test_jsonl_logging() {
         let temp = NamedTempFile::new().unwrap();
-        let (hooks, _rx) = TestHooks::with_jsonl(temp.path()).unwrap();
+        let (hooks, _rx) = TestHooks::with_jsonl(temp.path()).await.unwrap();
         let dispatcher = WithTestHooks::new(MockDispatch, Arc::new(hooks));
         let ctx = test_ctx();
 
