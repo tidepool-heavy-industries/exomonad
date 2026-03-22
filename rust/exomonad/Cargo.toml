@@ -14,6 +14,10 @@ autobins = false
 name = "exomonad"
 path = "src/main.rs"
 
+[[test]]
+name = "e2e"
+path = "../../tests/e2e/mod.rs"
+
 [dependencies]
 exomonad-core = { path = "../exomonad-core", version = "0.1.0" }
 claude-teams-bridge = { path = "../claude-teams-bridge", version = "0.1.0" }
