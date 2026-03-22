@@ -150,6 +150,10 @@ proto-test:
 test-mcp *args:
     ./scripts/test-mcp-integration.sh {{args}}
 
+# Run E2E tests (Harness + subprocess server + mock services)
+test-e2e:
+    cargo test -p exomonad --test e2e_tests -- --ignored --nocapture
+
 # Validate Gemini settings against schema
 validate-settings:
     nix-shell -p python3Packages.jsonschema --run "python3 scripts/validate_json.py .gemini/settings.json schema/gemini-cli/settings.schema.json"
