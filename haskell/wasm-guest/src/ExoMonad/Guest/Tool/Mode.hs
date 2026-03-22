@@ -25,6 +25,7 @@ module ExoMonad.Guest.Tool.Mode
     -- * Schema wrapper
     Schema (..),
     mkSchema,
+    withDescription,
 
     -- * Handler wrapper
     Handler (..),
@@ -36,7 +37,8 @@ where
 
 import Data.Aeson (FromJSON)
 import Data.Kind (Type)
-import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), ToolDefinition, WasmResult (..), mkToolDef)
+import Data.Text (Text)
+import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), ToolDefinition (..), WasmResult (..), mkToolDef)
 import ExoMonad.Guest.Tool.Suspend (runToolEff)
 
 -- ============================================================================
@@ -73,6 +75,14 @@ newtype Schema tool = Schema {getSchema :: ToolDefinition}
 -- | Construct a schema from an MCPTool instance.
 mkSchema :: forall t. (MCPTool t) => Schema t
 mkSchema = Schema (mkToolDef @t)
+
+-- | Construct a schema with a custom description override.
+-- The tool name and input schema come from the MCPTool instance;
+-- only the description is replaced.
+withDescription :: forall t. (MCPTool t) => Text -> Schema t
+withDescription desc =
+  let td = mkToolDef @t
+   in Schema (td {tdDescription = desc})
 
 -- ============================================================================
 -- AsHandler Mode

@@ -13,11 +13,7 @@ import ExoMonad.Guest.Tools.Events
   ( notifyParentCore, notifyParentDescription, notifyParentSchema, NotifyParentArgs,
     shutdownCore, shutdownDescription, shutdownSchema, ShutdownArgs
   )
-import ExoMonad.Guest.Tools.Tasks
-  ( taskListCore, taskListDescription, taskListSchema, TaskListArgs,
-    taskGetCore, taskGetDescription, taskGetSchema, TaskGetArgs,
-    taskUpdateCore, taskUpdateDescription, taskUpdateSchema, TaskUpdateArgs
-  )
+import ExoMonad.Guest.Tools.Tasks (TaskList, TaskGet, TaskUpdate)
 import ExoMonad.Guest.Types (allowResponse, allowStopResponse, postToolUseResponse)
 import ExoMonad.Types (HookConfig (..), defaultSessionStartHook)
 
@@ -45,56 +41,17 @@ instance MCPTool WorkerShutdown where
   toolSchema = shutdownSchema
   toolHandlerEff = shutdownCore
 
-data WorkerTaskList
-
-instance MCPTool WorkerTaskList where
-  type ToolArgs WorkerTaskList = TaskListArgs
-  toolName = "task_list"
-  toolDescription = taskListDescription
-  toolSchema = taskListSchema
-  toolHandlerEff args = do
-    result <- taskListCore args
-    case result of
-      Left err -> pure $ errorResult err
-      Right output -> pure $ successResult output
-
-data WorkerTaskGet
-
-instance MCPTool WorkerTaskGet where
-  type ToolArgs WorkerTaskGet = TaskGetArgs
-  toolName = "task_get"
-  toolDescription = taskGetDescription
-  toolSchema = taskGetSchema
-  toolHandlerEff args = do
-    result <- taskGetCore args
-    case result of
-      Left err -> pure $ errorResult err
-      Right output -> pure $ successResult output
-
-data WorkerTaskUpdate
-
-instance MCPTool WorkerTaskUpdate where
-  type ToolArgs WorkerTaskUpdate = TaskUpdateArgs
-  toolName = "task_update"
-  toolDescription = taskUpdateDescription
-  toolSchema = taskUpdateSchema
-  toolHandlerEff args = do
-    result <- taskUpdateCore args
-    case result of
-      Left err -> pure $ errorResult err
-      Right output -> pure $ successResult output
-
 data Tools mode = Tools
   { notifyParent :: mode :- WorkerNotifyParent,
     sendMessage :: mode :- SendMessage,
     shutdown :: mode :- WorkerShutdown,
-    taskList :: mode :- WorkerTaskList,
-    taskGet :: mode :- WorkerTaskGet,
-    taskUpdate :: mode :- WorkerTaskUpdate
+    taskList :: mode :- TaskList,
+    taskGet :: mode :- TaskGet,
+    taskUpdate :: mode :- TaskUpdate
   }
   deriving (Generic)
 
-config :: RoleConfig (Tools AsHandler)
+config :: RoleConfig Tools
 config =
   RoleConfig
     { roleName = "worker",
@@ -103,9 +60,18 @@ config =
           { notifyParent = mkHandler @WorkerNotifyParent,
             sendMessage = mkHandler @SendMessage,
             shutdown = mkHandler @WorkerShutdown,
-            taskList = mkHandler @WorkerTaskList,
-            taskGet = mkHandler @WorkerTaskGet,
-            taskUpdate = mkHandler @WorkerTaskUpdate
+            taskList = mkHandler @TaskList,
+            taskGet = mkHandler @TaskGet,
+            taskUpdate = mkHandler @TaskUpdate
+          },
+      schemas =
+        Tools
+          { notifyParent = withDescription "Send results or status to your parent agent",
+            sendMessage = withDescription "Send a message to another exomonad-spawned agent",
+            shutdown = withDescription "Gracefully exit and close your pane",
+            taskList = withDescription "Check pending tasks to find your next assignment",
+            taskGet = withDescription "Read full task details and requirements before starting work",
+            taskUpdate = withDescription "Update task status, claim ownership, or mark complete"
           },
       hooks =
         HookConfig

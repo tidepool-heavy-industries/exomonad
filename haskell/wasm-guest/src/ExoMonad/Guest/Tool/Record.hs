@@ -3,7 +3,7 @@
 -- This module provides:
 --
 -- * 'DispatchRecord' - Route tool calls by name through a record
--- * 'ReifyRecord' - Extract tool definitions from a record type
+-- * 'ReifyRecord' - Extract tool definitions from a schema record value
 -- * 'camelToSnake' - Convert field names to tool names
 --
 -- Example:
@@ -16,7 +16,7 @@
 --   deriving Generic
 --
 -- -- Dispatch: gitTools AsHandler -> "git_branch" -> args -> IO result
--- -- Reify:    Proxy @GitTools -> [ToolDefinition]
+-- -- Reify:    gitTools AsSchema -> [ToolDefinition]
 -- @
 module ExoMonad.Guest.Tool.Record
   ( -- * Record dispatch
@@ -34,7 +34,6 @@ import Data.Aeson (FromJSON, Value)
 import Data.Aeson qualified as Aeson
 import Data.Char (isUpper, toLower)
 import Data.Kind (Type)
-import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), MCPTool (..), ToolDefinition (..), WasmResult (..), errorResult)
@@ -98,49 +97,40 @@ instance
 -- Record Reification
 -- ============================================================================
 
--- | Reify tool definitions from a record type.
+-- | Reify tool definitions from a schema record value.
 class ReifyRecord (tools :: Type -> Type) where
-  -- | Get all tool definitions.
-  reifyToolDefs :: Proxy tools -> [ToolDefinition]
+  -- | Get all tool definitions from an explicit schemas value.
+  reifyToolDefs :: tools AsSchema -> [ToolDefinition]
 
-instance (GReifyTools (Rep (tools AsSchema))) => ReifyRecord tools where
-  reifyToolDefs _ = gReify (Proxy @(Rep (tools AsSchema)))
+instance (Generic (tools AsSchema), GReifyTools (Rep (tools AsSchema))) => ReifyRecord tools where
+  reifyToolDefs schemas = gReify (from schemas)
 
--- | Generic reification implementation.
+-- | Generic reification implementation (value-based).
 class GReifyTools (f :: Type -> Type) where
-  gReify :: Proxy f -> [ToolDefinition]
+  gReify :: f p -> [ToolDefinition]
 
 -- Datatype metadata: unwrap
 instance (GReifyTools f) => GReifyTools (M1 D meta f) where
-  gReify _ = gReify (Proxy @f)
+  gReify (M1 x) = gReify x
 
 -- Constructor metadata: unwrap
 instance (GReifyTools f) => GReifyTools (M1 C meta f) where
-  gReify _ = gReify (Proxy @f)
+  gReify (M1 x) = gReify x
 
 -- Product: combine both sides
 instance (GReifyTools left, GReifyTools right) => GReifyTools (left :*: right) where
-  gReify _ = gReify (Proxy @left) ++ gReify (Proxy @right)
+  gReify (l :*: r) = gReify l ++ gReify r
 
--- Selector with Schema: extract ToolDefinition using MCPTool
-instance
-  (MCPTool tool) =>
-  GReifyTools (M1 S sel (K1 i (Schema tool)))
-  where
-  gReify _ =
-    [ ToolDefinition
-        { tdName = toolName @tool,
-          tdDescription = toolDescription @tool,
-          tdInputSchema = toolSchema @tool
-        }
-    ]
+-- Selector with Schema: read the ToolDefinition from the value
+instance GReifyTools (M1 S sel (K1 i (Schema tool))) where
+  gReify (M1 (K1 (Schema td))) = [td]
 
 -- Nested sub-record: recurse
 instance
   (ReifyRecord subRec) =>
   GReifyTools (M1 S sel (K1 i (subRec AsSchema)))
   where
-  gReify _ = reifyToolDefs (Proxy @subRec)
+  gReify (M1 (K1 subRecord)) = reifyToolDefs subRecord
 
 -- ============================================================================
 -- Naming

@@ -16,11 +16,7 @@ import ExoMonad.Guest.Tools.Events
   ( notifyParentCore, notifyParentDescription, notifyParentSchema, NotifyParentArgs (..), NotifyStatus (..),
     shutdownCore, shutdownDescription, shutdownSchema, ShutdownArgs
   )
-import ExoMonad.Guest.Tools.Tasks
-  ( taskListCore, taskListDescription, taskListSchema, TaskListArgs,
-    taskGetCore, taskGetDescription, taskGetSchema, TaskGetArgs,
-    taskUpdateCore, taskUpdateDescription, taskUpdateSchema, TaskUpdateArgs
-  )
+import ExoMonad.Guest.Tools.Tasks (TaskList, TaskGet, TaskUpdate)
 import ExoMonad.Guest.StateMachine (applyEvent)
 import ExoMonad.Guest.Effects.StopHook (getCurrentBranch)
 import DevPhase (DevPhase (..), DevEvent (..))
@@ -77,57 +73,18 @@ instance MCPTool DevShutdown where
     void $ applyEvent @DevPhase @DevEvent branch DevSpawned ShutdownRequested
     shutdownCore args
 
-data DevTaskList
-
-instance MCPTool DevTaskList where
-  type ToolArgs DevTaskList = TaskListArgs
-  toolName = "task_list"
-  toolDescription = taskListDescription
-  toolSchema = taskListSchema
-  toolHandlerEff args = do
-    result <- taskListCore args
-    case result of
-      Left err -> pure $ errorResult err
-      Right output -> pure $ successResult output
-
-data DevTaskGet
-
-instance MCPTool DevTaskGet where
-  type ToolArgs DevTaskGet = TaskGetArgs
-  toolName = "task_get"
-  toolDescription = taskGetDescription
-  toolSchema = taskGetSchema
-  toolHandlerEff args = do
-    result <- taskGetCore args
-    case result of
-      Left err -> pure $ errorResult err
-      Right output -> pure $ successResult output
-
-data DevTaskUpdate
-
-instance MCPTool DevTaskUpdate where
-  type ToolArgs DevTaskUpdate = TaskUpdateArgs
-  toolName = "task_update"
-  toolDescription = taskUpdateDescription
-  toolSchema = taskUpdateSchema
-  toolHandlerEff args = do
-    result <- taskUpdateCore args
-    case result of
-      Left err -> pure $ errorResult err
-      Right output -> pure $ successResult output
-
 data Tools mode = Tools
   { pr :: mode :- DevFilePR,
     notifyParent :: mode :- DevNotifyParent,
     sendMessage :: mode :- SendMessage,
     shutdown :: mode :- DevShutdown,
-    taskList :: mode :- DevTaskList,
-    taskGet :: mode :- DevTaskGet,
-    taskUpdate :: mode :- DevTaskUpdate
+    taskList :: mode :- TaskList,
+    taskGet :: mode :- TaskGet,
+    taskUpdate :: mode :- TaskUpdate
   }
   deriving (Generic)
 
-config :: RoleConfig (Tools AsHandler)
+config :: RoleConfig Tools
 config =
   RoleConfig
     { roleName = "dev",
@@ -137,9 +94,19 @@ config =
             notifyParent = mkHandler @DevNotifyParent,
             sendMessage = mkHandler @SendMessage,
             shutdown = mkHandler @DevShutdown,
-            taskList = mkHandler @DevTaskList,
-            taskGet = mkHandler @DevTaskGet,
-            taskUpdate = mkHandler @DevTaskUpdate
+            taskList = mkHandler @TaskList,
+            taskGet = mkHandler @TaskGet,
+            taskUpdate = mkHandler @TaskUpdate
+          },
+      schemas =
+        Tools
+          { pr = withDescription "Create or update a PR for the current branch",
+            notifyParent = withDescription "Send a completion or failure message to your parent agent",
+            sendMessage = withDescription "Send a message to another exomonad-spawned agent",
+            shutdown = withDescription "Gracefully exit: notify parent and close your pane",
+            taskList = withDescription "Check pending tasks to find your next assignment",
+            taskGet = withDescription "Read full task details and requirements before starting work",
+            taskUpdate = withDescription "Update task status, claim ownership, or mark complete"
           },
       hooks = httpDevHooks,
       eventHandlers = prReviewEventHandlers

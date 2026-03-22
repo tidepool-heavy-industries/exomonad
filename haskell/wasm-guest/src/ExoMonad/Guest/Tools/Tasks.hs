@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveGeneric #-}
 
@@ -20,6 +21,7 @@ import Effects.Tasks qualified as Tasks
 import Effects.Log qualified as Log
 import ExoMonad.Effects.Tasks (TasksListTasks, TasksGetTask, TasksUpdateTask)
 import ExoMonad.Effects.Log (LogInfo)
+import ExoMonad.Guest.Tool.Class (MCPTool(..), MCPCallOutput, successResult, errorResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Types (Effects)
@@ -135,3 +137,39 @@ taskUpdateCore args = do
   case result of
     Left err -> pure $ Left (T.pack (show err))
     Right resp -> pure $ Right (Aeson.toJSON resp)
+
+-- MCPTool instances for SDK-level task tools.
+-- Roles use these directly (no passthrough wrapper needed).
+
+instance MCPTool TaskList where
+  type ToolArgs TaskList = TaskListArgs
+  toolName = "task_list"
+  toolDescription = taskListDescription
+  toolSchema = taskListSchema
+  toolHandlerEff args = do
+    result <- taskListCore args
+    case result of
+      Left err -> pure $ errorResult err
+      Right output -> pure $ successResult output
+
+instance MCPTool TaskGet where
+  type ToolArgs TaskGet = TaskGetArgs
+  toolName = "task_get"
+  toolDescription = taskGetDescription
+  toolSchema = taskGetSchema
+  toolHandlerEff args = do
+    result <- taskGetCore args
+    case result of
+      Left err -> pure $ errorResult err
+      Right output -> pure $ successResult output
+
+instance MCPTool TaskUpdate where
+  type ToolArgs TaskUpdate = TaskUpdateArgs
+  toolName = "task_update"
+  toolDescription = taskUpdateDescription
+  toolSchema = taskUpdateSchema
+  toolHandlerEff args = do
+    result <- taskUpdateCore args
+    case result of
+      Left err -> pure $ errorResult err
+      Right output -> pure $ successResult output
