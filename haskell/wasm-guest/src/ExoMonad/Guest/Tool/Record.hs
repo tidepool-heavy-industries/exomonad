@@ -37,7 +37,7 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), MCPTool (..), ToolDefinition (..), WasmResult (..), errorResult)
-import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, Handler (..), Schema (..))
+import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, Handler (..), Schema, schemaToolDef)
 import GHC.Generics
 
 -- ============================================================================
@@ -123,7 +123,7 @@ instance (GReifyTools left, GReifyTools right) => GReifyTools (left :*: right) w
 
 -- Selector with Schema: read the ToolDefinition from the value
 instance GReifyTools (M1 S sel (K1 i (Schema tool))) where
-  gReify (M1 (K1 (Schema td))) = [td]
+  gReify (M1 (K1 s)) = [schemaToolDef s]
 
 -- Nested sub-record: recurse
 instance

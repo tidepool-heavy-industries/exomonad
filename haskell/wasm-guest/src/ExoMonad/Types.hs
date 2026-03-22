@@ -1,5 +1,4 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeOperators #-}
 
@@ -33,7 +32,6 @@ import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Events (EventHandlerConfig, defaultEventHandlers)
 import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), HookSpecificOutput (..), StopHookOutput, Effects, allowResponse, allowStopResponse, postToolUseResponse)
 import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema)
-import GHC.Generics (Generic)
 
 -- | Role configuration, parameterized by a higher-kinded tool record.
 -- The same @tools@ type constructor is used in two modes:

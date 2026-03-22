@@ -21,7 +21,7 @@ import Effects.Tasks qualified as Tasks
 import Effects.Log qualified as Log
 import ExoMonad.Effects.Tasks (TasksListTasks, TasksGetTask, TasksUpdateTask)
 import ExoMonad.Effects.Log (LogInfo)
-import ExoMonad.Guest.Tool.Class (MCPTool(..), MCPCallOutput, successResult, errorResult)
+import ExoMonad.Guest.Tool.Class (MCPTool(..), successResult, errorResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Types (Effects)
