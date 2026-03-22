@@ -43,7 +43,7 @@ Handles effects in the `events.*` namespace, enabling synchronization between ag
 - **`wait_for_event`**: Internal effect for blocking wait on event types. Not exposed as an MCP tool — parent notification uses tmux STDIN injection instead.
 - **`notify_event`**: Publishes an event to a session queue.
 - **`notify_parent`**: Sends a message to the parent agent. Delegates to `delivery::notify_parent_delivery()` — the single codepath for all notify_parent operations (OTel span event, EventQueue, `[from:]`/`[FAILED:]` formatting, multi-channel delivery).
-- **`send_message`**: Resolves recipients and delivers arbitrary messages between agents. Routes via Teams inbox, ACP, UDS, or tmux fallback based on the recipient's type and capabilities.
+- **`send_message`**: Routes messages to typed `Address` recipients via `route_message()`. Supports `Agent(name)`, `Team { team, member }` (with lead resolution for empty member), and `Supervisor` addresses. Delivery via Teams inbox, ACP, UDS, or tmux fallback.
 
 ### Type Safety
 
@@ -70,6 +70,8 @@ Handles effects in the `session.*` namespace.
   - Used by `fork_wave` to resolve the parent's Claude session ID when spawning children with `--resume --fork-session`.
 - **`register_team`**: Registers agent's Claude Teams membership in `TeamRegistry`. Called by PostToolUse hook after `TeamCreate`. Stores under agent_name, birth_branch, and slug variant keys.
 - **`deregister_team`**: Removes agent's Teams membership from `TeamRegistry`. Called by PostToolUse hook after `TeamDelete`. Mirrors `register_team` — removes all 3 key variants.
+- **`register_supervisor`**: Registers a supervisor mapping in `SupervisorRegistry`. Maps child birth-branches to their supervisor's identity (agent name + team name). Called by TL when spawning children.
+- **`deregister_supervisor`**: Removes child birth-branches from `SupervisorRegistry`. Called when children are cleaned up.
 
 ## TasksHandler (`handlers/tasks.rs`)
 
@@ -139,8 +141,9 @@ Two abstraction levels — choose the right one:
 
 | Function | When to use |
 |----------|-------------|
+| `route_message()` | Typed Address routing: resolves `Agent`, `Team` (with lead resolution), `Supervisor` → `deliver_to_agent()` |
 | `notify_parent_delivery()` | Notifying a parent agent (OTel span events, EventQueue, `[from: id]`/`[FAILED: id]` prefix) |
-| `deliver_to_agent()` | Peer messaging, sibling notifications, injecting into agent panes |
+| `deliver_to_agent()` | Low-level: peer messaging, sibling notifications, injecting into agent panes |
 
 Both the `notify_parent` effect handler and the poller's `NotifyParentAction` use `notify_parent_delivery()`. All messages get `[from: id]` prefix (or `[FAILED: id]` for failures). Event handler messages include structural tags inside the body (e.g. `[from: leaf-id] [PR READY] PR #5...`). Never use raw `deliver_to_agent()` for parent notifications.
 
@@ -176,6 +179,7 @@ Proto3 uses empty strings/zero values as defaults. These helpers eliminate repet
 
 | Type | Purpose | Used In |
 |------|---------|---------|
+| `Address` | Typed routing: Agent(name), Team{team, member}, Supervisor | events, delivery |
 | `AgentName` | Agent identity (e.g., "root", "feature-a") | events, session, agent |
 | `BirthBranch` | Branch-based agent identity | events, github_poller |
 | `BranchName` | Git branch name | file_pr, agent |

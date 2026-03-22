@@ -21,6 +21,7 @@ pub mod merge_pr;
 pub mod mutex_registry;
 pub mod repo;
 pub mod secrets;
+pub mod supervisor_registry;
 pub mod synthetic_members;
 pub mod tmux_events;
 pub mod tmux_ipc;
@@ -37,6 +38,7 @@ pub use self::filesystem::FileSystemService;
 pub use self::git_worktree::GitWorktreeService;
 pub use self::mutex_registry::MutexRegistry;
 pub use self::secrets::Secrets;
+pub use self::supervisor_registry::SupervisorRegistry;
 use thiserror::Error;
 
 /// Errors that can occur during services validation.

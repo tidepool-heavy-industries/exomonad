@@ -12,6 +12,7 @@ use crate::services::git::GitService;
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::github::GitHubService;
 use crate::services::mutex_registry::MutexRegistry;
+use crate::services::supervisor_registry::SupervisorRegistry;
 use claude_teams_bridge::TeamRegistry;
 
 use super::{
@@ -85,6 +86,7 @@ pub fn orchestration_handlers(
     acp_registry: Arc<AcpRegistry>,
     mutex_registry: Arc<MutexRegistry>,
     event_log: Option<Arc<EventLog>>,
+    supervisor_registry: Arc<SupervisorRegistry>,
 ) -> Vec<Box<dyn EffectHandler>> {
     let mut agent_handler = AgentHandler::new(agent_control)
         .with_claude_session_registry(claude_session_registry.clone())
@@ -92,7 +94,8 @@ pub fn orchestration_handlers(
 
     let mut event_handler = EventHandler::new(event_queue, event_queue_scope, project_dir)
         .with_team_registry(team_registry.clone())
-        .with_acp_registry(acp_registry.clone());
+        .with_acp_registry(acp_registry.clone())
+        .with_supervisor_registry(supervisor_registry.clone());
 
     if let Some(ref log) = event_log {
         agent_handler = agent_handler.with_event_log(log.clone());
@@ -105,7 +108,9 @@ pub fn orchestration_handlers(
         Box::new(agent_handler),
         Box::new(event_handler),
         Box::new(
-            SessionHandler::new(claude_session_registry).with_team_registry(team_registry.clone()),
+            SessionHandler::new(claude_session_registry)
+                .with_team_registry(team_registry.clone())
+                .with_supervisor_registry(supervisor_registry),
         ),
         Box::new(TasksHandler::new(tasks_dir, Some(team_registry))),
         Box::new(CoordinationHandler::new(mutex_registry)),

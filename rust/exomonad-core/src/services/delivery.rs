@@ -1,3 +1,4 @@
+use crate::domain::Address;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::event_queue::EventQueue;
 use crate::services::tmux_events;
@@ -38,6 +39,267 @@ pub fn format_parent_notification(agent_id: &str, status: &str, message: &str) -
                 message
             }
         ),
+    }
+}
+
+/// Delivery method used for message routing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryMethod {
+    TeamsInbox,
+    Acp,
+    Uds,
+    Tmux,
+}
+
+/// Outcome of a routed message delivery.
+#[derive(Debug)]
+pub enum DeliveryOutcome {
+    /// Successfully delivered to the resolved recipient.
+    Delivered {
+        method: DeliveryMethod,
+        recipient: String,
+    },
+    /// Original target could not be resolved; fell back to team lead.
+    FallbackToLead {
+        method: DeliveryMethod,
+        original: String,
+        lead: String,
+    },
+    /// Delivery failed entirely.
+    Failed { original: String, reason: String },
+}
+
+impl DeliveryOutcome {
+    fn from_result(result: DeliveryResult, recipient: &str) -> Self {
+        match result {
+            DeliveryResult::Failed => DeliveryOutcome::Failed {
+                original: recipient.to_string(),
+                reason: "all delivery methods failed".to_string(),
+            },
+            DeliveryResult::Teams => DeliveryOutcome::Delivered {
+                method: DeliveryMethod::TeamsInbox,
+                recipient: recipient.to_string(),
+            },
+            DeliveryResult::Acp => DeliveryOutcome::Delivered {
+                method: DeliveryMethod::Acp,
+                recipient: recipient.to_string(),
+            },
+            DeliveryResult::Uds => DeliveryOutcome::Delivered {
+                method: DeliveryMethod::Uds,
+                recipient: recipient.to_string(),
+            },
+            DeliveryResult::Tmux => DeliveryOutcome::Delivered {
+                method: DeliveryMethod::Tmux,
+                recipient: recipient.to_string(),
+            },
+        }
+    }
+
+    /// Whether delivery succeeded (including fallback).
+    pub fn is_success(&self) -> bool {
+        matches!(
+            self,
+            DeliveryOutcome::Delivered { .. } | DeliveryOutcome::FallbackToLead { .. }
+        )
+    }
+
+    /// The delivery method string for proto response.
+    pub fn method_string(&self) -> &str {
+        match self {
+            DeliveryOutcome::Delivered { method, .. }
+            | DeliveryOutcome::FallbackToLead { method, .. } => match method {
+                DeliveryMethod::TeamsInbox => "teams_inbox",
+                DeliveryMethod::Acp => "acp",
+                DeliveryMethod::Uds => "unix_socket",
+                DeliveryMethod::Tmux => "tmux_stdin",
+            },
+            DeliveryOutcome::Failed { .. } => "failed",
+        }
+    }
+}
+
+/// Route a message to a typed Address.
+///
+/// Resolves the Address to a concrete agent key and tab name, then delegates
+/// to `deliver_to_agent()`. For `Address::Team` with no member, resolves the
+/// team lead from the TeamRegistry.
+#[allow(clippy::too_many_arguments)]
+#[instrument(skip_all, fields(address = %address, from = %from))]
+pub async fn route_message(
+    address: &Address,
+    team_registry: Option<&TeamRegistry>,
+    acp_registry: Option<&AcpRegistry>,
+    project_dir: &std::path::Path,
+    from: &str,
+    content: &str,
+    summary: &str,
+) -> DeliveryOutcome {
+    match address {
+        Address::Agent(name) => {
+            let agent_key = name.as_str();
+            let tab_name = resolve_tab_name_for_agent(agent_key);
+            let result = deliver_to_agent(
+                team_registry,
+                acp_registry,
+                project_dir,
+                agent_key,
+                &tab_name,
+                from,
+                content,
+                summary,
+            )
+            .await;
+            DeliveryOutcome::from_result(result, agent_key)
+        }
+        Address::Team { team, member } => {
+            if let Some(member_name) = member {
+                // Direct team member delivery
+                let agent_key = member_name.as_str();
+                let tab_name = resolve_tab_name_for_agent(agent_key);
+                let result = deliver_to_agent(
+                    team_registry,
+                    acp_registry,
+                    project_dir,
+                    agent_key,
+                    &tab_name,
+                    from,
+                    content,
+                    summary,
+                )
+                .await;
+                DeliveryOutcome::from_result(result, agent_key)
+            } else {
+                // Team lead resolution: find who owns this team
+                resolve_and_deliver_to_lead(
+                    team.as_str(),
+                    team_registry,
+                    acp_registry,
+                    project_dir,
+                    from,
+                    content,
+                    summary,
+                )
+                .await
+            }
+        }
+        Address::Supervisor => {
+            // Supervisor resolves to "root" by default (the root TL)
+            let result = deliver_to_agent(
+                team_registry,
+                acp_registry,
+                project_dir,
+                "root",
+                "TL",
+                from,
+                content,
+                summary,
+            )
+            .await;
+            DeliveryOutcome::from_result(result, "root")
+        }
+    }
+}
+
+/// Resolve team lead and deliver. Searches TeamRegistry for entries matching
+/// the team name, picks the first one as the lead.
+async fn resolve_and_deliver_to_lead(
+    team_name: &str,
+    team_registry: Option<&TeamRegistry>,
+    acp_registry: Option<&AcpRegistry>,
+    project_dir: &std::path::Path,
+    from: &str,
+    content: &str,
+    summary: &str,
+) -> DeliveryOutcome {
+    if let Some(registry) = team_registry {
+        let entries = registry.get_all_for_team(team_name).await;
+        // Find an entry that looks like the lead (first registered, typically the TL)
+        if let Some((lead_key, _)) = entries.first() {
+            info!(
+                team = %team_name,
+                lead = %lead_key,
+                "Resolved team lead for delivery"
+            );
+            let tab_name = resolve_tab_name_for_agent(lead_key);
+            let result = deliver_to_agent(
+                team_registry,
+                acp_registry,
+                project_dir,
+                lead_key,
+                &tab_name,
+                from,
+                content,
+                summary,
+            )
+            .await;
+            return match result {
+                DeliveryResult::Failed => DeliveryOutcome::Failed {
+                    original: format!("team:{}:lead", team_name),
+                    reason: format!("delivery to resolved lead '{}' failed", lead_key),
+                },
+                DeliveryResult::Teams => DeliveryOutcome::FallbackToLead {
+                    method: DeliveryMethod::TeamsInbox,
+                    original: format!("team:{}:lead", team_name),
+                    lead: lead_key.clone(),
+                },
+                DeliveryResult::Acp => DeliveryOutcome::FallbackToLead {
+                    method: DeliveryMethod::Acp,
+                    original: format!("team:{}:lead", team_name),
+                    lead: lead_key.clone(),
+                },
+                DeliveryResult::Uds => DeliveryOutcome::FallbackToLead {
+                    method: DeliveryMethod::Uds,
+                    original: format!("team:{}:lead", team_name),
+                    lead: lead_key.clone(),
+                },
+                DeliveryResult::Tmux => DeliveryOutcome::FallbackToLead {
+                    method: DeliveryMethod::Tmux,
+                    original: format!("team:{}:lead", team_name),
+                    lead: lead_key.clone(),
+                },
+            };
+        }
+    }
+
+    warn!(
+        team = %team_name,
+        "No team lead found, falling back to root"
+    );
+    let result = deliver_to_agent(
+        team_registry,
+        acp_registry,
+        project_dir,
+        "root",
+        "TL",
+        from,
+        content,
+        summary,
+    )
+    .await;
+    match result {
+        DeliveryResult::Failed => DeliveryOutcome::Failed {
+            original: format!("team:{}:lead", team_name),
+            reason: "no team lead found, root fallback also failed".to_string(),
+        },
+        _ => DeliveryOutcome::FallbackToLead {
+            method: match result {
+                DeliveryResult::Teams => DeliveryMethod::TeamsInbox,
+                DeliveryResult::Acp => DeliveryMethod::Acp,
+                DeliveryResult::Uds => DeliveryMethod::Uds,
+                _ => DeliveryMethod::Tmux,
+            },
+            original: format!("team:{}:lead", team_name),
+            lead: "root".to_string(),
+        },
+    }
+}
+
+pub fn resolve_tab_name_for_agent(agent_key: &str) -> String {
+    if agent_key == "root" {
+        "TL".to_string()
+    } else {
+        crate::services::agent_control::AgentType::from_dir_name(agent_key)
+            .tab_display_name(agent_key)
     }
 }
 

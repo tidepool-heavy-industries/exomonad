@@ -299,3 +299,259 @@ instance (HsJSONPB.ToJSON DeregisterTeamResponse) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON DeregisterTeamResponse) where
   parseJSON = HsJSONPB.parseJSONPB
+data RegisterSupervisorRequest
+  = RegisterSupervisorRequest {registerSupervisorRequestChildren :: (Hs.Vector Hs.Text),
+                               registerSupervisorRequestSupervisor :: Hs.Text,
+                               registerSupervisorRequestTeam :: Hs.Text}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData RegisterSupervisorRequest)
+instance (HsProtobuf.Named RegisterSupervisorRequest) where
+  nameOf _ = Hs.fromString "RegisterSupervisorRequest"
+instance (HsProtobuf.HasDefault RegisterSupervisorRequest)
+instance (HsProtobuf.Message RegisterSupervisorRequest) where
+  encodeMessage
+    _
+    RegisterSupervisorRequest {registerSupervisorRequestChildren,
+                               registerSupervisorRequestSupervisor, registerSupervisorRequestTeam}
+    = Hs.mappend
+        (Hs.mappend
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 1)
+              ((Hs.coerce
+                  @(Hs.Vector Hs.Text)
+                  @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                 registerSupervisorRequestChildren))
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 2)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 registerSupervisorRequestSupervisor)))
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 3)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              registerSupervisorRequestTeam))
+  decodeMessage _
+    = Hs.pure RegisterSupervisorRequest
+        <*>
+          ((HsProtobuf.coerceOver
+              @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text))
+              @(Hs.Vector Hs.Text))
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)))
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1)
+         (HsProtobufAST.Repeated HsProtobufAST.String)
+         (HsProtobufAST.Single "children") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 2)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "supervisor") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 3)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "team") [] ""]
+instance (HsJSONPB.ToJSONPB RegisterSupervisorRequest) where
+  toJSONPB (RegisterSupervisorRequest f1 f2 f3)
+    = HsJSONPB.object
+        ["children"
+           .=
+             ((Hs.coerce
+                 @(Hs.Vector Hs.Text)
+                 @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                f1),
+         "supervisor"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
+         "team" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
+  toEncodingPB (RegisterSupervisorRequest f1 f2 f3)
+    = HsJSONPB.pairs
+        ["children"
+           .=
+             ((Hs.coerce
+                 @(Hs.Vector Hs.Text)
+                 @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                f1),
+         "supervisor"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
+         "team" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
+instance (HsJSONPB.FromJSONPB RegisterSupervisorRequest) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "RegisterSupervisorRequest"
+        (\ obj
+           -> Hs.pure RegisterSupervisorRequest
+                <*>
+                  ((HsProtobuf.coerceOver
+                      @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text))
+                      @(Hs.Vector Hs.Text))
+                     (obj .: "children"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "supervisor"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "team")))
+instance (HsJSONPB.ToJSON RegisterSupervisorRequest) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON RegisterSupervisorRequest) where
+  parseJSON = HsJSONPB.parseJSONPB
+data RegisterSupervisorResponse
+  = RegisterSupervisorResponse {registerSupervisorResponseSuccess :: Hs.Bool,
+                                registerSupervisorResponseRegisteredCount :: Hs.Int32}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData RegisterSupervisorResponse)
+instance (HsProtobuf.Named RegisterSupervisorResponse) where
+  nameOf _ = Hs.fromString "RegisterSupervisorResponse"
+instance (HsProtobuf.HasDefault RegisterSupervisorResponse)
+instance (HsProtobuf.Message RegisterSupervisorResponse) where
+  encodeMessage
+    _
+    RegisterSupervisorResponse {registerSupervisorResponseSuccess,
+                                registerSupervisorResponseRegisteredCount}
+    = Hs.mappend
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 1) registerSupervisorResponseSuccess)
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 2)
+           registerSupervisorResponseRegisteredCount)
+  decodeMessage _
+    = Hs.pure RegisterSupervisorResponse
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1) (HsProtobufAST.Prim HsProtobufAST.Bool)
+         (HsProtobufAST.Single "success") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 2) (HsProtobufAST.Prim HsProtobufAST.Int32)
+         (HsProtobufAST.Single "registered_count") [] ""]
+instance (HsJSONPB.ToJSONPB RegisterSupervisorResponse) where
+  toJSONPB (RegisterSupervisorResponse f1 f2)
+    = HsJSONPB.object ["success" .= f1, "registered_count" .= f2]
+  toEncodingPB (RegisterSupervisorResponse f1 f2)
+    = HsJSONPB.pairs ["success" .= f1, "registered_count" .= f2]
+instance (HsJSONPB.FromJSONPB RegisterSupervisorResponse) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "RegisterSupervisorResponse"
+        (\ obj
+           -> Hs.pure RegisterSupervisorResponse <*> obj .: "success"
+                <*> obj .: "registered_count")
+instance (HsJSONPB.ToJSON RegisterSupervisorResponse) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON RegisterSupervisorResponse) where
+  parseJSON = HsJSONPB.parseJSONPB
+newtype DeregisterSupervisorRequest
+  = DeregisterSupervisorRequest {deregisterSupervisorRequestChildren :: (Hs.Vector Hs.Text)}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData DeregisterSupervisorRequest)
+instance (HsProtobuf.Named DeregisterSupervisorRequest) where
+  nameOf _ = Hs.fromString "DeregisterSupervisorRequest"
+instance (HsProtobuf.HasDefault DeregisterSupervisorRequest)
+instance (HsProtobuf.Message DeregisterSupervisorRequest) where
+  encodeMessage
+    _
+    DeregisterSupervisorRequest {deregisterSupervisorRequestChildren}
+    = (HsProtobuf.encodeMessageField
+         (HsProtobuf.FieldNumber 1)
+         ((Hs.coerce
+             @(Hs.Vector Hs.Text)
+             @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+            deregisterSupervisorRequestChildren))
+  decodeMessage _
+    = Hs.pure DeregisterSupervisorRequest
+        <*>
+          ((HsProtobuf.coerceOver
+              @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text))
+              @(Hs.Vector Hs.Text))
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1)
+         (HsProtobufAST.Repeated HsProtobufAST.String)
+         (HsProtobufAST.Single "children") [] ""]
+instance (HsJSONPB.ToJSONPB DeregisterSupervisorRequest) where
+  toJSONPB (DeregisterSupervisorRequest f1)
+    = HsJSONPB.object
+        ["children"
+           .=
+             ((Hs.coerce
+                 @(Hs.Vector Hs.Text)
+                 @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                f1)]
+  toEncodingPB (DeregisterSupervisorRequest f1)
+    = HsJSONPB.pairs
+        ["children"
+           .=
+             ((Hs.coerce
+                 @(Hs.Vector Hs.Text)
+                 @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                f1)]
+instance (HsJSONPB.FromJSONPB DeregisterSupervisorRequest) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "DeregisterSupervisorRequest"
+        (\ obj
+           -> Hs.pure DeregisterSupervisorRequest
+                <*>
+                  ((HsProtobuf.coerceOver
+                      @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text))
+                      @(Hs.Vector Hs.Text))
+                     (obj .: "children")))
+instance (HsJSONPB.ToJSON DeregisterSupervisorRequest) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON DeregisterSupervisorRequest) where
+  parseJSON = HsJSONPB.parseJSONPB
+newtype DeregisterSupervisorResponse
+  = DeregisterSupervisorResponse {deregisterSupervisorResponseSuccess :: Hs.Bool}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData DeregisterSupervisorResponse)
+instance (HsProtobuf.Named DeregisterSupervisorResponse) where
+  nameOf _ = Hs.fromString "DeregisterSupervisorResponse"
+instance (HsProtobuf.HasDefault DeregisterSupervisorResponse)
+instance (HsProtobuf.Message DeregisterSupervisorResponse) where
+  encodeMessage
+    _
+    DeregisterSupervisorResponse {deregisterSupervisorResponseSuccess}
+    = (HsProtobuf.encodeMessageField
+         (HsProtobuf.FieldNumber 1) deregisterSupervisorResponseSuccess)
+  decodeMessage _
+    = Hs.pure DeregisterSupervisorResponse
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1) (HsProtobufAST.Prim HsProtobufAST.Bool)
+         (HsProtobufAST.Single "success") [] ""]
+instance (HsJSONPB.ToJSONPB DeregisterSupervisorResponse) where
+  toJSONPB (DeregisterSupervisorResponse f1)
+    = HsJSONPB.object ["success" .= f1]
+  toEncodingPB (DeregisterSupervisorResponse f1)
+    = HsJSONPB.pairs ["success" .= f1]
+instance (HsJSONPB.FromJSONPB DeregisterSupervisorResponse) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "DeregisterSupervisorResponse"
+        (\ obj
+           -> Hs.pure DeregisterSupervisorResponse <*> obj .: "success")
+instance (HsJSONPB.ToJSON DeregisterSupervisorResponse) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON DeregisterSupervisorResponse) where
+  parseJSON = HsJSONPB.parseJSONPB

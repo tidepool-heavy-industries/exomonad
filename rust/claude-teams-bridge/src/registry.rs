@@ -51,6 +51,15 @@ impl TeamRegistry {
         map.get(key).cloned()
     }
 
+    /// Get all entries for a given team name.
+    pub async fn get_all_for_team(&self, team_name: &str) -> Vec<(String, TeamInfo)> {
+        let map = self.inner.lock().await;
+        map.iter()
+            .filter(|(_, info)| info.team_name == team_name)
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
     pub async fn deregister(&self, key: &str) {
         info!(key = %key, "Deregistering Claude Teams info");
         let mut map = self.inner.lock().await;
@@ -121,6 +130,48 @@ mod tests {
         .await;
         let result = reg.get("root").await.unwrap();
         assert_eq!(result.team_name, "team2");
+    }
+
+    #[tokio::test]
+    async fn test_get_all_for_team() {
+        let reg = TeamRegistry::new();
+        reg.register(
+            "agent-1",
+            TeamInfo {
+                team_name: "team-a".into(),
+                inbox_name: "inbox-1".into(),
+            },
+        )
+        .await;
+        reg.register(
+            "agent-2",
+            TeamInfo {
+                team_name: "team-a".into(),
+                inbox_name: "inbox-2".into(),
+            },
+        )
+        .await;
+        reg.register(
+            "agent-3",
+            TeamInfo {
+                team_name: "team-b".into(),
+                inbox_name: "inbox-3".into(),
+            },
+        )
+        .await;
+
+        let results = reg.get_all_for_team("team-a").await;
+        assert_eq!(results.len(), 2);
+        let keys: Vec<&str> = results.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(keys.contains(&"agent-1"));
+        assert!(keys.contains(&"agent-2"));
+    }
+
+    #[tokio::test]
+    async fn test_get_all_for_team_empty() {
+        let reg = TeamRegistry::new();
+        let results = reg.get_all_for_team("nonexistent").await;
+        assert!(results.is_empty());
     }
 
     #[tokio::test]

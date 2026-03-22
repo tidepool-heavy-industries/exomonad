@@ -6,6 +6,7 @@
 use crate::domain::ClaudeSessionUuid;
 use crate::effects::{dispatch_session_effect, EffectResult, SessionEffects};
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
+use crate::services::supervisor_registry::{SupervisorInfo, SupervisorRegistry};
 use async_trait::async_trait;
 use claude_teams_bridge::{TeamInfo, TeamRegistry};
 use exomonad_proto::effects::session::*;
@@ -16,6 +17,7 @@ use tracing::info;
 pub struct SessionHandler {
     registry: Arc<ClaudeSessionRegistry>,
     team_registry: Option<Arc<TeamRegistry>>,
+    supervisor_registry: Option<Arc<SupervisorRegistry>>,
 }
 
 impl SessionHandler {
@@ -23,11 +25,17 @@ impl SessionHandler {
         Self {
             registry,
             team_registry: None,
+            supervisor_registry: None,
         }
     }
 
     pub fn with_team_registry(mut self, team_registry: Arc<TeamRegistry>) -> Self {
         self.team_registry = Some(team_registry);
+        self
+    }
+
+    pub fn with_supervisor_registry(mut self, registry: Arc<SupervisorRegistry>) -> Self {
+        self.supervisor_registry = Some(registry);
         self
     }
 }
@@ -115,6 +123,73 @@ impl SessionEffects for SessionHandler {
         }
 
         Ok(RegisterTeamResponse { success: true })
+    }
+
+    async fn register_supervisor(
+        &self,
+        req: RegisterSupervisorRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<RegisterSupervisorResponse> {
+        if let Some(ref supervisor_registry) = self.supervisor_registry {
+            let children: Vec<String> = req.children.into_iter().collect();
+            let count = children.len() as i32;
+
+            if req.supervisor.is_empty() || req.team.is_empty() {
+                return Err(crate::effects::EffectError::invalid_input(
+                    "supervisor and team must be non-empty".to_string(),
+                ));
+            }
+
+            let supervisor_name =
+                crate::domain::AgentName::try_from(req.supervisor.clone()).map_err(|e| {
+                    crate::effects::EffectError::invalid_input(e.to_string())
+                })?;
+            let team_name =
+                crate::domain::TeamName::try_from(req.team.clone()).map_err(|e| {
+                    crate::effects::EffectError::invalid_input(e.to_string())
+                })?;
+
+            info!(
+                supervisor = %req.supervisor,
+                team = %req.team,
+                children_count = count,
+                "Registering supervisor for children"
+            );
+
+            supervisor_registry
+                .register(
+                    &children,
+                    SupervisorInfo {
+                        supervisor: supervisor_name,
+                        team: team_name,
+                    },
+                )
+                .await;
+
+            Ok(RegisterSupervisorResponse {
+                success: true,
+                registered_count: count,
+            })
+        } else {
+            tracing::warn!("SupervisorRegistry not available; register_supervisor is a no-op");
+            Ok(RegisterSupervisorResponse {
+                success: true,
+                registered_count: 0,
+            })
+        }
+    }
+
+    async fn deregister_supervisor(
+        &self,
+        req: DeregisterSupervisorRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<DeregisterSupervisorResponse> {
+        if let Some(ref supervisor_registry) = self.supervisor_registry {
+            let children: Vec<String> = req.children.into_iter().collect();
+            info!(children_count = children.len(), "Deregistering supervisor for children");
+            supervisor_registry.deregister(&children).await;
+        }
+        Ok(DeregisterSupervisorResponse { success: true })
     }
 
     async fn deregister_team(
