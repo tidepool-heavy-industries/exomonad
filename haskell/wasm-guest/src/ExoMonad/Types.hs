@@ -1,5 +1,4 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeOperators #-}
 
@@ -21,6 +20,7 @@ import Control.Monad.Freer (Eff)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KM
+import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -31,17 +31,18 @@ import ExoMonad.Effects.Session qualified as Session
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Events (EventHandlerConfig, defaultEventHandlers)
 import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), HookSpecificOutput (..), StopHookOutput, Effects, allowResponse, allowStopResponse, postToolUseResponse)
-import GHC.Generics (Generic)
+import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema)
 
--- | Role configuration.
--- Defines the role name, available tools, and lifecycle hooks.
-data RoleConfig tools = RoleConfig
+-- | Role configuration, parameterized by a higher-kinded tool record.
+-- The same @tools@ type constructor is used in two modes:
+-- @tools AsHandler@ for dispatch, @tools AsSchema@ for discovery.
+data RoleConfig (tools :: Type -> Type) = RoleConfig
   { roleName :: Text,
-    tools :: tools,
+    tools :: tools AsHandler,
+    schemas :: tools AsSchema,
     hooks :: HookConfig,
     eventHandlers :: EventHandlerConfig
   }
-  deriving (Generic)
 
 -- | Configuration for lifecycle hooks.
 data HookConfig = HookConfig

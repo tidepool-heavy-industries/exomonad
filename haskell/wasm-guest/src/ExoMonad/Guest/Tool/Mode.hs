@@ -23,8 +23,9 @@ module ExoMonad.Guest.Tool.Mode
     AsHandler,
 
     -- * Schema wrapper
-    Schema (..),
-    mkSchema,
+    Schema,
+    withDescription,
+    schemaToolDef,
 
     -- * Handler wrapper
     Handler (..),
@@ -36,7 +37,8 @@ where
 
 import Data.Aeson (FromJSON)
 import Data.Kind (Type)
-import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), ToolDefinition, WasmResult (..), mkToolDef)
+import Data.Text (Text)
+import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), ToolDefinition (..), WasmResult (..), mkToolDef)
 import ExoMonad.Guest.Tool.Suspend (runToolEff)
 
 -- ============================================================================
@@ -64,15 +66,23 @@ data AsSchema
 instance ToolMode AsSchema where
   type AsSchema :- tool = Schema tool
 
--- | Schema wrapper that preserves the tool type.
---
--- This newtype preserves the phantom tool type, allowing Generic
--- traversal to access the MCPTool constraint for reification.
-newtype Schema tool = Schema {getSchema :: ToolDefinition}
+-- | Schema wrapper that pairs a ToolDefinition with a phantom tool type.
+-- Opaque: construct via 'withDescription' only.
+-- Generic traversal reads the ToolDefinition value directly (no MCPTool
+-- constraint needed at reification time — only at construction time).
+newtype Schema tool = Schema ToolDefinition
 
--- | Construct a schema from an MCPTool instance.
-mkSchema :: forall t. (MCPTool t) => Schema t
-mkSchema = Schema (mkToolDef @t)
+-- | Extract the ToolDefinition from a Schema.
+schemaToolDef :: Schema tool -> ToolDefinition
+schemaToolDef (Schema td) = td
+
+-- | Construct a schema with an explicit description.
+-- The tool name and input schema come from the MCPTool instance;
+-- only the description is caller-provided.
+withDescription :: forall t. (MCPTool t) => Text -> Schema t
+withDescription desc =
+  let td = mkToolDef @t
+   in Schema (td {tdDescription = desc})
 
 -- ============================================================================
 -- AsHandler Mode

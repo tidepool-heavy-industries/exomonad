@@ -153,7 +153,7 @@ data Tools mode = Tools
   }
   deriving (Generic)
 
-config :: RoleConfig (Tools AsHandler)
+config :: RoleConfig Tools
 config =
   RoleConfig
     { roleName = "tl",
@@ -166,6 +166,16 @@ config =
             mergePr = mkHandler @TLMergePR,
             notifyParent = mkHandler @TLNotifyParent,
             sendMessage = mkHandler @SendMessage
+          },
+      schemas =
+        Tools
+          { forkWave = withDescription "Fork N parallel Claude agents, each in its own worktree with optional context inheritance",
+            spawnGemini = withDescription "Spawn a Gemini agent in its own worktree and branch — it files a PR when done",
+            spawnWorker = withDescription "Spawn an ephemeral Gemini worker in a tmux pane — no branch, no PR",
+            pr = withDescription "Create or update a PR for the current branch to your parent",
+            mergePr = withDescription "Merge a child agent's PR into your branch",
+            notifyParent = withDescription "Send a completion or failure message to your parent agent",
+            sendMessage = withDescription "Send a message to another exomonad-spawned agent"
           },
       hooks =
         HookConfig

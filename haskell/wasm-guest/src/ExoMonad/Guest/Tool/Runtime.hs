@@ -6,7 +6,6 @@
 -- loaded by the TH external interpreter during cross-compilation.
 module ExoMonad.Guest.Tool.Runtime
   ( mcpHandlerRecord,
-    listHandlerRecord,
     hookHandler,
     handleWorkerExit,
     resumeHandler,
@@ -24,7 +23,6 @@ import Data.Aeson.Types (parseMaybe)
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Maybe (fromMaybe)
-import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -38,9 +36,9 @@ import ExoMonad.Guest.Continuations (retrieveContinuation)
 import ExoMonad.Guest.Effects.AgentControl (runAgentControlSuspend)
 import ExoMonad.Guest.Effects.FileSystem (runFileSystemSuspend)
 import ExoMonad.Guest.Proto (fromText)
-import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), WasmResult (..), toMCPFormat)
+import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), WasmResult (..))
 import ExoMonad.Guest.Tool.Mode (AsHandler)
-import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
+import ExoMonad.Guest.Tool.Record (DispatchRecord (..))
 import ExoMonad.Guest.Tool.Suspend (statusToWasmResult)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Types (HookEventType (..), HookInput (..), HookOutput, MCPCallInput (..), Runtime (..), StopDecision (..), StopHookOutput (..), allowResponse)
@@ -155,13 +153,6 @@ parseResumeInput val = flip (maybe (Left "Invalid input format")) (parseMaybe pa
       k <- o Aeson..: "continuation_id"
       res <- o Aeson..: "result"
       pure (k, res)
-
--- | List tools handler - returns all tool definitions for a record type.
-listHandlerRecord :: forall tools. (ReifyRecord tools) => IO CInt
-listHandlerRecord = do
-  let tools = map toMCPFormat (reifyToolDefs (Proxy @tools))
-  output (BSL.toStrict $ Aeson.encode (Done tools))
-  pure 0
 
 -- | Hook handler - handles PreToolUse, SessionEnd, and SubagentStop hooks.
 --

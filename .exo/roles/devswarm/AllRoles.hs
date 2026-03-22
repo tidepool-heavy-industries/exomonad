@@ -24,10 +24,8 @@ where
 import Data.Aeson (Value)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, ToolDefinition, WasmResult, toMCPFormat)
-import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
 import ExoMonad.Types (EventHandlerConfig, HookConfig (..), RoleConfig (..))
 
@@ -56,13 +54,13 @@ data SomeRoleConfig = SomeRoleConfig RoleCapabilities
 mkSomeRoleConfig ::
   forall tools.
   (DispatchRecord tools, ReifyRecord tools) =>
-  RoleConfig (tools AsHandler) ->
+  RoleConfig tools ->
   SomeRoleConfig
 mkSomeRoleConfig cfg =
   SomeRoleConfig $
     RoleCapabilities
       { rcDispatch = dispatchRecord (tools cfg),
-        rcListTools = reifyToolDefs (Proxy @tools),
+        rcListTools = reifyToolDefs (schemas cfg),
         rcHooks = hooks cfg,
         rcEventHandlers = eventHandlers cfg
       }
