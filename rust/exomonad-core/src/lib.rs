@@ -79,7 +79,9 @@ pub mod services;
 #[cfg(feature = "runtime")]
 pub use common::{ErrorCode, ErrorContext, HostError, HostResult};
 #[cfg(feature = "runtime")]
-pub use effects::{EffectContext, EffectError, EffectHandler, EffectRegistry, EffectResult};
+pub use effects::{
+    EffectContext, EffectDispatch, EffectError, EffectHandler, EffectRegistry, EffectResult,
+};
 #[cfg(feature = "runtime")]
 pub use plugin_manager::PluginManager;
 

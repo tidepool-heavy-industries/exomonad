@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+# Mock gh CLI for E2E testing.
+# Records all invocations to $GH_MOCK_LOG and returns canned JSON.
+
+LOG_FILE="${GH_MOCK_LOG:-/tmp/gh_mock.log}"
+TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
+echo "[$TIMESTAMP] $*" >> "$LOG_FILE"
+
+# Helper to find PR number in arguments
+get_pr_number() {
+    for arg in "$@"; do
+        if [[ "$arg" =~ ^[0-9]+$ ]]; then
+            echo "$arg"
+            return
+        fi
+    done
+    echo "1" # Default
+}
+
+case "$1" in
+    pr)
+        case "$2" in
+            create)
+                echo '{"number": 1, "url": "https://github.com/test/repo/pull/1"}'
+                ;;
+            merge)
+                echo 'Merged pull request'
+                ;;
+            view)
+                PR_NUM=$(get_pr_number "$@")
+                echo "{\"number\": $PR_NUM, \"state\": \"OPEN\", \"url\": \"https://github.com/test/repo/pull/$PR_NUM\"}"
+                ;;
+            list)
+                echo '[]'
+                ;;
+            *)
+                echo "mock_gh: unrecognized pr subcommand: $2" >&2
+                exit 1
+                ;;
+        esac
+        ;;
+    api)
+        # Check if it's the reviews API
+        # gh api repos/{owner}/{repo}/pulls/{n}/reviews
+        if [[ "$*" =~ repos/.*/pulls/[0-9]+/reviews ]]; then
+            echo '[{"id":1,"user":{"login":"copilot[bot]"},"state":"APPROVED"}]'
+        else
+            echo '{}'
+        fi
+        ;;
+    *)
+        echo "mock_gh: unrecognized command: $1" >&2
+        exit 1
+        ;;
+esac

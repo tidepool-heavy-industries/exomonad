@@ -9,7 +9,7 @@
 //! - **File-based**: WASM loaded from disk path with hot reload on mtime change (serve mode)
 
 use crate::effects::{
-    host_fn::yield_effect_host_fn, host_fn::YieldEffectContext, EffectContext, EffectRegistry,
+    host_fn::yield_effect_host_fn, host_fn::YieldEffectContext, EffectContext, EffectDispatch,
 };
 use anyhow::{Context, Result};
 use extism::{Manifest, Plugin, PluginBuilder};
@@ -71,8 +71,8 @@ pub struct PluginManager {
     wasm_path: Option<PathBuf>,
     /// Modification time of the last loaded WASM file.
     last_mtime: Arc<RwLock<Option<SystemTime>>>,
-    /// Effect registry, stored for reload (recreating plugin requires re-registering host fns).
-    registry: Arc<EffectRegistry>,
+    /// Effect dispatch, stored for reload (recreating plugin requires re-registering host fns).
+    registry: Arc<dyn EffectDispatch>,
     /// Agent identity, baked in at construction. Always present.
     ctx: EffectContext,
 }
@@ -81,7 +81,7 @@ impl PluginManager {
     /// Load a WASM plugin from bytes (embedded mode, no hot reload).
     pub async fn new(
         wasm_bytes: &[u8],
-        registry: Arc<EffectRegistry>,
+        registry: Arc<dyn EffectDispatch>,
         ctx: EffectContext,
     ) -> Result<Self> {
         let hash = sha256_short(wasm_bytes);
@@ -102,7 +102,7 @@ impl PluginManager {
     /// Load a WASM plugin from a file path (runtime mode, hot reload enabled).
     pub async fn from_file(
         path: &Path,
-        registry: Arc<EffectRegistry>,
+        registry: Arc<dyn EffectDispatch>,
         ctx: EffectContext,
     ) -> Result<Self> {
         let wasm_bytes = std::fs::read(path)
@@ -349,7 +349,7 @@ impl PluginManager {
 /// Build an Extism plugin from WASM bytes with yield_effect host function.
 fn build_plugin(
     wasm_bytes: &[u8],
-    registry: &Arc<EffectRegistry>,
+    registry: &Arc<dyn EffectDispatch>,
     effect_ctx: &EffectContext,
 ) -> Result<Plugin> {
     let manifest = Manifest::new([extism::Wasm::data(wasm_bytes.to_vec())]);

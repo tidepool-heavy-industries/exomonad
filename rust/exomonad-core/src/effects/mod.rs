@@ -44,6 +44,7 @@
 
 pub mod error;
 pub mod host_fn;
+pub mod test_hooks;
 
 pub use error::{spawn_blocking_effect, EffectError, ResultExt, ResultExtPreserve};
 
@@ -108,6 +109,25 @@ pub trait EffectHandler: Send + Sync {
     ) -> EffectResult<Vec<u8>>;
 }
 
+/// Trait for dispatching effects. Production code uses `EffectRegistry` directly;
+/// test code can wrap it in `WithTestHooks` for instrumentation.
+#[async_trait]
+pub trait EffectDispatch: Send + Sync {
+    /// Dispatch an effect to the appropriate handler by namespace prefix.
+    async fn dispatch(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &EffectContext,
+    ) -> EffectResult<Vec<u8>>;
+
+    /// Get the list of registered namespaces.
+    fn namespaces(&self) -> Vec<&str>;
+
+    /// Check if a handler is registered for a namespace.
+    fn has_handler(&self, namespace: &str) -> bool;
+}
+
 use tracing::instrument;
 
 /// Registry for effect handlers.
@@ -152,11 +172,12 @@ impl EffectRegistry {
         self.register(Arc::from(handler));
     }
 
-    /// Dispatch an effect to the appropriate handler.
-    ///
-    /// Routes based on namespace prefix extracted from the effect type.
+}
+
+#[async_trait]
+impl EffectDispatch for EffectRegistry {
     #[instrument(skip_all, fields(effect_type = %effect_type, namespace = tracing::field::Empty, agent_name = %ctx.agent_name))]
-    pub async fn dispatch(
+    async fn dispatch(
         &self,
         effect_type: &str,
         payload: &[u8],
@@ -186,13 +207,11 @@ impl EffectRegistry {
         handler.handle(effect_type, payload, ctx).await
     }
 
-    /// Check if a handler is registered for a namespace.
-    pub fn has_handler(&self, namespace: &str) -> bool {
+    fn has_handler(&self, namespace: &str) -> bool {
         self.handlers.contains_key(namespace)
     }
 
-    /// Get the list of registered namespaces.
-    pub fn namespaces(&self) -> Vec<&str> {
+    fn namespaces(&self) -> Vec<&str> {
         self.handlers.keys().map(|s| s.as_str()).collect()
     }
 }
