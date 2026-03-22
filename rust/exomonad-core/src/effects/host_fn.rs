@@ -4,7 +4,7 @@
 //! and payload bytes. The host dispatches to the appropriate handler and returns
 //! an `EffectResponse` (protobuf) with either payload bytes or an error.
 
-use super::{EffectContext, EffectError, EffectRegistry};
+use super::{EffectContext, EffectDispatch, EffectError};
 use exomonad_proto::effects::error as proto_error;
 use exomonad_proto::effects::{EffectEnvelope, EffectResponse};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
@@ -52,8 +52,8 @@ pub fn to_proto_error(err: &EffectError) -> proto_error::EffectError {
 
 /// User data for the yield_effect host function.
 pub struct YieldEffectContext {
-    /// Effect registry for dispatching semantic effects.
-    pub registry: Arc<EffectRegistry>,
+    /// Effect dispatch for dispatching semantic effects.
+    pub registry: Arc<dyn EffectDispatch>,
     /// Agent identity, baked in at plugin construction time.
     pub ctx: EffectContext,
 }
@@ -112,7 +112,7 @@ fn yield_effect_impl(
 
     tracing::debug!(effect_type = %envelope.effect_type, payload_bytes = envelope.payload.len(), "[yield_effect] dispatching");
 
-    // Clone Arc<EffectRegistry> and EffectContext out of the mutex, then drop the lock.
+    // Clone Arc<dyn EffectDispatch> and EffectContext out of the mutex, then drop the lock.
     // This prevents holding the UserData mutex across the async dispatch.
     let (registry, effect_ctx) = {
         let ctx = user_data.get()?;
