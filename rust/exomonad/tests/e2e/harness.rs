@@ -43,18 +43,24 @@ impl TestHarness {
             return Err(anyhow!("Failed to init project git repo"));
         }
 
-        Command::new("git")
+        let status = Command::new("git")
             .args(["remote", "add", "origin", "../remote.git"])
             .current_dir(&project_dir)
             .status()?;
+        if !status.success() {
+            return Err(anyhow!("Failed to add origin remote to project git repo"));
+        }
 
         // Initial commit
         fs::write(project_dir.join("README.md"), "# Test Project")?;
-        Command::new("git")
+        let status = Command::new("git")
             .args(["add", "README.md"])
             .current_dir(&project_dir)
             .status()?;
-        Command::new("git")
+        if !status.success() {
+            return Err(anyhow!("Failed to add README.md to git index"));
+        }
+        let status = Command::new("git")
             .args([
                 "-c",
                 "user.name=Test",
@@ -67,32 +73,60 @@ impl TestHarness {
             ])
             .current_dir(&project_dir)
             .status()?;
+        if !status.success() {
+            return Err(anyhow!("Failed to create initial commit"));
+        }
 
         // 3. Copy WASM
         let mut workspace_root = std::env::var("CARGO_MANIFEST_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("."));
 
-        while workspace_root.parent().is_some() && !workspace_root.join("justfile").exists() {
-            workspace_root = workspace_root.parent().unwrap().to_path_buf();
-        }
-
-        let wasm_src = workspace_root.join(".exo/wasm");
-        let wasm_dest = project_dir.join(".exo/wasm");
-        if wasm_src.exists() {
-            fs::create_dir_all(&wasm_dest)?;
-            for entry in fs::read_dir(wasm_src)? {
-                let entry = entry?;
-                if entry.file_type()?.is_file() {
-                    fs::copy(entry.path(), wasm_dest.join(entry.file_name()))?;
+        let start_dir = workspace_root.clone();
+        loop {
+            if workspace_root.join("justfile").exists() {
+                break;
+            }
+            match workspace_root.parent() {
+                Some(parent) => {
+                    workspace_root = parent.to_path_buf();
+                }
+                None => {
+                    return Err(anyhow!(
+                        "Could not locate justfile; searched upwards from {}",
+                        start_dir.display()
+                    ));
                 }
             }
         }
 
+        let wasm_src = workspace_root.join(".exo/wasm");
+        let wasm_dest = project_dir.join(".exo/wasm");
+        if !wasm_src.exists() {
+            return Err(anyhow!(
+                "WASM directory not found at {:?}. Run `just wasm-all` first.",
+                wasm_src
+            ));
+        }
+        fs::create_dir_all(&wasm_dest)?;
+        for entry in fs::read_dir(&wasm_src)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                fs::copy(entry.path(), wasm_dest.join(entry.file_name()))?;
+            }
+        }
+
         // 4. Write minimal config.toml
+        let tmux_session = format!("exo-test-{}", std::process::id());
         let config_path = project_dir.join(".exo/config.toml");
         fs::create_dir_all(project_dir.join(".exo"))?;
-        fs::write(config_path, "default_role = \"tl\"\nproject_dir = \".\"\n")?;
+        fs::write(
+            config_path,
+            format!(
+                "default_role = \"tl\"\nproject_dir = \".\"\ntmux_session = \"{}\"\n",
+                tmux_session
+            ),
+        )?;
 
         // 5. Copy mock_gh
         let mock_gh_src = workspace_root.join("tests/e2e/mock_gh");
@@ -119,9 +153,6 @@ impl TestHarness {
             .arg(port.to_string())
             .stderr(Stdio::null())
             .spawn()?;
-
-        // 7. Generate unique tmux session name
-        let tmux_session = format!("exo-test-{}", std::process::id());
 
         Ok(TestHarness {
             tmpdir,

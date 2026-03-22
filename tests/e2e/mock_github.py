@@ -27,6 +27,7 @@ import re
 import signal
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse
 
 
 class GitHubState:
@@ -96,14 +97,16 @@ class GitHubMockHandler(BaseHTTPRequestHandler):
         self._log_request(status_code)
 
     def do_GET(self):
+        path = urlparse(self.path).path
+
         # GET /repos/{owner}/{repo}/pulls
-        m = re.match(r"^/repos/([^/]+)/([^/]+)/pulls$", self.path)
+        m = re.match(r"^/repos/([^/]+)/([^/]+)/pulls$", path)
         if m:
             open_prs = [pr for pr in state.prs.values() if pr["state"] == "open"]
             return self._send_json(open_prs)
 
         # GET /repos/{owner}/{repo}/pulls/{n}/reviews
-        m = re.match(r"^/repos/([^/]+)/([^/]+)/pulls/(\d+)/reviews$", self.path)
+        m = re.match(r"^/repos/([^/]+)/([^/]+)/pulls/(\d+)/reviews$", path)
         if m:
             pr_number = int(m.group(3))
             if pr_number in state.prs:
@@ -118,7 +121,7 @@ class GitHubMockHandler(BaseHTTPRequestHandler):
             return self._send_error(404, "PR not found")
 
         # GET /repos/{owner}/{repo}/pulls/{n}/comments
-        m = re.match(r"^/repos/([^/]+)/([^/]+)/pulls/(\d+)/comments$", self.path)
+        m = re.match(r"^/repos/([^/]+)/([^/]+)/pulls/(\d+)/comments$", path)
         if m:
             pr_number = int(m.group(3))
             if pr_number in state.prs:
@@ -126,7 +129,7 @@ class GitHubMockHandler(BaseHTTPRequestHandler):
             return self._send_error(404, "PR not found")
 
         # GET /repos/{owner}/{repo}/pulls/{n}
-        m = re.match(r"^/repos/([^/]+)/([^/]+)/pulls/(\d+)$", self.path)
+        m = re.match(r"^/repos/([^/]+)/([^/]+)/pulls/(\d+)$", path)
         if m:
             pr_number = int(m.group(3))
             if pr_number in state.prs:
@@ -134,7 +137,7 @@ class GitHubMockHandler(BaseHTTPRequestHandler):
             return self._send_error(404, "PR not found")
 
         # GET /repos/{owner}/{repo}/commits/{sha}/check-runs
-        m = re.match(r"^/repos/([^/]+)/([^/]+)/commits/([^/]+)/check-runs$", self.path)
+        m = re.match(r"^/repos/([^/]+)/([^/]+)/commits/([^/]+)/check-runs$", path)
         if m:
             data = {
                 "total_count": 1,
@@ -151,8 +154,10 @@ class GitHubMockHandler(BaseHTTPRequestHandler):
         return self._send_error(404, "Not Found")
 
     def do_POST(self):
+        path = urlparse(self.path).path
+
         # POST /repos/{owner}/{repo}/pulls
-        m = re.match(r"^/repos/([^/]+)/([^/]+)/pulls$", self.path)
+        m = re.match(r"^/repos/([^/]+)/([^/]+)/pulls$", path)
         if m:
             owner, repo = m.groups()
             content_length = int(self.headers.get("Content-Length", 0))
@@ -170,8 +175,10 @@ class GitHubMockHandler(BaseHTTPRequestHandler):
         return self._send_error(404, "Not Found")
 
     def do_PUT(self):
+        path = urlparse(self.path).path
+
         # PUT /repos/{owner}/{repo}/pulls/{n}/merge
-        m = re.match(r"^/repos/([^/]+)/([^/]+)/pulls/(\d+)/merge$", self.path)
+        m = re.match(r"^/repos/([^/]+)/([^/]+)/pulls/(\d+)/merge$", path)
         if m:
             pr_number = int(m.group(3))
             if state.merge_pr(pr_number):

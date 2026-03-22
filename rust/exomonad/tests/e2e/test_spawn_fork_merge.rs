@@ -18,7 +18,13 @@ fn test_spawn_pipeline() -> Result<()> {
         .arg("serve")
         .current_dir(project_dir)
         .env("GITHUB_API_BASE_URL", format!("http://127.0.0.1:{}", harness.mock_github_port))
-        .env("PATH", format!("{}:{}", harness.mock_gh_path.parent().unwrap().to_str().unwrap(), std::env::var("PATH").unwrap()))
+        .env("PATH", {
+            let mock_dir = harness.mock_gh_path.parent().expect("mock_gh_path has no parent");
+            let current_path = std::env::var_os("PATH").unwrap_or_default();
+            let mut paths: Vec<std::path::PathBuf> = vec![mock_dir.to_path_buf()];
+            paths.extend(std::env::split_paths(&current_path));
+            std::env::join_paths(paths).expect("failed to join PATH")
+        })
         .env("GITHUB_TOKEN", "test-token")
         .env("RUST_LOG", "warn")
         .stdout(Stdio::piped())

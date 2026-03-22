@@ -35,7 +35,8 @@ case "$1" in
                 echo '[]'
                 ;;
             *)
-                # Unrecognized pr command
+                echo "mock_gh: unrecognized pr subcommand: $2" >&2
+                exit 1
                 ;;
         esac
         ;;
@@ -49,8 +50,7 @@ case "$1" in
         fi
         ;;
     *)
-        # Unrecognized command
+        echo "mock_gh: unrecognized command: $1" >&2
+        exit 1
         ;;
 esac
-
-exit 0

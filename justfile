@@ -151,7 +151,7 @@ test-mcp *args:
     ./scripts/test-mcp-integration.sh {{args}}
 
 # Run E2E tests (Harness + subprocess server + mock services)
-test-e2e:
+test-e2e: wasm-all
     cargo test -p exomonad --test e2e_tests -- --ignored --nocapture
 
 # Validate Gemini settings against schema

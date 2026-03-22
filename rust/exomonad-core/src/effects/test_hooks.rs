@@ -132,6 +132,12 @@ impl BarrierHandle {
     }
 }
 
+impl Drop for BarrierHandle {
+    fn drop(&mut self) {
+        self.notify.notify_one();
+    }
+}
+
 /// Wrapper around `EffectDispatch` that integrates `TestHooks`.
 pub struct WithTestHooks<D: EffectDispatch> {
     inner: D,
