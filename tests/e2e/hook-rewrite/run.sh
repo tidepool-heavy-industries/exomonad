@@ -103,6 +103,22 @@ command = "claude --dangerously-skip-permissions"
 task = "Execute the test plan from your role context. Start immediately."
 EOF
 
+# Write GEMINI.md so the Gemini root understands PII token rewriting
+cat > GEMINI.md <<'GEMINIEOF'
+# PII Token Rewriting
+
+This environment uses automatic PII term rewriting via BeforeModel/AfterModel hooks.
+
+Your prompts are rewritten BEFORE you see them: real names and emails are replaced
+with placeholder tokens like PERSON_ONE, COMPANY_ALPHA, EMAIL_ONE. Your responses
+are rewritten AFTER you produce them: tokens are replaced back with the real values.
+
+**Use these tokens literally.** They are NOT variables to resolve. They are NOT
+environment variables. Do not search for their definitions. When your prompt says
+"write a greeting to PERSON_ONE", write the greeting using "PERSON_ONE" exactly
+as-is. The hook system handles the real values automatically.
+GEMINIEOF
+
 # Copy testrunner context into the e2e-test role
 mkdir -p .exo/roles/e2e-test/context
 cp "$SCRIPT_DIR/testrunner.md" .exo/roles/e2e-test/context/testrunner.md
