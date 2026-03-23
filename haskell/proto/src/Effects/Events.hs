@@ -599,8 +599,179 @@ instance (HsJSONPB.ToJSON Timeout) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON Timeout) where
   parseJSON = HsJSONPB.parseJSONPB
+newtype Address
+  = Address {addressKind :: (Hs.Maybe AddressKind)}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData Address)
+instance (HsProtobuf.Named Address) where
+  nameOf _ = Hs.fromString "Address"
+instance (HsProtobuf.HasDefault Address)
+instance (HsProtobuf.Message Address) where
+  encodeMessage _ Address {addressKind}
+    = (case addressKind of
+         Hs.Nothing -> Hs.mempty
+         Hs.Just x
+           -> case x of
+                AddressKindAgent y
+                  -> HsProtobuf.encodeMessageField
+                       (HsProtobuf.FieldNumber 1)
+                       (HsProtobuf.ForceEmit
+                          ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) y))
+                AddressKindTeam y
+                  -> HsProtobuf.encodeMessageField
+                       (HsProtobuf.FieldNumber 2)
+                       ((Hs.coerce
+                           @(Hs.Maybe Effects.Events.TeamAddress)
+                           @(HsProtobuf.Nested Effects.Events.TeamAddress))
+                          (Hs.Just y)))
+  decodeMessage _
+    = Hs.pure Address
+        <*>
+          HsProtobuf.oneof
+            Hs.Nothing
+            [((HsProtobuf.FieldNumber 1), 
+              Hs.pure (Hs.Just Hs.. AddressKindAgent)
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     HsProtobuf.decodeMessageField)),
+             ((HsProtobuf.FieldNumber 2), 
+              Hs.pure (Hs.fmap AddressKindTeam)
+                <*>
+                  ((HsProtobuf.coerceOver
+                      @(HsProtobuf.Nested Effects.Events.TeamAddress)
+                      @(Hs.Maybe Effects.Events.TeamAddress))
+                     HsProtobuf.decodeMessageField))]
+  dotProto _ = []
+instance (HsJSONPB.ToJSONPB Address) where
+  toJSONPB (Address f1_or_f2)
+    = HsJSONPB.object
+        [(let
+            encodeKind
+              = (case f1_or_f2 of
+                   Hs.Just (AddressKindAgent f1)
+                     -> HsJSONPB.pair
+                          "agent" ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1)
+                   Hs.Just (AddressKindTeam f2) -> HsJSONPB.pair "team" f2
+                   Hs.Nothing -> Hs.mempty)
+          in
+            (\ options
+               -> if HsJSONPB.optEmitNamedOneof options then
+                      ("kind" .= HsJSONPB.objectOrNull [encodeKind] options) options
+                  else
+                      encodeKind options))]
+  toEncodingPB (Address f1_or_f2)
+    = HsJSONPB.pairs
+        [(let
+            encodeKind
+              = (case f1_or_f2 of
+                   Hs.Just (AddressKindAgent f1)
+                     -> HsJSONPB.pair
+                          "agent" ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1)
+                   Hs.Just (AddressKindTeam f2) -> HsJSONPB.pair "team" f2
+                   Hs.Nothing -> Hs.mempty)
+          in
+            (\ options
+               -> if HsJSONPB.optEmitNamedOneof options then
+                      ("kind" .= HsJSONPB.pairsOrNull [encodeKind] options) options
+                  else
+                      encodeKind options))]
+instance (HsJSONPB.FromJSONPB Address) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "Address"
+        (\ obj
+           -> Hs.pure Address
+                <*>
+                  (let
+                     parseKind parseObj
+                       = Hs.msum
+                           [Hs.Just Hs.. AddressKindAgent
+                              Hs.. (Hs.coerce @(HsProtobuf.String Hs.Text) @Hs.Text)
+                              <$> HsJSONPB.parseField parseObj "agent",
+                            Hs.Just Hs.. AddressKindTeam
+                              <$> HsJSONPB.parseField parseObj "team",
+                            Hs.pure Hs.Nothing]
+                   in
+                     (obj .: "kind" Hs.>>= HsJSONPB.withObject "kind" parseKind)
+                       <|> (parseKind obj)))
+instance (HsJSONPB.ToJSON Address) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON Address) where
+  parseJSON = HsJSONPB.parseJSONPB
+data AddressKind
+  = AddressKindAgent Hs.Text |
+    AddressKindTeam Effects.Events.TeamAddress
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData AddressKind)
+instance (HsProtobuf.Named AddressKind) where
+  nameOf _ = Hs.fromString "AddressKind"
+data TeamAddress
+  = TeamAddress {teamAddressTeam :: Hs.Text,
+                 teamAddressMember :: Hs.Text}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData TeamAddress)
+instance (HsProtobuf.Named TeamAddress) where
+  nameOf _ = Hs.fromString "TeamAddress"
+instance (HsProtobuf.HasDefault TeamAddress)
+instance (HsProtobuf.Message TeamAddress) where
+  encodeMessage _ TeamAddress {teamAddressTeam, teamAddressMember}
+    = Hs.mappend
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 1)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              teamAddressTeam))
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 2)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              teamAddressMember))
+  decodeMessage _
+    = Hs.pure TeamAddress
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "team") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 2)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "member") [] ""]
+instance (HsJSONPB.ToJSONPB TeamAddress) where
+  toJSONPB (TeamAddress f1 f2)
+    = HsJSONPB.object
+        ["team" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+         "member" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+  toEncodingPB (TeamAddress f1 f2)
+    = HsJSONPB.pairs
+        ["team" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+         "member" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+instance (HsJSONPB.FromJSONPB TeamAddress) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "TeamAddress"
+        (\ obj
+           -> Hs.pure TeamAddress
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "team"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "member")))
+instance (HsJSONPB.ToJSON TeamAddress) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON TeamAddress) where
+  parseJSON = HsJSONPB.parseJSONPB
 data SendMessageRequest
-  = SendMessageRequest {sendMessageRequestRecipient :: Hs.Text,
+  = SendMessageRequest {sendMessageRequestRecipient :: (Hs.Maybe Effects.Events.Address),
                         sendMessageRequestContent :: Hs.Text,
                         sendMessageRequestSummary :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
@@ -617,7 +788,9 @@ instance (HsProtobuf.Message SendMessageRequest) where
         (Hs.mappend
            (HsProtobuf.encodeMessageField
               (HsProtobuf.FieldNumber 1)
-              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              ((Hs.coerce
+                  @(Hs.Maybe Effects.Events.Address)
+                  @(HsProtobuf.Nested Effects.Events.Address))
                  sendMessageRequestRecipient))
            (HsProtobuf.encodeMessageField
               (HsProtobuf.FieldNumber 2)
@@ -630,7 +803,9 @@ instance (HsProtobuf.Message SendMessageRequest) where
   decodeMessage _
     = Hs.pure SendMessageRequest
         <*>
-          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+          ((HsProtobuf.coerceOver
+              @(HsProtobuf.Nested Effects.Events.Address)
+              @(Hs.Maybe Effects.Events.Address))
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
         <*>
@@ -644,7 +819,8 @@ instance (HsProtobuf.Message SendMessageRequest) where
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
-         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "Address")))
          (HsProtobufAST.Single "recipient") [] "",
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 2)
@@ -658,7 +834,11 @@ instance (HsJSONPB.ToJSONPB SendMessageRequest) where
   toJSONPB (SendMessageRequest f1 f2 f3)
     = HsJSONPB.object
         ["recipient"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+           .=
+             ((Hs.coerce
+                 @(Hs.Maybe Effects.Events.Address)
+                 @(HsProtobuf.Nested Effects.Events.Address))
+                f1),
          "content"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "summary"
@@ -666,7 +846,11 @@ instance (HsJSONPB.ToJSONPB SendMessageRequest) where
   toEncodingPB (SendMessageRequest f1 f2 f3)
     = HsJSONPB.pairs
         ["recipient"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+           .=
+             ((Hs.coerce
+                 @(Hs.Maybe Effects.Events.Address)
+                 @(HsProtobuf.Nested Effects.Events.Address))
+                f1),
          "content"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "summary"
@@ -678,7 +862,9 @@ instance (HsJSONPB.FromJSONPB SendMessageRequest) where
         (\ obj
            -> Hs.pure SendMessageRequest
                 <*>
-                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                  ((HsProtobuf.coerceOver
+                      @(HsProtobuf.Nested Effects.Events.Address)
+                      @(Hs.Maybe Effects.Events.Address))
                      (obj .: "recipient"))
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
@@ -756,7 +942,8 @@ instance (HsJSONPB.FromJSON SendMessageResponse) where
 data NotifyParentRequest
   = NotifyParentRequest {notifyParentRequestStatus :: Hs.Text,
                          notifyParentRequestMessage :: Hs.Text,
-                         notifyParentRequestAgentId :: Hs.Text}
+                         notifyParentRequestAgentId :: Hs.Text,
+                         notifyParentRequestOverrideRecipient :: (Hs.Maybe Effects.Events.Address)}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData NotifyParentRequest)
 instance (HsProtobuf.Named NotifyParentRequest) where
@@ -766,21 +953,29 @@ instance (HsProtobuf.Message NotifyParentRequest) where
   encodeMessage
     _
     NotifyParentRequest {notifyParentRequestStatus,
-                         notifyParentRequestMessage, notifyParentRequestAgentId}
+                         notifyParentRequestMessage, notifyParentRequestAgentId,
+                         notifyParentRequestOverrideRecipient}
     = Hs.mappend
         (Hs.mappend
+           (Hs.mappend
+              (HsProtobuf.encodeMessageField
+                 (HsProtobuf.FieldNumber 1)
+                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                    notifyParentRequestStatus))
+              (HsProtobuf.encodeMessageField
+                 (HsProtobuf.FieldNumber 2)
+                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                    notifyParentRequestMessage)))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 1)
+              (HsProtobuf.FieldNumber 3)
               ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                 notifyParentRequestStatus))
-           (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 2)
-              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                 notifyParentRequestMessage)))
+                 notifyParentRequestAgentId)))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 3)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              notifyParentRequestAgentId))
+           (HsProtobuf.FieldNumber 4)
+           ((Hs.coerce
+               @(Hs.Maybe Effects.Events.Address)
+               @(HsProtobuf.Nested Effects.Events.Address))
+              notifyParentRequestOverrideRecipient))
   decodeMessage _
     = Hs.pure NotifyParentRequest
         <*>
@@ -795,6 +990,12 @@ instance (HsProtobuf.Message NotifyParentRequest) where
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)))
+        <*>
+          ((HsProtobuf.coerceOver
+              @(HsProtobuf.Nested Effects.Events.Address)
+              @(Hs.Maybe Effects.Events.Address))
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 4)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -807,24 +1008,41 @@ instance (HsProtobuf.Message NotifyParentRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 3)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "agent_id") [] ""]
+         (HsProtobufAST.Single "agent_id") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 4)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "Address")))
+         (HsProtobufAST.Single "override_recipient") [] ""]
 instance (HsJSONPB.ToJSONPB NotifyParentRequest) where
-  toJSONPB (NotifyParentRequest f1 f2 f3)
+  toJSONPB (NotifyParentRequest f1 f2 f3 f4)
     = HsJSONPB.object
         ["status"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "message"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "agent_id"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
-  toEncodingPB (NotifyParentRequest f1 f2 f3)
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
+         "override_recipient"
+           .=
+             ((Hs.coerce
+                 @(Hs.Maybe Effects.Events.Address)
+                 @(HsProtobuf.Nested Effects.Events.Address))
+                f4)]
+  toEncodingPB (NotifyParentRequest f1 f2 f3 f4)
     = HsJSONPB.pairs
         ["status"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "message"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "agent_id"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
+         "override_recipient"
+           .=
+             ((Hs.coerce
+                 @(Hs.Maybe Effects.Events.Address)
+                 @(HsProtobuf.Nested Effects.Events.Address))
+                f4)]
 instance (HsJSONPB.FromJSONPB NotifyParentRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -839,7 +1057,12 @@ instance (HsJSONPB.FromJSONPB NotifyParentRequest) where
                      (obj .: "message"))
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "agent_id")))
+                     (obj .: "agent_id"))
+                <*>
+                  ((HsProtobuf.coerceOver
+                      @(HsProtobuf.Nested Effects.Events.Address)
+                      @(Hs.Maybe Effects.Events.Address))
+                     (obj .: "override_recipient")))
 instance (HsJSONPB.ToJSON NotifyParentRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding

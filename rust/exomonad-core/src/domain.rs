@@ -708,6 +708,70 @@ impl RoutingInfo {
 }
 
 // ============================================================================
+// Address — Typed routing for agent-to-agent messaging
+// ============================================================================
+
+/// Typed address for agent-to-agent message routing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Address {
+    /// Direct agent by name.
+    Agent(AgentName),
+    /// Team-scoped: specific member or team lead (member=None).
+    Team {
+        team: TeamName,
+        member: Option<AgentName>,
+    },
+    /// Default supervisor sentinel; routes to root TL via `route_message()`.
+    /// SupervisorRegistry resolution happens in the events handler before
+    /// reaching route_message — this variant is the fallback when no
+    /// explicit supervisor is registered.
+    Supervisor,
+}
+
+impl Address {
+    /// Convert from proto Address. None/empty → Supervisor (caller wants default/root routing).
+    pub fn from_proto(addr: Option<exomonad_proto::effects::events::Address>) -> Self {
+        use exomonad_proto::effects::events::address::Kind;
+        match addr.as_ref().and_then(|a| a.kind.as_ref()) {
+            Some(Kind::Agent(name)) if !name.is_empty() => {
+                Address::Agent(AgentName::from(name.as_str()))
+            }
+            Some(Kind::Team(team_addr)) => {
+                let team = if team_addr.team.is_empty() {
+                    return Address::Supervisor;
+                } else {
+                    TeamName::from(team_addr.team.as_str())
+                };
+                let member = if team_addr.member.is_empty() {
+                    None
+                } else {
+                    Some(AgentName::from(team_addr.member.as_str()))
+                };
+                Address::Team { team, member }
+            }
+            _ => Address::Supervisor,
+        }
+    }
+}
+
+impl fmt::Display for Address {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Address::Agent(name) => write!(f, "agent:{}", name),
+            Address::Team {
+                team,
+                member: Some(m),
+            } => write!(f, "team:{}:{}", team, m),
+            Address::Team {
+                team,
+                member: None,
+            } => write!(f, "team:{}:lead", team),
+            Address::Supervisor => write!(f, "supervisor"),
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -942,6 +1006,73 @@ mod tests {
         let master_child = master_root.child("feature-a");
         assert_eq!(master_child.as_str(), "master.feature-a");
         assert_eq!(master_child.parent(), Some(BirthBranch::from("master")));
+    }
+
+    #[test]
+    fn test_address_from_proto_agent() {
+        use exomonad_proto::effects::events::{address::Kind, Address as ProtoAddr};
+        let addr = Address::from_proto(Some(ProtoAddr {
+            kind: Some(Kind::Agent("worker-1".into())),
+        }));
+        assert_eq!(addr, Address::Agent(AgentName::from("worker-1")));
+        assert_eq!(addr.to_string(), "agent:worker-1");
+    }
+
+    #[test]
+    fn test_address_from_proto_team_with_member() {
+        use exomonad_proto::effects::events::{address::Kind, Address as ProtoAddr, TeamAddress};
+        let addr = Address::from_proto(Some(ProtoAddr {
+            kind: Some(Kind::Team(TeamAddress {
+                team: "my-team".into(),
+                member: "worker-1".into(),
+            })),
+        }));
+        assert_eq!(
+            addr,
+            Address::Team {
+                team: TeamName::from("my-team"),
+                member: Some(AgentName::from("worker-1"))
+            }
+        );
+        assert_eq!(addr.to_string(), "team:my-team:worker-1");
+    }
+
+    #[test]
+    fn test_address_from_proto_team_lead() {
+        use exomonad_proto::effects::events::{address::Kind, Address as ProtoAddr, TeamAddress};
+        let addr = Address::from_proto(Some(ProtoAddr {
+            kind: Some(Kind::Team(TeamAddress {
+                team: "my-team".into(),
+                member: "".into(),
+            })),
+        }));
+        assert_eq!(
+            addr,
+            Address::Team {
+                team: TeamName::from("my-team"),
+                member: None
+            }
+        );
+        assert_eq!(addr.to_string(), "team:my-team:lead");
+    }
+
+    #[test]
+    fn test_address_from_proto_none() {
+        assert_eq!(Address::from_proto(None), Address::Supervisor);
+    }
+
+    #[test]
+    fn test_address_from_proto_empty_agent() {
+        use exomonad_proto::effects::events::{address::Kind, Address as ProtoAddr};
+        let addr = Address::from_proto(Some(ProtoAddr {
+            kind: Some(Kind::Agent("".into())),
+        }));
+        assert_eq!(addr, Address::Supervisor);
+    }
+
+    #[test]
+    fn test_address_supervisor_display() {
+        assert_eq!(Address::Supervisor.to_string(), "supervisor");
     }
 
     #[test]

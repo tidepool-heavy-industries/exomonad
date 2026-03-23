@@ -274,7 +274,8 @@ handleWorkerExit hookInput = do
                   (ProtoEvents.NotifyParentRequest
                     { ProtoEvents.notifyParentRequestAgentId = TL.fromStrict agentId,
                       ProtoEvents.notifyParentRequestStatus = TL.fromStrict status,
-                      ProtoEvents.notifyParentRequestMessage = TL.fromStrict statusMsg
+                      ProtoEvents.notifyParentRequestMessage = TL.fromStrict statusMsg,
+                      ProtoEvents.notifyParentRequestOverrideRecipient = Nothing
                     })
           case res of
             Left err -> void $ suspendEffect_ @LogError (Log.ErrorRequest { Log.errorRequestMessage = TL.fromStrict ("Failed to notify parent: " <> T.pack (show err)), Log.errorRequestFields = "" })

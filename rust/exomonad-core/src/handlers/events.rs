@@ -2,9 +2,10 @@
 //!
 //! Uses proto-generated types from `exomonad_proto::effects::events`.
 
+use crate::domain::Address;
 use crate::effects::{dispatch_events_effect, EffectHandler, EffectResult, EventEffects};
 use crate::services::acp_registry::AcpRegistry;
-use crate::services::delivery::DeliveryResult;
+use crate::services::supervisor_registry::SupervisorRegistry;
 use crate::services::EventQueue;
 use async_trait::async_trait;
 use claude_teams_bridge::TeamRegistry;
@@ -24,6 +25,8 @@ pub struct EventHandler {
     team_registry: Option<Arc<TeamRegistry>>,
     /// ACP connection registry for prompt-based delivery.
     acp_registry: Option<Arc<AcpRegistry>>,
+    /// Supervisor registry for child → parent routing.
+    supervisor_registry: Option<Arc<SupervisorRegistry>>,
     /// Project root directory for resolving UDS socket paths.
     project_dir: std::path::PathBuf,
     /// JSONL event log for offline analysis.
@@ -41,6 +44,7 @@ impl EventHandler {
             event_queue_scope: event_queue_scope.unwrap_or_else(|| "default".to_string()),
             team_registry: None,
             acp_registry: None,
+            supervisor_registry: None,
             project_dir,
             event_log: None,
         }
@@ -53,6 +57,11 @@ impl EventHandler {
 
     pub fn with_acp_registry(mut self, registry: Arc<AcpRegistry>) -> Self {
         self.acp_registry = Some(registry);
+        self
+    }
+
+    pub fn with_supervisor_registry(mut self, registry: Arc<SupervisorRegistry>) -> Self {
+        self.supervisor_registry = Some(registry);
         self
     }
 
@@ -156,15 +165,96 @@ impl EventEffects for EventHandler {
             "notify_parent: resolved agent_id"
         );
 
-        // Identity model:
-        // - Subtree agents: birth-branch is their own branch name (e.g. "main.feature-a").
-        //   Their parent is one level up (e.g. "main" -> root).
-        // - Workers: birth-branch is inherited from parent (parent's birth-branch).
+        // Check for override_recipient first (explicit routing)
+        let override_addr = Address::from_proto(req.override_recipient.clone());
+
+        // Resolve parent session ID:
+        // 1. If override_recipient is set and not Supervisor, use that address via route_message
+        // 2. Check SupervisorRegistry for explicit supervisor mapping
+        // 3. Fall back to structural identity (birth-branch parent)
+        if !matches!(override_addr, Address::Supervisor) {
+            tracing::info!(
+                address = %override_addr,
+                "notify_parent: using override_recipient"
+            );
+            // Resolve the override address to a concrete agent key for notify_parent_delivery
+            let (parent_session_id, tab_name) = match &override_addr {
+                Address::Agent(name) => {
+                    let id = name.as_str().to_string();
+                    let tab = crate::services::delivery::resolve_tab_name_for_agent(name.as_str());
+                    (id, tab)
+                }
+                Address::Team { member: Some(m), .. } => {
+                    let id = m.as_str().to_string();
+                    let tab = crate::services::delivery::resolve_tab_name_for_agent(m.as_str());
+                    (id, tab)
+                }
+                Address::Team { team, member: None } => {
+                    // Resolve team lead via config.json's leadAgentId
+                    let lead = if let Some(ref registry) = self.team_registry {
+                        registry.resolve_lead(team.as_str()).await
+                    } else {
+                        None
+                    };
+                    let id = lead.unwrap_or_else(|| "root".to_string());
+                    let tab = crate::services::delivery::resolve_tab_name_for_agent(&id);
+                    (id, tab)
+                }
+                Address::Supervisor => unreachable!(),
+            };
+
+            crate::services::delivery::notify_parent_delivery(
+                self.team_registry.as_deref(),
+                self.acp_registry.as_deref(),
+                self.event_log.as_deref(),
+                &self.queue,
+                &self.project_dir,
+                &agent_id_str,
+                &parent_session_id,
+                &tab_name,
+                &req.status,
+                &req.message,
+                None,
+                "agent",
+            )
+            .await;
+            return Ok(NotifyParentResponse { ack: true });
+        }
+
+        // Check SupervisorRegistry for this agent's birth-branch
+        if let Some(ref supervisor_registry) = self.supervisor_registry {
+            if let Some(info) = supervisor_registry.lookup(birth_branch.as_str()).await {
+                tracing::info!(
+                    supervisor = %info.supervisor,
+                    team = %info.team,
+                    "notify_parent: resolved supervisor from registry"
+                );
+                let parent_session_id = info.supervisor.as_str();
+                let tab_name = crate::services::delivery::resolve_tab_name_for_agent(parent_session_id);
+
+                crate::services::delivery::notify_parent_delivery(
+                    self.team_registry.as_deref(),
+                    self.acp_registry.as_deref(),
+                    self.event_log.as_deref(),
+                    &self.queue,
+                    &self.project_dir,
+                    &agent_id_str,
+                    parent_session_id,
+                    &tab_name,
+                    &req.status,
+                    &req.message,
+                    None,
+                    "agent",
+                )
+                .await;
+                return Ok(NotifyParentResponse { ack: true });
+            }
+        }
+
+        // Structural fallback: birth-branch parent
         let parent_session_id = if agent_name.is_gemini_worker() {
-            // Worker: birth-branch is inherited from parent
             birth_branch.to_string()
         } else {
-            // Subtree agent: parent is one level up
             birth_branch
                 .parent()
                 .map(|p| p.to_string())
@@ -175,7 +265,7 @@ impl EventEffects for EventHandler {
             birth_branch = %birth_branch,
             parent_session_id = %parent_session_id,
             status = %req.status,
-            "notify_parent: routing message to parent"
+            "notify_parent: routing via structural identity"
         );
 
         let tab_name = crate::services::agent_control::resolve_parent_tab_name(ctx);
@@ -210,48 +300,49 @@ impl EventEffects for EventHandler {
         } else {
             req.summary.clone()
         };
-        let tab_name = resolve_recipient_tab_name(&req.recipient);
 
-        let delivery_result = crate::services::delivery::deliver_to_agent(
+        let address = Address::from_proto(req.recipient.clone());
+
+        // Validate: send_message requires an explicit recipient, not Supervisor
+        if matches!(address, Address::Supervisor) {
+            return Err(crate::effects::EffectError::custom(
+                "events.invalid_input",
+                "send_message requires an explicit recipient (agent name or team); got empty/missing recipient".to_string(),
+            ));
+        }
+
+        tracing::info!(
+            address = %address,
+            sender = %sender,
+            "send_message: routing via Address"
+        );
+
+        let outcome = crate::services::delivery::route_message(
+            &address,
             self.team_registry.as_deref(),
             self.acp_registry.as_deref(),
             &self.project_dir,
-            &req.recipient,
-            &tab_name,
             sender,
             &req.content,
             &summary,
         )
         .await;
 
-        let method_string = match delivery_result {
-            DeliveryResult::Teams => "teams_inbox",
-            DeliveryResult::Acp => "acp",
-            DeliveryResult::Uds => "unix_socket",
-            DeliveryResult::Tmux => "tmux_stdin",
-            DeliveryResult::Failed => "failed",
-        };
+        let method_string = outcome.method_string();
+        let success = outcome.is_success();
 
         tracing::info!(
             otel.name = "agent.message_sent",
-            recipient = %req.recipient,
+            address = %address,
             method = method_string,
+            success = success,
             "[event] agent.message_sent"
         );
 
         Ok(SendMessageResponse {
-            success: !matches!(delivery_result, DeliveryResult::Failed),
+            success,
             delivery_method: method_string.to_string(),
         })
-    }
-}
-
-fn resolve_recipient_tab_name(recipient: &str) -> String {
-    if recipient == "root" {
-        "TL".to_string()
-    } else {
-        crate::services::agent_control::AgentType::from_dir_name(recipient)
-            .tab_display_name(recipient)
     }
 }
 
@@ -264,18 +355,5 @@ mod tests {
         let queue = Arc::new(EventQueue::new());
         let handler = EventHandler::new(queue, None, std::path::PathBuf::from("."));
         assert_eq!(handler.namespace(), "events");
-    }
-
-    #[test]
-    fn test_resolve_recipient_tab_name() {
-        assert_eq!(super::resolve_recipient_tab_name("root"), "TL");
-        assert_eq!(
-            super::resolve_recipient_tab_name("feature-a-gemini"),
-            "💎 feature-a-gemini"
-        );
-        assert_eq!(
-            super::resolve_recipient_tab_name("feature-b-claude"),
-            "🤖 feature-b-claude"
-        );
     }
 }

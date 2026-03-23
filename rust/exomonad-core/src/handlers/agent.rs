@@ -16,7 +16,9 @@ use crate::services::agent_control::{
     SpawnWorkerOptions,
 };
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
+use crate::services::supervisor_registry::{SupervisorInfo, SupervisorRegistry};
 use crate::{GithubOwner, GithubRepo, IssueNumber};
+use claude_teams_bridge::TeamRegistry;
 use async_trait::async_trait;
 use exomonad_proto::effects::agent::*;
 use std::path::PathBuf;
@@ -32,6 +34,8 @@ pub struct AgentHandler {
     claude_session_registry: Option<Arc<ClaudeSessionRegistry>>,
     acp_registry: Option<Arc<AcpRegistry>>,
     event_log: Option<Arc<crate::services::event_log::EventLog>>,
+    supervisor_registry: Option<Arc<SupervisorRegistry>>,
+    team_registry: Option<Arc<TeamRegistry>>,
 }
 
 impl AgentHandler {
@@ -41,6 +45,8 @@ impl AgentHandler {
             claude_session_registry: None,
             acp_registry: None,
             event_log: None,
+            supervisor_registry: None,
+            team_registry: None,
         }
     }
 
@@ -57,6 +63,46 @@ impl AgentHandler {
     pub fn with_acp_registry(mut self, reg: Arc<AcpRegistry>) -> Self {
         self.acp_registry = Some(reg);
         self
+    }
+
+    pub fn with_supervisor_registry(mut self, reg: Arc<SupervisorRegistry>) -> Self {
+        self.supervisor_registry = Some(reg);
+        self
+    }
+
+    pub fn with_team_registry(mut self, reg: Arc<TeamRegistry>) -> Self {
+        self.team_registry = Some(reg);
+        self
+    }
+
+    /// Auto-register a spawned child in the SupervisorRegistry.
+    /// Resolves the caller's team from TeamRegistry, then maps the child key
+    /// to the caller as supervisor.
+    async fn register_child_supervisor(&self, child_key: &str, ctx: &crate::effects::EffectContext) {
+        let (Some(sup_reg), Some(team_reg)) = (&self.supervisor_registry, &self.team_registry) else {
+            return;
+        };
+        let agent_key = ctx.agent_name.to_string();
+        let team_name = if let Some(info) = team_reg.get(&agent_key).await {
+            TeamName::from(info.team_name.as_str())
+        } else if let Some(info) = team_reg.get(ctx.birth_branch.as_ref()).await {
+            TeamName::from(info.team_name.as_str())
+        } else {
+            warn!(
+                agent = %agent_key,
+                child = %child_key,
+                "No team found for agent — skipping supervisor registration"
+            );
+            return;
+        };
+
+        sup_reg.register(
+            &[child_key.to_string()],
+            SupervisorInfo {
+                supervisor: ctx.agent_name.clone(),
+                team: team_name,
+            },
+        ).await;
     }
 }
 
@@ -245,6 +291,8 @@ impl AgentEffects for AgentHandler {
             );
         }
 
+        self.register_child_supervisor(&req.name, ctx).await;
+
         Ok(SpawnWorkerResponse {
             agent: Some(agent_info),
         })
@@ -336,6 +384,8 @@ impl AgentEffects for AgentHandler {
             );
         }
 
+        self.register_child_supervisor(&req.branch_name, ctx).await;
+
         Ok(SpawnSubtreeResponse {
             agent: Some(agent_info),
         })
@@ -382,6 +432,8 @@ impl AgentEffects for AgentHandler {
                 "branch": agent_info.branch_name,
             }));
         }
+
+        self.register_child_supervisor(&req.branch_name, ctx).await;
 
         Ok(SpawnLeafSubtreeResponse {
             agent: Some(agent_info),
@@ -490,6 +542,8 @@ impl AgentEffects for AgentHandler {
                 }),
             );
         }
+
+        self.register_child_supervisor(&req.name, ctx).await;
 
         Ok(SpawnAcpResponse {
             agent: Some(agent_info),

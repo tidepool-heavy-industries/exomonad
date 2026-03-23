@@ -24,8 +24,29 @@ message DeregisterTeamResponse {
   bool success = 1;
 }
 
+message RegisterSupervisorRequest {
+  repeated string children = 1;  // child birth-branches to register
+  string supervisor = 2;         // supervisor agent name
+  string team = 3;               // team name for scoped delivery
+}
+
+message RegisterSupervisorResponse {
+  bool success = 1;
+  int32 registered_count = 2;
+}
+
+message DeregisterSupervisorRequest {
+  repeated string children = 1;  // child birth-branches to deregister
+}
+
+message DeregisterSupervisorResponse {
+  bool success = 1;
+}
+
 service SessionEffects {
   rpc RegisterClaudeId(RegisterClaudeSessionRequest) returns (RegisterClaudeSessionResponse);
   rpc RegisterTeam(RegisterTeamRequest) returns (RegisterTeamResponse);
   rpc DeregisterTeam(DeregisterTeamRequest) returns (DeregisterTeamResponse);
+  rpc RegisterSupervisor(RegisterSupervisorRequest) returns (RegisterSupervisorResponse);
+  rpc DeregisterSupervisor(DeregisterSupervisorRequest) returns (DeregisterSupervisorResponse);
 }

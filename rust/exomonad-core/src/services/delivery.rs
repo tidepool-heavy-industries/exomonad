@@ -1,3 +1,4 @@
+use crate::domain::Address;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::event_queue::EventQueue;
 use crate::services::tmux_events;
@@ -38,6 +39,237 @@ pub fn format_parent_notification(agent_id: &str, status: &str, message: &str) -
                 message
             }
         ),
+    }
+}
+
+/// Delivery method used for message routing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryMethod {
+    TeamsInbox,
+    Acp,
+    Uds,
+    Tmux,
+}
+
+/// Outcome of a routed message delivery.
+#[derive(Debug)]
+pub enum DeliveryOutcome {
+    /// Successfully delivered to the resolved recipient.
+    Delivered {
+        method: DeliveryMethod,
+        recipient: String,
+    },
+    /// Original target could not be resolved; fell back to team lead.
+    FallbackToLead {
+        method: DeliveryMethod,
+        original: String,
+        lead: String,
+    },
+    /// Delivery failed entirely.
+    Failed { original: String, reason: String },
+}
+
+impl DeliveryOutcome {
+    fn from_result(result: DeliveryResult, recipient: &str) -> Self {
+        match result {
+            DeliveryResult::Failed => DeliveryOutcome::Failed {
+                original: recipient.to_string(),
+                reason: "all delivery methods failed".to_string(),
+            },
+            DeliveryResult::Teams => DeliveryOutcome::Delivered {
+                method: DeliveryMethod::TeamsInbox,
+                recipient: recipient.to_string(),
+            },
+            DeliveryResult::Acp => DeliveryOutcome::Delivered {
+                method: DeliveryMethod::Acp,
+                recipient: recipient.to_string(),
+            },
+            DeliveryResult::Uds => DeliveryOutcome::Delivered {
+                method: DeliveryMethod::Uds,
+                recipient: recipient.to_string(),
+            },
+            DeliveryResult::Tmux => DeliveryOutcome::Delivered {
+                method: DeliveryMethod::Tmux,
+                recipient: recipient.to_string(),
+            },
+        }
+    }
+
+    /// Whether delivery succeeded (including fallback).
+    pub fn is_success(&self) -> bool {
+        matches!(
+            self,
+            DeliveryOutcome::Delivered { .. } | DeliveryOutcome::FallbackToLead { .. }
+        )
+    }
+
+    /// The delivery method string for proto response.
+    pub fn method_string(&self) -> &str {
+        match self {
+            DeliveryOutcome::Delivered { method, .. }
+            | DeliveryOutcome::FallbackToLead { method, .. } => match method {
+                DeliveryMethod::TeamsInbox => "teams_inbox",
+                DeliveryMethod::Acp => "acp",
+                DeliveryMethod::Uds => "unix_socket",
+                DeliveryMethod::Tmux => "tmux_stdin",
+            },
+            DeliveryOutcome::Failed { .. } => "failed",
+        }
+    }
+}
+
+/// Route a message to a typed Address.
+///
+/// Resolves the Address to a concrete agent key and tab name, then delegates
+/// to `deliver_to_agent()`. For `Address::Team` with no member, resolves the
+/// team lead from the TeamRegistry.
+#[allow(clippy::too_many_arguments)]
+#[instrument(skip_all, fields(address = %address, from = %from))]
+pub async fn route_message(
+    address: &Address,
+    team_registry: Option<&TeamRegistry>,
+    acp_registry: Option<&AcpRegistry>,
+    project_dir: &std::path::Path,
+    from: &str,
+    content: &str,
+    summary: &str,
+) -> DeliveryOutcome {
+    match address {
+        Address::Agent(name) => {
+            let agent_key = name.as_str();
+            let tab_name = resolve_tab_name_for_agent(agent_key);
+            let result = deliver_to_agent(
+                team_registry,
+                acp_registry,
+                project_dir,
+                agent_key,
+                &tab_name,
+                from,
+                content,
+                summary,
+            )
+            .await;
+            DeliveryOutcome::from_result(result, agent_key)
+        }
+        Address::Team { team, member } => {
+            if let Some(member_name) = member {
+                // Direct team member delivery
+                let agent_key = member_name.as_str();
+                let tab_name = resolve_tab_name_for_agent(agent_key);
+                let result = deliver_to_agent(
+                    team_registry,
+                    acp_registry,
+                    project_dir,
+                    agent_key,
+                    &tab_name,
+                    from,
+                    content,
+                    summary,
+                )
+                .await;
+                DeliveryOutcome::from_result(result, agent_key)
+            } else {
+                // Team lead resolution: find who owns this team
+                resolve_and_deliver_to_lead(
+                    team.as_str(),
+                    team_registry,
+                    acp_registry,
+                    project_dir,
+                    from,
+                    content,
+                    summary,
+                )
+                .await
+            }
+        }
+        Address::Supervisor => {
+            // Supervisor resolves to "root" by default (the root TL)
+            let result = deliver_to_agent(
+                team_registry,
+                acp_registry,
+                project_dir,
+                "root",
+                "TL",
+                from,
+                content,
+                summary,
+            )
+            .await;
+            DeliveryOutcome::from_result(result, "root")
+        }
+    }
+}
+
+/// Resolve team lead and deliver. Uses `config.json`'s `leadAgentId` to find
+/// the lead, falls back to first in-memory entry, then to "root".
+async fn resolve_and_deliver_to_lead(
+    team_name: &str,
+    team_registry: Option<&TeamRegistry>,
+    acp_registry: Option<&AcpRegistry>,
+    project_dir: &std::path::Path,
+    from: &str,
+    content: &str,
+    summary: &str,
+) -> DeliveryOutcome {
+    let original = format!("team:{}:lead", team_name);
+
+    // Resolve lead: config.json leadAgentId → in-memory first entry → "root"
+    let lead_key = if let Some(registry) = team_registry {
+        registry
+            .resolve_lead(team_name)
+            .await
+            .unwrap_or_else(|| "root".to_string())
+    } else {
+        "root".to_string()
+    };
+
+    info!(
+        team = %team_name,
+        lead = %lead_key,
+        "Resolved team lead for delivery"
+    );
+
+    let tab_name = resolve_tab_name_for_agent(&lead_key);
+    let result = deliver_to_agent(
+        team_registry,
+        acp_registry,
+        project_dir,
+        &lead_key,
+        &tab_name,
+        from,
+        content,
+        summary,
+    )
+    .await;
+
+    match result {
+        DeliveryResult::Failed => DeliveryOutcome::Failed {
+            original,
+            reason: format!("delivery to resolved lead '{}' failed", lead_key),
+        },
+        _ => DeliveryOutcome::FallbackToLead {
+            method: delivery_method_from_result(result),
+            original,
+            lead: lead_key,
+        },
+    }
+}
+
+fn delivery_method_from_result(result: DeliveryResult) -> DeliveryMethod {
+    match result {
+        DeliveryResult::Teams => DeliveryMethod::TeamsInbox,
+        DeliveryResult::Acp => DeliveryMethod::Acp,
+        DeliveryResult::Uds => DeliveryMethod::Uds,
+        DeliveryResult::Tmux | DeliveryResult::Failed => DeliveryMethod::Tmux,
+    }
+}
+
+pub fn resolve_tab_name_for_agent(agent_key: &str) -> String {
+    if agent_key == "root" {
+        "TL".to_string()
+    } else {
+        crate::services::agent_control::AgentType::from_dir_name(agent_key)
+            .tab_display_name(agent_key)
     }
 }
 
@@ -211,7 +443,22 @@ pub async fn deliver_to_agent(
     summary: &str,
 ) -> DeliveryResult {
     if let Some(registry) = team_registry {
-        if let Some(team_info) = registry.get(agent_key).await {
+        // Batch lookup: sender's team (for Tier 2 scoping) + recipient in-memory check.
+        // Single lock acquisition instead of two separate get() calls.
+        let (sender_info, recipient_info) = registry.get_pair(from, agent_key).await;
+        let sender_team = sender_info.map(|info| info.team_name);
+        // Track whether this is a Tier 1 (in-memory) resolution — CC-native agents
+        // (Tier 2, config.json) don't have worktrees or routing.json, so the
+        // verifier's tmux fallback should be skipped for them.
+        let is_in_memory = recipient_info.is_some();
+        // Use in-memory result directly, or fall back to Tier 2 (config.json scan)
+        let resolved = recipient_info.or_else(|| {
+            sender_team
+                .as_deref()
+                .and_then(|team| TeamRegistry::resolve_from_config(team, agent_key))
+        });
+        if let Some(team_info) = resolved
+        {
             match teams_mailbox::write_to_inbox(
                 &team_info.team_name,
                 &team_info.inbox_name,
@@ -241,11 +488,14 @@ pub async fn deliver_to_agent(
 
                     // Spawn background task to verify CC's InboxPoller read the message.
                     // If not read within 30s, fall back to tmux STDIN injection.
+                    // For Tier 2 (CC-native) recipients, skip tmux fallback — they don't
+                    // have exomonad worktrees or routing.json. CC's InboxPoller owns delivery.
                     let team_name = team_info.team_name.clone();
                     let inbox_name = team_info.inbox_name.clone();
                     let agent = agent_key.to_string();
                     let target = tmux_target.to_string();
                     let msg = message.to_string();
+                    let has_tmux_fallback = is_in_memory;
                     let worktree = if agent_key.contains('.') {
                         crate::services::resolve_working_dir(agent_key)
                     } else if tmux_target == "TL" {
@@ -271,6 +521,14 @@ pub async fn deliver_to_agent(
                             if is_read {
                                 return;
                             }
+                        }
+                        if !has_tmux_fallback {
+                            warn!(
+                                agent = %agent,
+                                team = %team_name,
+                                "Teams inbox message not read after 30s (Tier 2 recipient, no tmux fallback)"
+                            );
+                            return;
                         }
                         warn!(
                             agent = %agent,

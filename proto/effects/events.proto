@@ -41,13 +41,29 @@ message Timeout {
 }
 
 // ============================================================================
+// Address - Typed address for agent-to-agent messaging
+// ============================================================================
+
+message Address {
+  oneof kind {
+    string agent = 1;        // direct by name
+    TeamAddress team = 2;    // team-scoped (member or lead)
+  }
+}
+
+message TeamAddress {
+  string team = 1;
+  string member = 2;        // specific member; empty = team lead
+}
+
+// ============================================================================
 // SendMessage - Send message to another agent
 // ============================================================================
 
 message SendMessageRequest {
-  string recipient = 1;   // target agent name (e.g., "root", "rust-impl-gemini")
-  string content = 2;     // message body
-  string summary = 3;     // brief summary for inbox preview
+  Address recipient = 1;    // typed address
+  string content = 2;       // message body
+  string summary = 3;       // brief summary for inbox preview
 }
 
 message SendMessageResponse {
@@ -63,6 +79,7 @@ message NotifyParentRequest {
   string status = 1;    // "success" | "failure"
   string message = 2;   // completion message
   string agent_id = 3;  // identity of the notifying agent
+  Address override_recipient = 4;  // optional: bypass default supervisor routing
 }
 
 message NotifyParentResponse {

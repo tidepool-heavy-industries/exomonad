@@ -801,6 +801,7 @@ Run `exomonad recompile` first to build it.",
     let event_queue = Arc::new(exomonad_core::services::event_queue::EventQueue::new());
     let mutex_registry = Arc::new(exomonad_core::services::MutexRegistry::new());
     mutex_registry.spawn_expiry_task();
+    let supervisor_registry = Arc::new(exomonad_core::services::SupervisorRegistry::new());
 
     let claude_session_registry =
         Arc::new(exomonad_core::services::claude_session_registry::ClaudeSessionRegistry::new());
@@ -848,6 +849,7 @@ Run `exomonad recompile` first to build it.",
         acp_registry.clone(),
         mutex_registry,
         event_log.clone(),
+        supervisor_registry,
     );
     builder = builder.with_handlers(orch_handlers);
     let rt = builder.build().await.context("Failed to build runtime")?;

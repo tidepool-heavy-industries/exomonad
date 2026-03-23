@@ -157,7 +157,8 @@ notifyParentCore args = do
               (ProtoEvents.NotifyParentRequest
                 { ProtoEvents.notifyParentRequestAgentId = "",
                   ProtoEvents.notifyParentRequestStatus = TL.fromStrict statusText,
-                  ProtoEvents.notifyParentRequestMessage = TL.fromStrict richMessage
+                  ProtoEvents.notifyParentRequestMessage = TL.fromStrict richMessage,
+                  ProtoEvents.notifyParentRequestOverrideRecipient = Nothing
                 })
   case result of
     Left err -> pure $ Left (T.pack (show err))
@@ -211,9 +212,12 @@ instance MCPTool SendMessage where
         ("summary", "An optional summary of the message")
       ]
   toolHandlerEff args = do
+    let address = ProtoEvents.Address
+          { ProtoEvents.addressKind = Just (ProtoEvents.AddressKindAgent (TL.fromStrict (smRecipient args)))
+          }
     result <- suspendEffect @ProtoEvents.EventsSendMessage
                 (ProtoEvents.SendMessageRequest
-                  { ProtoEvents.sendMessageRequestRecipient = TL.fromStrict (smRecipient args),
+                  { ProtoEvents.sendMessageRequestRecipient = Just address,
                     ProtoEvents.sendMessageRequestContent = TL.fromStrict (smContent args),
                     ProtoEvents.sendMessageRequestSummary = maybe "" TL.fromStrict (smSummary args)
                   })
@@ -258,7 +262,8 @@ shutdownCore args = do
     (ProtoEvents.NotifyParentRequest
       { ProtoEvents.notifyParentRequestAgentId = "",
         ProtoEvents.notifyParentRequestStatus = TL.fromStrict statusText,
-        ProtoEvents.notifyParentRequestMessage = TL.fromStrict msg
+        ProtoEvents.notifyParentRequestMessage = TL.fromStrict msg,
+        ProtoEvents.notifyParentRequestOverrideRecipient = Nothing
       })
   void $ suspendEffect @ProtoAgent.AgentCloseSelf
     (AgentProto.CloseSelfRequest
