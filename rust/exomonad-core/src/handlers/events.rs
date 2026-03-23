@@ -190,10 +190,9 @@ impl EventEffects for EventHandler {
                     (id, tab)
                 }
                 Address::Team { team, member: None } => {
-                    // Resolve team lead
+                    // Resolve team lead via config.json's leadAgentId
                     let lead = if let Some(ref registry) = self.team_registry {
-                        let entries = registry.get_all_for_team(team.as_str()).await;
-                        entries.first().map(|(k, _)| k.clone())
+                        registry.resolve_lead(team.as_str()).await
                     } else {
                         None
                     };

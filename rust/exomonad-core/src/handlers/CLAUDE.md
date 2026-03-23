@@ -158,6 +158,15 @@ Both the `notify_parent` effect handler and the poller's `NotifyParentAction` us
 
 This enables `send_message` and `notify_parent` to reach CC-native teammates (e.g., a "supervisor" spawned via Claude Code's Task tool) without requiring them to register in the in-memory TeamRegistry.
 
+### Team Lead Resolution
+
+When routing to `Address::Team { team, member: None }`, the lead is resolved via `TeamRegistry::resolve_lead()`:
+
+1. **Primary**: Reads `config.json`'s `leadAgentId`, finds the member with that `agent_id`, returns their `name`.
+2. **Name fallback**: If `leadAgentId` doesn't match any member's `agent_id`, checks if it matches a member `name` directly (exomonad sets `leadAgentId` to the member name).
+3. **In-memory fallback**: If `config.json` is unavailable, returns the first in-memory entry (sorted alphabetically).
+4. **Root fallback**: If no entries exist at all, falls back to `"root"`.
+
 The delivery verifier (background task that polls `is_message_read` for 30s) skips tmux fallback for Tier 2 recipients. CC-native agents don't have exomonad worktrees or routing.json — CC's own InboxPoller is responsible for their message delivery.
 
 ### Routing Resolution

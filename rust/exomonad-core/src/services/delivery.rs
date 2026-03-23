@@ -200,8 +200,8 @@ pub async fn route_message(
     }
 }
 
-/// Resolve team lead and deliver. Searches TeamRegistry for entries matching
-/// the team name, picks the first one as the lead.
+/// Resolve team lead and deliver. Uses `config.json`'s `leadAgentId` to find
+/// the lead, falls back to first in-memory entry, then to "root".
 async fn resolve_and_deliver_to_lead(
     team_name: &str,
     team_registry: Option<&TeamRegistry>,
@@ -211,86 +211,56 @@ async fn resolve_and_deliver_to_lead(
     content: &str,
     summary: &str,
 ) -> DeliveryOutcome {
-    if let Some(registry) = team_registry {
-        let entries = registry.get_all_for_team(team_name).await;
-        // Find an entry that looks like the lead (first registered, typically the TL)
-        if let Some((lead_key, _)) = entries.first() {
-            info!(
-                team = %team_name,
-                lead = %lead_key,
-                "Resolved team lead for delivery"
-            );
-            let tab_name = resolve_tab_name_for_agent(lead_key);
-            let result = deliver_to_agent(
-                team_registry,
-                acp_registry,
-                project_dir,
-                lead_key,
-                &tab_name,
-                from,
-                content,
-                summary,
-            )
-            .await;
-            return match result {
-                DeliveryResult::Failed => DeliveryOutcome::Failed {
-                    original: format!("team:{}:lead", team_name),
-                    reason: format!("delivery to resolved lead '{}' failed", lead_key),
-                },
-                DeliveryResult::Teams => DeliveryOutcome::FallbackToLead {
-                    method: DeliveryMethod::TeamsInbox,
-                    original: format!("team:{}:lead", team_name),
-                    lead: lead_key.clone(),
-                },
-                DeliveryResult::Acp => DeliveryOutcome::FallbackToLead {
-                    method: DeliveryMethod::Acp,
-                    original: format!("team:{}:lead", team_name),
-                    lead: lead_key.clone(),
-                },
-                DeliveryResult::Uds => DeliveryOutcome::FallbackToLead {
-                    method: DeliveryMethod::Uds,
-                    original: format!("team:{}:lead", team_name),
-                    lead: lead_key.clone(),
-                },
-                DeliveryResult::Tmux => DeliveryOutcome::FallbackToLead {
-                    method: DeliveryMethod::Tmux,
-                    original: format!("team:{}:lead", team_name),
-                    lead: lead_key.clone(),
-                },
-            };
-        }
-    }
+    let original = format!("team:{}:lead", team_name);
 
-    warn!(
+    // Resolve lead: config.json leadAgentId → in-memory first entry → "root"
+    let lead_key = if let Some(registry) = team_registry {
+        registry
+            .resolve_lead(team_name)
+            .await
+            .unwrap_or_else(|| "root".to_string())
+    } else {
+        "root".to_string()
+    };
+
+    info!(
         team = %team_name,
-        "No team lead found, falling back to root"
+        lead = %lead_key,
+        "Resolved team lead for delivery"
     );
+
+    let tab_name = resolve_tab_name_for_agent(&lead_key);
     let result = deliver_to_agent(
         team_registry,
         acp_registry,
         project_dir,
-        "root",
-        "TL",
+        &lead_key,
+        &tab_name,
         from,
         content,
         summary,
     )
     .await;
+
     match result {
         DeliveryResult::Failed => DeliveryOutcome::Failed {
-            original: format!("team:{}:lead", team_name),
-            reason: "no team lead found, root fallback also failed".to_string(),
+            original,
+            reason: format!("delivery to resolved lead '{}' failed", lead_key),
         },
         _ => DeliveryOutcome::FallbackToLead {
-            method: match result {
-                DeliveryResult::Teams => DeliveryMethod::TeamsInbox,
-                DeliveryResult::Acp => DeliveryMethod::Acp,
-                DeliveryResult::Uds => DeliveryMethod::Uds,
-                _ => DeliveryMethod::Tmux,
-            },
-            original: format!("team:{}:lead", team_name),
-            lead: "root".to_string(),
+            method: delivery_method_from_result(result),
+            original,
+            lead: lead_key,
         },
+    }
+}
+
+fn delivery_method_from_result(result: DeliveryResult) -> DeliveryMethod {
+    match result {
+        DeliveryResult::Teams => DeliveryMethod::TeamsInbox,
+        DeliveryResult::Acp => DeliveryMethod::Acp,
+        DeliveryResult::Uds => DeliveryMethod::Uds,
+        DeliveryResult::Tmux | DeliveryResult::Failed => DeliveryMethod::Tmux,
     }
 }
 
@@ -473,15 +443,21 @@ pub async fn deliver_to_agent(
     summary: &str,
 ) -> DeliveryResult {
     if let Some(registry) = team_registry {
-        // Resolve sender's team to scope Tier 2 config.json lookup
-        let sender_team = registry.get(from).await.map(|info| info.team_name);
-        // Track whether this is a Tier 2 (config.json) resolution — CC-native agents
-        // don't have worktrees or routing.json, so the verifier's tmux fallback
-        // should be skipped for them.
-        let is_in_memory = registry.get(agent_key).await.is_some();
-        if let Some(team_info) = registry
-            .resolve(agent_key, sender_team.as_deref())
-            .await
+        // Batch lookup: sender's team (for Tier 2 scoping) + recipient in-memory check.
+        // Single lock acquisition instead of two separate get() calls.
+        let (sender_info, recipient_info) = registry.get_pair(from, agent_key).await;
+        let sender_team = sender_info.map(|info| info.team_name);
+        // Track whether this is a Tier 1 (in-memory) resolution — CC-native agents
+        // (Tier 2, config.json) don't have worktrees or routing.json, so the
+        // verifier's tmux fallback should be skipped for them.
+        let is_in_memory = recipient_info.is_some();
+        // Use in-memory result directly, or fall back to Tier 2 (config.json scan)
+        let resolved = recipient_info.or_else(|| {
+            sender_team
+                .as_deref()
+                .and_then(|team| TeamRegistry::resolve_from_config(team, agent_key))
+        });
+        if let Some(team_info) = resolved
         {
             match teams_mailbox::write_to_inbox(
                 &team_info.team_name,

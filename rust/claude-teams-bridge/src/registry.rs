@@ -70,6 +70,57 @@ impl TeamRegistry {
         entries
     }
 
+    /// Resolve the team lead's name for a given team.
+    ///
+    /// Reads `config.json` to find `leadAgentId`, then resolves that UUID to
+    /// a member name. Falls back to the first in-memory entry if config.json
+    /// is unavailable or the lead is not a member.
+    pub async fn resolve_lead(&self, team_name: &str) -> Option<String> {
+        // Primary: read config.json's leadAgentId and map to member name
+        if let Ok(config) = crate::config::read_team_config(team_name) {
+            if let Some(member) = config
+                .members
+                .iter()
+                .find(|m| m.agent_id == config.lead_agent_id)
+            {
+                debug!(
+                    team = %team_name,
+                    lead_agent_id = %config.lead_agent_id,
+                    lead_name = %member.name,
+                    "Resolved team lead from config.json"
+                );
+                return Some(member.name.clone());
+            }
+            // leadAgentId didn't match any member — try member name directly
+            // (exomonad sets leadAgentId to the member name, not UUID)
+            if config
+                .members
+                .iter()
+                .any(|m| m.name == config.lead_agent_id)
+            {
+                debug!(
+                    team = %team_name,
+                    lead_name = %config.lead_agent_id,
+                    "Resolved team lead from config.json (name match)"
+                );
+                return Some(config.lead_agent_id);
+            }
+        }
+        // Fallback: first in-memory entry
+        let entries = self.get_all_for_team(team_name).await;
+        entries.first().map(|(k, _)| k.clone())
+    }
+
+    /// Batch lookup: get team info for two keys in a single lock acquisition.
+    pub async fn get_pair(
+        &self,
+        key1: &str,
+        key2: &str,
+    ) -> (Option<TeamInfo>, Option<TeamInfo>) {
+        let map = self.inner.lock().await;
+        (map.get(key1).cloned(), map.get(key2).cloned())
+    }
+
     /// Two-tier lookup: in-memory first, then config.json scan scoped by sender's team.
     ///
     /// Tier 1: Check the in-memory registry (exomonad agents that called `register_team`).
@@ -215,8 +266,7 @@ mod tests {
         let results = reg.get_all_for_team("team-a").await;
         assert_eq!(results.len(), 2);
         let keys: Vec<&str> = results.iter().map(|(k, _)| k.as_str()).collect();
-        assert!(keys.contains(&"agent-1"));
-        assert!(keys.contains(&"agent-2"));
+        assert_eq!(keys, vec!["agent-1", "agent-2"], "entries must be sorted by key");
     }
 
     #[tokio::test]
@@ -253,6 +303,80 @@ mod tests {
         .await;
         assert_eq!(reg.get("root").await.unwrap().team_name, "root-team");
         assert_eq!(reg.get("agent").await.unwrap().team_name, "agent-team");
+    }
+
+    #[tokio::test]
+    async fn test_get_pair_single_lock() {
+        let reg = TeamRegistry::new();
+        reg.register(
+            "agent-a",
+            TeamInfo {
+                team_name: "team".into(),
+                inbox_name: "a".into(),
+            },
+        )
+        .await;
+        let (a, b) = reg.get_pair("agent-a", "missing").await;
+        assert!(a.is_some());
+        assert!(b.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_lead_from_config() {
+        let team_name = "test-resolve-lead";
+        let config = crate::config::TeamConfig {
+            name: team_name.into(),
+            description: "test".into(),
+            created_at: 0,
+            lead_agent_id: "uuid-lead".into(),
+            lead_session_id: "session".into(),
+            members: vec![
+                crate::config::TeamMember {
+                    agent_id: "uuid-lead".into(),
+                    name: "team-lead".into(),
+                    agent_type: "claude".into(),
+                    model: "opus".into(),
+                    joined_at: 0,
+                    cwd: "/tmp".into(),
+                },
+                crate::config::TeamMember {
+                    agent_id: "uuid-worker".into(),
+                    name: "alpha-worker".into(),
+                    agent_type: "claude".into(),
+                    model: "haiku".into(),
+                    joined_at: 0,
+                    cwd: "/tmp".into(),
+                },
+            ],
+        };
+        crate::config::write_team_config(team_name, &config).unwrap();
+
+        let reg = TeamRegistry::new();
+        // Without config.json, alphabetical "alpha-worker" would have been picked.
+        // With resolve_lead, "team-lead" is picked via leadAgentId.
+        let lead = reg.resolve_lead(team_name).await;
+        assert_eq!(lead, Some("team-lead".to_string()));
+
+        // Cleanup
+        if let Some(dir) = crate::paths::teams_base_dir() {
+            let _ = std::fs::remove_dir_all(dir.join(team_name));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_resolve_lead_fallback_to_in_memory() {
+        let reg = TeamRegistry::new();
+        reg.register(
+            "beta",
+            TeamInfo {
+                team_name: "ephemeral-team".into(),
+                inbox_name: "beta".into(),
+            },
+        )
+        .await;
+        // No config.json on disk, falls back to in-memory first entry
+        let lead = reg.resolve_lead("ephemeral-team").await;
+        assert_eq!(lead, Some("beta".to_string()));
     }
 
     #[tokio::test]
