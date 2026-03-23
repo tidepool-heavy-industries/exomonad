@@ -54,7 +54,7 @@ cleanup() {
         echo "  Killed mock GitHub API (PID $MOCK_PID)"
     fi
     # Clean up tmux global env vars
-    for var in GITHUB_API_URL MOCK_LOG GH_MOCK_LOG REMOTE_DIR MOCK_PORT E2E_SCRIPT_DIR; do
+    for var in GITHUB_API_URL MOCK_LOG GH_MOCK_LOG REMOTE_DIR MOCK_PORT E2E_SCRIPT_DIR MOCK_STDOUT; do
         tmux set-environment -gu "$var" 2>/dev/null || true
     done
     tmux kill-session -t e2e-test 2>/dev/null || true
@@ -200,7 +200,9 @@ echo ">>> [Phase 2] Starting mock GitHub API..."
 MOCK_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 export MOCK_LOG="$WORK_DIR/mock_github.log"
 
-REMOTE_DIR="$REMOTE_DIR" MOCK_LOG="$MOCK_LOG" python3 "$SCRIPT_DIR/mock_github.py" --port "$MOCK_PORT" &
+MOCK_STDOUT="$WORK_DIR/mock_github_stdout.log"
+REMOTE_DIR="$REMOTE_DIR" MOCK_LOG="$MOCK_LOG" python3 "$SCRIPT_DIR/mock_github.py" --port "$MOCK_PORT" \
+    > "$MOCK_STDOUT" 2>&1 &
 MOCK_PID=$!
 
 # Poll until responsive
@@ -210,7 +212,8 @@ for i in $(seq 1 20); do
         break
     fi
     if [[ $i -eq 20 ]]; then
-        echo "ERROR: Mock GitHub API failed to start."
+        echo "ERROR: Mock GitHub API failed to start. Output:"
+        cat "$MOCK_STDOUT" 2>/dev/null || true
         exit 1
     fi
     sleep 0.25
@@ -232,6 +235,7 @@ tmux set-environment -g GH_MOCK_LOG "$GH_MOCK_LOG"
 tmux set-environment -g REMOTE_DIR "$REMOTE_DIR"
 tmux set-environment -g MOCK_PORT "$MOCK_PORT"
 tmux set-environment -g E2E_SCRIPT_DIR "$SCRIPT_DIR"
+tmux set-environment -g MOCK_STDOUT "$MOCK_STDOUT"
 
 echo "  PATH prepended with: $SCRIPT_DIR (mock_gh)"
 echo "  GITHUB_TOKEN=test-token-e2e"
@@ -254,7 +258,8 @@ echo "  E2E Environment Ready"
 echo "  Session: e2e-test"
 echo "  Work dir: $WORK_DIR/repo"
 echo "  Mock GitHub: http://127.0.0.1:$MOCK_PORT"
-echo "  Mock log: $MOCK_LOG"
+echo "  Mock request log: $MOCK_LOG"
+echo "  Mock stdout/err: $MOCK_STDOUT"
 echo "  GH mock log: $GH_MOCK_LOG"
 echo "  Remote dir: $REMOTE_DIR"
 echo ""
