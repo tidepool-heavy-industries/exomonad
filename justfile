@@ -79,6 +79,7 @@ wasm role="tl":
 # Build unified WASM plugin (contains all roles)
 wasm-all:
     @just wasm devswarm
+    @just wasm e2e-test
     @echo ">>> Installed to .exo/wasm/:"
     @ls -lh .exo/wasm/wasm-guest-*.wasm
 
@@ -114,6 +115,7 @@ _install profile:
     mkdir -p ~/.exo/wasm
     cp "target/${TARGET_DIR}/exomonad" ~/.cargo/bin/
     cp .exo/wasm/wasm-guest-devswarm.wasm ~/.exo/wasm/
+    [ -f .exo/wasm/wasm-guest-e2e-test.wasm ] && cp .exo/wasm/wasm-guest-e2e-test.wasm ~/.exo/wasm/ || true
 
     # Install role context files for consuming repos
     mkdir -p ~/.exo/roles/devswarm/context
@@ -173,6 +175,10 @@ test-e2e:
 # Run E2E messaging test (Teams inbox delivery, no spawn/merge)
 e2e-messaging:
     ./tests/e2e/messaging/run.sh
+
+# Run E2E hook rewrite test (BeforeModel/AfterModel PII term rewriting)
+e2e-hook-rewrite:
+    ./tests/e2e/hook-rewrite/run.sh
 
 # Validate Gemini settings against schema
 validate-settings:

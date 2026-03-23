@@ -1,0 +1,213 @@
+{-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+-- | WASM entry point for the e2e-test role set.
+-- Identical dispatch logic to devswarm/Main.hs, but imports AllRoles
+-- from this package (root with PII hooks + testrunner only).
+module Main where
+
+import AllRoles (lookupRole, roleDispatch, roleEventHandlers, roleHooks, roleToolsMCP)
+import ExoMonad.Guest.Events (EventInput, dispatchEvent)
+import Data.Aeson (Value, (.:), (.:?))
+import Data.Aeson qualified as Aeson
+import Data.ByteString (ByteString)
+import Data.ByteString.Lazy qualified as BSL
+import Data.Text (Text)
+import Data.Text qualified as T
+import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), WasmResult (..))
+import ExoMonad.Guest.Tool.Runtime (wrapHandler, resumeHandler, handleWorkerExit)
+import ExoMonad.Guest.Tool.Suspend (statusToWasmResult)
+import ExoMonad.Guest.Types (HookInput (..), HookEventType (..))
+import ExoMonad.PDK (input, output)
+import ExoMonad.Guest.Effects.AgentControl (runAgentControlSuspend)
+import ExoMonad.Guest.Effects.FileSystem (runFileSystemSuspend)
+import ExoMonad.Types (HookConfig (..))
+import Foreign.C.Types (CInt (..))
+import Control.Monad.Freer (runM)
+import Control.Monad.Freer.Coroutine (runC)
+
+foreign export ccall handle_mcp_call :: IO CInt
+foreign export ccall handle_list_tools :: IO CInt
+foreign export ccall handle_pre_tool_use :: IO CInt
+foreign export ccall handle_event :: IO CInt
+foreign export ccall resume :: IO CInt
+
+-- | Input for role-aware MCP calls: { "role": "dev", "toolName": "...", "toolArgs": {...} }
+data RoleAwareMCPInput = RoleAwareMCPInput
+  { ramRole :: Text,
+    ramToolName :: Maybe Text,
+    ramToolArgs :: Maybe Value
+  }
+
+instance Aeson.FromJSON RoleAwareMCPInput where
+  parseJSON = Aeson.withObject "RoleAwareMCPInput" $ \v ->
+    RoleAwareMCPInput
+      <$> v .: "role"
+      <*> v .:? "toolName"
+      <*> v .:? "toolArgs"
+
+-- | Input for role-aware list calls: { "role": "dev" }
+newtype RoleAwareListInput = RoleAwareListInput
+  { ralRole :: Text
+  }
+
+instance Aeson.FromJSON RoleAwareListInput where
+  parseJSON = Aeson.withObject "RoleAwareListInput" $ \v ->
+    RoleAwareListInput
+      <$> v .: "role"
+
+-- | Input for role-aware hook calls: { "role": "dev", ...hook fields... }
+data RoleAwareHookInput = RoleAwareHookInput
+  { rahRole :: Text,
+    rahRawValue :: Value
+  }
+
+instance Aeson.FromJSON RoleAwareHookInput where
+  parseJSON val = Aeson.withObject "RoleAwareHookInput" (\v -> do
+    role <- v .: "role"
+    pure $ RoleAwareHookInput role val) val
+
+-- | Input for role-aware event calls: { "role": "dev", "event_type": "pr_review", "payload": {...} }
+data RoleAwareEventInput = RoleAwareEventInput
+  { raeRole :: Text,
+    raeRawValue :: Value
+  }
+
+instance Aeson.FromJSON RoleAwareEventInput where
+  parseJSON val = Aeson.withObject "RoleAwareEventInput" (\v -> do
+    role <- v .: "role"
+    pure $ RoleAwareEventInput role val) val
+
+-- | Dispatch an MCP tool call to the correct role's handler.
+handle_mcp_call :: IO CInt
+handle_mcp_call = wrapHandler $ do
+  inp <- input @ByteString
+  case Aeson.eitherDecodeStrict inp of
+    Left err -> do
+      outputError $ "Parse error: " <> T.pack err
+      pure 0
+    Right rai -> case lookupRole (ramRole rai) of
+      Nothing -> do
+        outputError $ "Unknown role: " <> ramRole rai
+        pure 0
+      Just roleCfg -> do
+        let name = maybe "" id (ramToolName rai)
+            args = maybe Aeson.Null id (ramToolArgs rai)
+        resp <- roleDispatch roleCfg name args
+        output (BSL.toStrict $ Aeson.encode resp)
+        pure 0
+
+-- | Handle an event call (PRReview, CIStatus, Timeout) for a given role.
+handle_event :: IO CInt
+handle_event = wrapHandler $ do
+  inp <- input @ByteString
+  case Aeson.eitherDecodeStrict inp of
+    Left err -> do
+      outputError $ "Event parse error: " <> T.pack err
+      pure 1
+    Right raei -> case lookupRole (raeRole raei) of
+      Nothing -> do
+        outputError $ "Unknown role: " <> raeRole raei
+        pure 1
+      Just roleCfg ->
+        case Aeson.fromJSON (raeRawValue raei) of
+          Aeson.Error err -> do
+            outputError $ "Event input parse error: " <> T.pack err
+            pure 1
+          Aeson.Success eventInput -> do
+            let handlers = roleEventHandlers roleCfg
+            status <- runM $ runC $ runFileSystemSuspend $ runAgentControlSuspend (dispatchEvent handlers eventInput)
+            result <- statusToWasmResult status
+            output (BSL.toStrict $ Aeson.encode result)
+            pure 0
+
+-- | List tools for a given role. Reads role from input JSON.
+handle_list_tools :: IO CInt
+handle_list_tools = wrapHandler $ do
+  inp <- input @ByteString
+  case Aeson.eitherDecodeStrict inp of
+    Left _ -> do
+      output (BSL.toStrict $ Aeson.encode (Done ([] :: [Value])))
+      pure 0
+    Right rai -> case lookupRole (ralRole rai) of
+      Nothing -> do
+        output (BSL.toStrict $ Aeson.encode (Done ([] :: [Value])))
+        pure 0
+      Just roleCfg -> do
+        let toolDefs = roleToolsMCP roleCfg
+        output (BSL.toStrict $ Aeson.encode (Done toolDefs))
+        pure 0
+
+-- | Handle a hook call (PreToolUse, SessionEnd, SubagentStop) for a given role.
+handle_pre_tool_use :: IO CInt
+handle_pre_tool_use = wrapHandler $ do
+  inp <- input @ByteString
+  case Aeson.eitherDecodeStrict inp of
+    Left err -> do
+      outputError $ "Hook parse error: " <> T.pack err
+      pure 1
+    Right rahi -> case lookupRole (rahRole rahi) of
+      Nothing -> do
+        outputError $ "Unknown role: " <> rahRole rahi
+        pure 1
+      Just roleCfg ->
+        case Aeson.fromJSON (rahRawValue rahi) of
+          Aeson.Error err -> do
+            outputError $ "Hook input parse error: " <> T.pack err
+            pure 1
+          Aeson.Success hookInput ->
+            dispatchHook (roleHooks roleCfg) hookInput
+
+-- | Dispatch a pre-parsed HookInput to the correct hook handler.
+dispatchHook :: HookConfig -> HookInput -> IO CInt
+dispatchHook cfg hookInput =
+  case hiHookEventName hookInput of
+    SessionStart -> do
+      status <- runM $ runC $ runFileSystemSuspend $ runAgentControlSuspend (onSessionStart cfg hookInput)
+      result <- statusToWasmResult status
+      output (BSL.toStrict $ Aeson.encode result)
+      pure 0
+    SessionEnd -> runStopHook (onStop cfg)
+    Stop -> runStopHook (onStop cfg)
+    SubagentStop -> runStopHook (onSubagentStop cfg)
+    PreToolUse -> do
+      status <- runM $ runC $ runFileSystemSuspend $ runAgentControlSuspend (preToolUse cfg hookInput)
+      result <- statusToWasmResult status
+      output (BSL.toStrict $ Aeson.encode result)
+      pure 0
+    PostToolUse -> do
+      status <- runM $ runC $ runFileSystemSuspend $ runAgentControlSuspend (postToolUse cfg hookInput)
+      result <- statusToWasmResult status
+      output (BSL.toStrict $ Aeson.encode result)
+      pure 0
+    WorkerExit -> do
+      result <- handleWorkerExit hookInput
+      output (BSL.toStrict $ Aeson.encode result)
+      pure 0
+    BeforeModel -> do
+      status <- runM $ runC $ runFileSystemSuspend $ runAgentControlSuspend (beforeModel cfg hookInput)
+      result <- statusToWasmResult status
+      output (BSL.toStrict $ Aeson.encode result)
+      pure 0
+    AfterModel -> do
+      status <- runM $ runC $ runFileSystemSuspend $ runAgentControlSuspend (afterModel cfg hookInput)
+      result <- statusToWasmResult status
+      output (BSL.toStrict $ Aeson.encode result)
+      pure 0
+  where
+    runStopHook hook = do
+      status <- runM $ runC $ runFileSystemSuspend $ runAgentControlSuspend (hook hookInput)
+      result <- statusToWasmResult status
+      output (BSL.toStrict $ Aeson.encode result)
+      pure 0
+
+-- | Output an error in WasmResult MCPCallOutput format.
+outputError :: Text -> IO ()
+outputError msg = output (BSL.toStrict $ Aeson.encode $ Done $ MCPCallOutput False Nothing (Just msg))
+
+-- | Resume a suspended continuation.
+resume :: IO CInt
+resume = wrapHandler resumeHandler
+
+main :: IO ()
+main = pure ()
