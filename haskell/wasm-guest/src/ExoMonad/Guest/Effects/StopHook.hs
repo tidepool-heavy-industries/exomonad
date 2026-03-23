@@ -53,7 +53,7 @@ checkPRNotFiled branch = do
           repo = Git.getRepoInfoResponseName repoInfo
       -- If we can't derive a meaningful owner/repo (e.g., non-GitHub remote),
       -- treat PR status as unknown and don't nudge.
-      if T.null owner || T.null repo
+      if TL.null owner || TL.null repo
         then pure Nothing
         else do
           prResult <- suspendEffect @GitHubGetPullRequestForBranch
