@@ -627,15 +627,29 @@ impl AgentEffects for AgentHandler {
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<CloseSelfResponse> {
         let agent_key = ctx.agent_name.to_string();
-        let routing_path = std::path::Path::new(".exo/agents")
-            .join(&agent_key)
-            .join("routing.json");
+        let agents_dir = std::path::Path::new(".exo/agents");
 
-        let routing = if let Ok(content) = std::fs::read_to_string(&routing_path) {
-            serde_json::from_str::<serde_json::Value>(&content).ok()
-        } else {
-            None
-        };
+        // FIXME: Routing is written under internal_name (slug-suffix, e.g. "beta-gemini")
+        // but MCP config passes bare slug as --name (e.g. "beta"). This suffix probing
+        // is a band-aid — the real fix is making agent_name consistent between MCP config
+        // and routing.json (either always include the suffix, or never).
+        let candidates = std::iter::once(agent_key.clone()).chain(
+            ["gemini", "claude", "shoal"]
+                .iter()
+                .map(|suffix| format!("{}-{}", agent_key, suffix)),
+        );
+
+        let mut routing = None;
+        for candidate in candidates {
+            let path = agents_dir.join(&candidate).join("routing.json");
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+                    info!(agent = %ctx.agent_name, path = %path.display(), "Found routing.json");
+                    routing = Some(parsed);
+                    break;
+                }
+            }
+        }
 
         let mut closed = false;
 
@@ -671,7 +685,7 @@ impl AgentEffects for AgentHandler {
                 warn!(agent = %ctx.agent_name, "No pane_id or window_id in routing.json");
             }
         } else {
-            warn!(agent = %ctx.agent_name, path = %routing_path.display(), "Could not read routing.json");
+            warn!(agent = %ctx.agent_name, "Could not read routing.json (tried {agent_key} and suffixed variants)");
         }
 
         info!(agent = %ctx.agent_name, closed, "Agent requested self-closure");
