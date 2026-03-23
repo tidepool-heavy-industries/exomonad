@@ -147,7 +147,7 @@ void $ applyEvent @DevPhase @DevEvent DevSpawned (PRCreated prNum url branch)
 | Approved | Clean | Yes |
 | No PR, uncommitted work | ShouldNudge | Yes, with nudge |
 | No PR filed for branch | ShouldNudge | Yes, with nudge to file PR |
-| No PR, clean, no commits | Clean | Yes |
+| No PR, clean, no commits | ShouldNudge | Yes, with nudge to file PR |
 | On main/master | Allow | Yes |
 
 ## Event Handlers

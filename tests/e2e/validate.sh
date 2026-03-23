@@ -26,6 +26,8 @@ echo ""
 
 # Create a feature branch + commit, then file_pr
 echo ">>> Creating test branch + filing PR via tool call..."
+git config user.name "Exomonad E2E" 2>/dev/null || true
+git config user.email "e2e@example.com" 2>/dev/null || true
 git checkout -b main.test-feature 2>/dev/null || git checkout main.test-feature
 git commit --allow-empty -m "test feature commit"
 git push origin main.test-feature 2>/dev/null || true

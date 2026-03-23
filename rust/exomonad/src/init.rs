@@ -410,13 +410,16 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     if !rename_status.success() {
         warn!("tmux rename-window failed with status {}", rename_status);
     }
-    let mut serve_env = format!("EXOMONAD_TMUX_SESSION={}", &session);
+    // Set env vars via tmux set-environment so they're inherited cleanly
+    // (avoids inlining secrets in send-keys command strings / terminal scrollback)
     for var in ["GITHUB_TOKEN", "GITHUB_API_URL"] {
         if let Ok(val) = std::env::var(var) {
-            serve_env.push_str(&format!(" {}={}", var, val));
+            let _ = std::process::Command::new("tmux")
+                .args(["set-environment", "-t", &session, var, &val])
+                .status();
         }
     }
-    let serve_cmd = format!("{} exomonad serve", serve_env);
+    let serve_cmd = format!("EXOMONAD_TMUX_SESSION={} exomonad serve", &session);
     let send_status = std::process::Command::new("tmux")
         .args([
             "send-keys",

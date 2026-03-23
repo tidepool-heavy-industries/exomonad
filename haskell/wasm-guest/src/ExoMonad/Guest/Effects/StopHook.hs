@@ -51,15 +51,26 @@ checkPRNotFiled branch = do
     Right repoInfo -> do
       let owner = Git.getRepoInfoResponseOwner repoInfo
           repo = Git.getRepoInfoResponseName repoInfo
-      prResult <- suspendEffect @GitHubGetPullRequestForBranch
-        (GH.GetPullRequestForBranchRequest
-          { GH.getPullRequestForBranchRequestOwner = owner
-          , GH.getPullRequestForBranchRequestRepo = repo
-          , GH.getPullRequestForBranchRequestBranch = TL.fromStrict branch
-          })
-      case prResult of
-        Right resp | GH.getPullRequestForBranchResponseFound resp -> pure Nothing
-        _ -> pure $ Just $ "No PR filed for branch " <> branch <> ". File a PR with file_pr before stopping."
+      -- If we can't derive a meaningful owner/repo (e.g., non-GitHub remote),
+      -- treat PR status as unknown and don't nudge.
+      if T.null owner || T.null repo
+        then pure Nothing
+        else do
+          prResult <- suspendEffect @GitHubGetPullRequestForBranch
+            (GH.GetPullRequestForBranchRequest
+              { GH.getPullRequestForBranchRequestOwner = owner
+              , GH.getPullRequestForBranchRequestRepo = repo
+              , GH.getPullRequestForBranchRequestBranch = TL.fromStrict branch
+              })
+          case prResult of
+            Right resp
+              | GH.getPullRequestForBranchResponseFound resp ->
+                  pure Nothing
+            Right _ ->
+              pure $ Just $ "No PR filed for branch " <> branch <> ". File a PR with file_pr before stopping."
+            Left _ ->
+              -- On GitHub API errors/offline, don't emit a misleading nudge.
+              pure Nothing
 
 -- ============================================================================
 -- Agent Identity Helpers

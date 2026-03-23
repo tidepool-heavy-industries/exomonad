@@ -209,6 +209,7 @@ shell_command = "nix develop" # environment wrapper for TL tab + server
 wasm_dir = ".exo/wasm"       # project-local (default), override for shared installs
 wasm_name = "devswarm"       # auto-detected from .exo/roles/ if exactly one role exists
 model = "sonnet"             # optional — passed as --model flag to root TL agent
+poll_interval = 60           # optional — GitHub poll cycle in seconds (default: 60)
 
 # Extra MCP servers (HTTP or stdio). Included in .mcp.json for all agents.
 [extra_mcp_servers.metacog]

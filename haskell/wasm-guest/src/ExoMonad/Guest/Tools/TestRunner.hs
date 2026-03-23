@@ -125,7 +125,7 @@ postReviewCore :: PostReviewArgs -> Eff Effects (Either Text Value)
 postReviewCore args = do
   result <- suspendEffect @ProcessRun
               (Proc.RunRequest
-                { Proc.runRequestCommand = "post_review.sh"
+                { Proc.runRequestCommand = "./post_review.sh"
                 , Proc.runRequestArgs = V.fromList
                     [ TL.pack (show (praPrNumber args))
                     , TL.fromStrict (praState args)

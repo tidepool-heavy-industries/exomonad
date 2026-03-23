@@ -501,7 +501,12 @@ impl AgentControlService {
             warn!("Could not determine home directory for Gemini trust");
             return;
         };
-        let trust_file = home.join(".gemini").join("trustedFolders.json");
+        let gemini_home = home.join(".gemini");
+        if let Err(e) = tokio::fs::create_dir_all(&gemini_home).await {
+            warn!(error = %e, dir = %gemini_home.display(), "Failed to create Gemini config directory");
+            return;
+        }
+        let trust_file = gemini_home.join("trustedFolders.json");
         let abs_path = match path.canonicalize() {
             Ok(p) => p.to_string_lossy().to_string(),
             Err(_) => path.to_string_lossy().to_string(),
@@ -523,8 +528,13 @@ impl AgentControlService {
         trust_map.insert(abs_path.clone(), serde_json::Value::String("TRUST_FOLDER".to_string()));
 
         if let Ok(content) = serde_json::to_string_pretty(&trust_map) {
-            if let Err(e) = tokio::fs::write(&trust_file, content).await {
-                warn!(path = %abs_path, error = %e, "Failed to write Gemini trustedFolders.json");
+            // Atomic write: temp file + rename to avoid partial writes from concurrent spawns
+            let tmp_file = trust_file.with_extension("tmp");
+            if let Err(e) = tokio::fs::write(&tmp_file, &content).await {
+                warn!(path = %abs_path, error = %e, "Failed to write Gemini trustedFolders.json tmp");
+            } else if let Err(e) = tokio::fs::rename(&tmp_file, &trust_file).await {
+                warn!(path = %abs_path, error = %e, "Failed to rename Gemini trustedFolders.json");
+                let _ = tokio::fs::remove_file(&tmp_file).await;
             } else {
                 info!(path = %abs_path, "Pre-trusted folder for Gemini CLI");
             }

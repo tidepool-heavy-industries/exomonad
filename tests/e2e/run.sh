@@ -76,12 +76,19 @@ cd "$REPO_DIR"
 git init -q -b main
 git remote add origin "$REMOTE_DIR"
 
+# Configure local Git identity for reproducible commits in fresh environments
+git config user.name "Exomonad E2E"
+git config user.email "e2e@example.com"
+
 # Initial commit + push
 git commit --allow-empty -m "initial commit" -q
 git push -u origin main -q
 
 # Bootstrap via exomonad new — generates .exo/config.toml, .gitignore, copies WASM + rules
-"$EXOMONAD_BIN" new 2>&1 | sed 's/^/  /' || true
+if ! "$EXOMONAD_BIN" new 2>&1 | sed 's/^/  /'; then
+    echo "ERROR: 'exomonad new' failed during E2E setup. See output above."
+    exit 1
+fi
 
 # Symlink WASM from project (overwrite whatever new copied — symlinks save disk)
 mkdir -p .exo/wasm
