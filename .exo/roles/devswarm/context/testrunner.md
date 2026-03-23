@@ -36,11 +36,11 @@ A minimal but complete test exercising all 3 spawn types + the review cycle with
 Root TL (you instruct this)
 ├── [Wave 0] spawn_worker × 1 → scaffold files (ephemeral)
 ├── [Wave 1] fork_wave → 1 Claude sub-TL + spawn_gemini → 1 Gemini leaf (parallel)
-│   ├── Sub-TL "impl" (worktree 1) → spawn_worker × 1 (inline)
-│   │   └── worker: implement functions in src/math_ops.py
+│   ├── Sub-TL "alpha" (worktree 1) → spawn_worker × 1 (inline)
+│   │   └── worker: write content to src/alpha.py
 │   │   └── sub-TL commits, pushes, files PR to root
-│   └── Gemini leaf "tests" (worktree 2) → files PR to root
-│       └── implement tests/test_math_ops.py
+│   └── Gemini leaf "beta" (worktree 2) → files PR to root
+│       └── write content to src/beta.py
 └── Root merges both PRs
 ```
 
@@ -61,9 +61,8 @@ PHASE 0 — SCAFFOLD: Use `spawn_worker` to create ONE ephemeral Gemini worker t
 Worker name: 'scaffold'
 Task: Create these files:
 - src/__init__.py (empty)
-- src/math_ops.py (empty, placeholder)
-- tests/__init__.py (empty)
-- tests/test_math_ops.py (empty, placeholder)
+- src/alpha.py (empty, placeholder)
+- src/beta.py (empty, placeholder)
 
 After the worker completes, commit the scaffold with message 'scaffold: project structure', push to origin main, then STOP and wait for my next instruction."
 
@@ -86,62 +85,61 @@ Use `instruct` to send:
 "Good, scaffold is pushed. Now PHASE 1 — spawn TWO children in parallel:
 
 1. Use `fork_wave` with ONE child:
-   slug: 'impl'
-   task: 'You are sub-TL for math_ops implementation. Use spawn_worker to create ONE ephemeral Gemini worker:
-     Worker name: "write-fns"
-     Task: "Edit src/math_ops.py to contain three functions: add(a, b) returns a + b, subtract(a, b) returns a - b, multiply(a, b) returns a * b"
-   After the worker completes, commit with message "feat: math operations", push, and file a PR with file_pr. Then IDLE.'
+   slug: 'alpha'
+   task: 'You are sub-TL for alpha module. Use spawn_worker to create ONE ephemeral Gemini worker:
+     Worker name: "write-alpha"
+     Task: "Edit src/alpha.py to contain two functions: greet(name) that returns the string Hello followed by name, and farewell(name) that returns Goodbye followed by name"
+   After the worker completes, commit with message "feat: alpha module", push, and file a PR with file_pr. Then IDLE.'
 
 2. Use `spawn_gemini` with:
-   name: 'tests'
-   task: 'Create tests/test_math_ops.py that imports add, subtract, multiply from src.math_ops and asserts: add(2,3)==5, subtract(5,3)==2, multiply(3,4)==12. Use plain assert statements in functions named test_add, test_subtract, test_multiply. Commit, push, file PR.'
-   verify: ['python3 -c "import sys; sys.path.insert(0,\".\"); from tests.test_math_ops import test_add, test_subtract, test_multiply; test_add(); test_subtract(); test_multiply(); print(\"3 tests passed\")"']
+   name: 'beta'
+   task: 'Edit src/beta.py to contain two functions: double(n) that returns n times 2, and triple(n) that returns n times 3. Commit with message "feat: beta module", push, file PR.'
 
 After spawning BOTH, IDLE and wait for notifications. When you receive [FIXES PUSHED] or [REVIEW TIMEOUT], merge with merge_pr."
 
 #### Step 1.2: Observe execution
 
 Poll every 15 seconds, max 3 minutes. Check:
-- `tmux list-windows -t $EXOMONAD_TMUX_SESSION` — new windows for impl, tests
+- `tmux list-windows -t $EXOMONAD_TMUX_SESSION` — new windows for alpha, beta
 - `ls .exo/worktrees/` — worktree directories created
-- `git -C $REMOTE_DIR branch` — branches main.impl, main.tests
+- `git -C $REMOTE_DIR branch` — branches main.alpha, main.beta
 
 ---
 
 ### Phase 2: Observe activity + review cycle
 
-#### Step 2.1: Watch for worker pane (impl sub-TL)
+#### Step 2.1: Watch for worker pane (alpha sub-TL)
 
 Poll every 15 seconds, max 3 minutes. Check:
-- `tmux list-panes -t $EXOMONAD_TMUX_SESSION -a` — worker pane for "write-fns"
+- `tmux list-panes -t $EXOMONAD_TMUX_SESSION -a` — worker pane for "write-alpha"
 
 #### Step 2.2: Wait for PRs
 
 Poll `$MOCK_LOG` every 15 seconds for `POST .*/pulls` entries. Max wait: 5 minutes.
 
 Expected PRs (not necessarily in order):
-- main.impl (from impl sub-TL, targeting main)
-- main.tests (from Gemini leaf, targeting main)
+- main.alpha (from alpha sub-TL, targeting main)
+- main.beta (from Gemini leaf, targeting main)
 
 #### Step 2.3: Post CHANGES_REQUESTED on the leaf PR
 
-Once the tests PR appears, use `post_review`:
+Once the beta PR appears, use `post_review`:
 
 ```
-post_review(pr_number=<tests_pr>, state="CHANGES_REQUESTED", body="Add a docstring to each test function describing what it verifies.")
+post_review(pr_number=<beta_pr>, state="CHANGES_REQUESTED", body="Add a docstring to each function describing what it does.")
 ```
 
 This tests the review cycle: poller detects review → injects into Gemini pane → Gemini fixes → pushes → poller fires fixes_pushed → root notified.
 
-Let the impl PR go through the timeout path.
+Let the alpha PR go through the timeout path.
 
 #### Step 2.4: Wait for merges
 
 Poll `$MOCK_LOG` every 15 seconds for `PUT .*/merge` entries. Max wait: 5 minutes.
 
 Expected merges:
-1. Root merges impl PR (via [REVIEW TIMEOUT])
-2. Root merges tests PR (via [FIXES PUSHED] after addressing review)
+1. Root merges alpha PR (via [REVIEW TIMEOUT])
+2. Root merges beta PR (via [FIXES PUSHED] after addressing review)
 
 ---
 
@@ -160,8 +158,8 @@ Call `notify_parent` with:
   - Branches pushed to remote?
 
   **Phase 2 (activity + review cycle):**
-  - impl: Worker pane observed (write-fns)?
-  - tests: Gemini leaf activity?
+  - alpha: Worker pane observed (write-alpha)?
+  - beta: Gemini leaf activity?
   - Total PRs created (expected: 2)
   - Review cycle: CHANGES_REQUESTED posted? Agent pushed fixes? [FIXES PUSHED] delivered?
   - Merges: which PRs merged via which path (fixes_pushed / review_timeout)?
