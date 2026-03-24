@@ -1,3 +1,4 @@
+use crate::domain::{NotifyStatus, RoutingInfo};
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::event_queue::EventQueue;
 use crate::services::tmux_events;
@@ -18,9 +19,9 @@ pub enum DeliveryResult {
 
 /// Format a parent-facing notification message.
 /// "failure" → `[FAILED: {id}] {msg}`, otherwise → `[from: {id}] {msg}`.
-pub fn format_parent_notification(agent_id: &str, status: &str, message: &str) -> String {
-    match status {
-        "failure" => format!(
+pub fn format_parent_notification(agent_id: &str, status: NotifyStatus, message: &str) -> String {
+    if status.is_failure() {
+        format!(
             "[FAILED: {}] {}",
             agent_id,
             if message.is_empty() {
@@ -28,8 +29,9 @@ pub fn format_parent_notification(agent_id: &str, status: &str, message: &str) -
             } else {
                 message
             }
-        ),
-        _ => format!(
+        )
+    } else {
+        format!(
             "[from: {}] {}",
             agent_id,
             if message.is_empty() {
@@ -37,7 +39,7 @@ pub fn format_parent_notification(agent_id: &str, status: &str, message: &str) -
             } else {
                 message
             }
-        ),
+        )
     }
 }
 
@@ -53,7 +55,7 @@ pub fn format_parent_notification(agent_id: &str, status: &str, message: &str) -
 ///
 /// For peer-to-peer messaging, use `deliver_to_agent()` directly instead.
 #[allow(clippy::too_many_arguments)]
-#[instrument(skip_all, fields(agent_id = %agent_id, parent_session_id = %parent_session_id, status = %status))]
+#[instrument(skip_all, fields(agent_id = %agent_id, parent_session_id = %parent_session_id, status = %status.as_str()))]
 pub async fn notify_parent_delivery(
     team_registry: Option<&TeamRegistry>,
     acp_registry: Option<&AcpRegistry>,
@@ -63,7 +65,7 @@ pub async fn notify_parent_delivery(
     agent_id: &str,
     parent_session_id: &str,
     parent_tab_name: &str,
-    status: &str,
+    status: NotifyStatus,
     message: &str,
     summary: Option<&str>,
     source: &str,
@@ -72,7 +74,7 @@ pub async fn notify_parent_delivery(
     tracing::info!(
         otel.name = "agent.notify_parent",
         parent = %parent_session_id,
-        status = %status,
+        status = %status.as_str(),
         source = %source,
         "[event] agent.notify_parent"
     );
@@ -82,7 +84,7 @@ pub async fn notify_parent_delivery(
             agent_id,
             &serde_json::json!({
                 "parent": parent_session_id,
-                "status": status,
+                "status": status.as_str(),
                 "message": message,
                 "source": source,
             }),
@@ -94,7 +96,7 @@ pub async fn notify_parent_delivery(
         event_id: 0,
         event_type: Some(event::EventType::AgentMessage(AgentMessage {
             agent_id: agent_id.to_string(),
-            status: status.to_string(),
+            status: status.as_str().to_string(),
             message: message.to_string(),
             changes: Vec::new(),
         })),
@@ -405,22 +407,21 @@ pub async fn deliver_to_agent(
     let mut routing_parent_tab = None;
     let mut matched_dir_name = None;
     for dir_name in routing_candidates {
-        let path = agents_dir.join(&dir_name).join("routing.json");
-        if let Ok(content) = tokio::fs::read_to_string(&path).await {
-            if let Ok(routing) = serde_json::from_str::<serde_json::Value>(&content) {
-                // Prefer pane_id (workers), then window_id (subtrees/leaves), then parent_tab
-                let target = routing["pane_id"]
-                    .as_str()
-                    .or_else(|| routing["window_id"].as_str())
-                    .or_else(|| routing["parent_tab"].as_str())
-                    .map(|s| s.to_string());
+        let dir_path = agents_dir.join(&dir_name);
+        if let Ok(routing) = RoutingInfo::read_from_dir(&dir_path).await {
+            // Prefer pane_id (workers), then window_id (subtrees/leaves), then parent_tab
+            let target = routing
+                .pane_id
+                .as_deref()
+                .or(routing.window_id.as_deref())
+                .or(routing.parent_tab.as_deref())
+                .map(|s| s.to_string());
 
-                if let Some(t) = target {
-                    routing_target = Some(t);
-                    routing_parent_tab = routing["parent_tab"].as_str().map(|s| s.to_string());
-                    matched_dir_name = Some(dir_name.clone());
-                    break;
-                }
+            if let Some(t) = target {
+                routing_target = Some(t);
+                routing_parent_tab = routing.parent_tab;
+                matched_dir_name = Some(dir_name.clone());
+                break;
             }
         }
     }
@@ -504,32 +505,26 @@ mod tests {
 
     #[test]
     fn test_format_parent_notification_success() {
-        let msg = format_parent_notification("agent-1", "success", "All done");
+        let msg = format_parent_notification("agent-1", NotifyStatus::Success, "All done");
         assert_eq!(msg, "[from: agent-1] All done");
     }
 
     #[test]
     fn test_format_parent_notification_success_empty() {
-        let msg = format_parent_notification("agent-1", "success", "");
+        let msg = format_parent_notification("agent-1", NotifyStatus::Success, "");
         assert_eq!(msg, "[from: agent-1] Status update.");
     }
 
     #[test]
     fn test_format_parent_notification_failure() {
-        let msg = format_parent_notification("agent-2", "failure", "Something went wrong");
+        let msg = format_parent_notification("agent-2", NotifyStatus::Failure, "Something went wrong");
         assert_eq!(msg, "[FAILED: agent-2] Something went wrong");
     }
 
     #[test]
     fn test_format_parent_notification_failure_empty() {
-        let msg = format_parent_notification("agent-2", "failure", "");
+        let msg = format_parent_notification("agent-2", NotifyStatus::Failure, "");
         assert_eq!(msg, "[FAILED: agent-2] Task failed.");
-    }
-
-    #[test]
-    fn test_format_parent_notification_other_status() {
-        let msg = format_parent_notification("agent-3", "running", "Working...");
-        assert_eq!(msg, "[from: agent-3] Working...");
     }
 
     #[test]
