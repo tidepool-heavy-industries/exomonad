@@ -48,7 +48,7 @@ impl AgentControlService {
         let birth_branch = self
             .birth_branch
             .as_ref()
-            .expect("birth_branch was never initialized via with_birth_branch()");
+            .ok_or_else(|| anyhow::anyhow!("birth_branch was never initialized via with_birth_branch()"))?;
         let team_name = TeamName::from(format!("exo-{}", birth_branch).as_str());
         if let Err(e) =
             crate::services::synthetic_members::remove_synthetic_member(&team_name, &slug)

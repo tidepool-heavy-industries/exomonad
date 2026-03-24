@@ -565,11 +565,11 @@ impl AgentControlService {
     ///
     /// Callers pass the birth branch from EffectContext. Falls back to `self.birth_branch`
     /// if no override is provided.
-    pub(crate) fn effective_birth_branch(&self, override_bb: Option<&BirthBranch>) -> BirthBranch {
+    pub(crate) fn effective_birth_branch(&self, override_bb: Option<&BirthBranch>) -> Result<BirthBranch> {
         override_bb
             .cloned()
             .or_else(|| self.birth_branch.clone())
-            .expect("birth_branch was never initialized via with_birth_branch()")
+            .ok_or_else(|| anyhow::anyhow!("birth_branch was never initialized via with_birth_branch()"))
     }
 
     /// Common post-spawn bookkeeping.

@@ -174,8 +174,15 @@ impl EventEffects for EventHandler {
 
         // Convert proto enum to NotifyStatus for the delivery pipeline
         let status = match exomonad_proto::effects::events::NotifyStatus::try_from(req.status) {
+            Ok(exomonad_proto::effects::events::NotifyStatus::Success) => NotifyStatus::Success,
             Ok(exomonad_proto::effects::events::NotifyStatus::Failure) => NotifyStatus::Failure,
-            _ => NotifyStatus::Success,
+            Ok(exomonad_proto::effects::events::NotifyStatus::Unspecified) | Err(_) => {
+                tracing::warn!(
+                    raw_status = req.status,
+                    "notify_parent: received UNSPECIFIED or invalid status, defaulting to Success"
+                );
+                NotifyStatus::Success
+            }
         };
 
         tracing::info!(
