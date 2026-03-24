@@ -70,7 +70,7 @@ fn register_synthetic_member_at_path(
     let content = serde_json::to_string_pretty(&config)?;
     let tmp_dir = config_path
         .parent()
-        .ok_or_else(|| anyhow::anyhow!("No parent dir"))?;
+        .ok_or_else(|| anyhow::anyhow!("No parent dir for config path: {}", config_path.display()))?;
     let tmp = tempfile::NamedTempFile::new_in(tmp_dir)?;
     {
         let mut writer = std::io::BufWriter::new(tmp.as_file());
@@ -116,7 +116,7 @@ fn remove_synthetic_member_at_path(
     let content = serde_json::to_string_pretty(&config)?;
     let tmp_dir = config_path
         .parent()
-        .ok_or_else(|| anyhow::anyhow!("No parent dir"))?;
+        .ok_or_else(|| anyhow::anyhow!("No parent dir for config path: {}", config_path.display()))?;
     let tmp = tempfile::NamedTempFile::new_in(tmp_dir)?;
     {
         let mut writer = std::io::BufWriter::new(tmp.as_file());
