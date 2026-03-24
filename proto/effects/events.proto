@@ -56,13 +56,23 @@ message SendMessageResponse {
 }
 
 // ============================================================================
+// Notify status for parent notifications
+// ============================================================================
+
+enum NotifyStatus {
+  NOTIFY_STATUS_UNSPECIFIED = 0;
+  NOTIFY_STATUS_SUCCESS = 1;
+  NOTIFY_STATUS_FAILURE = 2;
+}
+
+// ============================================================================
 // NotifyParent - Notify parent session of worker completion
 // ============================================================================
 
 message NotifyParentRequest {
-  string status = 1;    // "success" | "failure"
-  string message = 2;   // completion message
-  string agent_id = 3;  // identity of the notifying agent
+  NotifyStatus status = 1;  // typed status
+  string message = 2;       // completion message
+  string agent_id = 3;      // identity of the notifying agent
 }
 
 message NotifyParentResponse {

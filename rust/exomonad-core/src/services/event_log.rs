@@ -3,6 +3,7 @@
 //! Writes one JSON line per event to `.exo/events.jsonl` for post-hoc
 //! reconstruction of agent runs. Query with DuckDB or jq.
 
+use crate::domain::AgentName;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -30,7 +31,7 @@ impl EventLog {
     pub fn append(
         &self,
         event_type: &str,
-        agent_id: &str,
+        agent_id: &AgentName,
         data: &serde_json::Value,
     ) -> std::io::Result<String> {
         let event_id = uuid::Uuid::new_v4().to_string();
@@ -40,11 +41,11 @@ impl EventLog {
             "ts": ts,
             "id": event_id,
             "type": event_type,
-            "agent_id": agent_id,
+            "agent_id": agent_id.as_ref(),
             "data": data,
         });
 
-        let sanitized_id = agent_id.replace(['/', '\\', '\0'], "_");
+        let sanitized_id = agent_id.as_ref().replace(['/', '\\', '\0'], "_");
         let path = self.dir.join(format!("{}.jsonl", sanitized_id));
 
         let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -75,7 +76,9 @@ mod tests {
         let log = EventLog::open(dir.path().to_path_buf()).unwrap();
 
         let data = serde_json::json!({"slug": "feature-a", "agent_type": "claude"});
-        let id = log.append("agent.spawned", "root", &data).unwrap();
+        let id = log
+            .append("agent.spawned", &AgentName::from("root"), &data)
+            .unwrap();
         assert!(!id.is_empty());
 
         let path = dir.path().join("root.jsonl");
@@ -93,8 +96,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let log = EventLog::open(dir.path().to_path_buf()).unwrap();
 
-        log.append("a", "agent-x", &serde_json::json!({})).unwrap();
-        log.append("b", "agent-y", &serde_json::json!({})).unwrap();
+        log.append(
+            "a",
+            &AgentName::from("agent-x"),
+            &serde_json::json!({}),
+        )
+        .unwrap();
+        log.append(
+            "b",
+            &AgentName::from("agent-y"),
+            &serde_json::json!({}),
+        )
+        .unwrap();
 
         let path_x = dir.path().join("agent-x.jsonl");
         let path_y = dir.path().join("agent-y.jsonl");
@@ -114,7 +127,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let log = EventLog::open(dir.path().to_path_buf()).unwrap();
 
-        log.append("a", "feature/bug", &serde_json::json!({}))
+        log.append("a", &AgentName::from("feature/bug"), &serde_json::json!({}))
             .unwrap();
         let path = dir.path().join("feature_bug.jsonl");
         assert!(path.exists());

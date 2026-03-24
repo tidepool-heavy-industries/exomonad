@@ -753,8 +753,48 @@ instance (HsJSONPB.ToJSON SendMessageResponse) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON SendMessageResponse) where
   parseJSON = HsJSONPB.parseJSONPB
+data NotifyStatus
+  = NotifyStatusNOTIFY_STATUS_UNSPECIFIED |
+    NotifyStatusNOTIFY_STATUS_SUCCESS |
+    NotifyStatusNOTIFY_STATUS_FAILURE
+  deriving (Hs.Show, Hs.Eq, Hs.Generic, Hs.NFData)
+instance (HsProtobuf.Named NotifyStatus) where
+  nameOf _ = Hs.fromString "NotifyStatus"
+instance (HsProtobuf.HasDefault NotifyStatus)
+instance (Hs.Bounded NotifyStatus) where
+  minBound = NotifyStatusNOTIFY_STATUS_UNSPECIFIED
+  maxBound = NotifyStatusNOTIFY_STATUS_FAILURE
+instance (Hs.Ord NotifyStatus) where
+  compare x y
+    = Hs.compare
+        (HsProtobuf.fromProtoEnum x) (HsProtobuf.fromProtoEnum y)
+instance (HsProtobuf.ProtoEnum NotifyStatus) where
+  toProtoEnumMay 0 = Hs.Just NotifyStatusNOTIFY_STATUS_UNSPECIFIED
+  toProtoEnumMay 1 = Hs.Just NotifyStatusNOTIFY_STATUS_SUCCESS
+  toProtoEnumMay 2 = Hs.Just NotifyStatusNOTIFY_STATUS_FAILURE
+  toProtoEnumMay _ = Hs.Nothing
+  fromProtoEnum NotifyStatusNOTIFY_STATUS_UNSPECIFIED = 0
+  fromProtoEnum NotifyStatusNOTIFY_STATUS_SUCCESS = 1
+  fromProtoEnum NotifyStatusNOTIFY_STATUS_FAILURE = 2
+instance (HsJSONPB.ToJSONPB NotifyStatus) where
+  toJSONPB x _ = HsJSONPB.enumFieldString x
+  toEncodingPB x _ = HsJSONPB.enumFieldEncoding x
+instance (HsJSONPB.FromJSONPB NotifyStatus) where
+  parseJSONPB (HsJSONPB.String "NOTIFY_STATUS_UNSPECIFIED")
+    = Hs.pure NotifyStatusNOTIFY_STATUS_UNSPECIFIED
+  parseJSONPB (HsJSONPB.String "NOTIFY_STATUS_SUCCESS")
+    = Hs.pure NotifyStatusNOTIFY_STATUS_SUCCESS
+  parseJSONPB (HsJSONPB.String "NOTIFY_STATUS_FAILURE")
+    = Hs.pure NotifyStatusNOTIFY_STATUS_FAILURE
+  parseJSONPB v = HsJSONPB.typeMismatch "NotifyStatus" v
+instance (HsJSONPB.ToJSON NotifyStatus) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON NotifyStatus) where
+  parseJSON = HsJSONPB.parseJSONPB
+instance (HsProtobuf.Finite NotifyStatus)
 data NotifyParentRequest
-  = NotifyParentRequest {notifyParentRequestStatus :: Hs.Text,
+  = NotifyParentRequest {notifyParentRequestStatus :: (HsProtobuf.Enumerated Effects.Events.NotifyStatus),
                          notifyParentRequestMessage :: Hs.Text,
                          notifyParentRequestAgentId :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
@@ -770,9 +810,7 @@ instance (HsProtobuf.Message NotifyParentRequest) where
     = Hs.mappend
         (Hs.mappend
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 1)
-              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                 notifyParentRequestStatus))
+              (HsProtobuf.FieldNumber 1) notifyParentRequestStatus)
            (HsProtobuf.encodeMessageField
               (HsProtobuf.FieldNumber 2)
               ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
@@ -784,9 +822,8 @@ instance (HsProtobuf.Message NotifyParentRequest) where
   decodeMessage _
     = Hs.pure NotifyParentRequest
         <*>
-          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-             (HsProtobuf.at
-                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)
         <*>
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
@@ -798,7 +835,8 @@ instance (HsProtobuf.Message NotifyParentRequest) where
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
-         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "NotifyStatus")))
          (HsProtobufAST.Single "status") [] "",
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 2)
@@ -811,16 +849,14 @@ instance (HsProtobuf.Message NotifyParentRequest) where
 instance (HsJSONPB.ToJSONPB NotifyParentRequest) where
   toJSONPB (NotifyParentRequest f1 f2 f3)
     = HsJSONPB.object
-        ["status"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+        ["status" .= f1,
          "message"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "agent_id"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
   toEncodingPB (NotifyParentRequest f1 f2 f3)
     = HsJSONPB.pairs
-        ["status"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+        ["status" .= f1,
          "message"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "agent_id"
@@ -830,10 +866,7 @@ instance (HsJSONPB.FromJSONPB NotifyParentRequest) where
     = HsJSONPB.withObject
         "NotifyParentRequest"
         (\ obj
-           -> Hs.pure NotifyParentRequest
-                <*>
-                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "status"))
+           -> Hs.pure NotifyParentRequest <*> obj .: "status"
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
                      (obj .: "message"))

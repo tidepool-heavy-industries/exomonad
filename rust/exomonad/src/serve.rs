@@ -438,7 +438,7 @@ pub async fn handle_hook_inner(
             if let Some(ref log) = state.event_log {
                 let _ = log.append(
                     "hook.stop",
-                    agent_name_for_hook.as_str(),
+                    &agent_name_for_hook,
                     &serde_json::json!({
                         "event_type": format!("{:?}", event_type),
                         "decision": decision_str,
@@ -604,7 +604,7 @@ pub async fn call_tool(
             if let Some(ref log) = state.event_log {
                 let _ = log.append(
                     "tool.called",
-                    &name,
+                    &AgentName::from(name.as_str()),
                     &serde_json::json!({
                         "tool_name": body.name,
                         "role": role,
@@ -634,7 +634,7 @@ pub async fn call_tool(
     if let Some(ref log) = state.event_log {
         let _ = log.append(
             "tool.called",
-            &name,
+            &AgentName::from(name.as_str()),
             &serde_json::json!({
                 "tool_name": body.name,
                 "role": role,

@@ -15,6 +15,7 @@ enum AgentType {
   AGENT_TYPE_CLAUDE = 1;
   AGENT_TYPE_GEMINI = 2;
   AGENT_TYPE_SHOAL = 3;
+  AGENT_TYPE_PROCESS = 4;
 }
 
 // Topology of the workspace.

@@ -85,7 +85,7 @@ impl AgentControlService {
         internal_name: &str,
         session_id: &str,
         role: &str,
-    ) -> HashMap<String, String> {
+    ) -> Result<HashMap<String, String>> {
         let mut env_vars = HashMap::new();
         env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.to_string());
         env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session_id.to_string());
@@ -100,7 +100,7 @@ impl AgentControlService {
         }
         env_vars.insert(
             "EXOMONAD_PARENT_AGENT".to_string(),
-            self.effective_birth_branch(None).to_string(),
+            self.effective_birth_branch(None)?.to_string(),
         );
 
         // Propagate W3C traceparent for cross-agent trace correlation
@@ -116,7 +116,7 @@ impl AgentControlService {
             }
         }
 
-        env_vars
+        Ok(env_vars)
     }
 
     /// Emit an agent:started event if tmux_session is configured.

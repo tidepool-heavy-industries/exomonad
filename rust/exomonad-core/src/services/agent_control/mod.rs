@@ -166,15 +166,17 @@ impl AgentType {
     }
 
     /// Infer agent type from a worktree directory name (e.g., "feature-a-claude" → Claude).
-    pub fn from_dir_name(dir_name: &str) -> Self {
+    pub fn from_dir_name(dir_name: &str) -> Option<Self> {
         if dir_name.ends_with("-claude") {
-            AgentType::Claude
+            Some(AgentType::Claude)
         } else if dir_name.ends_with("-shoal") {
-            AgentType::Shoal
+            Some(AgentType::Shoal)
         } else if dir_name.ends_with("-process") {
-            AgentType::Process
+            Some(AgentType::Process)
+        } else if dir_name.ends_with("-gemini") {
+            Some(AgentType::Gemini)
         } else {
-            AgentType::Gemini
+            None
         }
     }
 }
@@ -489,7 +491,7 @@ pub struct AgentControlService {
     /// Direct tmux IPC client.
     pub(crate) tmux_ipc: Option<super::tmux_ipc::TmuxIpc>,
     /// This agent's birth-branch (git identity). Root TL = "main".
-    pub(crate) birth_branch: BirthBranch,
+    pub(crate) birth_branch: Option<BirthBranch>,
     /// Git worktree service
     pub(crate) git_wt: Arc<GitWorktreeService>,
     /// ACP connection registry for Gemini agents.
@@ -514,7 +516,7 @@ impl AgentControlService {
             github,
             tmux_session: None,
             tmux_ipc: None,
-            birth_branch: BirthBranch::from("unset"),
+            birth_branch: None,
             git_wt,
             acp_registry: None,
             yolo: false,
@@ -549,7 +551,7 @@ impl AgentControlService {
 
     /// Set the birth-branch (git identity) for this agent.
     pub fn with_birth_branch(mut self, branch: BirthBranch) -> Self {
-        self.birth_branch = branch;
+        self.birth_branch = Some(branch);
         self
     }
 
@@ -563,14 +565,11 @@ impl AgentControlService {
     ///
     /// Callers pass the birth branch from EffectContext. Falls back to `self.birth_branch`
     /// if no override is provided.
-    pub(crate) fn effective_birth_branch(&self, override_bb: Option<&BirthBranch>) -> BirthBranch {
-        override_bb.cloned().unwrap_or_else(|| {
-            debug_assert!(
-                self.birth_branch.as_str() != "unset",
-                "birth_branch was never initialized via with_birth_branch()"
-            );
-            self.birth_branch.clone()
-        })
+    pub(crate) fn effective_birth_branch(&self, override_bb: Option<&BirthBranch>) -> Result<BirthBranch> {
+        override_bb
+            .cloned()
+            .or_else(|| self.birth_branch.clone())
+            .ok_or_else(|| anyhow::anyhow!("birth_branch was never initialized via with_birth_branch()"))
     }
 
     /// Common post-spawn bookkeeping.
@@ -627,7 +626,7 @@ impl AgentControlService {
             github,
             tmux_session: None,
             tmux_ipc: None,
-            birth_branch: BirthBranch::root()?,
+            birth_branch: Some(BirthBranch::root()?),
             git_wt,
             acp_registry: None,
             yolo: false,

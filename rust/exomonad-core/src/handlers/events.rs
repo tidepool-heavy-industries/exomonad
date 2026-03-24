@@ -3,6 +3,7 @@
 //! Uses proto-generated types from `exomonad_proto::effects::events`.
 
 use crate::effects::{dispatch_events_effect, EffectHandler, EffectResult, EventEffects};
+use crate::domain::NotifyStatus;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::delivery::DeliveryResult;
 use crate::services::EventQueue;
@@ -171,10 +172,23 @@ impl EventEffects for EventHandler {
                 .unwrap_or_else(|| "root".to_string())
         };
 
+        // Convert proto enum to NotifyStatus for the delivery pipeline
+        let status = match exomonad_proto::effects::events::NotifyStatus::try_from(req.status) {
+            Ok(exomonad_proto::effects::events::NotifyStatus::Success) => NotifyStatus::Success,
+            Ok(exomonad_proto::effects::events::NotifyStatus::Failure) => NotifyStatus::Failure,
+            Ok(exomonad_proto::effects::events::NotifyStatus::Unspecified) | Err(_) => {
+                tracing::warn!(
+                    raw_status = req.status,
+                    "notify_parent: received UNSPECIFIED or invalid status, defaulting to Success"
+                );
+                NotifyStatus::Success
+            }
+        };
+
         tracing::info!(
             birth_branch = %birth_branch,
             parent_session_id = %parent_session_id,
-            status = %req.status,
+            status = %status.as_str(),
             "notify_parent: routing message to parent"
         );
 
@@ -189,7 +203,7 @@ impl EventEffects for EventHandler {
             &agent_id_str,
             &parent_session_id,
             &tab_name,
-            &req.status,
+            status,
             &req.message,
             None,
             "agent",
@@ -251,6 +265,7 @@ fn resolve_recipient_tab_name(recipient: &str) -> String {
         "TL".to_string()
     } else {
         crate::services::agent_control::AgentType::from_dir_name(recipient)
+            .unwrap_or(crate::services::agent_control::AgentType::Gemini)
             .tab_display_name(recipient)
     }
 }

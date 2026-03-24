@@ -46,13 +46,17 @@ impl AgentControlService {
             let internal_name = format!("gh-{}-{}-{}", issue_id, slug, agent_suffix);
 
             // Determine base branch (use birth_branch for root detection)
-            let default_base = self.birth_branch.as_parent_branch().to_string();
+            let birth_branch = self
+                .birth_branch
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("birth_branch was never initialized via with_birth_branch()"))?;
+            let default_base = birth_branch.as_parent_branch().to_string();
             let base = options
                 .base_branch
                 .as_ref()
                 .map(|b| b.as_str().to_string())
                 .unwrap_or(default_base);
-            let branch_name = if self.birth_branch.depth() == 0 {
+            let branch_name = if birth_branch.depth() == 0 {
                 format!("gh-{}/{}-{}", issue_id, slug, agent_suffix)
             } else {
                 format!("{}/{}-{}", base, slug, agent_suffix)
@@ -106,9 +110,9 @@ impl AgentControlService {
 
             let env_vars = self.common_spawn_env(
                 &internal_name,
-                self.effective_birth_branch(Some(caller_bb)).as_ref(),
+                self.effective_birth_branch(Some(caller_bb))?.as_ref(),
                 role,
-            );
+            )?;
 
             // Open tmux window with cwd = worktree_path
             let window_id = self
@@ -252,9 +256,9 @@ impl AgentControlService {
 
             let mut env_vars = self.common_spawn_env(
                 &internal_name,
-                self.effective_birth_branch(Some(caller_bb)).as_ref(),
+                self.effective_birth_branch(Some(caller_bb))?.as_ref(),
                 "dev",
-            );
+            )?;
 
             // Write per-agent MCP config into the worktree
             self.write_agent_mcp_config(
@@ -415,14 +419,14 @@ impl AgentControlService {
                 }
             }
 
-            let mut env_vars = self.common_spawn_env(&internal_name, self.effective_birth_branch(Some(&ctx.birth_branch)).as_ref(), "worker");
+            let mut env_vars = self.common_spawn_env(&internal_name, self.effective_birth_branch(Some(&ctx.birth_branch))?.as_ref(), "worker")?;
 
             // Write Gemini settings to worker config dir in project root
             fs::create_dir_all(&agent_config_dir).await?;
 
             // Write parent's birth_branch so the server can resolve it for notify_parent routing.
             // Workers don't have worktrees, so git-based resolution fails. This file is the fallback.
-            let parent_bb = self.effective_birth_branch(Some(&ctx.birth_branch));
+            let parent_bb = self.effective_birth_branch(Some(&ctx.birth_branch))?;
             fs::write(agent_config_dir.join(".birth_branch"), parent_bb.as_str()).await?;
             let context_path = self.resolve_role_context("worker");
             let settings = Self::generate_gemini_worker_settings(&internal_name, context_path.as_deref());
@@ -470,7 +474,7 @@ impl AgentControlService {
                 .await?;
 
             // Register as synthetic team member for Claude Teams messaging
-            let team_name = TeamName::from(format!("exo-{}", self.effective_birth_branch(Some(&ctx.birth_branch))).as_str());
+            let team_name = TeamName::from(format!("exo-{}", self.effective_birth_branch(Some(&ctx.birth_branch))?).as_str());
             if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
                 &team_name, &slug, "gemini-worker",
             ) {
@@ -509,7 +513,7 @@ impl AgentControlService {
         let result = timeout(SPAWN_TIMEOUT, async {
             self.resolve_tmux_session()?;
 
-            let effective_birth = self.effective_birth_branch(Some(caller_bb));
+            let effective_birth = self.effective_birth_branch(Some(caller_bb))?;
 
             // Depth check using typed birth-branch.
             let depth = effective_birth.depth();
@@ -602,7 +606,7 @@ impl AgentControlService {
                 }
             }
 
-            let mut env_vars = self.common_spawn_env(&internal_name, &branch_name, role);
+            let mut env_vars = self.common_spawn_env(&internal_name, &branch_name, role)?;
             // Enable Claude Code Agent Teams for native inter-agent messaging
             env_vars.insert(
                 "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".to_string(),
@@ -729,7 +733,7 @@ impl AgentControlService {
 
             // No depth check for leaf nodes.
 
-            let effective_birth = self.effective_birth_branch(Some(caller_bb));
+            let effective_birth = self.effective_birth_branch(Some(caller_bb))?;
             let effective_project_dir = &self.project_dir;
 
             // Parent branch derived from typed birth-branch.
@@ -774,7 +778,7 @@ impl AgentControlService {
             self.create_socket_symlink(&worktree_path).await;
 
             let role = options.role.as_deref().unwrap_or("dev");
-            let mut env_vars = self.common_spawn_env(&internal_name, &branch_name, role);
+            let mut env_vars = self.common_spawn_env(&internal_name, &branch_name, role)?;
             self.write_agent_mcp_config(effective_project_dir, &worktree_path, agent_type, role)
                 .await?;
 

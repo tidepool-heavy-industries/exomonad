@@ -93,8 +93,9 @@ fn convert_agent_type(t: AgentType) -> EffectResult<ServiceAgentType> {
         AgentType::Claude => Ok(ServiceAgentType::Claude),
         AgentType::Gemini => Ok(ServiceAgentType::Gemini),
         AgentType::Shoal => Ok(ServiceAgentType::Shoal),
+        AgentType::Process => Ok(ServiceAgentType::Process),
         AgentType::Unspecified => Err(EffectError::invalid_input(
-            "agent_type is required (must be 'claude', 'gemini', or 'shoal', got UNSPECIFIED)",
+            "agent_type is required (must be 'claude', 'gemini', 'shoal', or 'process', got UNSPECIFIED)",
         )),
     }
 }
@@ -237,7 +238,7 @@ impl AgentEffects for AgentHandler {
         if let Some(ref log) = self.event_log {
             let _ = log.append(
                 "agent.spawned",
-                ctx.agent_name.as_ref(),
+                &ctx.agent_name,
                 &serde_json::json!({
                     "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "worker",
                     "branch": agent_info.branch_name,
@@ -261,11 +262,11 @@ impl AgentEffects for AgentHandler {
         let parent_session_id = if req.fork_session {
             if let Some(ref registry) = self.claude_session_registry {
                 let key = if ctx.agent_name.as_str().is_empty() {
-                    crate::domain::AgentName::from("root")
+                    crate::domain::BirthBranch::from("root")
                 } else {
-                    ctx.agent_name.clone()
+                    crate::domain::BirthBranch::from(ctx.agent_name.as_str())
                 };
-                let claude_uuid = registry.get(key.as_str()).await;
+                let claude_uuid = registry.get(&key).await;
                 info!(
                     key = %key,
                     claude_uuid = ?claude_uuid,
@@ -328,7 +329,7 @@ impl AgentEffects for AgentHandler {
         if let Some(ref log) = self.event_log {
             let _ = log.append(
                 "agent.spawned",
-                ctx.agent_name.as_ref(),
+                &ctx.agent_name,
                 &serde_json::json!({
                     "child_agent": agent_info.id, "agent_type": "claude", "spawn_type": "subtree",
                     "branch": agent_info.branch_name,
@@ -377,7 +378,7 @@ impl AgentEffects for AgentHandler {
             "[event] agent.spawned"
         );
         if let Some(ref log) = self.event_log {
-            let _ = log.append("agent.spawned", ctx.agent_name.as_ref(), &serde_json::json!({
+            let _ = log.append("agent.spawned", &ctx.agent_name, &serde_json::json!({
                 "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "leaf_subtree",
                 "branch": agent_info.branch_name,
             }));
@@ -483,7 +484,7 @@ impl AgentEffects for AgentHandler {
         if let Some(ref log) = self.event_log {
             let _ = log.append(
                 "agent.spawned",
-                ctx.agent_name.as_ref(),
+                &ctx.agent_name,
                 &serde_json::json!({
                     "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "acp",
                     "branch": agent_info.branch_name,
@@ -744,7 +745,7 @@ fn service_agent_type_to_proto(at: ServiceAgentType) -> i32 {
         ServiceAgentType::Claude => AgentType::Claude as i32,
         ServiceAgentType::Gemini => AgentType::Gemini as i32,
         ServiceAgentType::Shoal => AgentType::Shoal as i32,
-        ServiceAgentType::Process => AgentType::Unspecified as i32,
+        ServiceAgentType::Process => AgentType::Process as i32,
     }
 }
 
@@ -753,7 +754,7 @@ fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::Ag
         Some(ServiceAgentType::Claude) => AgentType::Claude as i32,
         Some(ServiceAgentType::Gemini) => AgentType::Gemini as i32,
         Some(ServiceAgentType::Shoal) => AgentType::Shoal as i32,
-        Some(ServiceAgentType::Process) => AgentType::Unspecified as i32,
+        Some(ServiceAgentType::Process) => AgentType::Process as i32,
         None => AgentType::Unspecified as i32,
     };
 
