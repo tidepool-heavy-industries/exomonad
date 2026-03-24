@@ -702,7 +702,7 @@ impl GitHubPoller {
             }
 
             let dir_name = entry.file_name().to_string_lossy().to_string();
-            let agent_type = AgentType::from_dir_name(&dir_name);
+            let agent_type = AgentType::from_dir_name(&dir_name).unwrap_or(AgentType::Gemini);
 
             // Execute git branch --show-current in the worktree
             let output = Command::new("git")

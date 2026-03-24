@@ -32,7 +32,7 @@ impl AgentControlService {
                 (at, s.strip_suffix(&suffix).unwrap_or(s).to_string())
             }
             None => {
-                let at = AgentType::from_dir_name(identifier);
+                let at = AgentType::from_dir_name(identifier).unwrap_or(AgentType::Gemini);
                 let suffix = format!("-{}", at.suffix());
                 (
                     at,
@@ -45,7 +45,11 @@ impl AgentControlService {
         };
 
         // Remove synthetic team member registration (non-fatal if not registered)
-        let team_name = TeamName::from(format!("exo-{}", self.birth_branch).as_str());
+        let birth_branch = self
+            .birth_branch
+            .as_ref()
+            .expect("birth_branch was never initialized via with_birth_branch()");
+        let team_name = TeamName::from(format!("exo-{}", birth_branch).as_str());
         if let Err(e) =
             crate::services::synthetic_members::remove_synthetic_member(&team_name, &slug)
         {
