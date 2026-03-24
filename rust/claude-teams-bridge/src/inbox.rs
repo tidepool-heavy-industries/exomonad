@@ -52,7 +52,12 @@ pub(crate) fn write_to_inbox_at_base(
 
     let mut messages: Vec<TeamsMessage> = if inbox_file.exists() {
         let content = std::fs::read_to_string(&inbox_file)?;
-        serde_json::from_str(&content).unwrap_or_default()
+        serde_json::from_str(&content).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Corrupt inbox JSON at {}: {e}", inbox_file.display()),
+            )
+        })?
     } else {
         Vec::new()
     };
