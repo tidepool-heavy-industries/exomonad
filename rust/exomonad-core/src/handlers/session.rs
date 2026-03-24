@@ -3,7 +3,7 @@
 //! Stores Claude Code session UUIDs so spawn_subtree can use --resume --fork-session.
 //! Stores Claude Teams info so notify_parent can route via Teams inbox.
 
-use crate::domain::ClaudeSessionUuid;
+use crate::domain::{BirthBranch, ClaudeSessionUuid};
 use crate::effects::{dispatch_session_effect, EffectResult, SessionEffects};
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
 use async_trait::async_trait;
@@ -43,9 +43,9 @@ impl SessionEffects for SessionHandler {
     ) -> EffectResult<RegisterClaudeSessionResponse> {
         let agent_name = &ctx.agent_name;
         let key = if agent_name.as_str().is_empty() {
-            "root".to_string()
+            BirthBranch::from("root")
         } else {
-            agent_name.to_string()
+            BirthBranch::from(agent_name.as_str())
         };
 
         let claude_uuid = ClaudeSessionUuid::try_from(req.claude_session_id.clone())
@@ -57,11 +57,11 @@ impl SessionEffects for SessionHandler {
             "Registering Claude session via effect"
         );
 
-        self.registry.register(&key, claude_uuid.clone()).await;
+        self.registry.register(key.clone(), claude_uuid.clone()).await;
 
         // Also store under slug variant (strip -claude suffix) for broader lookup
-        if let Some(slug) = key.strip_suffix("-claude") {
-            self.registry.register(slug, claude_uuid).await;
+        if let Some(slug) = key.as_str().strip_suffix("-claude") {
+            self.registry.register(BirthBranch::from(slug), claude_uuid).await;
         }
 
         Ok(RegisterClaudeSessionResponse { success: true })
@@ -184,7 +184,7 @@ mod tests {
         let resp = handler.register_claude_id(req, &ctx).await.unwrap();
         assert!(resp.success);
 
-        let registered = registry.get("test").await.unwrap();
+        let registered = registry.get(&BirthBranch::from("test")).await.unwrap();
         assert_eq!(
             registered.to_string(),
             "7343ced0-1d95-450a-8ae5-976fe94421f0"
@@ -292,8 +292,8 @@ mod tests {
         handler.register_claude_id(req, &ctx).await.unwrap();
 
         // Should be found under "foo-claude"
-        assert!(registry.get("foo-claude").await.is_some());
+        assert!(registry.get(&BirthBranch::from("foo-claude")).await.is_some());
         // Should be found under slug "foo"
-        assert!(registry.get("foo").await.is_some());
+        assert!(registry.get(&BirthBranch::from("foo")).await.is_some());
     }
 }

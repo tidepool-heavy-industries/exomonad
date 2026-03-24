@@ -262,11 +262,11 @@ impl AgentEffects for AgentHandler {
         let parent_session_id = if req.fork_session {
             if let Some(ref registry) = self.claude_session_registry {
                 let key = if ctx.agent_name.as_str().is_empty() {
-                    crate::domain::AgentName::from("root")
+                    crate::domain::BirthBranch::from("root")
                 } else {
-                    ctx.agent_name.clone()
+                    crate::domain::BirthBranch::from(ctx.agent_name.as_str())
                 };
-                let claude_uuid = registry.get(key.as_str()).await;
+                let claude_uuid = registry.get(&key).await;
                 info!(
                     key = %key,
                     claude_uuid = ?claude_uuid,
