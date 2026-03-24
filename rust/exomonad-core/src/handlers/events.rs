@@ -171,10 +171,16 @@ impl EventEffects for EventHandler {
                 .unwrap_or_else(|| "root".to_string())
         };
 
+        // Convert proto enum to string for the delivery pipeline
+        let status_str = match exomonad_proto::effects::events::NotifyStatus::try_from(req.status) {
+            Ok(exomonad_proto::effects::events::NotifyStatus::Failure) => "failure",
+            _ => "success",
+        };
+
         tracing::info!(
             birth_branch = %birth_branch,
             parent_session_id = %parent_session_id,
-            status = %req.status,
+            status = %status_str,
             "notify_parent: routing message to parent"
         );
 
@@ -189,7 +195,7 @@ impl EventEffects for EventHandler {
             &agent_id_str,
             &parent_session_id,
             &tab_name,
-            &req.status,
+            status_str,
             &req.message,
             None,
             "agent",

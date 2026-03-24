@@ -93,8 +93,9 @@ fn convert_agent_type(t: AgentType) -> EffectResult<ServiceAgentType> {
         AgentType::Claude => Ok(ServiceAgentType::Claude),
         AgentType::Gemini => Ok(ServiceAgentType::Gemini),
         AgentType::Shoal => Ok(ServiceAgentType::Shoal),
+        AgentType::Process => Ok(ServiceAgentType::Process),
         AgentType::Unspecified => Err(EffectError::invalid_input(
-            "agent_type is required (must be 'claude', 'gemini', or 'shoal', got UNSPECIFIED)",
+            "agent_type is required (must be 'claude', 'gemini', 'shoal', or 'process', got UNSPECIFIED)",
         )),
     }
 }
@@ -744,7 +745,7 @@ fn service_agent_type_to_proto(at: ServiceAgentType) -> i32 {
         ServiceAgentType::Claude => AgentType::Claude as i32,
         ServiceAgentType::Gemini => AgentType::Gemini as i32,
         ServiceAgentType::Shoal => AgentType::Shoal as i32,
-        ServiceAgentType::Process => AgentType::Unspecified as i32,
+        ServiceAgentType::Process => AgentType::Process as i32,
     }
 }
 
@@ -753,7 +754,7 @@ fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::Ag
         Some(ServiceAgentType::Claude) => AgentType::Claude as i32,
         Some(ServiceAgentType::Gemini) => AgentType::Gemini as i32,
         Some(ServiceAgentType::Shoal) => AgentType::Shoal as i32,
-        Some(ServiceAgentType::Process) => AgentType::Unspecified as i32,
+        Some(ServiceAgentType::Process) => AgentType::Process as i32,
         None => AgentType::Unspecified as i32,
     };
 

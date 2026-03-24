@@ -591,6 +591,88 @@ impl fmt::Display for ReviewState {
 }
 
 // ============================================================================
+// CI Status
+// ============================================================================
+
+/// CI pipeline status for a PR.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CiStatus {
+    Success,
+    Failure,
+    Pending,
+    Unknown,
+}
+
+impl CiStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            CiStatus::Success => "success",
+            CiStatus::Failure => "failure",
+            CiStatus::Pending => "pending",
+            CiStatus::Unknown => "unknown",
+        }
+    }
+}
+
+impl fmt::Display for CiStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<&str> for CiStatus {
+    fn from(s: &str) -> Self {
+        match s {
+            "success" => CiStatus::Success,
+            "failure" => CiStatus::Failure,
+            "pending" => CiStatus::Pending,
+            _ => CiStatus::Unknown,
+        }
+    }
+}
+
+// ============================================================================
+// Notify Status
+// ============================================================================
+
+/// Typed notify status for parent notifications.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NotifyStatus {
+    Success,
+    Failure,
+}
+
+impl NotifyStatus {
+    pub fn as_str(&self) -> &str {
+        match self {
+            NotifyStatus::Success => "success",
+            NotifyStatus::Failure => "failure",
+        }
+    }
+
+    pub fn is_failure(&self) -> bool {
+        matches!(self, NotifyStatus::Failure)
+    }
+}
+
+impl fmt::Display for NotifyStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<&str> for NotifyStatus {
+    fn from(s: &str) -> Self {
+        match s {
+            "failure" => NotifyStatus::Failure,
+            _ => NotifyStatus::Success,
+        }
+    }
+}
+
+// ============================================================================
 // Path Types
 // ============================================================================
 
@@ -1286,6 +1368,7 @@ mod proptest_tests {
             Just(crate::services::agent_control::AgentType::Claude),
             Just(crate::services::agent_control::AgentType::Gemini),
             Just(crate::services::agent_control::AgentType::Shoal),
+            Just(crate::services::agent_control::AgentType::Process),
         ]
     }
 }
