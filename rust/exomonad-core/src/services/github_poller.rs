@@ -1,4 +1,4 @@
-use crate::domain::{AgentName, BranchName, CiStatus, CommitSha, GithubOwner, GithubRepo, PRNumber};
+use crate::domain::{AgentName, BranchName, CiStatus, CommitSha, GithubOwner, GithubRepo, NotifyStatus, PRNumber};
 use crate::plugin_manager::PluginManager;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::AgentType;
@@ -496,7 +496,7 @@ impl GitHubPoller {
                     agent_slug,
                     &parent_session_id,
                     &parent_tab,
-                    "success",
+                    NotifyStatus::Success,
                     &message,
                     Some(&summary),
                     "event_handler",
