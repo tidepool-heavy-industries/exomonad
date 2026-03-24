@@ -46,13 +46,17 @@ impl AgentControlService {
             let internal_name = format!("gh-{}-{}-{}", issue_id, slug, agent_suffix);
 
             // Determine base branch (use birth_branch for root detection)
-            let default_base = self.birth_branch.as_parent_branch().to_string();
+            let birth_branch = self
+                .birth_branch
+                .as_ref()
+                .expect("birth_branch was never initialized via with_birth_branch()");
+            let default_base = birth_branch.as_parent_branch().to_string();
             let base = options
                 .base_branch
                 .as_ref()
                 .map(|b| b.as_str().to_string())
                 .unwrap_or(default_base);
-            let branch_name = if self.birth_branch.depth() == 0 {
+            let branch_name = if birth_branch.depth() == 0 {
                 format!("gh-{}/{}-{}", issue_id, slug, agent_suffix)
             } else {
                 format!("{}/{}-{}", base, slug, agent_suffix)

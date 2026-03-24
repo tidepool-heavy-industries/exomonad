@@ -257,6 +257,7 @@ fn resolve_recipient_tab_name(recipient: &str) -> String {
         "TL".to_string()
     } else {
         crate::services::agent_control::AgentType::from_dir_name(recipient)
+            .unwrap_or(crate::services::agent_control::AgentType::Gemini)
             .tab_display_name(recipient)
     }
 }
