@@ -1,4 +1,4 @@
-use crate::domain::{BranchName, CommitSha, PRNumber};
+use crate::domain::{AgentName, BranchName, CommitSha, PRNumber};
 use crate::plugin_manager::PluginManager;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::AgentType;
@@ -404,7 +404,7 @@ impl GitHubPoller {
                 if let Some(ref log) = self.event_log {
                     let _ = log.append(
                         "event.dispatched",
-                        agent_name,
+                        &AgentName::from(agent_name),
                         &serde_json::json!({
                             "event_type": event_type,
                             "action": action_str,
@@ -430,7 +430,7 @@ impl GitHubPoller {
                 if let Some(ref log) = self.event_log {
                     let _ = log.append(
                         "event.dispatch_failed",
-                        agent_name,
+                        &AgentName::from(agent_name),
                         &serde_json::json!({
                             "event_type": event_type,
                             "error": e.to_string(),
@@ -634,7 +634,7 @@ impl GitHubPoller {
                     if let Some(ref log) = self.event_log {
                         let _ = log.append(
                             "agent.sibling_merged",
-                            branch.as_str(),
+                            &AgentName::from(branch.as_str()),
                             &serde_json::json!({
                                 "pr_number": pr_num.as_u64(),
                                 "branch": branch.as_str(),
@@ -1033,7 +1033,7 @@ impl GitHubPoller {
         if let Some(ref log) = self.event_log {
             let _ = log.append(
                 event_name,
-                branch,
+                &AgentName::from(branch),
                 &serde_json::json!({
                     "branch": branch,
                     "status": status,

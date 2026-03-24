@@ -105,7 +105,7 @@ impl FilePrEffects for FilePRHandler {
         if let Some(ref log) = self.event_log {
             if let Err(e) = log.append(
                 event_type,
-                ctx.agent_name.as_ref(),
+                &ctx.agent_name,
                 &serde_json::json!({
                     "pr_number": output.pr_number.as_u64(),
                     "pr_url": output.pr_url,

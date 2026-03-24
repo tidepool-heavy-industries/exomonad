@@ -238,7 +238,7 @@ impl AgentEffects for AgentHandler {
         if let Some(ref log) = self.event_log {
             let _ = log.append(
                 "agent.spawned",
-                ctx.agent_name.as_ref(),
+                &ctx.agent_name,
                 &serde_json::json!({
                     "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "worker",
                     "branch": agent_info.branch_name,
@@ -329,7 +329,7 @@ impl AgentEffects for AgentHandler {
         if let Some(ref log) = self.event_log {
             let _ = log.append(
                 "agent.spawned",
-                ctx.agent_name.as_ref(),
+                &ctx.agent_name,
                 &serde_json::json!({
                     "child_agent": agent_info.id, "agent_type": "claude", "spawn_type": "subtree",
                     "branch": agent_info.branch_name,
@@ -378,7 +378,7 @@ impl AgentEffects for AgentHandler {
             "[event] agent.spawned"
         );
         if let Some(ref log) = self.event_log {
-            let _ = log.append("agent.spawned", ctx.agent_name.as_ref(), &serde_json::json!({
+            let _ = log.append("agent.spawned", &ctx.agent_name, &serde_json::json!({
                 "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "leaf_subtree",
                 "branch": agent_info.branch_name,
             }));
@@ -484,7 +484,7 @@ impl AgentEffects for AgentHandler {
         if let Some(ref log) = self.event_log {
             let _ = log.append(
                 "agent.spawned",
-                ctx.agent_name.as_ref(),
+                &ctx.agent_name,
                 &serde_json::json!({
                     "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "acp",
                     "branch": agent_info.branch_name,

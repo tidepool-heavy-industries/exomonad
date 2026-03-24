@@ -163,8 +163,7 @@ impl LogEffects for LogHandler {
                 serde_json::from_slice(&req.payload)
                     .unwrap_or(serde_json::json!({"raw": payload_str}))
             };
-            let agent_id = ctx.agent_name.to_string();
-            if let Err(e) = log.append(&req.event_type, &agent_id, &data) {
+            if let Err(e) = log.append(&req.event_type, &ctx.agent_name, &data) {
                 tracing::warn!(error = %e, "Failed to write event to JSONL log");
             }
         }

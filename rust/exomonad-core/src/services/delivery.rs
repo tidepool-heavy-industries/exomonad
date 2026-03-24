@@ -1,3 +1,4 @@
+use crate::domain::AgentName;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::event_queue::EventQueue;
 use crate::services::tmux_events;
@@ -79,7 +80,7 @@ pub async fn notify_parent_delivery(
     if let Some(log) = event_log {
         let _ = log.append(
             "agent.notify_parent",
-            agent_id,
+            &AgentName::from(agent_id),
             &serde_json::json!({
                 "parent": parent_session_id,
                 "status": status,
