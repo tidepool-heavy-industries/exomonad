@@ -49,13 +49,13 @@ runtime = [
     "dep:claude-teams-bridge",
     "dep:opentelemetry",
     "dep:tracing-opentelemetry",
-    "dep:tempfile",
 ]
 
 [dependencies]
 # Always available (lightweight types for plugin consumers)
 serde = { workspace = true }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 
 # Runtime feature: workspace deps
 async-trait = { workspace = true, optional = true }
@@ -73,7 +73,6 @@ tracing-subscriber = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 opentelemetry = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
-tempfile = { workspace = true, optional = true }
 
 # Runtime feature: ACP (Agent Client Protocol)
 agent-client-protocol = { path = "../../vendor/acp-rust-sdk/src/agent-client-protocol", optional = true }

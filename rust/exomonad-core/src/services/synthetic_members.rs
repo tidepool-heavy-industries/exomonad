@@ -1,7 +1,9 @@
 use crate::domain::TeamName;
 use anyhow::{Context, Result};
+use claude_teams_bridge::file_lock::{FileLock, fsync_dir};
 use serde_json::Value;
 use std::path::PathBuf;
+use std::time::Duration;
 use tracing::info;
 
 /// Register a synthetic member in a Claude Teams config.json.
@@ -23,6 +25,8 @@ fn register_synthetic_member_at_path(
     agent_type: &str,
 ) -> Result<()> {
     // Read existing config
+    let _lock = FileLock::acquire(config_path, Duration::from_secs(30))
+        .map_err(|e| anyhow::anyhow!("Failed to acquire lock: {}", e))?;
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read team config: {}", config_path.display()))?;
     let mut config: Value =
@@ -62,10 +66,17 @@ fn register_synthetic_member_at_path(
     members.push(entry);
 
     // Atomic write
-    let tmp = config_path.with_extension("json.tmp");
     let content = serde_json::to_string_pretty(&config)?;
-    std::fs::write(&tmp, &content)?;
-    std::fs::rename(&tmp, config_path)?;
+    let tmp_dir = config_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("No parent dir"))?;
+    let tmp = tempfile::NamedTempFile::new_in(tmp_dir)?;
+    std::fs::write(tmp.path(), &content)?;
+    tmp.persist(config_path)?;
+
+    if let Some(parent) = config_path.parent() {
+        let _ = fsync_dir(parent);
+    }
 
     info!(team = %team_name, member = %member_name, "Synthetic member registered");
     Ok(())
@@ -82,6 +93,8 @@ fn remove_synthetic_member_at_path(
     team_name: &TeamName,
     member_name: &str,
 ) -> Result<()> {
+    let _lock = FileLock::acquire(config_path, Duration::from_secs(30))
+        .map_err(|e| anyhow::anyhow!("Failed to acquire lock: {}", e))?;
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read team config: {}", config_path.display()))?;
     let mut config: Value =
@@ -91,10 +104,18 @@ fn remove_synthetic_member_at_path(
         members.retain(|m| m.get("name").and_then(|n| n.as_str()) != Some(member_name));
     }
 
-    let tmp = config_path.with_extension("json.tmp");
+    // Atomic write
     let content = serde_json::to_string_pretty(&config)?;
-    std::fs::write(&tmp, &content)?;
-    std::fs::rename(&tmp, config_path)?;
+    let tmp_dir = config_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("No parent dir"))?;
+    let tmp = tempfile::NamedTempFile::new_in(tmp_dir)?;
+    std::fs::write(tmp.path(), &content)?;
+    tmp.persist(config_path)?;
+
+    if let Some(parent) = config_path.parent() {
+        let _ = fsync_dir(parent);
+    }
 
     info!(team = %team_name, member = %member_name, "Synthetic member removed");
     Ok(())
