@@ -63,7 +63,7 @@ impl MergePrEffects for MergePRHandler {
             if let Some(ref log) = self.event_log {
                 let _ = log.append(
                     "pr.merged",
-                    ctx.agent_name.as_ref(),
+                    &ctx.agent_name,
                     &serde_json::json!({
                         "pr_number": pr_number.as_u64(),
                         "strategy": req.strategy,
@@ -81,7 +81,7 @@ impl MergePrEffects for MergePRHandler {
             if let Some(ref log) = self.event_log {
                 let _ = log.append(
                     "pr.merge_failed",
-                    ctx.agent_name.as_ref(),
+                    &ctx.agent_name,
                     &serde_json::json!({
                         "pr_number": pr_number.as_u64(),
                         "error": &result.message,
