@@ -14,8 +14,6 @@ packages:
     haskell/vendor/proto3-wire
     .exo/roles/devswarm
     .exo/roles/e2e-test
-    /home/inanna/dev/shoal/.exo/roles/shoal
-    /home/inanna/dev/penumbra/.exo/roles/penumbra
 
 -- Global settings for static-only build
 -- Note: 'shared: True' is REQUIRED for Template Haskell (GHC 9.12 WASM)
