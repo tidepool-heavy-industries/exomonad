@@ -25,7 +25,6 @@ import ExoMonad.Effects.Log (LogEmitEvent, LogInfo)
 import ExoMonad.Guest.Effects.StopHook (getCurrentBranch, checkUncommittedWork, checkPRNotFiled)
 import ExoMonad.Guest.StateMachine (StopCheckResult(..), checkExit, describeStopResult)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect_)
-import Data.List (foldl')
 import ExoMonad.Guest.Types (HookInput (..), HookOutput (..), Runtime (..), StopDecision(..), StopHookOutput(..), BeforeModelOutput (..), AfterModelOutput (..), allowResponse, denyResponse, postToolUseResponse, allowStopResponse, blockStopResponse)
 import ExoMonad.Permissions (PermissionCheck (..), checkAgentPermissions)
 import ExoMonad.Types (HookConfig (..), Effects, defaultSessionStartHook)
@@ -81,58 +80,6 @@ geminiOnly check hookInput tool =
 -- Hook Config
 -- ============================================================================
 
--- ============================================================================
--- Term Rewriting
--- ============================================================================
-
--- | Bidirectional rewrite rules: (real term, metasyntactic token)
-rewriteRules :: [(Text, Text)]
-rewriteRules =
-  [ ("Acme Corp", "COMPANY_ALPHA")
-  , ("John Smith", "PERSON_ONE")
-  , ("jane.doe@acme.com", "EMAIL_ONE")
-  ]
-
--- | Recursively replace strings in a JSON Value tree.
-rewriteStrings :: [(Text, Text)] -> Value -> Value
-rewriteStrings rules = go
-  where
-    go (String t) = String (foldl' (\acc (from, to) -> T.replace from to acc) t rules)
-    go (Array arr) = Array (fmap go arr)
-    go (Object obj) = Object (KM.map go obj)
-    go other = other
-
--- | BeforeModel handler: real terms → metasyntactic tokens.
-beforeModelRewrite :: HookInput -> Eff Effects BeforeModelOutput
-beforeModelRewrite input_ = do
-  case hiLlmRequest input_ of
-    Nothing -> pure (BeforeModelAllow Nothing)
-    Just req -> do
-      let rewritten = rewriteStrings rewriteRules req
-      void $ suspendEffect_ @LogInfo $ Log.InfoRequest
-        { Log.infoRequestMessage = "[HttpDevHooks] BeforeModel rewrite applied"
-        , Log.infoRequestFields = ""
-        }
-      pure (BeforeModelAllow (Just rewritten))
-
--- | AfterModel handler: metasyntactic tokens → real terms (reversed rules).
-afterModelRewrite :: HookInput -> Eff Effects AfterModelOutput
-afterModelRewrite input_ = do
-  case hiLlmResponse input_ of
-    Nothing -> pure (AfterModelAllow Nothing)
-    Just resp -> do
-      let reversed = map (\(real, token) -> (token, real)) rewriteRules
-      let rewritten = rewriteStrings reversed resp
-      void $ suspendEffect_ @LogInfo $ Log.InfoRequest
-        { Log.infoRequestMessage = "[HttpDevHooks] AfterModel rewrite applied"
-        , Log.infoRequestFields = ""
-        }
-      pure (AfterModelAllow (Just rewritten))
-
--- ============================================================================
--- Hook Config
--- ============================================================================
-
 httpDevHooks :: HookConfig
 httpDevHooks =
   HookConfig
@@ -141,8 +88,8 @@ httpDevHooks =
       onStop = \_ -> devStopCheck,
       onSubagentStop = \_ -> devStopCheck,
       onSessionStart = defaultSessionStartHook,
-      beforeModel = beforeModelRewrite,
-      afterModel = afterModelRewrite
+      beforeModel = \_ -> pure (BeforeModelAllow Nothing),
+      afterModel = \_ -> pure (AfterModelAllow Nothing)
     }
 
 devStopCheck :: Eff Effects StopHookOutput
