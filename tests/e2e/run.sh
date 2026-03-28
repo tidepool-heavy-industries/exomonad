@@ -79,8 +79,27 @@ git remote add origin "$REMOTE_DIR"
 git config user.name "Exomonad E2E"
 git config user.email "e2e@example.com"
 
-# Initial commit + push
-git commit --allow-empty -m "initial commit" -q
+# Scaffold project structure (deterministic — no agent needed)
+mkdir -p src
+touch src/__init__.py
+cat > src/alpha.py <<'PYEOF'
+def greet(name):
+    pass
+
+
+def farewell(name):
+    pass
+PYEOF
+cat > src/beta.py <<'PYEOF'
+def double(n):
+    pass
+
+
+def triple(n):
+    pass
+PYEOF
+git add src/
+git commit -m "scaffold: project structure" -q
 git push -u origin main -q
 
 # Bootstrap via exomonad new — generates .exo/config.toml, .gitignore, copies WASM + rules
@@ -89,11 +108,15 @@ if ! "$EXOMONAD_BIN" new 2>&1 | sed 's/^/  /'; then
     exit 1
 fi
 
-# Symlink WASM from project (overwrite whatever new copied — symlinks save disk)
+# Symlink WASM and role context from source project (not global install)
 mkdir -p .exo/wasm
 for wasm_file in "$PROJECT_ROOT/.exo/wasm/"wasm-guest-*.wasm; do
     ln -sf "$wasm_file" ".exo/wasm/$(basename "$wasm_file")"
 done
+if [[ -d "$PROJECT_ROOT/.exo/roles" ]]; then
+    rm -rf .exo/roles
+    cp -r "$PROJECT_ROOT/.exo/roles" .exo/roles
+fi
 
 # Patch config: use bash instead of nix develop (temp env has no flake.nix)
 if [[ -f .exo/config.toml ]]; then

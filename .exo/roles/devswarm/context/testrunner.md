@@ -34,13 +34,13 @@ A minimal but complete test exercising all 3 spawn types + the review cycle with
 
 ```
 Root TL (you instruct this)
-├── [Wave 0] spawn_worker × 1 → scaffold files (ephemeral)
+├── [Scaffold] pre-created by run.sh (src/alpha.py, src/beta.py with stubs)
 ├── [Wave 1] fork_wave → 1 Claude sub-TL + spawn_gemini → 1 Gemini leaf (parallel)
 │   ├── Sub-TL "alpha" (worktree 1) → spawn_worker × 1 (inline)
-│   │   └── worker: write content to src/alpha.py
+│   │   └── worker: implement functions in src/alpha.py
 │   │   └── sub-TL commits, pushes, files PR to root
 │   └── Gemini leaf "beta" (worktree 2) → files PR to root
-│       └── write content to src/beta.py
+│       └── implement functions in src/beta.py
 └── Root merges both PRs
 ```
 
@@ -48,31 +48,14 @@ This exercises: `spawn_worker` (ephemeral pane), `fork_wave` (Claude subtree), `
 
 ---
 
-### Phase 0: Scaffold via worker
+### Phase 0: Verify scaffold
 
-#### Step 0.1: Instruct root to scaffold
+The scaffold (src/__init__.py, src/alpha.py, src/beta.py with stub functions) is pre-created by run.sh and already pushed to origin main. Verify it exists:
 
-Use `instruct` to send:
+- `git -C $REMOTE_DIR log --oneline main` — should show "scaffold: project structure"
+- `ls src/` — should show __init__.py, alpha.py, beta.py
 
-"You are being tested in E2E mode.
-
-PHASE 0 — SCAFFOLD: Use `spawn_worker` to create ONE ephemeral Gemini worker that sets up the project structure IN YOUR WORKING DIRECTORY (it shares your directory):
-
-Worker name: 'scaffold'
-Task: Create these files:
-- src/__init__.py (empty)
-- src/alpha.py (empty, placeholder)
-- src/beta.py (empty, placeholder)
-
-After the worker completes, commit the scaffold with message 'scaffold: project structure', push to origin main, then STOP and wait for my next instruction."
-
-#### Step 0.2: Observe scaffolding
-
-Poll every 10 seconds, max 2 minutes. Check:
-- `tmux list-panes -t $EXOMONAD_TMUX_SESSION -a` — worker pane appeared then closed
-- `git -C $REMOTE_DIR log --oneline main` — scaffold commit pushed
-
-Once you see the scaffold commit on remote main, proceed to Phase 1.
+Once verified, proceed to Phase 1.
 
 ---
 
@@ -82,7 +65,9 @@ Once you see the scaffold commit on remote main, proceed to Phase 1.
 
 Use `instruct` to send:
 
-"Good, scaffold is pushed. Now PHASE 1 — spawn TWO children in parallel:
+"You are being tested in E2E mode. The scaffold (src/alpha.py and src/beta.py with stub functions) is already committed and pushed to main.
+
+PHASE 1 — spawn TWO children in parallel:
 
 1. Use `fork_wave` with ONE child:
    slug: 'alpha'
@@ -149,8 +134,8 @@ Call `notify_parent` with:
 - `status`: "success" or "failure"
 - `message`: Structured summary:
 
-  **Phase 0 (scaffold worker):**
-  - Worker pane observed? Scaffold commit pushed?
+  **Phase 0 (scaffold):**
+  - Scaffold commit present on remote main?
 
   **Phase 1 (fork + spawn):**
   - Sub-TL window created? Gemini leaf window created?

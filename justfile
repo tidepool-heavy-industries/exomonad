@@ -9,8 +9,8 @@ fmt:
     nix develop --command bash -c 'cd haskell && ormolu --mode inplace --ghc-opt -XImportQualifiedPost $(find . -name "*.hs" -not -path "./vendor/*")'
     cargo fmt --all
 
-# Check formatting (no changes, exit 1 if unformatted)
-fmt-check:
+# Check formatting (fails if unformatted — run `just fmt` to fix)
+check-fmt:
     nix develop --command bash -c 'cd haskell && ormolu --mode check --ghc-opt -XImportQualifiedPost $(find . -name "*.hs" -not -path "./vendor/*")'
     cargo fmt --all --check
 
@@ -18,24 +18,19 @@ fmt-check:
 lint:
     nix develop --command hlint haskell
 
-# Run all tests
-test:
-    nix develop --command cabal test all
-    cargo test --workspace
-
 # Run fast tests only (Rust unit tests)
 test-fast:
     cargo test --workspace --lib
 
-# Verify everything builds and passes (Rust tests + WASM)
-verify:
+# Run tests: Rust unit tests, cargo check, WASM build, proto freshness
+test:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo ">>> [1/3] Rust unit tests..."
+    echo ">>> [1/4] Rust unit tests..."
     cargo test --workspace --lib
-    echo ">>> [2/3] Rust check (all targets)..."
+    echo ">>> [2/4] Rust check (all targets)..."
     cargo check --workspace --all-targets
-    echo ">>> [3/3] WASM build..."
+    echo ">>> [3/4] WASM build..."
     just wasm-all
     echo ">>> [4/4] Proto freshness check..."
     just proto-check
@@ -55,8 +50,8 @@ proto-check:
     fi
     echo ">>> Proto files are up to date."
 
-# Pre-push checks (formatting + verify)
-pre-push: fmt-check verify
+# Pre-push: format check + tests
+pre-push: check-fmt test
 
 # Install git hooks (symlinks scripts/hooks/* to .git/hooks/)
 install-hooks:
