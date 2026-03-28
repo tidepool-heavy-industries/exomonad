@@ -143,8 +143,9 @@ proto-gen-haskell:
 proto-gen-rust:
     cargo build -p exomonad-proto
 
-# Full proto regeneration
+# Full proto regeneration (includes formatting so proto-check passes)
 proto-gen: proto-gen-haskell proto-gen-rust
+    nix develop --command bash -c 'cd haskell && ormolu --mode inplace --ghc-opt -XImportQualifiedPost $(find proto/src -name "*.hs")'
     @echo "Proto generation complete. Don't forget to commit haskell/proto/src/"
 
 # Verify proto changes don't break wire format
