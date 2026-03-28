@@ -503,14 +503,6 @@ impl AgentControlService {
             self.finalize_spawn(&internal_name, routing)
                 .await?;
 
-            // Register as synthetic team member for Claude Teams messaging
-            let team_name = TeamName::from(format!("exo-{}", self.effective_birth_branch(Some(&ctx.birth_branch))).as_str());
-            if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
-                &team_name, &slug, "gemini-worker",
-            ) {
-                warn!(agent = %slug, team = %team_name, error = %e, "Failed to register synthetic team member (non-fatal)");
-            }
-
             self.emit_agent_started(&internal_name)?;
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
@@ -854,14 +846,6 @@ impl AgentControlService {
             let routing = RoutingInfo::window(window_id.as_str());
             self.finalize_spawn(&internal_name, routing)
                 .await?;
-
-            // Register as synthetic team member for Claude Teams messaging
-            let team_name = TeamName::from(format!("exo-{}", effective_birth).as_str());
-            if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
-                &team_name, &slug, "gemini-leaf",
-            ) {
-                warn!(agent = %slug, team = %team_name, error = %e, "Failed to register synthetic team member (non-fatal)");
-            }
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: worktree_path.clone(),

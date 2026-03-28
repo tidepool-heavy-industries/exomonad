@@ -111,6 +111,46 @@ impl AgentHandler {
             )
             .await;
     }
+
+    /// Register a spawned child as a synthetic member in the TL's actual team.
+    ///
+    /// Resolves the team from TeamRegistry (same pattern as `register_child_supervisor`)
+    /// so the child is registered in the user-created team (e.g., "gh-issues"), not
+    /// a hardcoded "exo-{branch}" team that CC doesn't recognize.
+    async fn register_synthetic_member(
+        &self,
+        member_name: &str,
+        agent_type: &str,
+        ctx: &crate::effects::EffectContext,
+    ) {
+        let Some(team_reg) = &self.team_registry else {
+            return;
+        };
+        let agent_key = ctx.agent_name.to_string();
+        let team_name = if let Some(info) = team_reg.get(&agent_key).await {
+            TeamName::from(info.team_name.as_str())
+        } else if let Some(info) = team_reg.get(ctx.birth_branch.as_ref()).await {
+            TeamName::from(info.team_name.as_str())
+        } else {
+            warn!(
+                member = %member_name,
+                "No team found — skipping synthetic member registration"
+            );
+            return;
+        };
+        if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
+            &team_name,
+            member_name,
+            agent_type,
+        ) {
+            warn!(
+                member = %member_name,
+                team = %team_name,
+                error = %e,
+                "Failed to register synthetic team member (non-fatal)"
+            );
+        }
+    }
 }
 
 #[async_trait]
@@ -298,6 +338,14 @@ impl AgentEffects for AgentHandler {
             );
         }
 
+        // Register as synthetic team member using internal_name (slug-gemini),
+        // matching what notify_parent sends as `from`.
+        let internal_name = format!(
+            "{}-gemini",
+            crate::services::agent_control::slugify(&req.name)
+        );
+        self.register_synthetic_member(&internal_name, "gemini-worker", ctx)
+            .await;
         self.register_child_supervisor(&req.name, ctx).await;
 
         Ok(SpawnWorkerResponse {
@@ -440,6 +488,14 @@ impl AgentEffects for AgentHandler {
             }));
         }
 
+        // Register as synthetic team member using internal_name (slug-gemini),
+        // matching what notify_parent sends as `from`.
+        let internal_name = format!(
+            "{}-gemini",
+            crate::services::agent_control::slugify(&req.branch_name)
+        );
+        self.register_synthetic_member(&internal_name, "gemini-leaf", ctx)
+            .await;
         self.register_child_supervisor(&req.branch_name, ctx).await;
 
         Ok(SpawnLeafSubtreeResponse {
@@ -508,15 +564,9 @@ impl AgentEffects for AgentHandler {
 
         registry.register(agent_name.clone(), conn).await;
 
-        // Register as synthetic team member for Teams inbox delivery
-        let team_name = TeamName::from(format!("exo-{}", ctx.birth_branch).as_str());
-        if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
-            &team_name,
-            agent_name,
-            "gemini-acp",
-        ) {
-            warn!(agent = %agent_name, team = %team_name, error = %e, "Failed to register synthetic team member (non-fatal)");
-        }
+        // Register as synthetic team member (uses TL's actual team, not hardcoded exo-{branch})
+        self.register_synthetic_member(agent_name, "gemini-acp", ctx)
+            .await;
 
         info!(agent = %agent_name, "ACP agent spawned and registered");
 

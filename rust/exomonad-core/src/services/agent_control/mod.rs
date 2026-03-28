@@ -771,7 +771,7 @@ pub fn resolve_role_context_path(
 }
 
 /// Create a URL-safe slug from a title.
-fn slugify(title: &str) -> String {
+pub fn slugify(title: &str) -> String {
     title
         .to_lowercase()
         .chars()
