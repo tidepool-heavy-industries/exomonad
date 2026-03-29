@@ -151,6 +151,63 @@ impl AgentHandler {
             );
         }
     }
+
+    /// Propagate the parent's team registration to a spawned sub-TL's identity keys.
+    ///
+    /// Sub-TLs don't call TeamCreate — they're part of the parent's team. But when
+    /// a sub-TL spawns workers, `register_synthetic_member` looks up the sub-TL's
+    /// keys in TeamRegistry and finds nothing. This method bridges that gap by
+    /// registering the sub-TL's keys (agent_name, birth_branch) pointing to the
+    /// parent's team.
+    async fn propagate_team_to_child(
+        &self,
+        child_branch: &str,
+        ctx: &crate::effects::EffectContext,
+    ) {
+        let Some(team_reg) = &self.team_registry else {
+            return;
+        };
+        let agent_key = ctx.agent_name.to_string();
+        let parent_team = if let Some(info) = team_reg.get(&agent_key).await {
+            info
+        } else if let Some(info) = team_reg.get(ctx.birth_branch.as_ref()).await {
+            info
+        } else {
+            warn!(
+                child = %child_branch,
+                "No team found for parent — skipping team propagation to sub-TL"
+            );
+            return;
+        };
+
+        // Derive the sub-TL's identity keys from the branch name
+        let child_birth_branch = format!("{}.{}", ctx.birth_branch, child_branch);
+        let child_agent_name = format!(
+            "{}-claude",
+            crate::services::agent_control::slugify(child_branch)
+        );
+
+        info!(
+            child_agent = %child_agent_name,
+            child_branch = %child_birth_branch,
+            team = %parent_team.team_name,
+            "Propagating parent team to sub-TL"
+        );
+
+        let team_info = claude_teams_bridge::TeamInfo {
+            team_name: parent_team.team_name.clone(),
+            inbox_name: parent_team.inbox_name.clone(),
+        };
+
+        team_reg.register(&child_agent_name, team_info.clone()).await;
+        team_reg.register(&child_birth_branch, team_info.clone()).await;
+
+        // Also register without -claude suffix for broader lookup
+        let slug = crate::services::agent_control::slugify(child_branch);
+        if slug != child_agent_name {
+            team_reg.register(&slug, team_info).await;
+        }
+    }
 }
 
 #[async_trait]
@@ -440,6 +497,18 @@ impl AgentEffects for AgentHandler {
         }
 
         self.register_child_supervisor(&req.branch_name, ctx).await;
+
+        // Register sub-TL as synthetic member so it can receive Teams inbox messages
+        let child_agent_name = format!(
+            "{}-claude",
+            crate::services::agent_control::slugify(&req.branch_name)
+        );
+        self.register_synthetic_member(&child_agent_name, "claude-subtree", ctx)
+            .await;
+
+        // Propagate parent's team to sub-TL's identity keys so the sub-TL can
+        // register its own workers as synthetic members when it spawns them
+        self.propagate_team_to_child(&req.branch_name, ctx).await;
 
         Ok(SpawnSubtreeResponse {
             agent: Some(agent_info),

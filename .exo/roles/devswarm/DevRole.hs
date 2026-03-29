@@ -13,8 +13,7 @@ import Data.Aeson qualified as Aeson
 import ExoMonad
 import ExoMonad.Guest.Tools.FilePR (filePRCore, filePRDescription, filePRSchema, FilePRArgs, FilePROutput (..))
 import ExoMonad.Guest.Tools.Events
-  ( notifyParentCore, notifyParentDescription, notifyParentSchema, NotifyParentArgs (..), NotifyStatus (..),
-    shutdownCore, shutdownDescription, shutdownSchema, ShutdownArgs
+  ( notifyParentCore, notifyParentDescription, notifyParentSchema, NotifyParentArgs (..), NotifyStatus (..)
   )
 import ExoMonad.Guest.Tools.Tasks
   ( taskListCore, taskListDescription, taskListSchema, TaskListArgs,
@@ -64,19 +63,6 @@ instance MCPTool DevNotifyParent where
           Failure -> void $ applyEvent @DevPhase @DevEvent branch DevSpawned (NotifyParentFailure (npMessage args))
         pure $ successResult $ object ["success" .= True]
 
--- | Dev-specific shutdown: transitions to DevDone, then exits.
-data DevShutdown
-
-instance MCPTool DevShutdown where
-  type ToolArgs DevShutdown = ShutdownArgs
-  toolName = "shutdown"
-  toolDescription = shutdownDescription
-  toolSchema = shutdownSchema
-  toolHandlerEff args = do
-    branch <- getCurrentBranch
-    void $ applyEvent @DevPhase @DevEvent branch DevSpawned ShutdownRequested
-    shutdownCore args
-
 data DevTaskList
 
 instance MCPTool DevTaskList where
@@ -120,7 +106,6 @@ data Tools mode = Tools
   { pr :: mode :- DevFilePR,
     notifyParent :: mode :- DevNotifyParent,
     sendMessage :: mode :- SendMessage,
-    shutdown :: mode :- DevShutdown,
     taskList :: mode :- DevTaskList,
     taskGet :: mode :- DevTaskGet,
     taskUpdate :: mode :- DevTaskUpdate
@@ -136,7 +121,6 @@ config =
           { pr = mkHandler @DevFilePR,
             notifyParent = mkHandler @DevNotifyParent,
             sendMessage = mkHandler @SendMessage,
-            shutdown = mkHandler @DevShutdown,
             taskList = mkHandler @DevTaskList,
             taskGet = mkHandler @DevTaskGet,
             taskUpdate = mkHandler @DevTaskUpdate
