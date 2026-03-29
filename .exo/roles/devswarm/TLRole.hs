@@ -16,8 +16,7 @@ import ExoMonad.Guest.StateMachine (applyEvent, StopCheckResult(..), checkExit)
 import ExoMonad.Guest.Effects.StopHook (checkUncommittedWork, getCurrentBranch)
 import ExoMonad.Guest.Tools.FilePR (filePRCore, filePRDescription, filePRSchema, FilePRArgs, FilePROutput (..))
 import ExoMonad.Guest.Tools.Events
-  ( notifyParentCore, notifyParentDescription, notifyParentSchema, NotifyParentArgs (..),
-    shutdownCore, shutdownDescription, shutdownSchema, ShutdownArgs
+  ( notifyParentCore, notifyParentDescription, notifyParentSchema, NotifyParentArgs (..), NotifyStatus (..)
   )
 import ExoMonad.Guest.Tools.MergePR (mergePRCore, mergePRDescription, mergePRSchema, mergePRRender, MergePRArgs (..), MergePROutput (..), extractSlug)
 import ExoMonad.Guest.Tools.Spawn

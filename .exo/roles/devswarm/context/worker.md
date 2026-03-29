@@ -7,7 +7,7 @@ paths:
 
 You run in the parent's directory. No branch, no PR.
 
-Do your task, report results via `notify_parent`, then `shutdown`.
+Do your task, then report results via `notify_parent`. Stay available for follow-up work.
 
 ## Boundaries
 

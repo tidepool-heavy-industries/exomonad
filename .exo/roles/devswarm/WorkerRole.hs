@@ -4,14 +4,13 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
--- | Worker role config: notify_parent + shutdown, allow-all hooks, no state transitions.
+-- | Worker role config: notify_parent + task tools, allow-all hooks, no state transitions.
 module WorkerRole (config, Tools) where
 
 import Data.Aeson (object, (.=))
 import ExoMonad
 import ExoMonad.Guest.Tools.Events
-  ( notifyParentCore, notifyParentDescription, notifyParentSchema, NotifyParentArgs,
-    shutdownCore, shutdownDescription, shutdownSchema, ShutdownArgs
+  ( notifyParentCore, notifyParentDescription, notifyParentSchema, NotifyParentArgs
   )
 import ExoMonad.Guest.Tools.Tasks
   ( taskListCore, taskListDescription, taskListSchema, TaskListArgs,
@@ -34,16 +33,6 @@ instance MCPTool WorkerNotifyParent where
     case result of
       Left err -> pure $ errorResult err
       Right _ -> pure $ successResult $ object ["success" .= True]
-
--- | Worker shutdown: thin wrapper, no phase transitions.
-data WorkerShutdown
-
-instance MCPTool WorkerShutdown where
-  type ToolArgs WorkerShutdown = ShutdownArgs
-  toolName = "shutdown"
-  toolDescription = shutdownDescription
-  toolSchema = shutdownSchema
-  toolHandlerEff = shutdownCore
 
 data WorkerTaskList
 
@@ -87,7 +76,6 @@ instance MCPTool WorkerTaskUpdate where
 data Tools mode = Tools
   { notifyParent :: mode :- WorkerNotifyParent,
     sendMessage :: mode :- SendMessage,
-    shutdown :: mode :- WorkerShutdown,
     taskList :: mode :- WorkerTaskList,
     taskGet :: mode :- WorkerTaskGet,
     taskUpdate :: mode :- WorkerTaskUpdate
@@ -102,7 +90,6 @@ config =
         Tools
           { notifyParent = mkHandler @WorkerNotifyParent,
             sendMessage = mkHandler @SendMessage,
-            shutdown = mkHandler @WorkerShutdown,
             taskList = mkHandler @WorkerTaskList,
             taskGet = mkHandler @WorkerTaskGet,
             taskUpdate = mkHandler @WorkerTaskUpdate
