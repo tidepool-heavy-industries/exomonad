@@ -453,7 +453,6 @@ All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/To
 | `merge_pr` | root, tl | Merge child PR (gh merge + git fetch) |
 | `notify_parent` | tl, dev, worker | Send message to parent agent. Auto-routed via Teams inbox (primary) or tmux STDIN (fallback) |
 | `send_message` | all | Send message to another exomonad-spawned agent (routes via Teams inbox, ACP, UDS, or tmux) |
-| `shutdown` | dev, worker | Gracefully exit: notify parent, close own pane |
 | `task_list` | dev, worker | List tasks from the shared Claude Code task list (auto-resolves team from TeamRegistry) |
 | `task_get` | dev, worker | Get a task by ID from the shared task list |
 | `task_update` | dev, worker | Update task status, owner, or activeForm in the shared task list |

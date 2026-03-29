@@ -79,7 +79,7 @@ The SDK (`wasm-guest`) exports **core I/O functions** and **shared descriptions/
 | SDK Module | Exports | Used by |
 |-----------|---------|---------|
 | `Tools.FilePR` | `filePRCore`, `filePRDescription`, `filePRSchema`, `FilePRArgs`, `FilePROutput` | `DevFilePR`, `TLFilePR` |
-| `Tools.Events` | `notifyParentCore`, `shutdownCore`, descriptions/schemas, `MCPTool SendMessage` | `DevNotifyParent`, `TLNotifyParent`, `WorkerNotifyParent`, `DevShutdown`, `WorkerShutdown` |
+| `Tools.Events` | `notifyParentCore`, `shutdownCore`, descriptions/schemas, `MCPTool SendMessage` | `DevNotifyParent`, `TLNotifyParent`, `WorkerNotifyParent` |
 | `Tools.MergePR` | `mergePRCore`, `mergePRRender`, description/schema, `extractSlug` | `TLMergePR` |
 | `Tools.Spawn` | `forkWaveCore`, `spawnGeminiCore`, `spawnWorkerToolCore`, `spawnLeafSubtreeCore`, `spawnWorkersCore`, descriptions/schemas, render functions | `TLForkWave`, `TLSpawnGemini`, `TLSpawnWorker`, `RootForkWave`, `RootSpawnGemini`, `RootSpawnWorker` |
 | `Tools.Tasks` | `taskListCore`, `taskGetCore`, `taskUpdateCore`, descriptions/schemas | `DevTaskList`, `DevTaskGet`, `DevTaskUpdate`, `WorkerTaskList`, `WorkerTaskGet`, `WorkerTaskUpdate` |
@@ -92,8 +92,8 @@ The SDK (`wasm-guest`) exports **core I/O functions** and **shared descriptions/
 |------|-------|---------------|------------|
 | **root** | `RootForkWave`, `RootSpawnGemini`, `RootSpawnWorker`, `RootMergePR`, `SendMessage` | `TLPhase` (tracks children via `ChildSpawned`/`ChildCompleted`) | `exomonad init` (human-facing TL) |
 | **tl** | `TLForkWave`, `TLSpawnGemini`, `TLSpawnWorker`, `TLMergePR`, `TLFilePR`, `TLNotifyParent`, `SendMessage` | `TLPhase` | `fork_wave` |
-| **dev** | `DevFilePR`, `DevNotifyParent`, `SendMessage`, `DevShutdown`, `DevTaskList`, `DevTaskGet`, `DevTaskUpdate` | `DevPhase` (tracks PR lifecycle) | `spawn_gemini` (worktree) |
-| **worker** | `WorkerNotifyParent`, `SendMessage`, `WorkerShutdown`, `WorkerTaskList`, `WorkerTaskGet`, `WorkerTaskUpdate` | None (ephemeral) | `spawn_worker` |
+| **dev** | `DevFilePR`, `DevNotifyParent`, `SendMessage`, `DevTaskList`, `DevTaskGet`, `DevTaskUpdate` | `DevPhase` (tracks PR lifecycle, parent controls agent exit) | `spawn_gemini` (worktree) |
+| **worker** | `WorkerNotifyParent`, `SendMessage`, `WorkerTaskList`, `WorkerTaskGet`, `WorkerTaskUpdate` | None (ephemeral, parent controls exit) | `spawn_worker` |
 | **testrunner** | `Instruct`, `TestrunnerNotifyParent` | None (allow-all hooks) | Companion config |
 
 ## Hooks
