@@ -15,17 +15,12 @@ pub struct MergePRHandler {
 }
 
 impl MergePRHandler {
-    pub fn new(git_wt: Arc<GitWorktreeService>, github_client: Option<Arc<GitHubClient>>) -> Self {
+    pub fn new(git_wt: Arc<GitWorktreeService>, services: &crate::services::Services) -> Self {
         Self {
             git_wt,
-            github_client,
-            event_log: None,
+            github_client: services.github_client.clone(),
+            event_log: services.event_log.clone(),
         }
-    }
-
-    pub fn with_event_log(mut self, log: Arc<EventLog>) -> Self {
-        self.event_log = Some(log);
-        self
     }
 }
 
@@ -108,6 +103,7 @@ mod tests {
     use super::*;
     use crate::domain::{AgentName, BirthBranch, PRNumber};
     use crate::effects::{EffectContext, EffectHandler};
+    use crate::services::Services;
     use std::path::PathBuf;
 
     fn test_ctx() -> EffectContext {
@@ -122,7 +118,8 @@ mod tests {
     fn test_namespace() {
         let _ctx = test_ctx();
         let git_wt = Arc::new(GitWorktreeService::new(PathBuf::from(".")));
-        let handler = MergePRHandler::new(git_wt, None);
+        let services = Services::test();
+        let handler = MergePRHandler::new(git_wt, &services);
         assert_eq!(handler.namespace(), "merge_pr");
     }
 

@@ -12,7 +12,7 @@ import Control.Monad (void, forM_, when)
 import ExoMonad
 import ExoMonad.Guest.StateMachine (applyEvent)
 import ExoMonad.Guest.Effects.StopHook (getCurrentBranch)
-import ExoMonad.Guest.Tools.MergePR (mergePRCore, mergePRDescription, mergePRSchema, mergePRRender, MergePRArgs (..), MergePROutput (..), extractSlug)
+import ExoMonad.Guest.Tools.MergePR (mergePRCore, mergePRDescription, mergePRSchema, mergePRRender, MergePRArgs (..), MergePROutput (..), extractAgentName)
 import ExoMonad.Guest.Tools.Spawn
   ( forkWaveCore, forkWaveDescription, forkWaveSchema, forkWaveRender, ForkWaveArgs (..), ForkWaveResult (..),
     spawnGeminiCore, spawnGeminiDescription, spawnGeminiSchema, spawnLeafRender, SpawnGeminiArgs (..),
@@ -77,7 +77,7 @@ instance MCPTool RootMergePR where
       Left err -> pure $ errorResult err
       Right output -> do
         when (mpoSuccess output) $ do
-          case extractSlug (mpoBranchName output) of
+          case extractAgentName (mpoBranchName output) of
             Just slug -> do
               branch <- getCurrentBranch
               void $ applyEvent @TLPhase @TLEvent branch TLPlanning (ChildCompleted slug)

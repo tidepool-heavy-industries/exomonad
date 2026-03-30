@@ -96,7 +96,7 @@ The TL never manually reviews code, never fixes a leaf's implementation.
 
 ## Branch Naming
 
-`{parent_branch}.{slug}` (dot separator). PRs target the parent branch, not main. Merged via recursive fold up the tree.
+`{parent_branch}.{slug}-{type}` (dot separator, suffixed). The last dot-segment IS the `AgentName` — one namespace, zero translation. PRs target the parent branch, not main. Merged via recursive fold up the tree.
 
 ## State Machines
 

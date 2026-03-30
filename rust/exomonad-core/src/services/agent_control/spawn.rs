@@ -126,7 +126,18 @@ impl AgentControlService {
 
             // Store window_id for message delivery and cleanup
             let routing = RoutingInfo::window(window_id);
-            self.finalize_spawn(&agent_name, routing).await?;
+            let effective_birth = self.effective_birth_branch(Some(caller_bb));
+            let identity_record = AgentIdentityRecord {
+                agent_name: agent_name.clone(),
+                slug: Slug::from(identity.slug()),
+                agent_type: options.agent_type,
+                birth_branch: BirthBranch::from(branch_name.as_str()),
+                parent_branch: effective_birth,
+                working_dir: agent_dir.clone(),
+                display_name: display_name.clone(),
+                topology: Topology::WorktreePerAgent,
+            };
+            self.finalize_spawn(&agent_name, routing, Some(identity_record)).await?;
 
             self.emit_agent_started(&agent_name)?;
 
@@ -245,7 +256,8 @@ impl AgentControlService {
 
             // Use '.' separator to avoid directory/file conflicts in git refs
             // and avoid ambiguity with '-' word separators in slugs.
-            let branch_name = format!("{}.{}", base_branch, identity.slug());
+            // Branch includes type suffix so rsplit_once('.') yields the AgentName directly.
+            let branch_name = format!("{}.{}", base_branch, agent_name);
             let worktree_path = self.worktree_base.join(agent_name.as_str());
 
             self.create_worktree_checked(&worktree_path, &branch_name, &base_branch)
@@ -289,7 +301,19 @@ impl AgentControlService {
 
             // Store window_id for message delivery and cleanup
             let routing = RoutingInfo::window(window_id);
-            self.finalize_spawn(&agent_name, routing).await?;
+            let effective_birth = self.effective_birth_branch(Some(caller_bb));
+            let child_birth = effective_birth.child(agent_name.as_str());
+            let identity_record = AgentIdentityRecord {
+                agent_name: agent_name.clone(),
+                slug: Slug::from(identity.slug()),
+                agent_type: options.agent_type,
+                birth_branch: child_birth,
+                parent_branch: effective_birth,
+                working_dir: worktree_path.clone(),
+                display_name: display_name.clone(),
+                topology: Topology::WorktreePerAgent,
+            };
+            self.finalize_spawn(&agent_name, routing, Some(identity_record)).await?;
 
             self.emit_agent_started(&agent_name)?;
 
@@ -454,8 +478,9 @@ impl AgentControlService {
             // Write Gemini settings to worker config dir in project root
             fs::create_dir_all(&agent_config_dir).await?;
 
-            // Write parent's birth_branch so the server can resolve it for notify_parent routing.
-            // Workers don't have worktrees, so git-based resolution fails. This file is the fallback.
+            // Legacy .birth_branch file for serve.rs fallback resolution.
+            // identity.json (written via finalize_spawn) is the canonical source,
+            // but keep this for backward compatibility with older server instances.
             let parent_bb = self.effective_birth_branch(Some(&ctx.birth_branch));
             fs::write(agent_config_dir.join(".birth_branch"), parent_bb.as_str()).await?;
             let context_path = self.resolve_role_context(&role);
@@ -500,7 +525,18 @@ impl AgentControlService {
 
             // Store pane_id for message delivery and cleanup
             let routing = RoutingInfo::pane(pane_id, &caller_tab);
-            self.finalize_spawn(&agent_name, routing)
+            let parent_bb = self.effective_birth_branch(Some(&ctx.birth_branch));
+            let identity_record = AgentIdentityRecord {
+                agent_name: agent_name.clone(),
+                slug: Slug::from(identity.slug()),
+                agent_type: AgentType::Gemini,
+                birth_branch: parent_bb.clone(),
+                parent_branch: parent_bb,
+                working_dir: ctx.working_dir.clone(),
+                display_name: display_name.clone(),
+                topology: Topology::SharedDir,
+            };
+            self.finalize_spawn(&agent_name, routing, Some(identity_record))
                 .await?;
 
             self.emit_agent_started(&agent_name)?;
@@ -557,7 +593,7 @@ impl AgentControlService {
             if tab_alive {
                 info!(slug = %identity.slug(), "Subtree already running, returning existing");
                 return Ok(SpawnResult {
-                    agent_dir: self.worktree_base.join(identity.slug()),
+                    agent_dir: self.worktree_base.join(agent_name.as_str()),
                     agent_name,
                     issue_title: options.branch_name.clone(),
                     agent_type,
@@ -570,9 +606,8 @@ impl AgentControlService {
             // Push parent branch so child PRs can reference it as base
             ensure_branch_pushed(&self.git_wt, current_branch, effective_project_dir).await;
 
-            // Branch: {current_branch}.{slug}
-            let slug = identity.slug();
-            let child_birth = effective_birth.child(slug);
+            // Branch: {current_branch}.{agent_name} (suffixed for unified namespace)
+            let child_birth = effective_birth.child(agent_name.as_str());
             let branch_name = child_birth.to_string();
 
             // Path resolution: working_dir overrides the default worktree location.
@@ -581,7 +616,7 @@ impl AgentControlService {
             let (worktree_path, is_custom_dir) = if let Some(ref custom_dir) = options.working_dir {
                 (custom_dir.clone(), true)
             } else {
-                (self.worktree_base.join(slug), false)
+                (self.worktree_base.join(agent_name.as_str()), false)
             };
 
             if options.standalone_repo {
@@ -722,7 +757,17 @@ impl AgentControlService {
 
             // Store window_id for message delivery and cleanup
             let routing = RoutingInfo::window(window_id);
-            self.finalize_spawn(&agent_name, routing)
+            let identity_record = AgentIdentityRecord {
+                agent_name: agent_name.clone(),
+                slug: Slug::from(identity.slug()),
+                agent_type,
+                birth_branch: child_birth,
+                parent_branch: effective_birth,
+                working_dir: worktree_path.clone(),
+                display_name: display_name.clone(),
+                topology: Topology::WorktreePerAgent,
+            };
+            self.finalize_spawn(&agent_name, routing, Some(identity_record))
                 .await?;
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
@@ -774,7 +819,7 @@ impl AgentControlService {
             if tab_alive {
                 info!(slug = %identity.slug(), "Leaf subtree already running, returning existing");
                 return Ok(SpawnResult {
-                    agent_dir: self.worktree_base.join(identity.slug()),
+                    agent_dir: self.worktree_base.join(agent_name.as_str()),
                     agent_name,
                     issue_title: options.branch_name.clone(),
                     agent_type,
@@ -784,11 +829,10 @@ impl AgentControlService {
             // Push parent branch so child PRs can reference it as base
             ensure_branch_pushed(&self.git_wt, &current_branch, effective_project_dir).await;
 
-            let slug = identity.slug();
-            let child_birth = effective_birth.child(slug);
+            let child_birth = effective_birth.child(agent_name.as_str());
             let branch_name = child_birth.to_string();
 
-            let worktree_path = self.worktree_base.join(slug);
+            let worktree_path = self.worktree_base.join(agent_name.as_str());
 
             if options.standalone_repo {
                 self.init_standalone_repo(&worktree_path).await?;
@@ -847,7 +891,17 @@ impl AgentControlService {
 
             // Store window_id for message delivery and cleanup
             let routing = RoutingInfo::window(window_id);
-            self.finalize_spawn(&agent_name, routing)
+            let identity_record = AgentIdentityRecord {
+                agent_name: agent_name.clone(),
+                slug: Slug::from(identity.slug()),
+                agent_type,
+                birth_branch: child_birth,
+                parent_branch: effective_birth,
+                working_dir: worktree_path.clone(),
+                display_name: display_name.clone(),
+                topology: Topology::WorktreePerAgent,
+            };
+            self.finalize_spawn(&agent_name, routing, Some(identity_record))
                 .await?;
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {

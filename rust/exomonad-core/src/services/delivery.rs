@@ -1,5 +1,6 @@
 use crate::domain::Address;
 use crate::services::acp_registry::AcpRegistry;
+use crate::services::agent_resolver::AgentResolver;
 use crate::services::event_queue::EventQueue;
 use crate::services::tmux_events;
 use agent_client_protocol::{Agent, PromptRequest};
@@ -156,6 +157,7 @@ pub async fn route_message(
     address: &Address,
     team_registry: Option<&TeamRegistry>,
     acp_registry: Option<&AcpRegistry>,
+    resolver: Option<&AgentResolver>,
     project_dir: &std::path::Path,
     from: &str,
     content: &str,
@@ -163,7 +165,7 @@ pub async fn route_message(
 ) -> DeliveryOutcome {
     match address {
         Address::Agent(name) => {
-            let tab_name = resolve_tab_name_for_agent(name);
+            let tab_name = resolve_tab_name_for_agent(name, resolver);
             let agent_key = name.as_str();
             let result = deliver_to_agent(
                 team_registry,
@@ -181,7 +183,7 @@ pub async fn route_message(
         Address::Team { team, member } => {
             if let Some(member_name) = member {
                 // Direct team member delivery
-                let tab_name = resolve_tab_name_for_agent(member_name);
+                let tab_name = resolve_tab_name_for_agent(member_name, resolver);
                 let agent_key = member_name.as_str();
                 let result = deliver_to_agent(
                     team_registry,
@@ -201,6 +203,7 @@ pub async fn route_message(
                     team.as_str(),
                     team_registry,
                     acp_registry,
+                    resolver,
                     project_dir,
                     from,
                     content,
@@ -233,6 +236,7 @@ async fn resolve_and_deliver_to_lead(
     team_name: &str,
     team_registry: Option<&TeamRegistry>,
     acp_registry: Option<&AcpRegistry>,
+    resolver: Option<&AgentResolver>,
     project_dir: &std::path::Path,
     from: &str,
     content: &str,
@@ -257,7 +261,7 @@ async fn resolve_and_deliver_to_lead(
     );
 
     let lead_agent = crate::domain::AgentName::from(lead_key.as_str());
-    let tab_name = resolve_tab_name_for_agent(&lead_agent);
+    let tab_name = resolve_tab_name_for_agent(&lead_agent, resolver);
     let result = deliver_to_agent(
         team_registry,
         acp_registry,
@@ -292,13 +296,30 @@ fn delivery_method_from_result(result: DeliveryResult) -> DeliveryMethod {
     }
 }
 
-pub fn resolve_tab_name_for_agent(agent_key: &crate::domain::AgentName) -> String {
+/// Resolve the tmux window/display name for an agent.
+///
+/// Primary path: `AgentResolver` lookup (pre-computed `display_name`).
+/// Derivation fallback: for agents not in the resolver (CC-native teammates
+/// that were never spawned via exomonad and thus never registered).
+pub fn resolve_tab_name_for_agent(
+    agent_key: &crate::domain::AgentName,
+    resolver: Option<&super::agent_resolver::AgentResolver>,
+) -> String {
     if agent_key.as_str() == "root" {
-        "TL".to_string()
-    } else {
-        crate::services::agent_control::AgentType::from_dir_name(agent_key.as_str())
-            .tab_display_name(agent_key.as_str())
+        return "TL".to_string();
     }
+
+    if let Some(resolver) = resolver {
+        if let Ok(records) = resolver.records_ref().try_read() {
+            if let Some(record) = records.get(agent_key) {
+                return record.display_name.clone();
+            }
+        }
+    }
+
+    // Unregistered agent (e.g., CC-native teammate) — derive from name
+    let identity = crate::services::agent_control::AgentIdentity::from_internal_name(agent_key.as_str());
+    identity.display_name()
 }
 
 /// Notify a parent agent. Single codepath for all parent notifications.

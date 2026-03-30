@@ -16,8 +16,10 @@ pub struct CoordinationHandler {
 }
 
 impl CoordinationHandler {
-    pub fn new(registry: Arc<MutexRegistry>) -> Self {
-        Self { registry }
+    pub fn new(services: &crate::services::Services) -> Self {
+        Self {
+            registry: services.mutex_registry.clone(),
+        }
     }
 }
 
@@ -100,6 +102,7 @@ mod tests {
     use super::*;
     use crate::domain::{AgentName, BirthBranch};
     use crate::effects::{EffectContext, EffectHandler};
+    use crate::services::Services;
 
     fn test_ctx() -> EffectContext {
         EffectContext {
@@ -111,15 +114,15 @@ mod tests {
 
     #[test]
     fn test_namespace() {
-        let registry = Arc::new(MutexRegistry::new());
-        let handler = CoordinationHandler::new(registry);
+        let services = Services::test();
+        let handler = CoordinationHandler::new(&services);
         assert_eq!(handler.namespace(), "coordination");
     }
 
     #[tokio::test]
     async fn test_acquire_and_release() {
-        let registry = Arc::new(MutexRegistry::new());
-        let handler = CoordinationHandler::new(registry);
+        let services = Services::test();
+        let handler = CoordinationHandler::new(&services);
         let ctx = test_ctx();
 
         let req = AcquireMutexRequest {
@@ -145,8 +148,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_idempotent_acquire() {
-        let registry = Arc::new(MutexRegistry::new());
-        let handler = CoordinationHandler::new(registry);
+        let services = Services::test();
+        let handler = CoordinationHandler::new(&services);
         let ctx = test_ctx();
 
         let req = AcquireMutexRequest {
@@ -166,8 +169,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_release_wrong_lock_id() {
-        let registry = Arc::new(MutexRegistry::new());
-        let handler = CoordinationHandler::new(registry);
+        let services = Services::test();
+        let handler = CoordinationHandler::new(&services);
         let ctx = test_ctx();
 
         let req = AcquireMutexRequest {

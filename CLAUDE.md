@@ -38,7 +38,7 @@ Within a single TL's scope, work proceeds in waves. Wave N produces merged code.
 
 ### Branch Naming as Coordinate System
 
-`{parent}.{slug}` (dot separator) encodes tree address. `dev.auth.oauth-provider` tells you: root is `dev`, first-level TL is `auth`, leaf is `oauth-provider`. PRs target the parent branch, not main — merged via recursive fold up the tree. The git DAG IS the computation trace.
+`{parent}.{name}` (dot separator) encodes tree address, where `name = {slug}-{type}` (e.g., `auth-claude`, `oauth-provider-gemini`). `dev.auth-claude.oauth-provider-gemini` tells you: root is `dev`, first-level TL is `auth` (Claude), leaf is `oauth-provider` (Gemini). The last dot-segment IS the `AgentName` — one namespace, zero translation. PRs target the parent branch, not main — merged via recursive fold up the tree. The git DAG IS the computation trace.
 
 ---
 
@@ -286,7 +286,7 @@ Spawn heterogeneous agent teams as a recursive tree:
 
 **Standalone repo mode:** Available via the lower-level `spawn_leaf_subtree` core function with `standalone_repo=true`. Creates a fresh `git init` repo instead of a worktree. Claude's native project discovery treats the local `.git` as the boundary — the agent cannot traverse into the parent repository. Use this for information segmentation (e.g., enterprise customers with proprietary root-level IP).
 
-**Branch naming:** `{parent_branch}.{slug}` (dot separator). PRs target parent branch, not main — merged via recursive fold up the tree.
+**Branch naming:** `{parent_branch}.{slug}-{type}` (dot separator, suffixed). PRs target parent branch, not main — merged via recursive fold up the tree.
 
 **Identity:** Birth-branch as session ID (immutable, deterministic). Root TL = "root". Filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/` to discover agents.
 

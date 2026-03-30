@@ -2,19 +2,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::effects::EffectHandler;
-use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::AgentControlService;
-use crate::services::claude_session_registry::ClaudeSessionRegistry;
-use crate::services::event_log::EventLog;
-use crate::services::event_queue::EventQueue;
 use crate::services::filesystem::FileSystemService;
 use crate::services::git::GitService;
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::github::GitHubService;
-use crate::services::mutex_registry::MutexRegistry;
-use crate::services::supervisor_registry::SupervisorRegistry;
 use crate::services::Services;
-use claude_teams_bridge::TeamRegistry;
 
 use super::{
     AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
@@ -25,14 +18,10 @@ use super::{
 /// Core handlers every consumer needs: logging, key-value store, filesystem.
 pub fn core_handlers(
     project_dir: PathBuf,
-    event_log: Option<Arc<EventLog>>,
+    services: &Services,
 ) -> Vec<Box<dyn EffectHandler>> {
-    let mut log_handler = LogHandler::new();
-    if let Some(ref log) = event_log {
-        log_handler = log_handler.with_event_log(log.clone());
-    }
     vec![
-        Box::new(log_handler),
+        Box::new(LogHandler::new(services)),
         Box::new(KvHandler::new(project_dir.clone())),
         Box::new(FsHandler::new(Arc::new(FileSystemService::new(
             project_dir,
@@ -50,17 +39,10 @@ pub fn git_handlers(
     git: Arc<GitService>,
     git_wt: Arc<GitWorktreeService>,
 ) -> Vec<Box<dyn EffectHandler>> {
-    let mut file_pr_handler = FilePRHandler::new(git_wt.clone(), services.github_client.clone());
-    let mut merge_pr_handler = MergePRHandler::new(git_wt, services.github_client.clone());
-    if let Some(ref log) = services.event_log {
-        file_pr_handler = file_pr_handler.with_event_log(log.clone());
-        merge_pr_handler = merge_pr_handler.with_event_log(log.clone());
-    }
-
     let mut handlers: Vec<Box<dyn EffectHandler>> = vec![
         Box::new(GitHandler::new(git)),
-        Box::new(file_pr_handler),
-        Box::new(merge_pr_handler),
+        Box::new(FilePRHandler::new(git_wt.clone(), services)),
+        Box::new(MergePRHandler::new(git_wt, services)),
         Box::new(CopilotHandler::new()),
     ];
     if let Some(ref client) = services.github_client {
@@ -76,48 +58,20 @@ pub fn git_handlers(
 }
 
 /// Orchestration handlers for agent spawning, messaging, and events.
-#[allow(clippy::too_many_arguments)]
 pub fn orchestration_handlers(
     agent_control: Arc<AgentControlService>,
-    event_queue: Arc<EventQueue>,
-    _tmux_session: Option<String>,
+    services: &Services,
     project_dir: PathBuf,
     event_queue_scope: Option<String>,
-    claude_session_registry: Arc<ClaudeSessionRegistry>,
-    team_registry: Arc<TeamRegistry>,
-    acp_registry: Arc<AcpRegistry>,
-    mutex_registry: Arc<MutexRegistry>,
-    event_log: Option<Arc<EventLog>>,
-    supervisor_registry: Arc<SupervisorRegistry>,
 ) -> Vec<Box<dyn EffectHandler>> {
-    let mut agent_handler = AgentHandler::new(agent_control)
-        .with_claude_session_registry(claude_session_registry.clone())
-        .with_acp_registry(acp_registry.clone())
-        .with_supervisor_registry(supervisor_registry.clone())
-        .with_team_registry(team_registry.clone());
-
-    let mut event_handler = EventHandler::new(event_queue, event_queue_scope, project_dir)
-        .with_team_registry(team_registry.clone())
-        .with_acp_registry(acp_registry.clone())
-        .with_supervisor_registry(supervisor_registry.clone());
-
-    if let Some(ref log) = event_log {
-        agent_handler = agent_handler.with_event_log(log.clone());
-        event_handler = event_handler.with_event_log(log.clone());
-    }
-
     let tasks_dir = dirs::home_dir().unwrap_or_default().join(".claude/tasks");
 
     vec![
-        Box::new(agent_handler),
-        Box::new(event_handler),
-        Box::new(
-            SessionHandler::new(claude_session_registry)
-                .with_team_registry(team_registry.clone())
-                .with_supervisor_registry(supervisor_registry),
-        ),
-        Box::new(TasksHandler::new(tasks_dir, Some(team_registry))),
-        Box::new(CoordinationHandler::new(mutex_registry)),
+        Box::new(AgentHandler::new(agent_control, services)),
+        Box::new(EventHandler::new(services, event_queue_scope, project_dir)),
+        Box::new(SessionHandler::new(services)),
+        Box::new(TasksHandler::new(tasks_dir, services)),
+        Box::new(CoordinationHandler::new(services)),
     ]
 }
 
@@ -144,7 +98,8 @@ mod tests {
     #[test]
     fn test_core_handlers() {
         let tmp = tempdir().unwrap();
-        let handlers = core_handlers(tmp.path().to_path_buf(), None);
+        let services = Services::test();
+        let handlers = core_handlers(tmp.path().to_path_buf(), &services);
         assert_eq!(handlers.len(), 4);
         let namespaces: Vec<_> = handlers.iter().map(|h| h.namespace()).collect();
         assert!(namespaces.contains(&"log"));
@@ -159,10 +114,7 @@ mod tests {
         let git = Arc::new(GitService::new(Arc::new(MockExecutor)));
         let git_wt = Arc::new(GitWorktreeService::new(tmp.path().to_path_buf()));
 
-        let services = Services {
-            github_client: None,
-            event_log: None,
-        };
+        let services = Services::test();
         let handlers = git_handlers(&services, git, git_wt);
         assert_eq!(handlers.len(), 4);
         let namespaces: Vec<_> = handlers.iter().map(|h| h.namespace()).collect();
@@ -180,10 +132,8 @@ mod tests {
         let git_wt = Arc::new(GitWorktreeService::new(tmp.path().to_path_buf()));
         let client = GitHubClient::new(5);
 
-        let services = Services {
-            github_client: Some(client),
-            event_log: None,
-        };
+        let mut services = Services::test();
+        services.github_client = Some(client);
         let handlers = git_handlers(&services, git, git_wt);
         assert_eq!(handlers.len(), 5);
         let namespaces: Vec<_> = handlers.iter().map(|h| h.namespace()).collect();

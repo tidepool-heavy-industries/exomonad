@@ -80,7 +80,7 @@ The SDK (`wasm-guest`) exports **core I/O functions** and **shared descriptions/
 |-----------|---------|---------|
 | `Tools.FilePR` | `filePRCore`, `filePRDescription`, `filePRSchema`, `FilePRArgs`, `FilePROutput` | `DevFilePR`, `TLFilePR` |
 | `Tools.Events` | `notifyParentCore`, `shutdownCore`, descriptions/schemas, `MCPTool SendMessage` | `DevNotifyParent`, `TLNotifyParent`, `WorkerNotifyParent` |
-| `Tools.MergePR` | `mergePRCore`, `mergePRRender`, description/schema, `extractSlug` | `TLMergePR` |
+| `Tools.MergePR` | `mergePRCore`, `mergePRRender`, description/schema, `extractAgentName` | `TLMergePR` |
 | `Tools.Spawn` | `forkWaveCore`, `spawnGeminiCore`, `spawnWorkerToolCore`, `spawnLeafSubtreeCore`, `spawnWorkersCore`, descriptions/schemas, render functions | `TLForkWave`, `TLSpawnGemini`, `TLSpawnWorker`, `RootForkWave`, `RootSpawnGemini`, `RootSpawnWorker` |
 | `Tools.Tasks` | `taskListCore`, `taskGetCore`, `taskUpdateCore`, descriptions/schemas | `DevTaskList`, `DevTaskGet`, `DevTaskUpdate`, `WorkerTaskList`, `WorkerTaskGet`, `WorkerTaskUpdate` |
 

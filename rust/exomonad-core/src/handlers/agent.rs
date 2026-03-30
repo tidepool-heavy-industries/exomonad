@@ -31,48 +31,23 @@ use tracing::{info, warn};
 /// the generated `dispatch_agent_effect` function.
 pub struct AgentHandler {
     service: Arc<AgentControlService>,
-    claude_session_registry: Option<Arc<ClaudeSessionRegistry>>,
-    acp_registry: Option<Arc<AcpRegistry>>,
+    claude_session_registry: Arc<ClaudeSessionRegistry>,
+    acp_registry: Arc<AcpRegistry>,
     event_log: Option<Arc<crate::services::event_log::EventLog>>,
-    supervisor_registry: Option<Arc<SupervisorRegistry>>,
-    team_registry: Option<Arc<TeamRegistry>>,
+    supervisor_registry: Arc<SupervisorRegistry>,
+    team_registry: Arc<TeamRegistry>,
 }
 
 impl AgentHandler {
-    pub fn new(service: Arc<AgentControlService>) -> Self {
+    pub fn new(service: Arc<AgentControlService>, services: &crate::services::Services) -> Self {
         Self {
             service,
-            claude_session_registry: None,
-            acp_registry: None,
-            event_log: None,
-            supervisor_registry: None,
-            team_registry: None,
+            claude_session_registry: services.claude_session_registry.clone(),
+            acp_registry: services.acp_registry.clone(),
+            event_log: services.event_log.clone(),
+            supervisor_registry: services.supervisor_registry.clone(),
+            team_registry: services.team_registry.clone(),
         }
-    }
-
-    pub fn with_claude_session_registry(mut self, reg: Arc<ClaudeSessionRegistry>) -> Self {
-        self.claude_session_registry = Some(reg);
-        self
-    }
-
-    pub fn with_event_log(mut self, log: Arc<crate::services::event_log::EventLog>) -> Self {
-        self.event_log = Some(log);
-        self
-    }
-
-    pub fn with_acp_registry(mut self, reg: Arc<AcpRegistry>) -> Self {
-        self.acp_registry = Some(reg);
-        self
-    }
-
-    pub fn with_supervisor_registry(mut self, reg: Arc<SupervisorRegistry>) -> Self {
-        self.supervisor_registry = Some(reg);
-        self
-    }
-
-    pub fn with_team_registry(mut self, reg: Arc<TeamRegistry>) -> Self {
-        self.team_registry = Some(reg);
-        self
     }
 
     /// Auto-register a spawned child in the SupervisorRegistry.
@@ -83,10 +58,8 @@ impl AgentHandler {
         child_key: &str,
         ctx: &crate::effects::EffectContext,
     ) {
-        let (Some(sup_reg), Some(team_reg)) = (&self.supervisor_registry, &self.team_registry)
-        else {
-            return;
-        };
+        let sup_reg = &self.supervisor_registry;
+        let team_reg = &self.team_registry;
         let agent_key = ctx.agent_name.to_string();
         let team_name = if let Some(info) = team_reg.get(&agent_key).await {
             TeamName::from(info.team_name.as_str())
@@ -123,9 +96,7 @@ impl AgentHandler {
         agent_type: &str,
         ctx: &crate::effects::EffectContext,
     ) {
-        let Some(team_reg) = &self.team_registry else {
-            return;
-        };
+        let team_reg = &self.team_registry;
         let agent_key = ctx.agent_name.to_string();
         let team_name = if let Some(info) = team_reg.get(&agent_key).await {
             TeamName::from(info.team_name.as_str())
@@ -164,9 +135,7 @@ impl AgentHandler {
         child_branch: &str,
         ctx: &crate::effects::EffectContext,
     ) {
-        let Some(team_reg) = &self.team_registry else {
-            return;
-        };
+        let team_reg = &self.team_registry;
         let agent_key = ctx.agent_name.to_string();
         let parent_team = if let Some(info) = team_reg.get(&agent_key).await {
             info
@@ -180,13 +149,14 @@ impl AgentHandler {
             return;
         };
 
-        // Derive the sub-TL's identity keys from the branch name
-        let child_birth_branch = format!("{}.{}", ctx.birth_branch, child_branch);
+        // Derive the sub-TL's identity keys from the branch name.
+        // Compute agent_name first, then use it for birth_branch (unified namespace).
         let child_identity = crate::services::agent_control::AgentIdentity::new(
             crate::services::agent_control::slugify(child_branch),
             crate::services::agent_control::AgentType::Claude,
         );
         let child_agent_name = child_identity.internal_name();
+        let child_birth_branch = format!("{}.{}", ctx.birth_branch, child_agent_name);
 
         info!(
             child_agent = %child_agent_name,
@@ -425,30 +395,24 @@ impl AgentEffects for AgentHandler {
         // Default (fork_session=false) starts the child fresh — avoids stale/compacted
         // session IDs causing "No conversation found" errors.
         let parent_session_id = if req.fork_session {
-            if let Some(ref registry) = self.claude_session_registry {
-                let key = if ctx.agent_name.as_str().is_empty() {
-                    crate::domain::AgentName::from("root")
-                } else {
-                    ctx.agent_name.clone()
-                };
-                let claude_uuid = registry.get(key.as_str()).await;
-                info!(
-                    key = %key,
-                    claude_uuid = ?claude_uuid,
-                    "Looked up Claude session UUID for spawn_subtree (fork_session=true)"
-                );
-                if claude_uuid.is_none() {
-                    warn!(
-                        key = %key,
-                        "No Claude session UUID registered — child will start without --fork-session context. Ensure SessionStart hook is configured."
-                    );
-                }
-                claude_uuid.map(|s| ClaudeSessionUuid::from(s.as_str()))
-            } else if !req.parent_session_id.is_empty() {
-                Some(ClaudeSessionUuid::from(req.parent_session_id.as_str()))
+            let key = if ctx.agent_name.as_str().is_empty() {
+                crate::domain::AgentName::from("root")
             } else {
-                None
+                ctx.agent_name.clone()
+            };
+            let claude_uuid = self.claude_session_registry.get(key.as_str()).await;
+            info!(
+                key = %key,
+                claude_uuid = ?claude_uuid,
+                "Looked up Claude session UUID for spawn_subtree (fork_session=true)"
+            );
+            if claude_uuid.is_none() {
+                warn!(
+                    key = %key,
+                    "No Claude session UUID registered — child will start without --fork-session context. Ensure SessionStart hook is configured."
+                );
             }
+            claude_uuid.map(|s| ClaudeSessionUuid::from(s.as_str()))
         } else {
             info!("fork_session=false, child starts fresh");
             None
@@ -583,10 +547,7 @@ impl AgentEffects for AgentHandler {
         req: SpawnAcpRequest,
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<SpawnAcpResponse> {
-        let registry = self
-            .acp_registry
-            .as_ref()
-            .ok_or_else(|| EffectError::custom("agent_error", "ACP registry not configured"))?;
+        let registry = &self.acp_registry;
 
         // Resolve working directory from context
         let working_dir = ctx.working_dir.clone();
@@ -830,32 +791,42 @@ impl AgentEffects for AgentHandler {
         }
 
         // Remove synthetic team member registration after closing.
-        // Parse agent_key into AgentIdentity to get the correct internal_name
-        // (synthetic members are always registered under internal_name).
+        // AgentResolver is the canonical source for agent identity.
         if closed {
-            if let Some(ref team_reg) = self.team_registry {
-                let identity = crate::services::agent_control::AgentIdentity::from_internal_name(
-                    &resolved_internal_name,
-                );
-                let birth_branch_str = ctx.birth_branch.as_str();
-                let team_info = if let Some(info) = team_reg.get(&agent_key).await {
-                    Some(info)
-                } else if let Some(info) = team_reg.get(birth_branch_str).await {
-                    Some(info)
-                } else if let Some(parent) = ctx.birth_branch.parent() {
-                    team_reg.get(parent.as_str()).await
+            {
+                let team_reg = &self.team_registry;
+                let member_name = if let Some(ref resolver) = self.service.agent_resolver {
+                    let name = crate::domain::AgentName::from(resolved_internal_name.as_str());
+                    if let Ok(records) = resolver.records_ref().try_read() {
+                        records.get(&name).map(|r| r.agent_name.clone())
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 };
-                let member_name = identity.internal_name();
-                if let Some(info) = team_info {
-                    let team_name = TeamName::from(info.team_name.as_str());
-                    if let Err(e) = crate::services::synthetic_members::remove_synthetic_member(
-                        &team_name,
-                        &member_name,
-                    ) {
-                        warn!(team = %team_name, member = %member_name, error = %e, "Failed to remove synthetic member on close_self (non-fatal)");
+                if let Some(member_name) = member_name {
+                    let birth_branch_str = ctx.birth_branch.as_str();
+                    let team_info = if let Some(info) = team_reg.get(&agent_key).await {
+                        Some(info)
+                    } else if let Some(info) = team_reg.get(birth_branch_str).await {
+                        Some(info)
+                    } else if let Some(parent) = ctx.birth_branch.parent() {
+                        team_reg.get(parent.as_str()).await
+                    } else {
+                        None
+                    };
+                    if let Some(info) = team_info {
+                        let team_name = TeamName::from(info.team_name.as_str());
+                        if let Err(e) = crate::services::synthetic_members::remove_synthetic_member(
+                            &team_name,
+                            &member_name,
+                        ) {
+                            warn!(team = %team_name, member = %member_name, error = %e, "Failed to remove synthetic member on close_self (non-fatal)");
+                        }
                     }
+                } else {
+                    warn!(agent = %ctx.agent_name, "No resolver record for agent, skipping synthetic member cleanup");
                 }
             }
         }
@@ -1027,7 +998,8 @@ mod tests {
         let dir = PathBuf::from(".");
         let git_wt = Arc::new(GitWorktreeService::new(dir.clone()));
         let service = Arc::new(AgentControlService::new(dir, None, git_wt));
-        AgentHandler::new(service)
+        let services = crate::services::Services::test();
+        AgentHandler::new(service, &services)
     }
 
     #[test]

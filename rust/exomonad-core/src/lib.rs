@@ -87,8 +87,8 @@ pub use plugin_manager::PluginManager;
 #[cfg(feature = "runtime")]
 pub use domain::{
     AbsolutePath, AgentName, BirthBranch, BranchName, ClaudeSessionUuid, CommitSha, DomainError,
-    GithubOwner, GithubRepo, IssueNumber, PRNumber, PathError, Revision, Role, SessionId, TeamName,
-    ToolName, ToolPermission,
+    GithubOwner, GithubRepo, IssueNumber, PRNumber, PathError, Revision, Role, SessionId, Slug,
+    TeamName, ToolName, ToolPermission,
 };
 #[cfg(feature = "runtime")]
 pub use error::{ExoMonadError, Result};

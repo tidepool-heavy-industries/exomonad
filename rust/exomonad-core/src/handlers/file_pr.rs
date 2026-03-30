@@ -27,17 +27,12 @@ pub struct FilePRHandler {
 }
 
 impl FilePRHandler {
-    pub fn new(git_wt: Arc<GitWorktreeService>, github_client: Option<Arc<GitHubClient>>) -> Self {
+    pub fn new(git_wt: Arc<GitWorktreeService>, services: &crate::services::Services) -> Self {
         Self {
             git_wt,
-            github_client,
-            event_log: None,
+            github_client: services.github_client.clone(),
+            event_log: services.event_log.clone(),
         }
-    }
-
-    pub fn with_event_log(mut self, log: Arc<EventLog>) -> Self {
-        self.event_log = Some(log);
-        self
     }
 }
 
@@ -138,6 +133,7 @@ mod tests {
     use super::*;
     use crate::domain::{AgentName, BirthBranch};
     use crate::effects::EffectContext;
+    use crate::services::Services;
     use std::path::PathBuf;
 
     fn test_ctx(branch: &str) -> EffectContext {
@@ -151,7 +147,8 @@ mod tests {
     #[test]
     fn test_namespace() {
         let git_wt = Arc::new(GitWorktreeService::new(PathBuf::from(".")));
-        let handler = FilePRHandler::new(git_wt, None);
+        let services = Services::test();
+        let handler = FilePRHandler::new(git_wt, &services);
         assert_eq!(handler.namespace(), "file_pr");
     }
 

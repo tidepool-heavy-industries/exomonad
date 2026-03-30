@@ -15,7 +15,7 @@ module ExoMonad.Guest.Tools.MergePR
     mergePRDescription,
     mergePRSchema,
     mergePRRender,
-    extractSlug,
+    extractAgentName,
   )
 where
 
@@ -217,9 +217,10 @@ isCopilotReview r =
        in T.isInfixOf "copilot" login
     Nothing -> False
 
--- | Extract the slug (last dot-segment) from a branch name.
-extractSlug :: Text -> Maybe Text
-extractSlug branch
+-- | Extract the agent name (last dot-segment) from a branch name.
+-- After the unified namespace change, the last segment IS the agent name (suffixed).
+extractAgentName :: Text -> Maybe Text
+extractAgentName branch
   | T.null branch = Nothing
   | otherwise = case reverse (T.splitOn "." branch) of
       [] -> Nothing
@@ -282,7 +283,7 @@ doMerge args = do
                 Right pullResp -> pure (Proc.runResponseExitCode pullResp == 0)
 
             -- Auto-cleanup: close agent tab, remove worktree, unregister
-            case extractSlug branchName of
+            case extractAgentName branchName of
               Just slug -> do
                 let cleanupReq =
                       Agent.CleanupRequest

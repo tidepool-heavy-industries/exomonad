@@ -470,4 +470,107 @@ mod tests {
 
         assert!(result.is_err());
     }
+
+    /// End-to-end: simulates the file_pr resolution chain.
+    ///
+    /// Given a dot-separated birth_branch (e.g. "main.remove-option-mcp"):
+    /// 1. resolve_working_dir → ".exo/worktrees/remove-option-mcp/"
+    /// 2. Create a worktree there on that branch
+    /// 3. get_workspace_bookmark → must return "main.remove-option-mcp"
+    ///
+    /// This is the exact chain file_pr uses. If step 3 returns a different
+    /// branch, file_pr will find/update the wrong PR.
+    #[test]
+    fn test_file_pr_resolution_chain_dot_branch() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+
+        // Simulate exomonad's dot-separated branch naming (suffixed agent names)
+        let birth_branch = format!("{}.remove-option-mcp-gemini", default_branch);
+        let branch = BranchName::from(birth_branch.as_str());
+        let base = BranchName::from(default_branch.as_str());
+
+        // Step 1: resolve_working_dir (same logic as EffectContext construction)
+        let relative_dir = crate::services::agent_control::resolve_working_dir(&birth_branch);
+        assert_eq!(
+            relative_dir,
+            std::path::PathBuf::from(".exo/worktrees/remove-option-mcp-gemini/")
+        );
+
+        // Step 2: create worktree at the resolved path (relative to project root)
+        let worktree_path = temp.path().join(&relative_dir);
+        std::fs::create_dir_all(worktree_path.parent().unwrap()).unwrap();
+        service
+            .create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+
+        // Step 3: get_workspace_bookmark must return the dot-separated branch
+        let resolved = service.get_workspace_bookmark(&worktree_path).unwrap();
+        assert_eq!(
+            resolved,
+            Some(birth_branch.clone()),
+            "get_workspace_bookmark must return the exact birth_branch"
+        );
+    }
+
+    /// Same chain but with a deeply nested branch (3 levels).
+    #[test]
+    fn test_file_pr_resolution_chain_deep_nesting() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+
+        let birth_branch = format!("{}.tui-port-2-claude.pdv-snapshot-enums-gemini", default_branch);
+        let branch = BranchName::from(birth_branch.as_str());
+        let base = BranchName::from(default_branch.as_str());
+
+        let relative_dir = crate::services::agent_control::resolve_working_dir(&birth_branch);
+        assert_eq!(
+            relative_dir,
+            std::path::PathBuf::from(".exo/worktrees/pdv-snapshot-enums-gemini/")
+        );
+
+        let worktree_path = temp.path().join(&relative_dir);
+        std::fs::create_dir_all(worktree_path.parent().unwrap()).unwrap();
+        service
+            .create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+
+        let resolved = service.get_workspace_bookmark(&worktree_path).unwrap();
+        assert_eq!(resolved, Some(birth_branch));
+    }
+
+    /// Verify that two sibling agents with different birth branches resolve
+    /// to different worktrees and get_workspace_bookmark returns the correct
+    /// branch for each.
+    #[test]
+    fn test_file_pr_resolution_chain_sibling_isolation() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+        let base = BranchName::from(default_branch.as_str());
+
+        let branch_a = format!("{}.feature-a-claude", default_branch);
+        let branch_b = format!("{}.feature-b-claude", default_branch);
+
+        let dir_a = temp
+            .path()
+            .join(crate::services::agent_control::resolve_working_dir(&branch_a));
+        let dir_b = temp
+            .path()
+            .join(crate::services::agent_control::resolve_working_dir(&branch_b));
+
+        std::fs::create_dir_all(dir_a.parent().unwrap()).unwrap();
+        service
+            .create_workspace(&dir_a, &BranchName::from(branch_a.as_str()), &base)
+            .unwrap();
+        service
+            .create_workspace(&dir_b, &BranchName::from(branch_b.as_str()), &base)
+            .unwrap();
+
+        let resolved_a = service.get_workspace_bookmark(&dir_a).unwrap();
+        let resolved_b = service.get_workspace_bookmark(&dir_b).unwrap();
+
+        assert_eq!(resolved_a, Some(branch_a));
+        assert_eq!(resolved_b, Some(branch_b));
+        assert_ne!(resolved_a, resolved_b);
+    }
 }

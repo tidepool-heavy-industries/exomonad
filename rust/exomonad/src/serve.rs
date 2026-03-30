@@ -88,6 +88,7 @@ pub struct HookState {
     pub tmux_session: String,
     pub default_role: Role,
     pub event_log: Option<Arc<exomonad_core::services::EventLog>>,
+    pub agent_resolver: Arc<exomonad_core::services::AgentResolver>,
 }
 
 // ============================================================================
@@ -157,6 +158,7 @@ pub async fn resolve_plugin(
     worktree_base: &StdPath,
     name: &str,
     wasm_path: &StdPath,
+    agent_resolver: Option<&exomonad_core::services::AgentResolver>,
 ) -> anyhow::Result<Arc<PluginManager>> {
     let agent_name = AgentName::from(name);
 
@@ -194,27 +196,63 @@ pub async fn resolve_plugin(
         return Ok(p);
     }
 
-    // Non-root agents: stable identity, normal cache
-    {
-        let cache = plugins.read().await;
-        if let Some(p) = cache.get(&agent_name) {
-            return Ok(p.clone());
-        }
-    }
+    // Non-root agents: resolver does in-memory lookup first, then probes disk.
+    let (birth_branch, working_dir) = if let Some(resolver) = agent_resolver {
+        resolver.resolve_or_probe(worktree_base, name).await?
+    } else {
+        let bb = resolve_agent_birth_branch(worktree_base, name).await?;
+        let wd = exomonad_core::services::agent_control::resolve_working_dir(bb.as_str());
+        (bb, wd)
+    };
 
-    let birth_branch = resolve_agent_birth_branch(worktree_base, name).await?;
-    get_or_create_plugin(plugins, agent_name, birth_branch, registry, wasm_path).await
+    let ctx = exomonad_core::effects::EffectContext {
+        agent_name: agent_name.clone(),
+        birth_branch,
+        working_dir,
+    };
+    let p = Arc::new(
+        PluginManager::from_file(wasm_path, registry.clone(), ctx)
+            .await
+            .with_context(|| format!("Failed to create plugin for agent {}", agent_name))?,
+    );
+    Ok(p)
 }
 
-pub async fn resolve_agent_birth_branch(
+/// Birth branch resolution for the root agent at server startup.
+///
+/// Only used for the root agent before the resolver is fully initialized.
+/// All other agents use `AgentResolver::resolve_or_probe()`.
+///
+/// Resolution order:
+/// 1. identity.json (canonical, written by finalize_spawn)
+/// 2. Worktree git branch (subtrees have their own git branch)
+/// 3. .birth_branch file (legacy, written by spawn_worker)
+/// 4. Fallback to root (with warning)
+async fn resolve_agent_birth_branch(
     worktree_base: &StdPath,
     agent_name: &str,
 ) -> anyhow::Result<BirthBranch> {
+    // 1. Try identity.json (canonical source)
+    if let Some(exo_dir) = worktree_base.parent() {
+        let identity_path = exo_dir
+            .join("agents")
+            .join(agent_name)
+            .join("identity.json");
+        if let Ok(contents) = tokio::fs::read_to_string(&identity_path).await {
+            if let Ok(record) = serde_json::from_str::<exomonad_core::services::AgentIdentityRecord>(&contents) {
+                tracing::debug!(agent = %agent_name, branch = %record.birth_branch, "Resolved birth branch from identity.json");
+                return Ok(record.birth_branch);
+            }
+        }
+    }
+
+    // 2. Try worktree (subtrees have their own git branch)
+    // Strip known suffixes to get the slug for worktree dir lookup.
     let slug = agent_name
         .trim_end_matches("-claude")
-        .trim_end_matches("-gemini");
-
-    // 1. Try worktree (subtrees have their own git branch)
+        .trim_end_matches("-gemini")
+        .trim_end_matches("-shoal")
+        .trim_end_matches("-process");
     let worktree_path = worktree_base.join(slug);
     match tokio::process::Command::new("git")
         .args(["branch", "--show-current"])
@@ -232,7 +270,7 @@ pub async fn resolve_agent_birth_branch(
         _ => {}
     }
 
-    // 2. Try agent config dir (workers write .birth_branch at spawn time)
+    // 3. Try .birth_branch file (legacy fallback for workers)
     if let Some(exo_dir) = worktree_base.parent() {
         let bb_file = exo_dir
             .join("agents")
@@ -240,15 +278,15 @@ pub async fn resolve_agent_birth_branch(
             .join(".birth_branch");
         if let Ok(contents) = tokio::fs::read_to_string(&bb_file).await {
             let branch = contents.trim().to_string();
-            tracing::debug!(agent = %agent_name, branch = %branch, "Resolved agent birth branch from config file");
+            tracing::debug!(agent = %agent_name, branch = %branch, "Resolved agent birth branch from .birth_branch file");
             return Ok(BirthBranch::from(branch.as_str()));
         }
     }
 
-    // 3. Fallback to root
+    // 4. Fallback to root (with warning — this is a bug if it happens for non-root agents)
     tracing::warn!(
         agent = %agent_name,
-        "Failed to resolve birth branch from worktree or config, falling back to root"
+        "Failed to resolve birth branch from identity.json, worktree, or .birth_branch — falling back to root"
     );
     BirthBranch::root().context("Failed to resolve root birth branch")
 }
@@ -272,6 +310,7 @@ async fn agent_identity_middleware(
         &state.worktree_base,
         &name,
         &wasm_path,
+        Some(&state.agent_resolver),
     )
     .await;
 
@@ -405,9 +444,14 @@ pub async fn handle_hook_inner(
     let mut hook_input_value =
         serde_json::to_value(&hook_input).context("Failed to serialize hook input")?;
 
-    // Resolve agent identity defaults (used for both injection and PluginManager)
+    // Resolve agent identity: try resolver first for authoritative identity,
+    // fall back to query params (which may be inaccurate for hooks fired before first tool call).
     let agent_name_for_hook = AgentName::from(params.agent_id.as_deref().unwrap_or("root"));
-    let birth_branch_for_hook = BirthBranch::from(params.session_id.as_deref().unwrap_or("main"));
+    let birth_branch_for_hook = if let Some(record) = state.agent_resolver.get(&agent_name_for_hook).await {
+        record.birth_branch
+    } else {
+        BirthBranch::from(params.session_id.as_deref().unwrap_or("main"))
+    };
 
     // Always inject identity into WASM input (hooks need it even when env vars aren't set)
     if let serde_json::Value::Object(ref mut map) = hook_input_value {
@@ -843,6 +887,11 @@ Run `exomonad recompile` first to build it.",
     let team_registry = Arc::new(claude_teams_bridge::TeamRegistry::new());
     let acp_registry = Arc::new(exomonad_core::services::acp_registry::AcpRegistry::new());
 
+    // Load canonical agent identity resolver from disk
+    let agent_resolver = Arc::new(
+        exomonad_core::services::AgentResolver::load(project_dir.clone()).await,
+    );
+
     // JSONL event log (parallel to OTel span events, queryable via DuckDB/kaizen)
     let event_log = match exomonad_core::services::EventLog::open(project_dir.join(".exo/logs")) {
         Ok(log) => {
@@ -855,14 +904,32 @@ Run `exomonad recompile` first to build it.",
         }
     };
 
-    let project_dir_for_services = project_dir.clone();
+    let event_queue = Arc::new(exomonad_core::services::event_queue::EventQueue::new());
+    let mutex_registry = Arc::new(exomonad_core::services::MutexRegistry::new());
+    mutex_registry.spawn_expiry_task();
+    let supervisor_registry = Arc::new(exomonad_core::services::SupervisorRegistry::new());
+    let claude_session_registry =
+        Arc::new(exomonad_core::services::claude_session_registry::ClaudeSessionRegistry::new());
+
+    // Build Services once — all shared registries in one struct
+    let services = exomonad_core::services::Services {
+        github_client: github_client.clone(),
+        event_log: event_log.clone(),
+        team_registry: team_registry.clone(),
+        acp_registry: acp_registry.clone(),
+        supervisor_registry,
+        claude_session_registry,
+        agent_resolver: agent_resolver.clone(),
+        event_queue: event_queue.clone(),
+        mutex_registry,
+    };
+
     let mut agent_control = exomonad_core::services::agent_control::AgentControlService::new(
-        project_dir_for_services.clone(),
+        project_dir.clone(),
         github_client.clone(),
         git_wt.clone(),
     )
-    .with_acp_registry(acp_registry.clone())
-    .with_team_registry(team_registry.clone())
+    .with_services(&services)
     .with_wasm_name(wasm_name.clone());
     let worktree_base = config.worktree_base.clone();
     agent_control = agent_control.with_worktree_base(worktree_base.clone());
@@ -874,14 +941,6 @@ Run `exomonad recompile` first to build it.",
         .with_extra_mcp_servers(serialize_extra_mcp_servers(&config.extra_mcp_servers));
     let event_session_id = uuid::Uuid::new_v4().to_string();
     let agent_control = Arc::new(agent_control);
-
-    let event_queue = Arc::new(exomonad_core::services::event_queue::EventQueue::new());
-    let mutex_registry = Arc::new(exomonad_core::services::MutexRegistry::new());
-    mutex_registry.spawn_expiry_task();
-    let supervisor_registry = Arc::new(exomonad_core::services::SupervisorRegistry::new());
-
-    let claude_session_registry =
-        Arc::new(exomonad_core::services::claude_session_registry::ClaudeSessionRegistry::new());
 
     info!(
         wasm_path = %wasm_path.display(),
@@ -905,30 +964,14 @@ Run `exomonad recompile` first to build it.",
             "tasks".to_string(),
         ]);
 
-    builder = builder.with_handlers(exomonad_core::core_handlers(
-        project_dir.clone(),
-        event_log.clone(),
-    ));
-    // Update services with event_log now that it's created
-    let services = exomonad_core::services::Services {
-        github_client: github_client.clone(),
-        event_log: event_log.clone(),
-    };
+    builder = builder.with_handlers(exomonad_core::core_handlers(project_dir.clone(), &services));
     builder = builder.with_handlers(exomonad_core::git_handlers(&services, git, git_wt));
-    let orch_handlers = exomonad_core::orchestration_handlers(
+    builder = builder.with_handlers(exomonad_core::orchestration_handlers(
         agent_control.clone(),
-        event_queue.clone(),
-        Some(config.tmux_session.clone()),
+        &services,
         project_dir.clone(),
         Some(event_session_id),
-        claude_session_registry,
-        team_registry.clone(),
-        acp_registry.clone(),
-        mutex_registry,
-        event_log.clone(),
-        supervisor_registry,
-    );
-    builder = builder.with_handlers(orch_handlers);
+    ));
     let rt = builder.build().await.context("Failed to build runtime")?;
 
     // Extract the shared registry for creating per-agent plugins
@@ -982,21 +1025,16 @@ Run `exomonad recompile` first to build it.",
 
     // Start GitHub Poller (background service)
     let mut poller = exomonad_core::services::github_poller::GitHubPoller::new(
-        event_queue.clone(),
+        services.event_queue.clone(),
         project_dir.clone(),
     )
-    .with_github_client(github_client);
-    poller = poller.with_team_registry(team_registry);
-    poller = poller.with_acp_registry(acp_registry.clone());
-    poller = poller.with_plugins(plugins.clone());
+    .with_services(&services)
+    .with_plugins(plugins.clone());
     if let Some(interval) = config.poll_interval {
         if interval == 0 {
             anyhow::bail!("Invalid configuration: `poll_interval` must be >= 1 second, got 0");
         }
         poller = poller.with_poll_interval(Duration::from_secs(interval));
-    }
-    if let Some(ref log) = event_log {
-        poller = poller.with_event_log(log.clone());
     }
     tokio::spawn(async move {
         poller.run().await;
@@ -1012,6 +1050,7 @@ Run `exomonad recompile` first to build it.",
         worktree_base: worktree_base.clone(),
         event_log: event_log.clone(),
         run_id: run_id.clone(),
+        agent_resolver: agent_resolver.clone(),
     };
 
     let hook_state = HookState {
@@ -1021,6 +1060,7 @@ Run `exomonad recompile` first to build it.",
         tmux_session: config.tmux_session.clone(),
         default_role: config.role.clone(),
         event_log: event_log.clone(),
+        agent_resolver: agent_resolver.clone(),
     };
 
     // Shutdown signal for graceful shutdown via /shutdown endpoint
@@ -1044,7 +1084,7 @@ Run `exomonad recompile` first to build it.",
         .route("/health", get(health))
         .route("/hook", post(handle_hook_request).with_state(hook_state))
         .nest("/agents", agent_routes)
-        .route("/events", post(handle_events).with_state(event_queue))
+        .route("/events", post(handle_events).with_state(services.event_queue.clone()))
         .route("/reload", post(reload))
         .route(
             "/shutdown",

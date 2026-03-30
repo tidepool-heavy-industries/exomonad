@@ -50,8 +50,8 @@ Human in tmux session
 ```
 
 Each subtree agent (`spawn_subtree`):
-- Runs in isolated git worktree at `.exo/worktrees/{slug}/`
-- Branch naming: `{parent_branch}.{slug}` (dot separator for hierarchy)
+- Runs in isolated git worktree at `.exo/worktrees/{slug}-{type}/`
+- Branch naming: `{parent_branch}.{slug}-{type}` (dot separator, suffixed agent name)
 - Gets `.mcp.json` with `{"type": "stdio", "command": "exomonad", "args": ["mcp-stdio", "--role", "tl", "--agent-id", "..."]}`
 - Claude-only, gets TL role (can spawn workers, depth-capped at 2)
 - Session ID = birth-branch (immutable, deterministic). Root TL = "root".

@@ -11,14 +11,14 @@ use tracing::info;
 
 pub struct TasksHandler {
     tasks_dir: PathBuf,
-    team_registry: Option<Arc<TeamRegistry>>,
+    team_registry: Arc<TeamRegistry>,
 }
 
 impl TasksHandler {
-    pub fn new(tasks_dir: PathBuf, team_registry: Option<Arc<TeamRegistry>>) -> Self {
+    pub fn new(tasks_dir: PathBuf, services: &crate::services::Services) -> Self {
         Self {
             tasks_dir,
-            team_registry,
+            team_registry: services.team_registry.clone(),
         }
     }
 
@@ -31,27 +31,26 @@ impl TasksHandler {
             return Some(requested_team.to_string());
         }
 
-        if let Some(ref registry) = self.team_registry {
-            // Try agent_name
-            let key = ctx.agent_name.to_string();
-            if let Some(info) = registry.get(&key).await {
-                return Some(info.team_name);
-            }
+        // Try agent_name
+        let key = ctx.agent_name.to_string();
+        if let Some(info) = self.team_registry.get(&key).await {
+            return Some(info.team_name);
+        }
 
-            // Try birth_branch
-            let bb = ctx.birth_branch.to_string();
-            if let Some(info) = registry.get(&bb).await {
-                return Some(info.team_name);
-            }
+        // Try birth_branch
+        let bb = ctx.birth_branch.to_string();
+        if let Some(info) = self.team_registry.get(&bb).await {
+            return Some(info.team_name);
+        }
 
-            // Try parent birth_branch
-            if let Some(parent) = ctx.birth_branch.parent() {
-                let p_bb = parent.to_string();
-                if let Some(info) = registry.get(&p_bb).await {
-                    return Some(info.team_name);
-                }
+        // Try parent birth_branch
+        if let Some(parent) = ctx.birth_branch.parent() {
+            let p_bb = parent.to_string();
+            if let Some(info) = self.team_registry.get(&p_bb).await {
+                return Some(info.team_name);
             }
         }
+
         None
     }
 }
@@ -233,6 +232,7 @@ mod tests {
     use super::*;
     use crate::domain::{AgentName, BirthBranch};
     use crate::effects::{EffectContext, TasksEffects};
+    use crate::services::Services;
     use tempfile::tempdir;
 
     fn test_ctx() -> EffectContext {
@@ -246,7 +246,8 @@ mod tests {
     #[tokio::test]
     async fn test_list_tasks_empty() {
         let tmp = tempdir().unwrap();
-        let handler = TasksHandler::new(tmp.path().to_path_buf(), None);
+        let services = Services::test();
+        let handler = TasksHandler::new(tmp.path().to_path_buf(), &services);
         let ctx = test_ctx();
 
         let req = ListTasksRequest {
@@ -276,7 +277,8 @@ mod tests {
         }"#;
         fs::write(team_dir.join("1.json"), task_json).await.unwrap();
 
-        let handler = TasksHandler::new(tasks_dir, None);
+        let services = Services::test();
+        let handler = TasksHandler::new(tasks_dir, &services);
         let ctx = test_ctx();
 
         // List

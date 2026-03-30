@@ -18,13 +18,10 @@ pub struct LogHandler {
 }
 
 impl LogHandler {
-    pub fn new() -> Self {
-        Self { event_log: None }
-    }
-
-    pub fn with_event_log(mut self, event_log: Arc<EventLog>) -> Self {
-        self.event_log = Some(event_log);
-        self
+    pub fn new(services: &crate::services::Services) -> Self {
+        Self {
+            event_log: services.event_log.clone(),
+        }
     }
 
     async fn do_log(
@@ -61,11 +58,6 @@ impl LogHandler {
     }
 }
 
-impl Default for LogHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[async_trait]
 impl EffectHandler for LogHandler {
@@ -176,20 +168,18 @@ impl LogEffects for LogHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::Services;
 
     #[test]
     fn test_log_handler_new() {
-        let _handler = LogHandler::new();
-    }
-
-    #[test]
-    fn test_log_handler_default() {
-        let _handler = LogHandler::default();
+        let services = Services::test();
+        let _handler = LogHandler::new(&services);
     }
 
     #[test]
     fn test_log_handler_namespace() {
-        let handler = LogHandler::new();
+        let services = Services::test();
+        let handler = LogHandler::new(&services);
         assert_eq!(handler.namespace(), "log");
     }
 }

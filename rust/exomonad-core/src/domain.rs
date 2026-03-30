@@ -261,6 +261,21 @@ impl ClaudeSessionUuid {
     }
 }
 
+validated_string!(
+    #[doc = "Bare agent slug without type suffix (e.g., `feature-a`)."]
+    #[doc = "Semantically distinct from `AgentName` which includes the type suffix."]
+    Slug,
+    "slug"
+);
+
+#[cfg(test)]
+impl Slug {
+    /// Create from &str (unchecked, for tests).
+    pub fn from_str_unchecked(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
 // ============================================================================
 // GitHub Issue Number
 // ============================================================================

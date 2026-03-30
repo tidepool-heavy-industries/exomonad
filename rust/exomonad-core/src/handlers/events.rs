@@ -5,6 +5,7 @@
 use crate::domain::Address;
 use crate::effects::{dispatch_events_effect, EffectHandler, EffectResult, EventEffects};
 use crate::services::acp_registry::AcpRegistry;
+use crate::services::agent_resolver::AgentResolver;
 use crate::services::supervisor_registry::SupervisorRegistry;
 use crate::services::EventQueue;
 use async_trait::async_trait;
@@ -22,11 +23,13 @@ pub struct EventHandler {
     /// Event queue scope ID (server-internal UUID, NOT the birth-branch).
     event_queue_scope: String,
     /// Claude Teams registry for inbox-based delivery.
-    team_registry: Option<Arc<TeamRegistry>>,
+    team_registry: Arc<TeamRegistry>,
     /// ACP connection registry for prompt-based delivery.
-    acp_registry: Option<Arc<AcpRegistry>>,
+    acp_registry: Arc<AcpRegistry>,
     /// Supervisor registry for child → parent routing.
-    supervisor_registry: Option<Arc<SupervisorRegistry>>,
+    supervisor_registry: Arc<SupervisorRegistry>,
+    /// Canonical agent identity resolver.
+    agent_resolver: Arc<AgentResolver>,
     /// Project root directory for resolving UDS socket paths.
     project_dir: std::path::PathBuf,
     /// JSONL event log for offline analysis.
@@ -35,39 +38,20 @@ pub struct EventHandler {
 
 impl EventHandler {
     pub fn new(
-        queue: Arc<EventQueue>,
+        services: &crate::services::Services,
         event_queue_scope: Option<String>,
         project_dir: std::path::PathBuf,
     ) -> Self {
         Self {
-            queue,
+            queue: services.event_queue.clone(),
             event_queue_scope: event_queue_scope.unwrap_or_else(|| "default".to_string()),
-            team_registry: None,
-            acp_registry: None,
-            supervisor_registry: None,
+            team_registry: services.team_registry.clone(),
+            acp_registry: services.acp_registry.clone(),
+            supervisor_registry: services.supervisor_registry.clone(),
+            agent_resolver: services.agent_resolver.clone(),
             project_dir,
-            event_log: None,
+            event_log: services.event_log.clone(),
         }
-    }
-
-    pub fn with_team_registry(mut self, registry: Arc<TeamRegistry>) -> Self {
-        self.team_registry = Some(registry);
-        self
-    }
-
-    pub fn with_acp_registry(mut self, registry: Arc<AcpRegistry>) -> Self {
-        self.acp_registry = Some(registry);
-        self
-    }
-
-    pub fn with_supervisor_registry(mut self, registry: Arc<SupervisorRegistry>) -> Self {
-        self.supervisor_registry = Some(registry);
-        self
-    }
-
-    pub fn with_event_log(mut self, log: Arc<crate::services::event_log::EventLog>) -> Self {
-        self.event_log = Some(log);
-        self
     }
 }
 
@@ -181,27 +165,23 @@ impl EventEffects for EventHandler {
                 "notify_parent: using override_recipient"
             );
             // Resolve the override address to a concrete agent key for notify_parent_delivery
+            let resolver_ref = Some(&*self.agent_resolver);
             let (parent_session_id, tab_name) = match &override_addr {
                 Address::Agent(name) => {
-                    let tab = crate::services::delivery::resolve_tab_name_for_agent(name);
+                    let tab = crate::services::delivery::resolve_tab_name_for_agent(name, resolver_ref);
                     (name.as_str().to_string(), tab)
                 }
                 Address::Team {
                     member: Some(m), ..
                 } => {
-                    let tab = crate::services::delivery::resolve_tab_name_for_agent(m);
+                    let tab = crate::services::delivery::resolve_tab_name_for_agent(m, resolver_ref);
                     (m.as_str().to_string(), tab)
                 }
                 Address::Team { team, member: None } => {
-                    // Resolve team lead via config.json's leadAgentId
-                    let lead = if let Some(ref registry) = self.team_registry {
-                        registry.resolve_lead(team.as_str()).await
-                    } else {
-                        None
-                    };
+                    let lead = self.team_registry.resolve_lead(team.as_str()).await;
                     let id = lead.unwrap_or_else(|| "root".to_string());
                     let lead_name = crate::domain::AgentName::from(id.as_str());
-                    let tab = crate::services::delivery::resolve_tab_name_for_agent(&lead_name);
+                    let tab = crate::services::delivery::resolve_tab_name_for_agent(&lead_name, resolver_ref);
                     (id, tab)
                 }
                 Address::Supervisor => unreachable!(),
@@ -209,8 +189,8 @@ impl EventEffects for EventHandler {
 
             let status = crate::services::delivery::NotifyStatus::from_str(&req.status);
             crate::services::delivery::notify_parent_delivery(
-                self.team_registry.as_deref(),
-                self.acp_registry.as_deref(),
+                Some(&*self.team_registry),
+                Some(&*self.acp_registry),
                 self.event_log.as_deref(),
                 &self.queue,
                 &self.project_dir,
@@ -227,36 +207,34 @@ impl EventEffects for EventHandler {
         }
 
         // Check SupervisorRegistry for this agent's birth-branch
-        if let Some(ref supervisor_registry) = self.supervisor_registry {
-            if let Some(info) = supervisor_registry.lookup(birth_branch.as_str()).await {
-                tracing::info!(
-                    supervisor = %info.supervisor,
-                    team = %info.team,
-                    "notify_parent: resolved supervisor from registry"
-                );
-                let parent_session_id = info.supervisor.as_str();
-                let supervisor_name = crate::domain::AgentName::from(parent_session_id);
-                let tab_name =
-                    crate::services::delivery::resolve_tab_name_for_agent(&supervisor_name);
+        if let Some(info) = self.supervisor_registry.lookup(birth_branch.as_str()).await {
+            tracing::info!(
+                supervisor = %info.supervisor,
+                team = %info.team,
+                "notify_parent: resolved supervisor from registry"
+            );
+            let parent_session_id = info.supervisor.as_str();
+            let supervisor_name = crate::domain::AgentName::from(parent_session_id);
+            let tab_name =
+                crate::services::delivery::resolve_tab_name_for_agent(&supervisor_name, Some(&*self.agent_resolver));
 
-                let status = crate::services::delivery::NotifyStatus::from_str(&req.status);
-                crate::services::delivery::notify_parent_delivery(
-                    self.team_registry.as_deref(),
-                    self.acp_registry.as_deref(),
-                    self.event_log.as_deref(),
-                    &self.queue,
-                    &self.project_dir,
-                    &agent_id,
-                    parent_session_id,
-                    &tab_name,
-                    status,
-                    &req.message,
-                    None,
-                    "agent",
-                )
-                .await;
-                return Ok(NotifyParentResponse { ack: true });
-            }
+            let status = crate::services::delivery::NotifyStatus::from_str(&req.status);
+            crate::services::delivery::notify_parent_delivery(
+                Some(&*self.team_registry),
+                Some(&*self.acp_registry),
+                self.event_log.as_deref(),
+                &self.queue,
+                &self.project_dir,
+                &agent_id,
+                parent_session_id,
+                &tab_name,
+                status,
+                &req.message,
+                None,
+                "agent",
+            )
+            .await;
+            return Ok(NotifyParentResponse { ack: true });
         }
 
         // Structural fallback: birth-branch parent
@@ -276,12 +254,16 @@ impl EventEffects for EventHandler {
             "notify_parent: routing via structural identity"
         );
 
-        let tab_name = crate::services::agent_control::resolve_parent_tab_name(ctx);
+        let parent_agent = crate::domain::AgentName::from(parent_session_id.as_str());
+        let tab_name = crate::services::delivery::resolve_tab_name_for_agent(
+            &parent_agent,
+            Some(&*self.agent_resolver),
+        );
 
         let status = crate::services::delivery::NotifyStatus::from_str(&req.status);
         crate::services::delivery::notify_parent_delivery(
-            self.team_registry.as_deref(),
-            self.acp_registry.as_deref(),
+            Some(&*self.team_registry),
+            Some(&*self.acp_registry),
             self.event_log.as_deref(),
             &self.queue,
             &self.project_dir,
@@ -328,8 +310,9 @@ impl EventEffects for EventHandler {
 
         let outcome = crate::services::delivery::route_message(
             &address,
-            self.team_registry.as_deref(),
-            self.acp_registry.as_deref(),
+            Some(&*self.team_registry),
+            Some(&*self.acp_registry),
+            Some(&*self.agent_resolver),
             &self.project_dir,
             sender,
             &req.content,
@@ -361,8 +344,8 @@ mod tests {
 
     #[test]
     fn test_event_handler_namespace() {
-        let queue = Arc::new(EventQueue::new());
-        let handler = EventHandler::new(queue, None, std::path::PathBuf::from("."));
+        let services = crate::services::Services::test();
+        let handler = EventHandler::new(&services, None, std::path::PathBuf::from("."));
         assert_eq!(handler.namespace(), "events");
     }
 }

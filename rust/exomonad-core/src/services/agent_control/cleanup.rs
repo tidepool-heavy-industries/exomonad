@@ -21,17 +21,26 @@ impl AgentControlService {
         );
 
         // Parse identifier into AgentIdentity to get consistent slug/internal_name/display_name.
-        // Identifier can be a bare slug ("my-feature") or an internal name ("my-feature-gemini").
-        // AgentIdentity normalizes both forms and prevents suffix doubling.
-        let identity = match agent {
-            Some(a) => {
-                let at = a.agent_type.unwrap_or(AgentType::Gemini);
-                let s = a.slug.as_ref().map(|s| s.as_str()).unwrap_or(identifier);
-                let suffix = format!("-{}", at.suffix());
-                let clean = s.strip_suffix(&suffix).unwrap_or(s);
-                AgentIdentity::new(clean.to_string(), at)
+        // Try resolver first for authoritative identity, then fall back to derivation.
+        let identity = if let Some(ref resolver) = self.agent_resolver {
+            let agent_name_key = AgentName::from(identifier);
+            if let Some(record) = resolver.get(&agent_name_key).await {
+                let slug = record.slug.as_str().to_string();
+                AgentIdentity::new(slug, record.agent_type)
+            } else {
+                AgentIdentity::from_internal_name(identifier)
             }
-            None => AgentIdentity::from_internal_name(identifier),
+        } else {
+            match agent {
+                Some(a) => {
+                    let at = a.agent_type.unwrap_or(AgentType::Gemini);
+                    let s = a.slug.as_ref().map(|s| s.as_str()).unwrap_or(identifier);
+                    let suffix = format!("-{}", at.suffix());
+                    let clean = s.strip_suffix(&suffix).unwrap_or(s);
+                    AgentIdentity::new(clean.to_string(), at)
+                }
+                None => AgentIdentity::from_internal_name(identifier),
+            }
         };
 
         // Remove synthetic team member registration (non-fatal if not registered).
@@ -149,6 +158,13 @@ impl AgentControlService {
                         "Blocking task for git worktree removal panicked or was cancelled (non-fatal)"
                     );
                 }
+            }
+        }
+
+        // Deregister identity from resolver
+        if let Some(ref resolver) = self.agent_resolver {
+            if let Err(e) = resolver.deregister(&internal_name).await {
+                warn!(agent = %internal_name, error = %e, "Failed to deregister agent identity (non-fatal)");
             }
         }
 

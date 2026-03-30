@@ -2,6 +2,7 @@ use crate::domain::{BranchName, CommitSha, PRNumber};
 use crate::plugin_manager::PluginManager;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::AgentType;
+use crate::services::agent_resolver::AgentResolver;
 use crate::services::event_queue::EventQueue;
 use crate::services::github::{map_octo_err, GitHubClient};
 use crate::services::repo;
@@ -28,6 +29,7 @@ pub struct GitHubPoller {
     repo_info: Arc<Mutex<Option<(String, String)>>>, // (owner, name)
     team_registry: Option<Arc<TeamRegistry>>,
     acp_registry: Option<Arc<AcpRegistry>>,
+    agent_resolver: Option<Arc<AgentResolver>>,
     plugins: Option<PluginMap>,
     event_log: Option<Arc<super::event_log::EventLog>>,
     github: Option<Arc<GitHubClient>>,
@@ -281,29 +283,20 @@ impl GitHubPoller {
             repo_info: Arc::new(Mutex::new(None)),
             team_registry: None,
             acp_registry: None,
+            agent_resolver: None,
             plugins: None,
             event_log: None,
             github: None,
         }
     }
 
-    pub fn with_github_client(mut self, client: Option<Arc<GitHubClient>>) -> Self {
-        self.github = client;
-        self
-    }
-
-    pub fn with_event_log(mut self, log: Arc<super::event_log::EventLog>) -> Self {
-        self.event_log = Some(log);
-        self
-    }
-
-    pub fn with_team_registry(mut self, registry: Arc<TeamRegistry>) -> Self {
-        self.team_registry = Some(registry);
-        self
-    }
-
-    pub fn with_acp_registry(mut self, registry: Arc<AcpRegistry>) -> Self {
-        self.acp_registry = Some(registry);
+    /// Set shared registries from Services in one call.
+    pub fn with_services(mut self, services: &super::Services) -> Self {
+        self.team_registry = Some(services.team_registry.clone());
+        self.acp_registry = Some(services.acp_registry.clone());
+        self.agent_resolver = Some(services.agent_resolver.clone());
+        self.event_log = services.event_log.clone();
+        self.github = services.github_client.clone();
         self
     }
 
@@ -497,8 +490,20 @@ impl GitHubPoller {
     ) {
         match action {
             EventActionResponse::InjectMessage { message } => {
-                let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
-                let tab_name = agent_type.tab_display_name(slug);
+                let resolver_ref = self.agent_resolver.as_deref();
+                let agent_name = crate::domain::AgentName::from(branch);
+                let tab_name = if let Some(resolver) = resolver_ref {
+                    if let Ok(records) = resolver.records_ref().try_read() {
+                        records.get(&agent_name).map(|r| r.display_name.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }.unwrap_or_else(|| {
+                    let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
+                    agent_type.tab_display_name(slug)
+                });
                 crate::services::delivery::deliver_to_agent(
                     self.team_registry.as_deref(),
                     self.acp_registry.as_deref(),
@@ -520,16 +525,11 @@ impl GitHubPoller {
                     .rsplit_once('.')
                     .map(|(parent, _)| parent.to_string())
                     .unwrap_or_else(|| "root".to_string());
-                let parent_tab = if parent_session_id == "root" || !parent_session_id.contains('.')
-                {
-                    "TL".to_string()
-                } else {
-                    let parent_slug = parent_session_id
-                        .rsplit_once('.')
-                        .map(|(_, s)| s)
-                        .unwrap_or(&parent_session_id);
-                    AgentType::Claude.tab_display_name(parent_slug)
-                };
+                let parent_name = crate::domain::AgentName::from(parent_session_id.as_str());
+                let parent_tab = crate::services::delivery::resolve_tab_name_for_agent(
+                    &parent_name,
+                    self.agent_resolver.as_deref(),
+                );
 
                 let summary = format!("Auto-notify: PR #{}", pr_num);
                 let agent_name = crate::domain::AgentName::from(agent_slug);

@@ -1,6 +1,7 @@
 pub mod acp_client;
 pub mod acp_registry;
 pub mod agent_control;
+pub mod agent_resolver;
 pub mod claude_session_registry;
 pub mod command;
 pub mod copilot_review;
@@ -28,11 +29,13 @@ pub mod tmux_events;
 pub mod tmux_ipc;
 
 pub use self::acp_registry::AcpRegistry;
+pub use self::agent_resolver::{AgentIdentityRecord, AgentResolver};
 pub use self::agent_control::{
-    resolve_parent_tab_name, resolve_role_context_path, resolve_working_dir,
+    resolve_role_context_path, resolve_working_dir,
     resolve_worktree_from_tab, AgentControlService, AgentInfo, AgentType, BatchCleanupResult,
     BatchSpawnResult, SpawnOptions, SpawnResult,
 };
+pub use self::claude_session_registry::ClaudeSessionRegistry;
 pub use self::event_log::EventLog;
 pub use self::event_queue::EventQueue;
 pub use self::filesystem::FileSystemService;
@@ -41,14 +44,43 @@ pub use self::github::GitHubClient;
 pub use self::mutex_registry::MutexRegistry;
 pub use self::secrets::Secrets;
 pub use self::supervisor_registry::SupervisorRegistry;
+use claude_teams_bridge::TeamRegistry;
 use std::sync::Arc;
 use thiserror::Error;
 
 /// Shared services context, constructed once and threaded through the app.
+///
+/// Contains all shared registries and infrastructure services. Handlers and
+/// services read what they need from this at construction time.
 #[derive(Clone)]
 pub struct Services {
     pub github_client: Option<Arc<GitHubClient>>,
     pub event_log: Option<Arc<EventLog>>,
+    pub team_registry: Arc<TeamRegistry>,
+    pub acp_registry: Arc<AcpRegistry>,
+    pub supervisor_registry: Arc<SupervisorRegistry>,
+    pub claude_session_registry: Arc<ClaudeSessionRegistry>,
+    pub agent_resolver: Arc<AgentResolver>,
+    pub event_queue: Arc<EventQueue>,
+    pub mutex_registry: Arc<MutexRegistry>,
+}
+
+#[cfg(test)]
+impl Services {
+    /// Construct a Services with empty/default registries for testing.
+    pub fn test() -> Self {
+        Self {
+            github_client: None,
+            event_log: None,
+            team_registry: Arc::new(TeamRegistry::new()),
+            acp_registry: Arc::new(AcpRegistry::new()),
+            supervisor_registry: Arc::new(SupervisorRegistry::new()),
+            claude_session_registry: Arc::new(ClaudeSessionRegistry::new()),
+            agent_resolver: Arc::new(AgentResolver::empty()),
+            event_queue: Arc::new(EventQueue::new()),
+            mutex_registry: Arc::new(MutexRegistry::new()),
+        }
+    }
 }
 
 /// Errors that can occur during services validation.

@@ -11,7 +11,8 @@ mod spawn;
 
 pub(crate) use crate::common::TimeoutError;
 pub(crate) use crate::domain::{
-    AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, ItemState, RoutingInfo, TeamName,
+    AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, ItemState, RoutingInfo, Slug,
+    TeamName,
 };
 pub(crate) use crate::effects::EffectError;
 pub(crate) use crate::ffi::FFIBoundary;
@@ -26,6 +27,7 @@ pub(crate) use tokio::time::{timeout, Duration};
 pub(crate) use tracing::{debug, info, instrument, warn};
 
 pub(crate) use super::acp_registry::AcpRegistry;
+pub(crate) use super::agent_resolver::{AgentIdentityRecord, AgentResolver};
 pub(crate) use super::git_worktree::GitWorktreeService;
 pub(crate) use super::github::{GitHubClient, GitHubService, Repo};
 pub(crate) use super::tmux_events;
@@ -73,7 +75,7 @@ pub(crate) async fn ensure_branch_pushed(
 /// # Naming concepts
 /// - **slug**: Bare human-readable identifier (`"feature-a"`)
 /// - **internal_name**: Suffixed directory/identity name as `AgentName` (`"feature-a-claude"`)
-/// - **display_name**: tmux window name (`"🤖 feature-a"`)
+/// - **display_name**: tmux window name (`"🤖 feature-a-claude"`)
 ///
 /// `internal_name()` returns `AgentName` (a validated newtype), not `String`.
 /// This makes it impossible to accidentally pass a bare slug where an internal
@@ -119,9 +121,12 @@ impl AgentIdentity {
         AgentName::from(format!("{}-{}", self.slug, self.agent_type.suffix()).as_str())
     }
 
-    /// tmux window display name (e.g., `"🤖 feature-a"`).
+    /// tmux window display name (e.g., `"🤖 feature-a-claude"`).
+    ///
+    /// Includes the type suffix so `resolve_worktree_from_tab` (which extracts the
+    /// segment after the emoji) yields the internal_name, matching the worktree directory.
     pub fn display_name(&self) -> String {
-        format!("{} {}", self.agent_type.emoji(), self.slug)
+        format!("{} {}", self.agent_type.emoji(), self.internal_name())
     }
 }
 
@@ -245,7 +250,8 @@ impl AgentType {
 /// Used for routing popup requests to the correct plugin instance.
 /// Resolve the working directory for an agent from its birth branch.
 ///
-/// Follows the dot-segment hierarchy: "main.feature-a" -> ".exo/worktrees/feature-a/".
+/// Follows the dot-segment hierarchy: last segment is the agent name (suffixed).
+/// Example: `"main.feature-a-claude"` → `".exo/worktrees/feature-a-claude/"`.
 pub fn resolve_working_dir(birth_branch: &str) -> PathBuf {
     if let Some((_, slug)) = birth_branch.rsplit_once('.') {
         PathBuf::from(format!(".exo/worktrees/{}/", slug))
@@ -256,14 +262,15 @@ pub fn resolve_working_dir(birth_branch: &str) -> PathBuf {
 
 /// Resolve the working directory for an agent from its tmux tab name.
 ///
-/// Tab names are formatted as "{emoji} {slug}" or "TL".
+/// Tab names are formatted as `"{emoji} {agent_name}"` or `"TL"`.
+/// Example: `"💎 feature-a-gemini"` → `".exo/worktrees/feature-a-gemini/"`.
 pub fn resolve_worktree_from_tab(tab: &str) -> PathBuf {
     if tab == "TL" {
         PathBuf::from(".")
     } else {
-        // Tab name is "{emoji} {slug}" (e.g. "💎 feature-a")
-        if let Some((_, slug)) = tab.split_once(' ') {
-            PathBuf::from(format!(".exo/worktrees/{}/", slug))
+        // Tab name is "{emoji} {agent_name}" (e.g. "💎 feature-a-gemini")
+        if let Some((_, agent_name)) = tab.split_once(' ') {
+            PathBuf::from(format!(".exo/worktrees/{}/", agent_name))
         } else {
             PathBuf::from(".")
         }
@@ -274,18 +281,13 @@ pub fn resolve_own_tab_name(ctx: &crate::effects::EffectContext) -> String {
     let birth_branch_str = ctx.birth_branch.as_str();
 
     if birth_branch_str.contains('.') {
-        let slug = birth_branch_str
+        // Last dot-segment is the agent_name (suffixed), matching the tmux tab format.
+        let agent_name = birth_branch_str
             .rsplit_once('.')
             .map(|(_, s)| s)
             .unwrap_or(birth_branch_str);
-        // Subtrees spawned by spawn_subtree are Claude; by spawn_leaf_subtree are Gemini.
-        // The worktree dir name includes the suffix, but birth_branch doesn't.
-        let agent_type = if ctx.agent_name.as_str().ends_with("-gemini") {
-            AgentType::Gemini
-        } else {
-            AgentType::Claude
-        };
-        agent_type.tab_display_name(slug)
+        let agent_type = AgentType::from_dir_name(agent_name);
+        agent_type.tab_display_name(agent_name)
     } else {
         "TL".to_string()
     }
@@ -297,39 +299,6 @@ pub fn resolve_own_tab_name(ctx: &crate::effects::EffectContext) -> String {
 /// Subtree agents: parent is one dot-level up in branch hierarchy.
 /// Root agents (no dots): parent is the TL tab.
 /// Parent tabs are always Claude (TL role), so always use the Claude emoji.
-pub fn resolve_parent_tab_name(ctx: &crate::effects::EffectContext) -> String {
-    let birth_branch_str = ctx.birth_branch.as_str();
-
-    if ctx.agent_name.is_gemini_worker() {
-        // Worker: birth-branch is parent's birth-branch (inherited)
-        if birth_branch_str.contains('.') {
-            let slug = birth_branch_str
-                .rsplit_once('.')
-                .map(|(_, s)| s)
-                .unwrap_or(birth_branch_str);
-            AgentType::Claude.tab_display_name(slug)
-        } else {
-            "TL".to_string()
-        }
-    } else {
-        // Subtree agent: parent is one level up
-        if let Some(parent) = ctx.birth_branch.parent() {
-            if parent.as_str().contains('.') {
-                let slug = parent
-                    .as_str()
-                    .rsplit_once('.')
-                    .map(|(_, s)| s)
-                    .unwrap_or(parent.as_str());
-                AgentType::Claude.tab_display_name(slug)
-            } else {
-                "TL".to_string()
-            }
-        } else {
-            "TL".to_string()
-        }
-    }
-}
-
 /// Options for spawning an agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnOptions {
@@ -562,6 +531,8 @@ pub struct AgentControlService {
     pub(crate) wasm_name: String,
     /// Pre-serialized extra MCP servers to include in spawned agent configs.
     pub(crate) extra_mcp_servers: HashMap<String, serde_json::Value>,
+    /// Canonical agent identity resolver.
+    pub(crate) agent_resolver: Option<Arc<AgentResolver>>,
 }
 
 impl AgentControlService {
@@ -585,6 +556,7 @@ impl AgentControlService {
             yolo: false,
             wasm_name: "devswarm".to_string(),
             extra_mcp_servers: HashMap::new(),
+            agent_resolver: None,
         }
     }
 
@@ -600,15 +572,11 @@ impl AgentControlService {
         self
     }
 
-    /// Set the ACP registry.
-    pub fn with_acp_registry(mut self, registry: Arc<AcpRegistry>) -> Self {
-        self.acp_registry = Some(registry);
-        self
-    }
-
-    /// Set the team registry for resolving agent team membership during cleanup.
-    pub fn with_team_registry(mut self, registry: Arc<TeamRegistry>) -> Self {
-        self.team_registry = Some(registry);
+    /// Set shared registries from Services in one call.
+    pub fn with_services(mut self, services: &super::Services) -> Self {
+        self.acp_registry = Some(services.acp_registry.clone());
+        self.team_registry = Some(services.team_registry.clone());
+        self.agent_resolver = Some(services.agent_resolver.clone());
         self
     }
 
@@ -653,11 +621,13 @@ impl AgentControlService {
 
     /// Common post-spawn bookkeeping.
     ///
-    /// Creates the agent's config directory and writes the routing info.
+    /// Creates the agent's config directory, writes routing info, and registers
+    /// identity with the resolver if available.
     pub(crate) async fn finalize_spawn(
         &self,
         agent_name: &AgentName,
         routing: RoutingInfo,
+        identity: Option<AgentIdentityRecord>,
     ) -> Result<PathBuf> {
         let agent_config_dir = self
             .project_dir
@@ -665,6 +635,14 @@ impl AgentControlService {
             .join(agent_name.as_str());
         fs::create_dir_all(&agent_config_dir).await?;
         routing.write_to_dir(&agent_config_dir).await?;
+
+        if let Some(record) = identity {
+            if let Some(ref resolver) = self.agent_resolver {
+                if let Err(e) = resolver.register(record).await {
+                    warn!(agent = %agent_name, error = %e, "Failed to register agent identity (non-fatal)");
+                }
+            }
+        }
 
         Ok(agent_config_dir)
     }
@@ -713,6 +691,7 @@ impl AgentControlService {
             yolo: false,
             wasm_name: "devswarm".to_string(),
             extra_mcp_servers: HashMap::new(),
+            agent_resolver: None,
         })
     }
 
@@ -996,5 +975,83 @@ mod tests {
         assert!(parse_agent_dir_name("123-test-claude").is_none());
         assert!(parse_agent_dir_name("gh-nohyphens").is_none());
         assert!(parse_agent_dir_name("gh-123").is_none());
+    }
+
+    // =========================================================================
+    // resolve_working_dir tests
+    // =========================================================================
+
+    #[test]
+    fn test_resolve_working_dir_root_branch() {
+        // Root agents (no dots) resolve to project root
+        assert_eq!(resolve_working_dir("main"), PathBuf::from("."));
+        assert_eq!(resolve_working_dir("develop"), PathBuf::from("."));
+        assert_eq!(resolve_working_dir("my-feature"), PathBuf::from("."));
+    }
+
+    #[test]
+    fn test_resolve_working_dir_one_level() {
+        // Single dot: last segment is the agent name (suffixed)
+        assert_eq!(
+            resolve_working_dir("main.feature-a-claude"),
+            PathBuf::from(".exo/worktrees/feature-a-claude/")
+        );
+        assert_eq!(
+            resolve_working_dir("main.remove-option-mcp-gemini"),
+            PathBuf::from(".exo/worktrees/remove-option-mcp-gemini/")
+        );
+    }
+
+    #[test]
+    fn test_resolve_working_dir_nested() {
+        // Multiple dots: agent name is always the LAST segment
+        assert_eq!(
+            resolve_working_dir("main.tui-port-2-claude.pdv-snapshot-enums-gemini"),
+            PathBuf::from(".exo/worktrees/pdv-snapshot-enums-gemini/")
+        );
+        assert_eq!(
+            resolve_working_dir("main.auth-claude.oauth-provider-gemini"),
+            PathBuf::from(".exo/worktrees/oauth-provider-gemini/")
+        );
+        assert_eq!(
+            resolve_working_dir("main.a.b.c.d"),
+            PathBuf::from(".exo/worktrees/d/")
+        );
+    }
+
+    #[test]
+    fn test_resolve_working_dir_agent_name_uniqueness() {
+        // Two different birth branches with the same agent name resolve to the same dir.
+        // This is correct: same agent name = same directory (by design, collision).
+        let dir_a = resolve_working_dir("main.tl-a-claude.my-feature-gemini");
+        let dir_b = resolve_working_dir("main.tl-b-claude.my-feature-gemini");
+        assert_eq!(dir_a, dir_b, "Same agent name = same worktree dir (by design)");
+    }
+
+    // =========================================================================
+    // resolve_worktree_from_tab tests
+    // =========================================================================
+
+    #[test]
+    fn test_resolve_worktree_from_tab_tl() {
+        assert_eq!(resolve_worktree_from_tab("TL"), PathBuf::from("."));
+    }
+
+    #[test]
+    fn test_resolve_worktree_from_tab_emoji_agent_name() {
+        assert_eq!(
+            resolve_worktree_from_tab("💎 feature-a-gemini"),
+            PathBuf::from(".exo/worktrees/feature-a-gemini/")
+        );
+        assert_eq!(
+            resolve_worktree_from_tab("🤖 auth-service-claude"),
+            PathBuf::from(".exo/worktrees/auth-service-claude/")
+        );
+    }
+
+    #[test]
+    fn test_resolve_worktree_from_tab_no_space() {
+        // No space separator: falls back to project root
+        assert_eq!(resolve_worktree_from_tab("unknown"), PathBuf::from("."));
     }
 }

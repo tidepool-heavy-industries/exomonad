@@ -16,27 +16,17 @@ use tracing::info;
 /// Session effect handler.
 pub struct SessionHandler {
     registry: Arc<ClaudeSessionRegistry>,
-    team_registry: Option<Arc<TeamRegistry>>,
-    supervisor_registry: Option<Arc<SupervisorRegistry>>,
+    team_registry: Arc<TeamRegistry>,
+    supervisor_registry: Arc<SupervisorRegistry>,
 }
 
 impl SessionHandler {
-    pub fn new(registry: Arc<ClaudeSessionRegistry>) -> Self {
+    pub fn new(services: &crate::services::Services) -> Self {
         Self {
-            registry,
-            team_registry: None,
-            supervisor_registry: None,
+            registry: services.claude_session_registry.clone(),
+            team_registry: services.team_registry.clone(),
+            supervisor_registry: services.supervisor_registry.clone(),
         }
-    }
-
-    pub fn with_team_registry(mut self, team_registry: Arc<TeamRegistry>) -> Self {
-        self.team_registry = Some(team_registry);
-        self
-    }
-
-    pub fn with_supervisor_registry(mut self, registry: Arc<SupervisorRegistry>) -> Self {
-        self.supervisor_registry = Some(registry);
-        self
     }
 }
 
@@ -96,30 +86,23 @@ impl SessionEffects for SessionHandler {
 
         // Register in-memory only — Claude Code owns team directory lifecycle via TeamCreate.
         // SessionStart hook instructs Claude to call TeamCreate, which creates ~/.claude/teams/{name}/.
-        if let Some(ref team_registry) = self.team_registry {
-            let info = TeamInfo {
-                team_name: req.team_name.clone(),
-                inbox_name: req.inbox_name.clone(),
-            };
+        let team_info = TeamInfo {
+            team_name: req.team_name.clone(),
+            inbox_name: req.inbox_name.clone(),
+        };
 
-            team_registry.register(&key, info.clone()).await;
+        self.team_registry.register(&key, team_info.clone()).await;
 
-            // Also store under birth_branch — notify_parent looks up by parent's birth_branch.
-            let bb = ctx.birth_branch.to_string();
-            if bb != key {
-                info!(key = %bb, team_name = %req.team_name, "Also registering team under birth_branch");
-                team_registry.register(&bb, info.clone()).await;
-            }
+        // Also store under birth_branch — notify_parent looks up by parent's birth_branch.
+        let bb = ctx.birth_branch.to_string();
+        if bb != key {
+            info!(key = %bb, team_name = %req.team_name, "Also registering team under birth_branch");
+            self.team_registry.register(&bb, team_info.clone()).await;
+        }
 
-            // Also store under slug variant for broader lookup
-            if let Some(slug) = key.strip_suffix("-claude") {
-                team_registry.register(slug, info).await;
-            }
-        } else {
-            tracing::warn!(
-                key = %key,
-                "TeamRegistry not available; register_team is a no-op"
-            );
+        // Also store under slug variant for broader lookup
+        if let Some(slug) = key.strip_suffix("-claude") {
+            self.team_registry.register(slug, team_info).await;
         }
 
         Ok(RegisterTeamResponse { success: true })
@@ -130,49 +113,41 @@ impl SessionEffects for SessionHandler {
         req: RegisterSupervisorRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<RegisterSupervisorResponse> {
-        if let Some(ref supervisor_registry) = self.supervisor_registry {
-            let children: Vec<String> = req.children.into_iter().collect();
-            let count = children.len() as i32;
+        let children: Vec<String> = req.children.into_iter().collect();
+        let count = children.len() as i32;
 
-            if req.supervisor.is_empty() || req.team.is_empty() {
-                return Err(crate::effects::EffectError::invalid_input(
-                    "supervisor and team must be non-empty".to_string(),
-                ));
-            }
-
-            let supervisor_name = crate::domain::AgentName::try_from(req.supervisor.clone())
-                .map_err(|e| crate::effects::EffectError::invalid_input(e.to_string()))?;
-            let team_name = crate::domain::TeamName::try_from(req.team.clone())
-                .map_err(|e| crate::effects::EffectError::invalid_input(e.to_string()))?;
-
-            info!(
-                supervisor = %req.supervisor,
-                team = %req.team,
-                children_count = count,
-                "Registering supervisor for children"
-            );
-
-            supervisor_registry
-                .register(
-                    &children,
-                    SupervisorInfo {
-                        supervisor: supervisor_name,
-                        team: team_name,
-                    },
-                )
-                .await;
-
-            Ok(RegisterSupervisorResponse {
-                success: true,
-                registered_count: count,
-            })
-        } else {
-            tracing::warn!("SupervisorRegistry not available; register_supervisor is a no-op");
-            Ok(RegisterSupervisorResponse {
-                success: true,
-                registered_count: 0,
-            })
+        if req.supervisor.is_empty() || req.team.is_empty() {
+            return Err(crate::effects::EffectError::invalid_input(
+                "supervisor and team must be non-empty".to_string(),
+            ));
         }
+
+        let supervisor_name = crate::domain::AgentName::try_from(req.supervisor.clone())
+            .map_err(|e| crate::effects::EffectError::invalid_input(e.to_string()))?;
+        let team_name = crate::domain::TeamName::try_from(req.team.clone())
+            .map_err(|e| crate::effects::EffectError::invalid_input(e.to_string()))?;
+
+        info!(
+            supervisor = %req.supervisor,
+            team = %req.team,
+            children_count = count,
+            "Registering supervisor for children"
+        );
+
+        self.supervisor_registry
+            .register(
+                &children,
+                SupervisorInfo {
+                    supervisor: supervisor_name,
+                    team: team_name,
+                },
+            )
+            .await;
+
+        Ok(RegisterSupervisorResponse {
+            success: true,
+            registered_count: count,
+        })
     }
 
     async fn deregister_supervisor(
@@ -180,14 +155,12 @@ impl SessionEffects for SessionHandler {
         req: DeregisterSupervisorRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<DeregisterSupervisorResponse> {
-        if let Some(ref supervisor_registry) = self.supervisor_registry {
-            let children: Vec<String> = req.children.into_iter().collect();
-            info!(
-                children_count = children.len(),
-                "Deregistering supervisor for children"
-            );
-            supervisor_registry.deregister(&children).await;
-        }
+        let children: Vec<String> = req.children.into_iter().collect();
+        info!(
+            children_count = children.len(),
+            "Deregistering supervisor for children"
+        );
+        self.supervisor_registry.deregister(&children).await;
         Ok(DeregisterSupervisorResponse { success: true })
     }
 
@@ -205,19 +178,17 @@ impl SessionEffects for SessionHandler {
 
         info!(key = %key, "Deregistering Claude Teams info via effect");
 
-        if let Some(ref team_registry) = self.team_registry {
-            team_registry.deregister(&key).await;
+        self.team_registry.deregister(&key).await;
 
-            // Also deregister under birth_branch
-            let bb = ctx.birth_branch.to_string();
-            if bb != key {
-                team_registry.deregister(&bb).await;
-            }
+        // Also deregister under birth_branch
+        let bb = ctx.birth_branch.to_string();
+        if bb != key {
+            self.team_registry.deregister(&bb).await;
+        }
 
-            // Also deregister slug variant
-            if let Some(slug) = key.strip_suffix("-claude") {
-                team_registry.deregister(slug).await;
-            }
+        // Also deregister slug variant
+        if let Some(slug) = key.strip_suffix("-claude") {
+            self.team_registry.deregister(slug).await;
         }
 
         Ok(DeregisterTeamResponse { success: true })
@@ -229,6 +200,7 @@ mod tests {
     use super::*;
     use crate::domain::{AgentName, BirthBranch};
     use crate::effects::{EffectContext, EffectHandler};
+    use crate::services::Services;
 
     fn test_ctx() -> EffectContext {
         EffectContext {
@@ -240,15 +212,15 @@ mod tests {
 
     #[test]
     fn test_namespace() {
-        let registry = Arc::new(ClaudeSessionRegistry::new());
-        let handler = SessionHandler::new(registry);
+        let services = Services::test();
+        let handler = SessionHandler::new(&services);
         assert_eq!(handler.namespace(), "session");
     }
 
     #[tokio::test]
     async fn test_register_claude_id() {
-        let registry = Arc::new(ClaudeSessionRegistry::new());
-        let handler = SessionHandler::new(registry.clone());
+        let services = Services::test();
+        let handler = SessionHandler::new(&services);
         let ctx = test_ctx();
 
         let req = RegisterClaudeSessionRequest {
@@ -258,7 +230,7 @@ mod tests {
         let resp = handler.register_claude_id(req, &ctx).await.unwrap();
         assert!(resp.success);
 
-        let registered = registry.get("test").await.unwrap();
+        let registered = services.claude_session_registry.get("test").await.unwrap();
         assert_eq!(
             registered.to_string(),
             "7343ced0-1d95-450a-8ae5-976fe94421f0"
@@ -267,9 +239,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_team() {
-        let registry = Arc::new(ClaudeSessionRegistry::new());
-        let team_registry = Arc::new(TeamRegistry::new());
-        let handler = SessionHandler::new(registry).with_team_registry(team_registry.clone());
+        let services = Services::test();
+        let handler = SessionHandler::new(&services);
         let ctx = test_ctx();
 
         let req = RegisterTeamRequest {
@@ -280,24 +251,20 @@ mod tests {
         let resp = handler.register_team(req, &ctx).await.unwrap();
         assert!(resp.success);
 
-        // Verify it was registered in team_registry
-        let info = team_registry.get("test").await.unwrap();
+        let info = services.team_registry.get("test").await.unwrap();
         assert_eq!(info.team_name, "test-team");
         assert_eq!(info.inbox_name, "test-inbox");
 
-        // Verify it was registered under birth_branch (main)
-        let info_bb = team_registry.get("main").await.unwrap();
+        let info_bb = services.team_registry.get("main").await.unwrap();
         assert_eq!(info_bb.team_name, "test-team");
     }
 
     #[tokio::test]
     async fn test_deregister_team() {
-        let registry = Arc::new(ClaudeSessionRegistry::new());
-        let team_registry = Arc::new(TeamRegistry::new());
-        let handler = SessionHandler::new(registry).with_team_registry(team_registry.clone());
+        let services = Services::test();
+        let handler = SessionHandler::new(&services);
         let ctx = test_ctx();
 
-        // Register first
         handler
             .register_team(
                 RegisterTeamRequest {
@@ -309,25 +276,23 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(team_registry.get("test").await.is_some());
-        assert!(team_registry.get("main").await.is_some());
+        assert!(services.team_registry.get("test").await.is_some());
+        assert!(services.team_registry.get("main").await.is_some());
 
-        // Deregister
         let resp = handler
             .deregister_team(DeregisterTeamRequest {}, &ctx)
             .await
             .unwrap();
         assert!(resp.success);
 
-        assert!(team_registry.get("test").await.is_none());
-        assert!(team_registry.get("main").await.is_none());
+        assert!(services.team_registry.get("test").await.is_none());
+        assert!(services.team_registry.get("main").await.is_none());
     }
 
     #[tokio::test]
     async fn test_register_team_slug_variant() {
-        let registry = Arc::new(ClaudeSessionRegistry::new());
-        let team_registry = Arc::new(TeamRegistry::new());
-        let handler = SessionHandler::new(registry).with_team_registry(team_registry.clone());
+        let services = Services::test();
+        let handler = SessionHandler::new(&services);
 
         let ctx = EffectContext {
             agent_name: AgentName::from("foo-claude"),
@@ -342,16 +307,14 @@ mod tests {
 
         handler.register_team(req, &ctx).await.unwrap();
 
-        // Should be found under "foo-claude"
-        assert!(team_registry.get("foo-claude").await.is_some());
-        // Should be found under slug "foo"
-        assert!(team_registry.get("foo").await.is_some());
+        assert!(services.team_registry.get("foo-claude").await.is_some());
+        assert!(services.team_registry.get("foo").await.is_some());
     }
 
     #[tokio::test]
     async fn test_register_claude_id_slug_variant() {
-        let registry = Arc::new(ClaudeSessionRegistry::new());
-        let handler = SessionHandler::new(registry.clone());
+        let services = Services::test();
+        let handler = SessionHandler::new(&services);
 
         let ctx = EffectContext {
             agent_name: AgentName::from("foo-claude"),
@@ -365,9 +328,7 @@ mod tests {
 
         handler.register_claude_id(req, &ctx).await.unwrap();
 
-        // Should be found under "foo-claude"
-        assert!(registry.get("foo-claude").await.is_some());
-        // Should be found under slug "foo"
-        assert!(registry.get("foo").await.is_some());
+        assert!(services.claude_session_registry.get("foo-claude").await.is_some());
+        assert!(services.claude_session_registry.get("foo").await.is_some());
     }
 }
