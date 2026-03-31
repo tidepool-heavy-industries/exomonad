@@ -478,6 +478,52 @@ pub enum FilterState {
 }
 
 // ============================================================================
+// Merge Strategy
+// ============================================================================
+
+/// GitHub PR merge strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeStrategy {
+    /// Squash and merge.
+    Squash,
+    /// Create a merge commit.
+    Merge,
+    /// Rebase and merge.
+    Rebase,
+}
+
+impl MergeStrategy {
+    /// Parse a string into a MergeStrategy.
+    pub fn parse(s: &str) -> std::result::Result<Self, DomainError> {
+        match s.to_lowercase().as_str() {
+            "squash" | "" => Ok(Self::Squash),
+            "merge" => Ok(Self::Merge),
+            "rebase" => Ok(Self::Rebase),
+            _ => Err(DomainError::Invalid {
+                field: "merge_strategy",
+                value: s.to_string(),
+            }),
+        }
+    }
+
+    /// Get the strategy as a string slice.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Squash => "squash",
+            Self::Merge => "merge",
+            Self::Rebase => "rebase",
+        }
+    }
+}
+
+impl fmt::Display for MergeStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+// ============================================================================
 // Role
 // ============================================================================
 
@@ -1206,6 +1252,48 @@ mod tests {
         let result =
             serde_json::from_value::<FilterState>(serde_json::Value::String("invalid".into()));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_merge_strategy_parsing() {
+        // Variants
+        assert_eq!(MergeStrategy::parse("squash").unwrap(), MergeStrategy::Squash);
+        assert_eq!(MergeStrategy::parse("merge").unwrap(), MergeStrategy::Merge);
+        assert_eq!(MergeStrategy::parse("rebase").unwrap(), MergeStrategy::Rebase);
+
+        // Case insensitive
+        assert_eq!(MergeStrategy::parse("SQUASH").unwrap(), MergeStrategy::Squash);
+
+        // Default to squash if empty
+        assert_eq!(MergeStrategy::parse("").unwrap(), MergeStrategy::Squash);
+
+        // Invalid
+        let result = MergeStrategy::parse("fast-forward");
+        assert!(matches!(result, Err(DomainError::Invalid { .. })));
+    }
+
+    #[test]
+    fn test_merge_strategy_as_str() {
+        assert_eq!(MergeStrategy::Squash.as_str(), "squash");
+        assert_eq!(MergeStrategy::Merge.as_str(), "merge");
+        assert_eq!(MergeStrategy::Rebase.as_str(), "rebase");
+    }
+
+    #[test]
+    fn test_merge_strategy_display() {
+        assert_eq!(format!("{}", MergeStrategy::Squash), "squash");
+        assert_eq!(format!("{}", MergeStrategy::Merge), "merge");
+        assert_eq!(format!("{}", MergeStrategy::Rebase), "rebase");
+    }
+
+    #[test]
+    fn test_merge_strategy_serde_roundtrip() {
+        for strategy in [MergeStrategy::Squash, MergeStrategy::Merge, MergeStrategy::Rebase] {
+            let json = serde_json::to_string(&strategy).unwrap();
+            let back: MergeStrategy = serde_json::from_str(&json).unwrap();
+            assert_eq!(strategy, back);
+            assert_eq!(json, format!("\"{}\"", strategy.as_str()));
+        }
     }
 
     // =========================================================================

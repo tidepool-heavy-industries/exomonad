@@ -35,10 +35,11 @@ impl MergePrEffects for MergePRHandler {
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<MergePrResponse> {
         let pr_number = crate::domain::PRNumber::new(req.pr_number as u64);
-        tracing::info!(pr_number = pr_number.as_u64(), strategy = %req.strategy, "[MergePR] merge_pr starting");
+        let strategy = crate::domain::MergeStrategy::parse(&req.strategy).effect_err("merge_pr")?;
+        tracing::info!(pr_number = pr_number.as_u64(), strategy = strategy.as_str(), "[MergePR] merge_pr starting");
         let result = merge_pr::merge_pr_async(
             pr_number,
-            &req.strategy,
+            &strategy,
             &req.working_dir,
             self.git_wt.clone(),
             self.github_client.as_deref(),
@@ -55,7 +56,7 @@ impl MergePrEffects for MergePRHandler {
             tracing::info!(
                 otel.name = "pr.merged",
                 pr_number = pr_number.as_u64(),
-                strategy = %req.strategy,
+                strategy = strategy.as_str(),
                 git_fetched = result.git_fetched,
                 "[event] pr.merged"
             );
@@ -65,7 +66,7 @@ impl MergePrEffects for MergePRHandler {
                     ctx.agent_name.as_ref(),
                     &serde_json::json!({
                         "pr_number": pr_number.as_u64(),
-                        "strategy": req.strategy,
+                        "strategy": strategy.as_str(),
                         "git_fetched": result.git_fetched,
                     }),
                 );
@@ -93,7 +94,7 @@ impl MergePrEffects for MergePRHandler {
             success: result.success,
             message: result.message,
             git_fetched: result.git_fetched,
-            branch_name: result.branch_name,
+            branch_name: result.branch_name.to_string(),
         })
     }
 }
