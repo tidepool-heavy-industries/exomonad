@@ -969,9 +969,13 @@ impl GitHubPoller {
             Err(_) => return Ok(CIStatus::Unknown),
         };
 
-        // Simplified logic: if any failure -> failure. If all success -> success. Else pending.
+        // Simplified logic: if any failure -> failure. If all success -> success.
+        // If some success and some neutral -> success (or neutral? GitHub treats skipped as not failing).
+        // If all neutral -> neutral.
         let mut any_failure = false;
         let mut all_success = true;
+        let mut any_neutral = false;
+        let mut any_success = false;
 
         // If no check runs, consider it pending (or none)
         if runs.check_runs.is_empty() {
@@ -982,10 +986,11 @@ impl GitHubPoller {
             match run.conclusion.as_deref() {
                 Some(conclusion) => {
                     let status = CIStatus::parse(conclusion);
-                    if status == CIStatus::Failure {
-                        any_failure = true;
-                    } else if status != CIStatus::Success && status != CIStatus::Neutral {
-                        all_success = false;
+                    match status {
+                        CIStatus::Failure => any_failure = true,
+                        CIStatus::Success => any_success = true,
+                        CIStatus::Neutral => any_neutral = true,
+                        _ => all_success = false,
                     }
                 }
                 None => {
@@ -997,8 +1002,13 @@ impl GitHubPoller {
 
         if any_failure {
             Ok(CIStatus::Failure)
-        } else if all_success {
+        } else if !all_success {
+            Ok(CIStatus::Pending)
+        } else if any_success {
+            // Mixed Success/Neutral is still Success for most purposes
             Ok(CIStatus::Success)
+        } else if any_neutral {
+            Ok(CIStatus::Neutral)
         } else {
             Ok(CIStatus::Pending)
         }

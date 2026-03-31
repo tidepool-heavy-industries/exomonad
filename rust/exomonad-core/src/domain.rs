@@ -540,7 +540,7 @@ pub enum CIStatus {
 
 impl CIStatus {
     pub fn parse(s: &str) -> Self {
-        match s {
+        match s.trim().to_lowercase().as_str() {
             "success" => CIStatus::Success,
             "failure" | "error" | "action_required" | "timed_out" | "cancelled"
             | "startup_failure" => CIStatus::Failure,
@@ -1356,6 +1356,7 @@ mod tests {
     #[test]
     fn test_ci_status_parse() {
         assert_eq!(CIStatus::parse("success"), CIStatus::Success);
+        assert_eq!(CIStatus::parse("SUCCESS "), CIStatus::Success);
         assert_eq!(CIStatus::parse("failure"), CIStatus::Failure);
         assert_eq!(CIStatus::parse("error"), CIStatus::Failure);
         assert_eq!(CIStatus::parse("pending"), CIStatus::Pending);
