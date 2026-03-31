@@ -2,7 +2,7 @@
 //
 // Replaces `gh` CLI subprocess calls with octocrab typed API.
 
-use crate::domain::{BirthBranch, BranchName, PRNumber};
+use crate::domain::{BirthBranch, BranchName, GithubOwner, GithubRepo, PRNumber};
 use crate::services::git;
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::github::{build_octocrab, map_octo_err, GitHubClient};
@@ -83,15 +83,15 @@ fn resolve_base_branch(head: &BranchName, explicit: Option<&BranchName>) -> Bran
 
 async fn find_existing_pr(
     octo: &octocrab::Octocrab,
-    owner: &str,
-    repo: &str,
+    owner: &GithubOwner,
+    repo: &GithubRepo,
     head_branch: &BranchName,
 ) -> Result<Option<GhPr>, FilePrError> {
     // GitHub API requires `owner:ref-name` format for the `head` parameter.
     // Without the prefix, GitHub returns unfiltered results.
     let qualified_head = format!("{}:{}", owner, head_branch);
     let page = octo
-        .pulls(owner, repo)
+        .pulls(owner.as_str(), repo.as_str())
         .list()
         .head(&qualified_head)
         .state(params::State::Open)
@@ -110,14 +110,14 @@ async fn find_existing_pr(
 
 async fn update_pr(
     octo: &octocrab::Octocrab,
-    owner: &str,
-    repo: &str,
+    owner: &GithubOwner,
+    repo: &GithubRepo,
     number: PRNumber,
     title: &str,
     body: &str,
     base: &BranchName,
 ) -> Result<(), FilePrError> {
-    octo.pulls(owner, repo)
+    octo.pulls(owner.as_str(), repo.as_str())
         .update(number.as_u64())
         .title(title)
         .body(body)
@@ -130,15 +130,15 @@ async fn update_pr(
 
 async fn create_pr(
     octo: &octocrab::Octocrab,
-    owner: &str,
-    repo: &str,
+    owner: &GithubOwner,
+    repo: &GithubRepo,
     title: &str,
     body: &str,
     base: &BranchName,
     head: &BranchName,
 ) -> Result<GhPr, FilePrError> {
     let pr = octo
-        .pulls(owner, repo)
+        .pulls(owner.as_str(), repo.as_str())
         .create(title, head.as_str(), base.as_str())
         .body(body)
         .send()

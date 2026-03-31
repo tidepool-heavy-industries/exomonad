@@ -1,3 +1,4 @@
+use crate::domain::{GithubOwner, GithubRepo};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -7,9 +8,9 @@ use tokio::process::Command;
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct RepoInfo {
     /// Repository owner (e.g., "anthropics").
-    pub owner: String,
+    pub owner: GithubOwner,
     /// Repository name (e.g., "exomonad").
-    pub repo: String,
+    pub repo: GithubRepo,
 }
 
 /// Get repository owner and name from git remote.
@@ -39,7 +40,7 @@ pub async fn get_repo_info<P: AsRef<Path>>(working_dir: P) -> Result<RepoInfo> {
 }
 
 /// Parse a GitHub URL (HTTPS or SSH) into (owner, repo) tuple.
-pub fn parse_github_url(url: &str) -> Option<(String, String)> {
+pub fn parse_github_url(url: &str) -> Option<(GithubOwner, GithubRepo)> {
     // Normalize SSH-style GitHub remotes to HTTPS-style.
     let normalized = url.replace("git@github.com:", "https://github.com/");
 
@@ -51,7 +52,7 @@ pub fn parse_github_url(url: &str) -> Option<(String, String)> {
 
     match parts.as_slice() {
         [.., owner, repo] if !owner.is_empty() && !repo.is_empty() => {
-            Some((owner.to_string(), repo.to_string()))
+            Some((GithubOwner::from(*owner), GithubRepo::from(*repo)))
         }
         _ => None,
     }
@@ -64,22 +65,22 @@ mod tests {
     #[test]
     fn test_parse_github_url_https() {
         let (owner, repo) = parse_github_url("https://github.com/anthropics/exomonad").unwrap();
-        assert_eq!(owner, "anthropics");
-        assert_eq!(repo, "exomonad");
+        assert_eq!(owner.as_str(), "anthropics");
+        assert_eq!(repo.as_str(), "exomonad");
     }
 
     #[test]
     fn test_parse_github_url_ssh() {
         let (owner, repo) = parse_github_url("git@github.com:anthropics/exomonad.git").unwrap();
-        assert_eq!(owner, "anthropics");
-        assert_eq!(repo, "exomonad");
+        assert_eq!(owner.as_str(), "anthropics");
+        assert_eq!(repo.as_str(), "exomonad");
     }
 
     #[test]
     fn test_parse_github_url_with_git_suffix() {
         let (owner, repo) = parse_github_url("https://github.com/anthropics/exomonad.git").unwrap();
-        assert_eq!(owner, "anthropics");
-        assert_eq!(repo, "exomonad");
+        assert_eq!(owner.as_str(), "anthropics");
+        assert_eq!(repo.as_str(), "exomonad");
     }
 
     #[test]

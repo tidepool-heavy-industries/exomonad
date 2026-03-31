@@ -54,7 +54,7 @@ pub async fn merge_pr_async(
     // Get branch name before merge to identify potential worktree
     let pr = match tokio::time::timeout(
         Duration::from_secs(10),
-        octo.pulls(&repo_info.owner, &repo_info.repo)
+        octo.pulls(repo_info.owner.as_str(), repo_info.repo.as_str())
             .get(pr_number.as_u64()),
     )
     .await
@@ -77,7 +77,7 @@ pub async fn merge_pr_async(
 
     let result = tokio::time::timeout(
         MERGE_TIMEOUT,
-        octo.pulls(&repo_info.owner, &repo_info.repo)
+        octo.pulls(repo_info.owner.as_str(), repo_info.repo.as_str())
             .merge(pr_number.as_u64())
             .method(merge_method)
             .send(),

@@ -1,4 +1,4 @@
-use crate::domain::{BranchName, CommitSha, PRNumber};
+use crate::domain::{BranchName, CommitSha, GithubOwner, GithubRepo, PRNumber};
 use crate::plugin_manager::PluginManager;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::AgentType;
@@ -26,7 +26,7 @@ pub struct GitHubPoller {
     project_dir: PathBuf,
     poll_interval: Duration,
     state: Arc<Mutex<HashMap<PRNumber, PRState>>>,
-    repo_info: Arc<Mutex<Option<(String, String)>>>, // (owner, name)
+    repo_info: Arc<Mutex<Option<(GithubOwner, GithubRepo)>>>, // (owner, name)
     team_registry: Option<Arc<TeamRegistry>>,
     acp_registry: Option<Arc<AcpRegistry>>,
     agent_resolver: Option<Arc<AgentResolver>>,
@@ -585,7 +585,7 @@ impl GitHubPoller {
         };
 
         let prs_page = octo
-            .pulls(&owner, &repo)
+            .pulls(owner.as_str(), repo.as_str())
             .list()
             .state(params::State::Open)
             .per_page(100)
@@ -711,7 +711,7 @@ impl GitHubPoller {
         Ok(())
     }
 
-    async fn get_repo_info(&self) -> Result<Option<(String, String)>> {
+    async fn get_repo_info(&self) -> Result<Option<(GithubOwner, GithubRepo)>> {
         let mut info_guard = self.repo_info.lock().await;
         if let Some(info) = &*info_guard {
             return Ok(Some(info.clone()));
@@ -771,8 +771,8 @@ impl GitHubPoller {
 
     async fn process_pr(
         &self,
-        owner: &str,
-        repo: &str,
+        owner: &GithubOwner,
+        repo: &GithubRepo,
         branch: &str,
         pr_number: PRNumber,
         pr_sha: &str,
@@ -860,8 +860,8 @@ impl GitHubPoller {
 
     async fn fetch_copilot_activity(
         &self,
-        owner: &str,
-        repo: &str,
+        owner: &GithubOwner,
+        repo: &GithubRepo,
         pr_number: PRNumber,
     ) -> Result<(Vec<CopilotComment>, Vec<CopilotReview>)> {
         let octo = match &self.github {
@@ -875,7 +875,7 @@ impl GitHubPoller {
         // Inline comments (with file context)
         let mut inline_comments = Vec::new();
         let comments_page = octo
-            .pulls(owner, repo)
+            .pulls(owner.as_str(), repo.as_str())
             .list_comments(Some(pr_number.as_u64()))
             .send()
             .await;
@@ -896,7 +896,7 @@ impl GitHubPoller {
         // Reviews (with body text and state)
         let mut copilot_reviews = Vec::new();
         let reviews_page = octo
-            .pulls(owner, repo)
+            .pulls(owner.as_str(), repo.as_str())
             .list_reviews(pr_number.as_u64())
             .send()
             .await;
@@ -925,7 +925,7 @@ impl GitHubPoller {
         Ok((inline_comments, copilot_reviews))
     }
 
-    async fn fetch_ci_status(&self, owner: &str, repo: &str, sha: &str) -> Result<String> {
+    async fn fetch_ci_status(&self, owner: &GithubOwner, repo: &GithubRepo, sha: &str) -> Result<String> {
         let octo = match &self.github {
             Some(client) => match client.get().await {
                 Ok(c) => c,
@@ -935,7 +935,7 @@ impl GitHubPoller {
         };
 
         let runs = match octo
-            .checks(owner, repo)
+            .checks(owner.as_str(), repo.as_str())
             .list_check_runs_for_git_ref(octocrab::params::repos::Commitish(sha.to_string()))
             .send()
             .await

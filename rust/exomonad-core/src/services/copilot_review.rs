@@ -205,7 +205,7 @@ pub async fn wait_for_copilot_review(
 
     loop {
         // Check for inline comments
-        let comments = fetch_pr_comments(&owner, &repo, input.pr_number).await?;
+        let comments = fetch_pr_comments(owner.as_str(), repo.as_str(), input.pr_number).await?;
 
         if !comments.is_empty() {
             info!("[CopilotReview] Found {} Copilot comments", comments.len());
@@ -243,7 +243,7 @@ pub async fn wait_for_copilot_review(
         }
 
         // Also check for review (without inline comments)
-        if fetch_pr_reviews(&owner, &repo, input.pr_number).await? {
+        if fetch_pr_reviews(owner.as_str(), repo.as_str(), input.pr_number).await? {
             info!("[CopilotReview] Found Copilot review (no inline comments)");
 
             // Emit copilot:reviewed event with 0 comments (only if in tmux session)
