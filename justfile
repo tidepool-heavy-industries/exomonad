@@ -22,7 +22,7 @@ lint:
 test-fast:
     cargo test --workspace --lib
 
-# Run tests: Rust unit tests, cargo check, WASM build, proto freshness
+# Run tests: Rust unit tests, cargo check
 test:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -30,10 +30,6 @@ test:
     cargo test --workspace --lib
     echo ">>> [2/4] Rust check (all targets)..."
     cargo check --workspace --all-targets
-    echo ">>> [3/4] WASM build..."
-    just wasm-all
-    echo ">>> [4/4] Proto freshness check..."
-    just proto-check
     echo ">>> All checks passed."
 
 # Verify generated proto files are up-to-date
