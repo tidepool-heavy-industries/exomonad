@@ -395,6 +395,38 @@ pub enum ToolPermission {
 }
 
 // ============================================================================
+// Tmux Layout
+// ============================================================================
+
+/// tmux window layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TmuxLayout {
+    Tiled,
+    EvenHorizontal,
+    EvenVertical,
+    MainHorizontal,
+    MainVertical,
+}
+
+impl TmuxLayout {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TmuxLayout::Tiled => "tiled",
+            TmuxLayout::EvenHorizontal => "even-horizontal",
+            TmuxLayout::EvenVertical => "even-vertical",
+            TmuxLayout::MainHorizontal => "main-horizontal",
+            TmuxLayout::MainVertical => "main-vertical",
+        }
+    }
+}
+
+impl fmt::Display for TmuxLayout {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+// ============================================================================
 // Permission Mode
 // ============================================================================
 
@@ -416,6 +448,31 @@ pub enum PermissionMode {
     DontAsk,
     /// Bypass all permissions.
     BypassPermissions,
+}
+
+impl PermissionMode {
+    /// Parse a string into a PermissionMode.
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "default" => Self::Default,
+            "plan" => Self::Plan,
+            "acceptEdits" => Self::AcceptEdits,
+            "dontAsk" => Self::DontAsk,
+            "bypassPermissions" => Self::BypassPermissions,
+            _ => Self::Default,
+        }
+    }
+
+    /// Get the mode as a string slice.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Plan => "plan",
+            Self::AcceptEdits => "acceptEdits",
+            Self::DontAsk => "dontAsk",
+            Self::BypassPermissions => "bypassPermissions",
+        }
+    }
 }
 
 impl<'de> serde::Deserialize<'de> for PermissionMode {

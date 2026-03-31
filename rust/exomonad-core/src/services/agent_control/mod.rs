@@ -12,7 +12,7 @@ mod spawn;
 pub(crate) use crate::common::TimeoutError;
 pub(crate) use crate::domain::{
     AgentName, AgentPermissions, BirthBranch, BranchName, ClaudeSessionUuid, ItemState,
-    RoutingInfo, Slug, TeamName,
+    PermissionMode, RoutingInfo, Slug, TeamName, TmuxLayout,
 };
 pub(crate) use crate::effects::EffectError;
 pub(crate) use crate::ffi::FFIBoundary;
@@ -336,7 +336,7 @@ pub struct SpawnGeminiTeammateOptions {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ClaudeSpawnFlags {
     /// Permission mode (e.g., "plan", "default"). None = --dangerously-skip-permissions.
-    pub permission_mode: Option<String>,
+    pub permission_mode: Option<PermissionMode>,
     /// Tool patterns to allow (e.g., "Read", "Grep").
     pub allowed_tools: Vec<String>,
     /// Tool patterns to disallow (e.g., "Bash").

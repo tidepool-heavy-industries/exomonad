@@ -2,6 +2,7 @@
 //!
 //! All methods are asynchronous (using `tokio::process::Command`).
 
+use crate::domain::TmuxLayout;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fmt;
@@ -358,10 +359,10 @@ impl TmuxIpc {
     }
 
     /// Apply a tmux layout to a window (e.g. "tiled", "even-vertical", "even-horizontal").
-    pub async fn select_layout(&self, window_id: &WindowId, layout: &str) -> Result<()> {
+    pub async fn select_layout(&self, window_id: &WindowId, layout: TmuxLayout) -> Result<()> {
         let qualified = format!("{}:{}", self.session_name, window_id.as_str());
         let output = Command::new("tmux")
-            .args(["select-layout", "-t", &qualified, layout])
+            .args(["select-layout", "-t", &qualified, layout.as_str()])
             .output()
             .await
             .context("Failed to run tmux select-layout")?;
@@ -371,7 +372,7 @@ impl TmuxIpc {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        info!(window = %window_id, layout, "Applied tmux layout");
+        info!(window = %window_id, layout = %layout, "Applied tmux layout");
         Ok(())
     }
 

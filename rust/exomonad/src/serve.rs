@@ -699,7 +699,7 @@ pub async fn call_tool(
     tracing::info!(tool = %body.name, "Executing tool");
 
     let input = exomonad_core::mcp::tools::MCPCallInput::new(
-        role.clone(),
+        Role::from(role.clone()),
         body.name.clone(),
         body.arguments,
     );

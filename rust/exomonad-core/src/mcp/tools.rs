@@ -5,6 +5,7 @@
 //! - Tool call types for WASM boundary (MCPCallInput/MCPCallOutput)
 
 use super::ToolDefinition;
+use crate::domain::Role;
 use crate::PluginManager;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -22,13 +23,13 @@ use tracing::debug;
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MCPCallInput {
-    role: String,
+    role: Role,
     tool_name: String,
     tool_args: Value,
 }
 
 impl MCPCallInput {
-    pub fn new(role: String, tool_name: String, tool_args: Value) -> Self {
+    pub fn new(role: Role, tool_name: String, tool_args: Value) -> Self {
         Self {
             role,
             tool_name,
@@ -94,7 +95,7 @@ mod tests {
     #[test]
     fn mcp_call_input_serializes_camel_case() {
         let input = MCPCallInput {
-            role: "tl".to_string(),
+            role: Role::from("tl"),
             tool_name: "git_branch".to_string(),
             tool_args: json!({"path": "/tmp"}),
         };
@@ -125,7 +126,7 @@ mod tests {
         });
 
         let input = MCPCallInput {
-            role: "tl".to_string(),
+            role: Role::from("tl"),
             tool_name: "github_get_issue".to_string(),
             tool_args: args.clone(),
         };
@@ -208,7 +209,7 @@ mod tests {
     #[test]
     fn mcp_call_input_empty_args() {
         let input = MCPCallInput {
-            role: "tl".to_string(),
+            role: Role::from("tl"),
             tool_name: "list_agents".to_string(),
             tool_args: json!({}),
         };
@@ -221,7 +222,7 @@ mod tests {
     #[test]
     fn mcp_call_input_nested_args() {
         let input = MCPCallInput {
-            role: "tl".to_string(),
+            role: Role::from("tl"),
             tool_name: "spawn_agents".to_string(),
             tool_args: json!({
                 "issues": ["1", "2", "3"],

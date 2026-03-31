@@ -2,7 +2,9 @@
 //!
 //! Uses proto-generated types from `exomonad_proto::effects::agent`.
 
-use crate::domain::{AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, TeamName};
+use crate::domain::{
+    AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, PermissionMode, TeamName,
+};
 use crate::effects::{
     dispatch_agent_effect, AgentEffects, EffectError, EffectHandler, EffectResult, ResultExt,
     ResultExtPreserve,
@@ -207,8 +209,13 @@ fn claude_spawn_flags(
     allowed_tools: Vec<String>,
     disallowed_tools: Vec<String>,
 ) -> ClaudeSpawnFlags {
+    let mode = if permission_mode.is_empty() {
+        None
+    } else {
+        Some(PermissionMode::parse(&permission_mode))
+    };
     ClaudeSpawnFlags {
-        permission_mode: non_empty(permission_mode),
+        permission_mode: mode,
         allowed_tools,
         disallowed_tools,
     }
