@@ -553,7 +553,7 @@ impl AgentEffects for AgentHandler {
         let working_dir = ctx.working_dir.clone();
 
         // Generate MCP settings for the agent using stdio transport
-        let agent_name = AgentName::from(req.name.as_str());
+        let agent_name = AgentName::try_from(req.name.clone()).effect_err("agent")?;
         let context_path = self
             .service
             .resolve_role_context(&crate::domain::Role::worker());
@@ -600,7 +600,7 @@ impl AgentEffects for AgentHandler {
         .await
         .effect_err("agent")?;
 
-        registry.register(agent_name.clone(), conn).await;
+        registry.register(conn).await;
 
         // Register as synthetic team member (uses TL's actual team, not hardcoded exo-{branch})
         self.register_synthetic_member(&agent_name, "gemini-acp", ctx)

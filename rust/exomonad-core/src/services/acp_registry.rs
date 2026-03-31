@@ -50,7 +50,8 @@ impl AcpRegistry {
         Self::default()
     }
 
-    pub async fn register(&self, agent_id: AgentName, conn: AcpConnection) {
+    pub async fn register(&self, conn: AcpConnection) {
+        let agent_id = conn.agent_id.clone();
         let mut connections = self.connections.write().await;
         tracing::info!(agent = %agent_id, "Registering ACP connection");
         connections.insert(agent_id, Arc::new(conn));
