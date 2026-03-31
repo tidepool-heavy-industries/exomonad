@@ -519,7 +519,10 @@ mod tests {
         let (temp, service) = init_test_repo();
         let default_branch = get_default_branch(temp.path());
 
-        let birth_branch = format!("{}.tui-port-2-claude.pdv-snapshot-enums-gemini", default_branch);
+        let birth_branch = format!(
+            "{}.tui-port-2-claude.pdv-snapshot-enums-gemini",
+            default_branch
+        );
         let branch = BranchName::from(birth_branch.as_str());
         let base = BranchName::from(default_branch.as_str());
 
@@ -707,10 +710,14 @@ mod tests {
 
         let dir_a = temp
             .path()
-            .join(crate::services::agent_control::resolve_working_dir(&branch_a));
+            .join(crate::services::agent_control::resolve_working_dir(
+                &branch_a,
+            ));
         let dir_b = temp
             .path()
-            .join(crate::services::agent_control::resolve_working_dir(&branch_b));
+            .join(crate::services::agent_control::resolve_working_dir(
+                &branch_b,
+            ));
 
         std::fs::create_dir_all(dir_a.parent().unwrap()).unwrap();
         service

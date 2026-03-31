@@ -58,7 +58,6 @@ impl LogHandler {
     }
 }
 
-
 #[async_trait]
 impl EffectHandler for LogHandler {
     fn namespace(&self) -> &str {

@@ -36,7 +36,11 @@ impl MergePrEffects for MergePRHandler {
     ) -> EffectResult<MergePrResponse> {
         let pr_number = crate::domain::PRNumber::new(req.pr_number as u64);
         let strategy = crate::domain::MergeStrategy::parse(&req.strategy).effect_err("merge_pr")?;
-        tracing::info!(pr_number = pr_number.as_u64(), strategy = strategy.as_str(), "[MergePR] merge_pr starting");
+        tracing::info!(
+            pr_number = pr_number.as_u64(),
+            strategy = strategy.as_str(),
+            "[MergePR] merge_pr starting"
+        );
         let result = merge_pr::merge_pr_async(
             pr_number,
             &strategy,

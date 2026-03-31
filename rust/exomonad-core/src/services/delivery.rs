@@ -318,7 +318,8 @@ pub fn resolve_tab_name_for_agent(
     }
 
     // Unregistered agent (e.g., CC-native teammate) — derive from name
-    let identity = crate::services::agent_control::AgentIdentity::from_internal_name(agent_key.as_str());
+    let identity =
+        crate::services::agent_control::AgentIdentity::from_internal_name(agent_key.as_str());
     identity.display_name()
 }
 

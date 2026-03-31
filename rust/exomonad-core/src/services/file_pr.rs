@@ -281,7 +281,10 @@ mod tests {
     fn test_resolve_base_branch_explicit_override() {
         let head = BranchName::from("main.feat");
         let explicit = BranchName::from("develop");
-        assert_eq!(resolve_base_branch(&head, Some(&explicit)), BranchName::from("develop"));
+        assert_eq!(
+            resolve_base_branch(&head, Some(&explicit)),
+            BranchName::from("develop")
+        );
     }
 
     #[test]

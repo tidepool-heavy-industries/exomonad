@@ -328,7 +328,11 @@ mod tests {
 
         handler.register_claude_id(req, &ctx).await.unwrap();
 
-        assert!(services.claude_session_registry.get("foo-claude").await.is_some());
+        assert!(services
+            .claude_session_registry
+            .get("foo-claude")
+            .await
+            .is_some());
         assert!(services.claude_session_registry.get("foo").await.is_some());
     }
 }

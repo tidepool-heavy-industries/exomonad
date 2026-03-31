@@ -55,11 +55,14 @@ impl AgentControlService {
                 .map(|b| b.as_str().to_string())
                 .unwrap_or(default_base);
             let agent_suffix = options.agent_type.suffix();
-            let branch_name = BranchName::from(if self.birth_branch.depth() == 0 {
-                format!("gh-{}/{}-{}", issue_id, slug, agent_suffix)
-            } else {
-                format!("{}/{}-{}", base, slug, agent_suffix)
-            }.as_str());
+            let branch_name = BranchName::from(
+                if self.birth_branch.depth() == 0 {
+                    format!("gh-{}/{}-{}", issue_id, slug, agent_suffix)
+                } else {
+                    format!("{}/{}-{}", base, slug, agent_suffix)
+                }
+                .as_str(),
+            );
 
             // Create worktree
             let worktree_path = self.worktree_base.join(agent_name.as_str());
@@ -110,11 +113,7 @@ impl AgentControlService {
 
             let parent_bb = self.effective_birth_branch(Some(caller_bb));
             let session_branch = BranchName::from(parent_bb.as_str());
-            let env_vars = self.common_spawn_env(
-                &agent_name,
-                &session_branch,
-                &role,
-            );
+            let env_vars = self.common_spawn_env(&agent_name, &session_branch, &role);
 
             // Open tmux window with cwd = worktree_path
             let window_id = self
@@ -140,7 +139,8 @@ impl AgentControlService {
                 display_name: display_name.clone(),
                 topology: Topology::WorktreePerAgent,
             };
-            self.finalize_spawn(&agent_name, routing, Some(identity_record)).await?;
+            self.finalize_spawn(&agent_name, routing, Some(identity_record))
+                .await?;
 
             self.emit_agent_started(&agent_name)?;
 
@@ -261,20 +261,14 @@ impl AgentControlService {
             // Use '.' separator to avoid directory/file conflicts in git refs
             // and avoid ambiguity with '-' word separators in slugs.
             // Branch includes type suffix so rsplit_once('.') yields the AgentName directly.
-            let branch_name = BranchName::from(
-                format!("{}.{}", base_branch, agent_name).as_str(),
-            );
+            let branch_name = BranchName::from(format!("{}.{}", base_branch, agent_name).as_str());
             let worktree_path = self.worktree_base.join(agent_name.as_str());
 
             self.create_worktree_checked(&worktree_path, &branch_name, &base_branch)
                 .await?;
 
             let role = crate::domain::Role::dev();
-            let mut env_vars = self.common_spawn_env(
-                &agent_name,
-                &branch_name,
-                &role,
-            );
+            let mut env_vars = self.common_spawn_env(&agent_name, &branch_name, &role);
 
             // Write per-agent MCP config into the worktree
             self.write_agent_mcp_config(
@@ -319,7 +313,8 @@ impl AgentControlService {
                 display_name: display_name.clone(),
                 topology: Topology::WorktreePerAgent,
             };
-            self.finalize_spawn(&agent_name, routing, Some(identity_record)).await?;
+            self.finalize_spawn(&agent_name, routing, Some(identity_record))
+                .await?;
 
             self.emit_agent_started(&agent_name)?;
 

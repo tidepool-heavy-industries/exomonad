@@ -71,25 +71,25 @@ impl AgentResolver {
                         let identity_path = entry.path().join(IDENTITY_FILENAME);
                         if identity_path.exists() {
                             match tokio::fs::read_to_string(&identity_path).await {
-                                Ok(contents) => match serde_json::from_str::<AgentIdentityRecord>(
-                                    &contents,
-                                ) {
-                                    Ok(record) => {
-                                        debug!(
-                                            agent = %record.agent_name,
-                                            branch = %record.birth_branch,
-                                            "Loaded agent identity"
-                                        );
-                                        records.insert(record.agent_name.clone(), record);
+                                Ok(contents) => {
+                                    match serde_json::from_str::<AgentIdentityRecord>(&contents) {
+                                        Ok(record) => {
+                                            debug!(
+                                                agent = %record.agent_name,
+                                                branch = %record.birth_branch,
+                                                "Loaded agent identity"
+                                            );
+                                            records.insert(record.agent_name.clone(), record);
+                                        }
+                                        Err(e) => {
+                                            warn!(
+                                                path = %identity_path.display(),
+                                                error = %e,
+                                                "Failed to parse identity.json, skipping"
+                                            );
+                                        }
                                     }
-                                    Err(e) => {
-                                        warn!(
-                                            path = %identity_path.display(),
-                                            error = %e,
-                                            "Failed to parse identity.json, skipping"
-                                        );
-                                    }
-                                },
+                                }
                                 Err(e) => {
                                     warn!(
                                         path = %identity_path.display(),

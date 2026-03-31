@@ -500,7 +500,8 @@ impl GitHubPoller {
                     }
                 } else {
                     None
-                }.unwrap_or_else(|| {
+                }
+                .unwrap_or_else(|| {
                     let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
                     agent_type.tab_display_name(slug)
                 });

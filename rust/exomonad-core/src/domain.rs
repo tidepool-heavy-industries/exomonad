@@ -1257,12 +1257,21 @@ mod tests {
     #[test]
     fn test_merge_strategy_parsing() {
         // Variants
-        assert_eq!(MergeStrategy::parse("squash").unwrap(), MergeStrategy::Squash);
+        assert_eq!(
+            MergeStrategy::parse("squash").unwrap(),
+            MergeStrategy::Squash
+        );
         assert_eq!(MergeStrategy::parse("merge").unwrap(), MergeStrategy::Merge);
-        assert_eq!(MergeStrategy::parse("rebase").unwrap(), MergeStrategy::Rebase);
+        assert_eq!(
+            MergeStrategy::parse("rebase").unwrap(),
+            MergeStrategy::Rebase
+        );
 
         // Case insensitive
-        assert_eq!(MergeStrategy::parse("SQUASH").unwrap(), MergeStrategy::Squash);
+        assert_eq!(
+            MergeStrategy::parse("SQUASH").unwrap(),
+            MergeStrategy::Squash
+        );
 
         // Default to squash if empty
         assert_eq!(MergeStrategy::parse("").unwrap(), MergeStrategy::Squash);
@@ -1288,7 +1297,11 @@ mod tests {
 
     #[test]
     fn test_merge_strategy_serde_roundtrip() {
-        for strategy in [MergeStrategy::Squash, MergeStrategy::Merge, MergeStrategy::Rebase] {
+        for strategy in [
+            MergeStrategy::Squash,
+            MergeStrategy::Merge,
+            MergeStrategy::Rebase,
+        ] {
             let json = serde_json::to_string(&strategy).unwrap();
             let back: MergeStrategy = serde_json::from_str(&json).unwrap();
             assert_eq!(strategy, back);

@@ -160,8 +160,17 @@ mod tests {
 
     #[test]
     fn test_merge_strategy_as_merge_method() {
-        assert!(matches!(MergeStrategy::Squash.as_merge_method(), MergeMethod::Squash));
-        assert!(matches!(MergeStrategy::Merge.as_merge_method(), MergeMethod::Merge));
-        assert!(matches!(MergeStrategy::Rebase.as_merge_method(), MergeMethod::Rebase));
+        assert!(matches!(
+            MergeStrategy::Squash.as_merge_method(),
+            MergeMethod::Squash
+        ));
+        assert!(matches!(
+            MergeStrategy::Merge.as_merge_method(),
+            MergeMethod::Merge
+        ));
+        assert!(matches!(
+            MergeStrategy::Rebase.as_merge_method(),
+            MergeMethod::Rebase
+        ));
     }
 }
