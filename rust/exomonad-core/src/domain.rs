@@ -1032,6 +1032,36 @@ mod tests {
     }
 
     #[test]
+    fn test_birth_branch_parent_deep() {
+        assert_eq!(
+            BirthBranch::from("main.a.b.c.d").parent(),
+            Some(BirthBranch::from("main.a.b.c"))
+        );
+    }
+
+    #[test]
+    fn test_birth_branch_depth_deep() {
+        assert_eq!(BirthBranch::from("main.a.b.c").depth(), 3);
+    }
+
+    #[test]
+    fn test_birth_branch_child_roundtrip() {
+        // parent → child → parent roundtrip reconstructs the original parent
+        let parent = BirthBranch::from("main");
+        let child = parent.child("feat-claude");
+        assert_eq!(child.as_str(), "main.feat-claude");
+        assert_eq!(child.parent(), Some(parent));
+    }
+
+    #[test]
+    fn test_birth_branch_nested_child_roundtrip() {
+        let parent = BirthBranch::from("main.feat");
+        let child = parent.child("sub-gemini");
+        assert_eq!(child.as_str(), "main.feat.sub-gemini");
+        assert_eq!(child.parent(), Some(parent));
+    }
+
+    #[test]
     fn test_address_from_proto_agent() {
         use exomonad_proto::effects::events::{address::Kind, Address as ProtoAddr};
         let addr = Address::from_proto(Some(ProtoAddr {

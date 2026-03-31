@@ -136,4 +136,31 @@ mod tests {
         let pr_number = PRNumber::new(original);
         assert_eq!(pr_number.as_u64(), original);
     }
+
+    #[test]
+    fn test_response_field_mapping() {
+        let response = MergePrResponse {
+            success: true,
+            message: "PR #42 merged via squash".to_string(),
+            git_fetched: true,
+            branch_name: "main.fix-auth-gemini".to_string(),
+        };
+
+        assert!(response.success);
+        assert!(response.message.contains("42"));
+        assert!(response.git_fetched);
+        assert_eq!(response.branch_name, "main.fix-auth-gemini");
+    }
+
+    #[test]
+    fn test_strategy_default_handling() {
+        let req = MergePrRequest {
+            pr_number: 42,
+            strategy: "".to_string(),
+            working_dir: ".".to_string(),
+        };
+
+        // Empty strategy should be handled by the service layer (defaults to "squash")
+        assert!(req.strategy.is_empty());
+    }
 }

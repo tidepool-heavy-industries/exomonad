@@ -55,16 +55,17 @@ impl AgentControlService {
                 .map(|b| b.as_str().to_string())
                 .unwrap_or(default_base);
             let agent_suffix = options.agent_type.suffix();
-            let branch_name = if self.birth_branch.depth() == 0 {
+            let branch_name = BranchName::from(if self.birth_branch.depth() == 0 {
                 format!("gh-{}/{}-{}", issue_id, slug, agent_suffix)
             } else {
                 format!("{}/{}-{}", base, slug, agent_suffix)
-            };
+            }.as_str());
 
             // Create worktree
             let worktree_path = self.worktree_base.join(agent_name.as_str());
+            let base_branch = BranchName::from(base.as_str());
 
-            self.create_worktree_checked(&worktree_path, &branch_name, &base)
+            self.create_worktree_checked(&worktree_path, &branch_name, &base_branch)
                 .await?;
 
             // Use worktree path as agent_dir
@@ -107,9 +108,11 @@ impl AgentControlService {
             // tmux display name (emoji + short format)
             let display_name = options.agent_type.display_name(&issue_id, &slug);
 
+            let parent_bb = self.effective_birth_branch(Some(caller_bb));
+            let session_branch = BranchName::from(parent_bb.as_str());
             let env_vars = self.common_spawn_env(
                 &agent_name,
-                self.effective_birth_branch(Some(caller_bb)).as_ref(),
+                &session_branch,
                 &role,
             );
 
@@ -240,7 +243,7 @@ impl AgentControlService {
 
             // Determine base branch
             let base_branch = if let Some(ref b) = options.base_branch {
-                b.to_string()
+                BranchName::from(b.as_str())
             } else {
                 // Default to current branch
                 let current_branch_output = Command::new("git")
@@ -249,15 +252,18 @@ impl AgentControlService {
                     .output()
                     .await
                     .context("Failed to get current branch")?;
-                String::from_utf8_lossy(&current_branch_output.stdout)
+                let branch_str = String::from_utf8_lossy(&current_branch_output.stdout)
                     .trim()
-                    .to_string()
+                    .to_string();
+                BranchName::from(branch_str.as_str())
             };
 
             // Use '.' separator to avoid directory/file conflicts in git refs
             // and avoid ambiguity with '-' word separators in slugs.
             // Branch includes type suffix so rsplit_once('.') yields the AgentName directly.
-            let branch_name = format!("{}.{}", base_branch, agent_name);
+            let branch_name = BranchName::from(
+                format!("{}.{}", base_branch, agent_name).as_str(),
+            );
             let worktree_path = self.worktree_base.join(agent_name.as_str());
 
             self.create_worktree_checked(&worktree_path, &branch_name, &base_branch)
@@ -266,7 +272,7 @@ impl AgentControlService {
             let role = crate::domain::Role::dev();
             let mut env_vars = self.common_spawn_env(
                 &agent_name,
-                self.effective_birth_branch(Some(caller_bb)).as_ref(),
+                &branch_name,
                 &role,
             );
 
@@ -473,7 +479,9 @@ impl AgentControlService {
             }
 
             let role = crate::domain::Role::worker();
-            let mut env_vars = self.common_spawn_env(&agent_name, self.effective_birth_branch(Some(&ctx.birth_branch)).as_ref(), &role);
+            let parent_bb = self.effective_birth_branch(Some(&ctx.birth_branch));
+            let session_branch = BranchName::from(parent_bb.as_str());
+            let mut env_vars = self.common_spawn_env(&agent_name, &session_branch, &role);
 
             // Write Gemini settings to worker config dir in project root
             fs::create_dir_all(&agent_config_dir).await?;
@@ -601,10 +609,10 @@ impl AgentControlService {
             }
 
             // Parent branch derived from typed birth-branch.
-            let current_branch = effective_birth.as_parent_branch();
+            let current_branch = BranchName::from(effective_birth.as_parent_branch());
 
             // Push parent branch so child PRs can reference it as base
-            ensure_branch_pushed(&self.git_wt, current_branch, effective_project_dir).await;
+            ensure_branch_pushed(&self.git_wt, &current_branch, effective_project_dir).await;
 
             // Branch: {current_branch}.{agent_name} (suffixed for unified namespace)
             let child_birth = effective_birth.child(agent_name.as_str());
@@ -625,7 +633,8 @@ impl AgentControlService {
                     self.copy_allowed_dirs(&worktree_path, &options.allowed_dirs).await?;
                 }
             } else if !is_custom_dir {
-                self.create_worktree_checked(&worktree_path, &branch_name, current_branch).await?;
+                let branch = BranchName::from(branch_name.as_str());
+                self.create_worktree_checked(&worktree_path, &branch, &current_branch).await?;
             }
 
             self.create_socket_symlink(&worktree_path).await;
@@ -664,7 +673,8 @@ impl AgentControlService {
                 }
             }
 
-            let mut env_vars = self.common_spawn_env(&agent_name, &branch_name, role);
+            let session_branch = BranchName::from(branch_name.as_str());
+            let mut env_vars = self.common_spawn_env(&agent_name, &session_branch, role);
             // Enable Claude Code Agent Teams for native inter-agent messaging
             env_vars.insert(
                 "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".to_string(),
@@ -806,7 +816,7 @@ impl AgentControlService {
             let effective_project_dir = &self.project_dir;
 
             // Parent branch derived from typed birth-branch.
-            let current_branch = effective_birth.as_parent_branch().to_string();
+            let current_branch = BranchName::from(effective_birth.as_parent_branch());
 
             // Sanitize branch name and construct typed identity
             let agent_type = options.agent_type;
@@ -830,7 +840,7 @@ impl AgentControlService {
             ensure_branch_pushed(&self.git_wt, &current_branch, effective_project_dir).await;
 
             let child_birth = effective_birth.child(agent_name.as_str());
-            let branch_name = child_birth.to_string();
+            let branch_name = BranchName::from(child_birth.to_string().as_str());
 
             let worktree_path = self.worktree_base.join(agent_name.as_str());
 

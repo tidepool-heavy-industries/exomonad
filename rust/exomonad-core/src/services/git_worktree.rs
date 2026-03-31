@@ -539,6 +539,160 @@ mod tests {
         assert_eq!(resolved, Some(birth_branch));
     }
 
+    /// Branch verification: after create_workspace, get_workspace_bookmark returns exact branch name.
+    #[test]
+    fn test_create_workspace_branch_verification() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+        let worktree_path = temp.path().join("wt-verify");
+        let branch = BranchName::from("test-verify-branch");
+        let base = BranchName::from(default_branch.as_str());
+
+        service
+            .create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+
+        let actual = service.get_workspace_bookmark(&worktree_path).unwrap();
+        assert_eq!(actual, Some("test-verify-branch".to_string()));
+    }
+
+    /// Branch verification with dotted branch name (ExoMonad convention).
+    #[test]
+    fn test_create_workspace_branch_verification_dotted() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+        let worktree_path = temp.path().join("wt-dotted");
+        let branch_name = format!("{}.feat-a-gemini", default_branch);
+        let branch = BranchName::from(branch_name.as_str());
+        let base = BranchName::from(default_branch.as_str());
+
+        service
+            .create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+
+        let actual = service.get_workspace_bookmark(&worktree_path).unwrap();
+        assert_eq!(actual, Some(branch_name));
+    }
+
+    /// Branch verification with deeply dotted branch name.
+    #[test]
+    fn test_create_workspace_branch_verification_deep() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+        let worktree_path = temp.path().join("wt-deep");
+        let branch_name = format!("{}.tl.sub.leaf-gemini", default_branch);
+        let branch = BranchName::from(branch_name.as_str());
+        let base = BranchName::from(default_branch.as_str());
+
+        service
+            .create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+
+        let actual = service.get_workspace_bookmark(&worktree_path).unwrap();
+        assert_eq!(actual, Some(branch_name));
+    }
+
+    /// Resolution chain with agent-suffixed branch.
+    #[test]
+    fn test_file_pr_resolution_chain_agent_suffix() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+
+        let birth_branch = format!("{}.fix-auth-gemini", default_branch);
+        let branch = BranchName::from(birth_branch.as_str());
+        let base = BranchName::from(default_branch.as_str());
+
+        let relative_dir = crate::services::agent_control::resolve_working_dir(&birth_branch);
+        assert_eq!(
+            relative_dir,
+            std::path::PathBuf::from(".exo/worktrees/fix-auth-gemini/")
+        );
+
+        let worktree_path = temp.path().join(&relative_dir);
+        std::fs::create_dir_all(worktree_path.parent().unwrap()).unwrap();
+        service
+            .create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+
+        let resolved = service.get_workspace_bookmark(&worktree_path).unwrap();
+        assert_eq!(resolved, Some(birth_branch));
+    }
+
+    /// Resolution chain with claude-suffixed branch.
+    #[test]
+    fn test_file_pr_resolution_chain_claude_suffix() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+
+        let birth_branch = format!("{}.tl-auth-claude", default_branch);
+        let branch = BranchName::from(birth_branch.as_str());
+        let base = BranchName::from(default_branch.as_str());
+
+        let relative_dir = crate::services::agent_control::resolve_working_dir(&birth_branch);
+        let worktree_path = temp.path().join(&relative_dir);
+        std::fs::create_dir_all(worktree_path.parent().unwrap()).unwrap();
+        service
+            .create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+
+        let resolved = service.get_workspace_bookmark(&worktree_path).unwrap();
+        assert_eq!(resolved, Some(birth_branch));
+    }
+
+    /// Resolution chain with 4 levels deep.
+    #[test]
+    fn test_file_pr_resolution_chain_deep_4_levels() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+
+        let birth_branch = format!("{}.tl.sub.leaf.worker-gemini", default_branch);
+        let branch = BranchName::from(birth_branch.as_str());
+        let base = BranchName::from(default_branch.as_str());
+
+        let relative_dir = crate::services::agent_control::resolve_working_dir(&birth_branch);
+        assert_eq!(
+            relative_dir,
+            std::path::PathBuf::from(".exo/worktrees/worker-gemini/")
+        );
+
+        let worktree_path = temp.path().join(&relative_dir);
+        std::fs::create_dir_all(worktree_path.parent().unwrap()).unwrap();
+        service
+            .create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+
+        let resolved = service.get_workspace_bookmark(&worktree_path).unwrap();
+        assert_eq!(resolved, Some(birth_branch));
+    }
+
+    /// Sibling collision: same slug from different parents → same worktree dir (known limitation).
+    #[test]
+    fn test_resolve_working_dir_sibling_collision() {
+        let dir_a =
+            crate::services::agent_control::resolve_working_dir("main.tl-a.my-feature-gemini");
+        let dir_b =
+            crate::services::agent_control::resolve_working_dir("main.tl-b.my-feature-gemini");
+        assert_eq!(dir_a, dir_b, "Same slug = same dir (known limitation)");
+    }
+
+    /// resolve_working_dir for agent-suffixed branches.
+    #[test]
+    fn test_resolve_working_dir_agent_suffixed() {
+        assert_eq!(
+            crate::services::agent_control::resolve_working_dir("main.fix-auth-gemini"),
+            std::path::PathBuf::from(".exo/worktrees/fix-auth-gemini/")
+        );
+    }
+
+    /// resolve_working_dir for root branches.
+    #[test]
+    fn test_resolve_working_dir_root() {
+        assert_eq!(
+            crate::services::agent_control::resolve_working_dir("main"),
+            std::path::PathBuf::from(".")
+        );
+    }
+
     /// Verify that two sibling agents with different birth branches resolve
     /// to different worktrees and get_workspace_bookmark returns the correct
     /// branch for each.

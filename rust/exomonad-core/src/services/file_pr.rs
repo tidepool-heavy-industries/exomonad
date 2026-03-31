@@ -2,7 +2,7 @@
 //
 // Replaces `gh` CLI subprocess calls with octocrab typed API.
 
-use crate::domain::{BranchName, PRNumber};
+use crate::domain::{BirthBranch, BranchName, PRNumber};
 use crate::services::git;
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::github::{build_octocrab, map_octo_err, GitHubClient};
@@ -37,13 +37,11 @@ pub struct FilePROutput {
 }
 
 /// Parsed from GitHub API response.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug)]
 struct GhPr {
     number: u64,
     url: String,
     head_ref_name: BranchName,
-    base_ref_name: BranchName,
 }
 
 /// Structured errors for file_pr operations.
@@ -66,23 +64,17 @@ enum FilePrError {
 // Git Helpers
 // ============================================================================
 
-/// Detect the base branch for a PR.
-/// Priority: explicit > convention (strip last / segment) > convention (strip last . segment) > "main"
-fn detect_base_branch(head: &str, explicit: Option<&str>) -> String {
+/// Resolve the base branch for a PR using the `BirthBranch` domain type.
+///
+/// Priority: explicit override > `BirthBranch::parent()` (dot hierarchy) > "main".
+fn resolve_base_branch(head: &BranchName, explicit: Option<&BranchName>) -> BranchName {
     if let Some(base) = explicit {
-        if !base.is_empty() {
-            return base.to_string();
-        }
+        return base.clone();
     }
-    // Convention 1: branch "parent/child" targets "parent" (Standard Git)
-    if let Some(pos) = head.rfind('/') {
-        return head[..pos].to_string();
-    }
-    // Convention 2: branch "parent.child" targets "parent" (ExoMonad Subtrees)
-    if let Some(pos) = head.rfind('.') {
-        return head[..pos].to_string();
-    }
-    "main".to_string()
+    BirthBranch::from(head.as_str())
+        .parent()
+        .map(|p| BranchName::from(p.as_str()))
+        .unwrap_or_else(|| BranchName::from("main"))
 }
 
 // ============================================================================
@@ -93,12 +85,15 @@ async fn find_existing_pr(
     octo: &octocrab::Octocrab,
     owner: &str,
     repo: &str,
-    head_branch: &str,
+    head_branch: &BranchName,
 ) -> Result<Option<GhPr>, FilePrError> {
+    // GitHub API requires `owner:ref-name` format for the `head` parameter.
+    // Without the prefix, GitHub returns unfiltered results.
+    let qualified_head = format!("{}:{}", owner, head_branch);
     let page = octo
         .pulls(owner, repo)
         .list()
-        .head(head_branch)
+        .head(&qualified_head)
         .state(params::State::Open)
         .per_page(1)
         .send()
@@ -109,7 +104,6 @@ async fn find_existing_pr(
         number: p.number,
         url: p.html_url.map(|u| u.to_string()).unwrap_or_default(),
         head_ref_name: BranchName::from(p.head.ref_field.as_str()),
-        base_ref_name: BranchName::from(p.base.ref_field.as_str()),
     });
     Ok(pr)
 }
@@ -121,11 +115,13 @@ async fn update_pr(
     number: PRNumber,
     title: &str,
     body: &str,
+    base: &BranchName,
 ) -> Result<(), FilePrError> {
     octo.pulls(owner, repo)
         .update(number.as_u64())
         .title(title)
         .body(body)
+        .base(base.as_str())
         .send()
         .await
         .map_err(|e| FilePrError::Update(map_octo_err(e)))?;
@@ -138,12 +134,12 @@ async fn create_pr(
     repo: &str,
     title: &str,
     body: &str,
-    base: &str,
-    head: &str,
+    base: &BranchName,
+    head: &BranchName,
 ) -> Result<GhPr, FilePrError> {
     let pr = octo
         .pulls(owner, repo)
-        .create(title, head, base)
+        .create(title, head.as_str(), base.as_str())
         .body(body)
         .send()
         .await
@@ -153,7 +149,6 @@ async fn create_pr(
         number: pr.number,
         url: pr.html_url.map(|u| u.to_string()).unwrap_or_default(),
         head_ref_name: BranchName::from(pr.head.ref_field.as_str()),
-        base_ref_name: BranchName::from(pr.base.ref_field.as_str()),
     })
 }
 
@@ -179,22 +174,22 @@ pub async fn file_pr_async(
     // Get branch from the agent's working directory, not server CWD
     let dir_path = std::path::PathBuf::from(dir);
     let git_wt_clone = git_wt.clone();
-    let head = tokio::task::spawn_blocking(move || git_wt_clone.get_workspace_bookmark(&dir_path))
-        .await
-        .context("spawn_blocking failed")?
-        .context("Failed to get workspace bookmark")?
-        .ok_or_else(|| anyhow::anyhow!("No bookmark found for workspace at {}", dir))?;
+    let head_str =
+        tokio::task::spawn_blocking(move || git_wt_clone.get_workspace_bookmark(&dir_path))
+            .await
+            .context("spawn_blocking failed")?
+            .context("Failed to get workspace bookmark")?
+            .ok_or_else(|| anyhow::anyhow!("No bookmark found for workspace at {}", dir))?;
+    let head = BranchName::from(head_str.as_str());
 
-    let base = BranchName::from(
-        detect_base_branch(&head, input.base_branch.as_ref().map(|b| b.as_str())).as_str(),
-    );
+    let base = resolve_base_branch(&head, input.base_branch.as_ref());
 
     info!("[FilePR] head={} base={} dir={}", head, base, dir);
 
     // Push first
     {
         let dir_path = std::path::PathBuf::from(dir);
-        let bookmark = BranchName::from(head.as_str());
+        let bookmark = head.clone();
         let git_wt_clone = git_wt.clone();
         tokio::task::spawn_blocking(move || git_wt_clone.push_bookmark(&dir_path, &bookmark))
             .await
@@ -215,6 +210,7 @@ pub async fn file_pr_async(
             pr_number,
             &input.title,
             &input.body,
+            &base,
         )
         .await?;
         info!("[FilePR] Updated PR #{}: {}", pr_number, pr.url);
@@ -222,7 +218,7 @@ pub async fn file_pr_async(
             pr_url: pr.url,
             pr_number,
             head_branch: pr.head_ref_name,
-            base_branch: pr.base_ref_name,
+            base_branch: base,
             created: false,
         });
     }
@@ -235,14 +231,14 @@ pub async fn file_pr_async(
         &repo_info.repo,
         &input.title,
         &input.body,
-        base.as_str(),
+        &base,
         &head,
     )
     .await?;
 
     // Emit pr:filed event (only if in tmux session)
     if let Ok(session) = std::env::var("EXOMONAD_TMUX_SESSION") {
-        if let Some(agent_id_str) = git::extract_agent_id(&head) {
+        if let Some(agent_id_str) = git::extract_agent_id(head.as_str()) {
             match crate::ui_protocol::AgentId::try_from(agent_id_str) {
                 Ok(agent_id) => {
                     let event = crate::ui_protocol::AgentEvent::PrFiled {
@@ -268,7 +264,7 @@ pub async fn file_pr_async(
         pr_url: pr.url,
         pr_number: PRNumber::new(pr.number),
         head_branch: pr.head_ref_name,
-        base_branch: pr.base_ref_name,
+        base_branch: base,
         created: true,
     })
 }
@@ -277,69 +273,115 @@ pub async fn file_pr_async(
 mod tests {
     use super::*;
 
+    // =========================================================================
+    // resolve_base_branch tests
+    // =========================================================================
+
     #[test]
-    fn test_detect_base_branch_explicit() {
+    fn test_resolve_base_branch_explicit_override() {
+        let head = BranchName::from("main.feat");
+        let explicit = BranchName::from("develop");
+        assert_eq!(resolve_base_branch(&head, Some(&explicit)), BranchName::from("develop"));
+    }
+
+    #[test]
+    fn test_resolve_base_branch_root_no_dots() {
+        let head = BranchName::from("my-branch");
+        assert_eq!(resolve_base_branch(&head, None), BranchName::from("main"));
+    }
+
+    #[test]
+    fn test_resolve_base_branch_single_dot() {
+        let head = BranchName::from("main.my-feature");
+        assert_eq!(resolve_base_branch(&head, None), BranchName::from("main"));
+    }
+
+    #[test]
+    fn test_resolve_base_branch_double_dot() {
+        let head = BranchName::from("main.auth-service.middleware");
         assert_eq!(
-            detect_base_branch("feature/my-work", Some("develop")),
-            "develop"
+            resolve_base_branch(&head, None),
+            BranchName::from("main.auth-service")
         );
     }
 
     #[test]
-    fn test_detect_base_branch_convention() {
-        // Slash convention
+    fn test_resolve_base_branch_deep_nesting() {
+        let head = BranchName::from("main.a.b.c.d.e");
         assert_eq!(
-            detect_base_branch("main/subtask/leaf", None),
-            "main/subtask"
-        );
-        assert_eq!(detect_base_branch("feature/my-work", None), "feature");
-
-        // Dot convention (ExoMonad subtrees)
-        assert_eq!(detect_base_branch("main.my-feature", None), "main");
-        assert_eq!(
-            detect_base_branch("parent.child.grandchild", None),
-            "parent.child"
+            resolve_base_branch(&head, None),
+            BranchName::from("main.a.b.c.d")
         );
     }
 
     #[test]
-    fn test_branch_naming_roundtrip_root() {
-        let branch = format!("{}.{}", "main", "auth-service");
-        assert_eq!(detect_base_branch(&branch, None), "main");
+    fn test_resolve_base_branch_agent_suffixed() {
+        let head = BranchName::from("main.fix-auth-gemini");
+        assert_eq!(resolve_base_branch(&head, None), BranchName::from("main"));
     }
 
     #[test]
-    fn test_branch_naming_roundtrip_nested() {
-        let branch = format!("{}.{}", "main.auth-service", "middleware");
-        assert_eq!(detect_base_branch(&branch, None), "main.auth-service");
-    }
-
-    #[test]
-    fn test_branch_naming_roundtrip_deep() {
+    fn test_resolve_base_branch_agent_suffixed_nested() {
+        let head = BranchName::from("main.tl-auth-claude.fix-oauth-gemini");
         assert_eq!(
-            detect_base_branch("main.feature.sub.leaf", None),
-            "main.feature.sub"
+            resolve_base_branch(&head, None),
+            BranchName::from("main.tl-auth-claude")
         );
     }
 
     #[test]
-    fn test_detect_base_branch_no_slash() {
-        assert_eq!(detect_base_branch("my-branch", None), "main");
+    fn test_resolve_base_branch_no_slash_convention() {
+        // Slash convention is dead — no dots means fallback to "main"
+        let head = BranchName::from("feature/my-work");
+        assert_eq!(resolve_base_branch(&head, None), BranchName::from("main"));
     }
 
     #[test]
-    fn test_detect_base_branch_empty_explicit() {
-        assert_eq!(detect_base_branch("feature/work", Some("")), "feature");
+    fn test_resolve_base_branch_none_explicit() {
+        let head = BranchName::from("main.feat");
+        assert_eq!(resolve_base_branch(&head, None), BranchName::from("main"));
     }
 
     #[test]
-    fn test_detect_base_branch_depth_4() {
+    fn test_resolve_base_branch_consistency_with_birth_branch() {
+        // Verify resolve_base_branch matches BirthBranch::parent() for all cases
+        let cases = [
+            "main",
+            "main.feat",
+            "main.auth.middleware",
+            "main.a.b.c.d.e",
+            "main.fix-auth-gemini",
+            "main.tl-auth-claude.fix-oauth-gemini",
+        ];
+        for case in &cases {
+            let head = BranchName::from(*case);
+            let expected = BirthBranch::from(*case)
+                .parent()
+                .map(|p| BranchName::from(p.as_str()))
+                .unwrap_or_else(|| BranchName::from("main"));
+            assert_eq!(
+                resolve_base_branch(&head, None),
+                expected,
+                "Mismatch for branch '{}'",
+                case
+            );
+        }
+    }
+
+    #[test]
+    fn test_resolve_base_branch_depth_4() {
         assert_eq!(
-            detect_base_branch("main.core-eval.optimize.inline.inline-coalg", None),
-            "main.core-eval.optimize.inline"
+            resolve_base_branch(
+                &BranchName::from("main.core-eval.optimize.inline.inline-coalg"),
+                None
+            ),
+            BranchName::from("main.core-eval.optimize.inline")
         );
-        assert_eq!(detect_base_branch("main.a.b.c.d.e", None), "main.a.b.c.d");
     }
+
+    // =========================================================================
+    // file_pr_async integration tests
+    // =========================================================================
 
     #[tokio::test]
     async fn test_file_pr_async_no_git_repo() -> Result<()> {
@@ -363,7 +405,6 @@ mod tests {
         let temp_dir = tempfile::tempdir()?;
         let dir = temp_dir.path();
 
-        // 1. Init git repo
         use std::process::Command;
         assert!(Command::new("git")
             .args(["init", "-b", "main"])
@@ -392,7 +433,6 @@ mod tests {
             .status()?
             .success());
 
-        // 2. Create a feature branch
         assert!(Command::new("git")
             .args(["checkout", "-b", "feature-branch"])
             .current_dir(dir)
@@ -407,7 +447,6 @@ mod tests {
             working_dir: Some(dir.to_string_lossy().to_string()),
         };
 
-        // Without GITHUB_TOKEN or origin remote, this will fail early.
         let result = file_pr_async(&input, git_wt, None).await;
 
         if let Err(ref e) = result {
@@ -420,6 +459,58 @@ mod tests {
         } else {
             panic!("Expected file_pr_async to fail, but it succeeded?!");
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_file_pr_async_base_branch_auto_detected() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let dir = temp_dir.path();
+
+        use std::process::Command;
+        assert!(Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(dir)
+            .status()?
+            .success());
+        assert!(Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(dir)
+            .status()?
+            .success());
+        assert!(Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(dir)
+            .status()?
+            .success());
+        std::fs::write(dir.join("README.md"), "test")?;
+        assert!(Command::new("git")
+            .args(["add", "README.md"])
+            .current_dir(dir)
+            .status()?
+            .success());
+        assert!(Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(dir)
+            .status()?
+            .success());
+
+        // Create a dot-separated branch (ExoMonad convention)
+        assert!(Command::new("git")
+            .args(["checkout", "-b", "main.feat-a-gemini"])
+            .current_dir(dir)
+            .status()?
+            .success());
+
+        let git_wt = Arc::new(GitWorktreeService::new(dir.to_path_buf()));
+        let bookmark = git_wt.get_workspace_bookmark(dir)?;
+        assert_eq!(bookmark, Some("main.feat-a-gemini".to_string()));
+
+        // Verify base detection via resolve_base_branch
+        let head = BranchName::from("main.feat-a-gemini");
+        let base = resolve_base_branch(&head, None);
+        assert_eq!(base, BranchName::from("main"));
 
         Ok(())
     }

@@ -23,8 +23,8 @@ impl AgentControlService {
     pub(crate) async fn create_worktree_checked(
         &self,
         worktree_path: &Path,
-        branch_name: &str,
-        base_branch: &str,
+        branch_name: &BranchName,
+        base_branch: &BranchName,
     ) -> Result<()> {
         if worktree_path.exists() {
             info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
@@ -50,8 +50,8 @@ impl AgentControlService {
 
         let git_wt = self.git_wt.clone();
         let path = worktree_path.to_path_buf();
-        let bookmark = crate::domain::BranchName::from(branch_name);
-        let base = crate::domain::BranchName::from(base_branch);
+        let bookmark = branch_name.clone();
+        let base = base_branch.clone();
         let result = tokio::task::spawn_blocking(move || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 git_wt.create_workspace(&path, &bookmark, &base)
@@ -76,14 +76,36 @@ impl AgentControlService {
             }
         }
 
+        // Verify the worktree is on the expected branch
+        let git_wt = self.git_wt.clone();
+        let verify_path = worktree_path.to_path_buf();
+        let expected = branch_name.to_string();
+        let actual = tokio::task::spawn_blocking(move || {
+            git_wt.get_workspace_bookmark(&verify_path)
+        })
+        .await
+        .context("spawn_blocking failed during branch verification")?
+        .map_err(|e| anyhow!("Failed to verify worktree branch: {}", e))?;
+
+        if actual.as_deref() != Some(&expected) {
+            return Err(anyhow!(
+                "Worktree branch mismatch: expected '{}', got {:?}",
+                expected,
+                actual
+            ));
+        }
+
         Ok(())
     }
 
     /// Build the common env vars shared by all spawn functions.
+    ///
+    /// `session_id` is the agent's birth-branch: for worktree agents this is the child's
+    /// branch name; for inline workers it's the parent's birth-branch (they share context).
     pub(crate) fn common_spawn_env(
         &self,
         agent_name: &AgentName,
-        session_id: &str,
+        session_id: &BranchName,
         role: &crate::domain::Role,
     ) -> HashMap<String, String> {
         let mut env_vars = HashMap::new();
@@ -968,5 +990,73 @@ mod tests {
         assert!(link.exists(), "Symlink should exist");
         let target = tokio::fs::read_link(&link).await.unwrap();
         assert_eq!(target, project_dir.join(".exo/server.sock"));
+    }
+
+    #[test]
+    fn test_common_spawn_env_core_vars() {
+        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(
+            PathBuf::from("."),
+        ));
+        let service = AgentControlService::new(PathBuf::from("."), None, git_wt)
+            .with_birth_branch(BirthBranch::from("main.tl-auth"));
+
+        let agent = AgentName::from("fix-oauth-gemini");
+        let session_id = BranchName::from("main.tl-auth.fix-oauth-gemini");
+        let role = crate::domain::Role::dev();
+
+        let env = service.common_spawn_env(&agent, &session_id, &role);
+
+        assert_eq!(env.get("EXOMONAD_AGENT_ID").unwrap(), "fix-oauth-gemini");
+        assert_eq!(
+            env.get("EXOMONAD_SESSION_ID").unwrap(),
+            "main.tl-auth.fix-oauth-gemini"
+        );
+        assert_eq!(env.get("EXOMONAD_ROLE").unwrap(), "dev");
+        assert_eq!(
+            env.get("EXOMONAD_PARENT_AGENT").unwrap(),
+            "main.tl-auth",
+            "Parent agent should be the service's own birth branch"
+        );
+    }
+
+    #[test]
+    fn test_common_spawn_env_tmux_session() {
+        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(
+            PathBuf::from("."),
+        ));
+        let service = AgentControlService::new(PathBuf::from("."), None, git_wt)
+            .with_birth_branch(BirthBranch::from("main"))
+            .with_tmux_session("exo-test-session".to_string());
+
+        let agent = AgentName::from("worker-1");
+        let session_id = BranchName::from("main");
+        let role = crate::domain::Role::worker();
+
+        let env = service.common_spawn_env(&agent, &session_id, &role);
+
+        assert_eq!(
+            env.get("EXOMONAD_TMUX_SESSION").unwrap(),
+            "exo-test-session"
+        );
+    }
+
+    #[test]
+    fn test_common_spawn_env_no_tmux_session() {
+        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(
+            PathBuf::from("."),
+        ));
+        let service = AgentControlService::new(PathBuf::from("."), None, git_wt)
+            .with_birth_branch(BirthBranch::from("main"));
+
+        let agent = AgentName::from("worker-1");
+        let session_id = BranchName::from("main");
+        let role = crate::domain::Role::worker();
+
+        let env = service.common_spawn_env(&agent, &session_id, &role);
+
+        assert!(
+            env.get("EXOMONAD_TMUX_SESSION").is_none(),
+            "No tmux session should be set when not configured"
+        );
     }
 }

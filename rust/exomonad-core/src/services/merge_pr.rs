@@ -73,17 +73,7 @@ pub async fn merge_pr_async(
     }
 
     // Step 1: merge PR
-    let merge_method = match strat {
-        "merge" => MergeMethod::Merge,
-        "squash" => MergeMethod::Squash,
-        "rebase" => MergeMethod::Rebase,
-        other => {
-            return Err(anyhow::anyhow!(
-                "Unknown merge strategy '{}'. Valid options: merge, squash, rebase",
-                other
-            ))
-        }
-    };
+    let merge_method = parse_merge_strategy(strat)?;
 
     let result = tokio::time::timeout(
         MERGE_TIMEOUT,
@@ -150,4 +140,55 @@ pub async fn merge_pr_async(
         git_fetched,
         branch_name,
     })
+}
+
+/// Parse a merge strategy string into octocrab's MergeMethod.
+///
+/// Extracted for testability — the async `merge_pr_async` requires GitHub API access.
+pub(crate) fn parse_merge_strategy(strategy: &str) -> Result<MergeMethod> {
+    match strategy {
+        "merge" => Ok(MergeMethod::Merge),
+        "squash" => Ok(MergeMethod::Squash),
+        "rebase" => Ok(MergeMethod::Rebase),
+        other => Err(anyhow::anyhow!(
+            "Unknown merge strategy '{}'. Valid options: merge, squash, rebase",
+            other
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_merge_strategy_squash() {
+        let method = parse_merge_strategy("squash").unwrap();
+        assert!(matches!(method, MergeMethod::Squash));
+    }
+
+    #[test]
+    fn test_parse_merge_strategy_merge() {
+        let method = parse_merge_strategy("merge").unwrap();
+        assert!(matches!(method, MergeMethod::Merge));
+    }
+
+    #[test]
+    fn test_parse_merge_strategy_rebase() {
+        let method = parse_merge_strategy("rebase").unwrap();
+        assert!(matches!(method, MergeMethod::Rebase));
+    }
+
+    #[test]
+    fn test_parse_merge_strategy_unknown() {
+        let err = parse_merge_strategy("fast-forward").unwrap_err();
+        assert!(err.to_string().contains("Unknown merge strategy"));
+        assert!(err.to_string().contains("fast-forward"));
+    }
+
+    #[test]
+    fn test_parse_merge_strategy_empty() {
+        let err = parse_merge_strategy("").unwrap_err();
+        assert!(err.to_string().contains("Unknown merge strategy"));
+    }
 }

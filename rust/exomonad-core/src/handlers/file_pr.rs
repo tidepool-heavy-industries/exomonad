@@ -165,4 +165,37 @@ mod tests {
         let working_dir = ctx.working_dir.clone();
         assert_eq!(working_dir, PathBuf::from(".exo/worktrees/feature/"));
     }
+
+    #[test]
+    fn test_base_branch_conversion_empty_is_none() {
+        let base_branch = non_empty("".to_string()).map(|s| BranchName::from(s.as_str()));
+        assert!(base_branch.is_none(), "Empty string should become None (auto-detect)");
+    }
+
+    #[test]
+    fn test_base_branch_conversion_explicit() {
+        let base_branch =
+            non_empty("develop".to_string()).map(|s| BranchName::from(s.as_str()));
+        assert_eq!(base_branch.unwrap().to_string(), "develop");
+    }
+
+    #[test]
+    fn test_response_field_conversion() {
+        let pr_number = crate::domain::PRNumber::new(42);
+        let head = BranchName::from("main.fix-auth-gemini");
+        let base = BranchName::from("main");
+
+        let response = FilePrResponse {
+            pr_url: "https://github.com/owner/repo/pull/42".to_string(),
+            pr_number: pr_number.as_u64() as i64,
+            head_branch: head.to_string(),
+            base_branch: base.to_string(),
+            created: true,
+        };
+
+        assert_eq!(response.pr_number, 42);
+        assert_eq!(response.head_branch, "main.fix-auth-gemini");
+        assert_eq!(response.base_branch, "main");
+        assert!(response.created);
+    }
 }

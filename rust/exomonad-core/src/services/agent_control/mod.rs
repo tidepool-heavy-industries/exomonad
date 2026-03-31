@@ -11,8 +11,8 @@ mod spawn;
 
 pub(crate) use crate::common::TimeoutError;
 pub(crate) use crate::domain::{
-    AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, ItemState, RoutingInfo, Slug,
-    TeamName,
+    AgentName, AgentPermissions, BirthBranch, BranchName, ClaudeSessionUuid, ItemState,
+    RoutingInfo, Slug, TeamName,
 };
 pub(crate) use crate::effects::EffectError;
 pub(crate) use crate::ffi::FFIBoundary;
@@ -43,13 +43,13 @@ pub(crate) const TMUX_TIMEOUT: Duration = Duration::from_secs(30);
 /// where no remote or non-GitHub remote is configured).
 pub(crate) async fn ensure_branch_pushed(
     git_wt: &Arc<GitWorktreeService>,
-    branch: &str,
+    branch: &BranchName,
     project_dir: &Path,
 ) {
     info!(branch = %branch, "Pushing parent branch to remote");
     let git_wt = git_wt.clone();
     let dir = project_dir.to_path_buf();
-    let bookmark = crate::domain::BranchName::from(branch);
+    let bookmark = branch.clone();
     match tokio::task::spawn_blocking(move || git_wt.push_bookmark(&dir, &bookmark)).await {
         Ok(Ok(())) => info!(branch = %branch, "Branch pushed successfully"),
         Ok(Err(e)) => {
