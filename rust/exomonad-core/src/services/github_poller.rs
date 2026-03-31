@@ -94,21 +94,21 @@ struct PRState {
 
 impl PRState {
     fn new(
-        branch: &str,
+        branch: &BranchName,
         agent_type: AgentType,
-        sha: &str,
+        sha: &CommitSha,
         ci_status: &str,
         copilot_count: usize,
     ) -> Self {
         Self {
             last_copilot_comment_count: copilot_count,
             last_ci_status: ci_status.to_string(),
-            branch_name: BranchName::from(branch),
+            branch_name: branch.clone(),
             agent_type,
             first_seen: Instant::now(),
             notified_parent_timeout: false,
             last_review_state: ReviewState::None,
-            last_sha: CommitSha::from(sha),
+            last_sha: sha.clone(),
             notified_parent_approved: false,
             addressed_changes: false,
         }
@@ -601,23 +601,37 @@ impl GitHubPoller {
 
         let mut pr_map = HashMap::new();
         for pr in prs {
-            let ref_name = pr.head.ref_field.clone();
-            let sha = pr.head.sha.clone();
-            pr_map.insert(ref_name, (pr.number, sha));
+            // Validate external data from GitHub before constructing domain types.
+            if pr.head.ref_field.is_empty() {
+                tracing::warn!(
+                    "GitHubPoller: skipping PR {} due to empty head.ref_field",
+                    pr.number
+                );
+                continue;
+            }
+            if pr.head.sha.is_empty() {
+                tracing::warn!(
+                    "GitHubPoller: skipping PR {} due to empty head.sha",
+                    pr.number
+                );
+                continue;
+            }
+            if pr.number == 0 {
+                tracing::warn!("GitHubPoller: skipping PR with non-positive number: 0");
+                continue;
+            }
+
+            let ref_name = BranchName::from(pr.head.ref_field.as_str());
+            let sha = CommitSha::from(pr.head.sha.as_str());
+            let pr_number = PRNumber::new(pr.number);
+            pr_map.insert(ref_name, (pr_number, sha));
         }
 
         // 3. Match branches to PRs
         for wb in branches {
-            if let Some((pr_number, pr_sha)) = pr_map.get(wb.branch.as_str()) {
+            if let Some((pr_number, pr_sha)) = pr_map.get(&wb.branch) {
                 if let Err(e) = self
-                    .process_pr(
-                        &owner,
-                        &repo,
-                        wb.branch.as_str(),
-                        PRNumber::new(*pr_number),
-                        pr_sha,
-                        wb.agent_type,
-                    )
+                    .process_pr(&owner, &repo, &wb.branch, *pr_number, pr_sha, wb.agent_type)
                     .await
                 {
                     warn!("Failed to process branch {}: {}", wb.branch, e);
@@ -719,7 +733,10 @@ impl GitHubPoller {
 
         match repo::get_repo_info(&self.project_dir).await {
             Ok(info) => {
-                let result = (info.owner, info.repo);
+                let result = (
+                    GithubOwner::from(info.owner.as_str()),
+                    GithubRepo::from(info.repo.as_str()),
+                );
                 *info_guard = Some(result.clone());
                 Ok(Some(result))
             }
@@ -773,9 +790,9 @@ impl GitHubPoller {
         &self,
         owner: &GithubOwner,
         repo: &GithubRepo,
-        branch: &str,
+        branch: &BranchName,
         pr_number: PRNumber,
-        pr_sha: &str,
+        pr_sha: &CommitSha,
         agent_type: AgentType,
     ) -> Result<()> {
         // Poll details
@@ -797,11 +814,11 @@ impl GitHubPoller {
                 compute_pr_actions(
                     old_state,
                     pr_number,
-                    pr_sha,
+                    pr_sha.as_str(),
                     &copilot_comments,
                     &copilot_reviews,
                     &ci_status,
-                    branch,
+                    branch.as_str(),
                     &|c, r| self.format_copilot_message(c, r),
                 )
             } else {
@@ -828,10 +845,10 @@ impl GitHubPoller {
                     payload,
                 } => {
                     if let Ok(Some(action)) = self
-                        .call_handle_event(branch, agent_type, event_type, payload)
+                        .call_handle_event(branch.as_str(), agent_type, event_type, payload)
                         .await
                     {
-                        self.handle_event_action(action, branch, agent_type, pr_number)
+                        self.handle_event_action(action, branch.as_str(), agent_type, pr_number)
                             .await;
                     }
                 }
@@ -842,7 +859,7 @@ impl GitHubPoller {
                     reviews,
                 } => {
                     self.emit_event_with_reviews(
-                        branch,
+                        branch.as_str(),
                         &status,
                         &message,
                         agent_type,
@@ -925,7 +942,12 @@ impl GitHubPoller {
         Ok((inline_comments, copilot_reviews))
     }
 
-    async fn fetch_ci_status(&self, owner: &GithubOwner, repo: &GithubRepo, sha: &str) -> Result<String> {
+    async fn fetch_ci_status(
+        &self,
+        owner: &GithubOwner,
+        repo: &GithubRepo,
+        sha: &CommitSha,
+    ) -> Result<String> {
         let octo = match &self.github {
             Some(client) => match client.get().await {
                 Ok(c) => c,
@@ -1162,7 +1184,13 @@ mod tests {
     }
 
     fn make_pr_state(branch: &str, sha: &str) -> PRState {
-        PRState::new(branch, AgentType::Gemini, sha, "pending", 0)
+        PRState::new(
+            &BranchName::from(branch),
+            AgentType::Gemini,
+            &CommitSha::from(sha),
+            "pending",
+            0,
+        )
     }
 
     #[test]
