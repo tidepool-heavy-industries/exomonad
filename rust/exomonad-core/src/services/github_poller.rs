@@ -511,7 +511,7 @@ impl GitHubPoller {
                     &self.project_dir,
                     branch,
                     &tab_name,
-                    "event-handler",
+                    &crate::domain::AgentName::from("event-handler"),
                     &message,
                     &format!("Event handler action for PR #{}", pr_number),
                 )
