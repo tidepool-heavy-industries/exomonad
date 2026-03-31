@@ -3,7 +3,7 @@
 // Uses `gh api` to check for Copilot review comments on a PR.
 // Blocks until comments are found or timeout is reached.
 
-use crate::domain::PRNumber;
+use crate::domain::{GithubOwner, GithubRepo, PRNumber};
 use crate::services::{git, repo};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -55,11 +55,11 @@ pub struct CopilotComment {
 
 /// Fetch PR review comments using gh api
 async fn fetch_pr_comments(
-    owner: &str,
-    repo: &str,
+    owner: &GithubOwner,
+    repo: &GithubRepo,
     pr_number: PRNumber,
 ) -> Result<Vec<CopilotComment>> {
-    let endpoint = format!("/repos/{}/{}/pulls/{}/comments", owner, repo, pr_number);
+    let endpoint = format!("/repos/{}/{}/pulls/{}/comments", owner.as_str(), repo.as_str(), pr_number);
 
     debug!("[CopilotReview] Fetching comments from: {}", endpoint);
 
@@ -142,8 +142,8 @@ fn is_copilot_comment(login: &str, user_type: Option<&str>) -> bool {
 }
 
 /// Also check PR reviews (not just inline comments)
-async fn fetch_pr_reviews(owner: &str, repo: &str, pr_number: PRNumber) -> Result<bool> {
-    let endpoint = format!("/repos/{}/{}/pulls/{}/reviews", owner, repo, pr_number);
+async fn fetch_pr_reviews(owner: &GithubOwner, repo: &GithubRepo, pr_number: PRNumber) -> Result<bool> {
+    let endpoint = format!("/repos/{}/{}/pulls/{}/reviews", owner.as_str(), repo.as_str(), pr_number);
 
     debug!("[CopilotReview] Fetching reviews from: {}", endpoint);
 
@@ -205,7 +205,7 @@ pub async fn wait_for_copilot_review(
 
     loop {
         // Check for inline comments
-        let comments = fetch_pr_comments(owner.as_str(), repo.as_str(), input.pr_number).await?;
+        let comments = fetch_pr_comments(&owner, &repo, input.pr_number).await?;
 
         if !comments.is_empty() {
             info!("[CopilotReview] Found {} Copilot comments", comments.len());
@@ -213,7 +213,7 @@ pub async fn wait_for_copilot_review(
             // Emit copilot:reviewed event (only if in tmux session)
             if let Ok(session) = std::env::var("EXOMONAD_TMUX_SESSION") {
                 if let Ok(branch) = git::get_current_branch() {
-                    if let Some(agent_id_str) = git::extract_agent_id(&branch) {
+                    if let Some(agent_id_str) = git::extract_agent_id(branch.as_str()) {
                         match crate::ui_protocol::AgentId::try_from(agent_id_str) {
                             Ok(agent_id) => {
                                 let event = crate::ui_protocol::AgentEvent::CopilotReviewed {
@@ -243,13 +243,13 @@ pub async fn wait_for_copilot_review(
         }
 
         // Also check for review (without inline comments)
-        if fetch_pr_reviews(owner.as_str(), repo.as_str(), input.pr_number).await? {
+        if fetch_pr_reviews(&owner, &repo, input.pr_number).await? {
             info!("[CopilotReview] Found Copilot review (no inline comments)");
 
             // Emit copilot:reviewed event with 0 comments (only if in tmux session)
             if let Ok(session) = std::env::var("EXOMONAD_TMUX_SESSION") {
                 if let Ok(branch) = git::get_current_branch() {
-                    if let Some(agent_id_str) = git::extract_agent_id(&branch) {
+                    if let Some(agent_id_str) = git::extract_agent_id(branch.as_str()) {
                         match crate::ui_protocol::AgentId::try_from(agent_id_str) {
                             Ok(agent_id) => {
                                 let event = crate::ui_protocol::AgentEvent::CopilotReviewed {

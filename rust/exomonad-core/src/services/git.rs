@@ -1,6 +1,6 @@
 use crate::services::command::CommandExecutor;
 use crate::services::repo;
-use crate::{GithubOwner, GithubRepo};
+use crate::domain::{BranchName, GithubOwner, GithubRepo};
 use anyhow::{Context, Result};
 use duct::cmd;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use std::sync::Arc;
 /// This is a standalone helper function that calls git directly without
 /// requiring Docker or the GitService. Used by file_pr and copilot_review
 /// services to extract agent IDs from branch names.
-pub fn get_current_branch() -> Result<String> {
+pub fn get_current_branch() -> Result<BranchName> {
     let branch = cmd!("git", "branch", "--show-current")
         .read()
         .context("Failed to execute git branch --show-current")?;
@@ -21,7 +21,7 @@ pub fn get_current_branch() -> Result<String> {
         anyhow::bail!("Not on a branch (detached HEAD?)");
     }
 
-    Ok(branch.to_string())
+    Ok(BranchName::from(branch))
 }
 
 /// Extract agent ID from a branch name following gh-{number}/{slug} convention.
@@ -72,7 +72,7 @@ pub struct WorktreeInfo {
     pub path: String,
 
     /// Current branch name (or "HEAD" if detached).
-    pub branch: String,
+    pub branch: BranchName,
 }
 
 /// Git repository information.
@@ -81,7 +81,7 @@ pub struct WorktreeInfo {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct RepoInfo {
     /// Current branch name.
-    pub branch: String,
+    pub branch: BranchName,
 
     /// Repository owner (parsed from remote URL, if available).
     ///
@@ -132,9 +132,9 @@ impl GitService {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn get_branch(&self, dir: &str) -> Result<String> {
+    pub async fn get_branch(&self, dir: &str) -> Result<BranchName> {
         let output = self.exec_git(dir, &["branch", "--show-current"]).await?;
-        Ok(output.trim().to_string())
+        Ok(BranchName::from(output.trim()))
     }
 
     #[tracing::instrument(skip(self))]
@@ -266,7 +266,7 @@ mod tests {
         let mock = Arc::new(MockExecutor::new(vec![Ok("main\n".to_string())]));
         let git = GitService::new(mock);
         let branch = git.get_branch("/app").await.unwrap();
-        assert_eq!(branch, "main");
+        assert_eq!(branch.as_str(), "main");
     }
 
     #[tokio::test]
@@ -278,7 +278,7 @@ mod tests {
         let git = GitService::new(mock);
         let wt = git.get_worktree("/app/src").await.unwrap();
         assert_eq!(wt.path, "/app");
-        assert_eq!(wt.branch, "feature/123");
+        assert_eq!(wt.branch.as_str(), "feature/123");
     }
 
     #[tokio::test]

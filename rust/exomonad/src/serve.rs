@@ -362,7 +362,7 @@ pub async fn handle_hook_inner(
 
     // Emit HookReceived tmux event
     if let Ok(branch) = git::get_current_branch() {
-        if let Some(agent_id_str) = git::extract_agent_id(&branch) {
+        if let Some(agent_id_str) = git::extract_agent_id(branch.as_str()) {
             match exomonad_core::ui_protocol::AgentId::try_from(agent_id_str.clone()) {
                 Ok(agent_id) => {
                     let event = exomonad_core::ui_protocol::AgentEvent::HookReceived {
@@ -538,7 +538,7 @@ pub async fn handle_hook_inner(
                 && event_type == HookEventType::SubagentStop
             {
                 if let Ok(branch) = git::get_current_branch() {
-                    if let Some(agent_id_str) = git::extract_agent_id(&branch) {
+                    if let Some(agent_id_str) = git::extract_agent_id(branch.as_str()) {
                         let reason = internal_output
                             .reason
                             .clone()
