@@ -8,11 +8,9 @@ use tracing::{info, warn};
 
 const MAX_QUEUE_SIZE: usize = 1000;
 
-type SessionId = String;
-
 pub struct EventQueue {
-    queues: Arc<Mutex<HashMap<SessionId, VecDeque<Event>>>>,
-    wakers: Arc<Mutex<HashMap<SessionId, Vec<oneshot::Sender<Event>>>>>,
+    queues: Arc<Mutex<HashMap<String, VecDeque<Event>>>>,
+    wakers: Arc<Mutex<HashMap<String, Vec<oneshot::Sender<Event>>>>>,
     next_id: Arc<Mutex<u64>>,
 }
 
