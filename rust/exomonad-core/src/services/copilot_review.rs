@@ -59,7 +59,12 @@ async fn fetch_pr_comments(
     repo: &GithubRepo,
     pr_number: PRNumber,
 ) -> Result<Vec<CopilotComment>> {
-    let endpoint = format!("/repos/{}/{}/pulls/{}/comments", owner.as_str(), repo.as_str(), pr_number);
+    let endpoint = format!(
+        "/repos/{}/{}/pulls/{}/comments",
+        owner.as_str(),
+        repo.as_str(),
+        pr_number
+    );
 
     debug!("[CopilotReview] Fetching comments from: {}", endpoint);
 
@@ -142,8 +147,17 @@ fn is_copilot_comment(login: &str, user_type: Option<&str>) -> bool {
 }
 
 /// Also check PR reviews (not just inline comments)
-async fn fetch_pr_reviews(owner: &GithubOwner, repo: &GithubRepo, pr_number: PRNumber) -> Result<bool> {
-    let endpoint = format!("/repos/{}/{}/pulls/{}/reviews", owner.as_str(), repo.as_str(), pr_number);
+async fn fetch_pr_reviews(
+    owner: &GithubOwner,
+    repo: &GithubRepo,
+    pr_number: PRNumber,
+) -> Result<bool> {
+    let endpoint = format!(
+        "/repos/{}/{}/pulls/{}/reviews",
+        owner.as_str(),
+        repo.as_str(),
+        pr_number
+    );
 
     debug!("[CopilotReview] Fetching reviews from: {}", endpoint);
 

@@ -1,6 +1,6 @@
+use crate::domain::{BranchName, GithubOwner, GithubRepo};
 use crate::services::command::CommandExecutor;
 use crate::services::repo;
-use crate::domain::{BranchName, GithubOwner, GithubRepo};
 use anyhow::{Context, Result};
 use duct::cmd;
 use serde::{Deserialize, Serialize};

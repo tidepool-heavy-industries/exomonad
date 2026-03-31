@@ -702,11 +702,17 @@ impl AgentControlService {
         match subrepo {
             Some(sub_path) => {
                 if sub_path.is_absolute() {
-                    return Err(anyhow!("subrepo path must be relative: {}", sub_path.display()));
+                    return Err(anyhow!(
+                        "subrepo path must be relative: {}",
+                        sub_path.display()
+                    ));
                 }
                 for component in sub_path.components() {
                     if matches!(component, std::path::Component::ParentDir) {
-                        return Err(anyhow!("subrepo path cannot contain '..': {}", sub_path.display()));
+                        return Err(anyhow!(
+                            "subrepo path cannot contain '..': {}",
+                            sub_path.display()
+                        ));
                     }
                 }
                 let dir = self.project_dir.join(sub_path);
