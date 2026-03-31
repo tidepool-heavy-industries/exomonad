@@ -239,7 +239,9 @@ async fn resolve_agent_birth_branch(
             .join(agent_name)
             .join("identity.json");
         if let Ok(contents) = tokio::fs::read_to_string(&identity_path).await {
-            if let Ok(record) = serde_json::from_str::<exomonad_core::services::AgentIdentityRecord>(&contents) {
+            if let Ok(record) =
+                serde_json::from_str::<exomonad_core::services::AgentIdentityRecord>(&contents)
+            {
                 tracing::debug!(agent = %agent_name, branch = %record.birth_branch, "Resolved birth branch from identity.json");
                 return Ok(record.birth_branch);
             }
@@ -447,11 +449,12 @@ pub async fn handle_hook_inner(
     // Resolve agent identity: try resolver first for authoritative identity,
     // fall back to query params (which may be inaccurate for hooks fired before first tool call).
     let agent_name_for_hook = AgentName::from(params.agent_id.as_deref().unwrap_or("root"));
-    let birth_branch_for_hook = if let Some(record) = state.agent_resolver.get(&agent_name_for_hook).await {
-        record.birth_branch
-    } else {
-        BirthBranch::from(params.session_id.as_deref().unwrap_or("main"))
-    };
+    let birth_branch_for_hook =
+        if let Some(record) = state.agent_resolver.get(&agent_name_for_hook).await {
+            record.birth_branch
+        } else {
+            BirthBranch::from(params.session_id.as_deref().unwrap_or("main"))
+        };
 
     // Always inject identity into WASM input (hooks need it even when env vars aren't set)
     if let serde_json::Value::Object(ref mut map) = hook_input_value {
@@ -888,9 +891,8 @@ Run `exomonad recompile` first to build it.",
     let acp_registry = Arc::new(exomonad_core::services::acp_registry::AcpRegistry::new());
 
     // Load canonical agent identity resolver from disk
-    let agent_resolver = Arc::new(
-        exomonad_core::services::AgentResolver::load(project_dir.clone()).await,
-    );
+    let agent_resolver =
+        Arc::new(exomonad_core::services::AgentResolver::load(project_dir.clone()).await);
 
     // JSONL event log (parallel to OTel span events, queryable via DuckDB/kaizen)
     let event_log = match exomonad_core::services::EventLog::open(project_dir.join(".exo/logs")) {
@@ -1084,7 +1086,10 @@ Run `exomonad recompile` first to build it.",
         .route("/health", get(health))
         .route("/hook", post(handle_hook_request).with_state(hook_state))
         .nest("/agents", agent_routes)
-        .route("/events", post(handle_events).with_state(services.event_queue.clone()))
+        .route(
+            "/events",
+            post(handle_events).with_state(services.event_queue.clone()),
+        )
         .route("/reload", post(reload))
         .route(
             "/shutdown",

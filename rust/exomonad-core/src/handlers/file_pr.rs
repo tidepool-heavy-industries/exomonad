@@ -169,13 +169,15 @@ mod tests {
     #[test]
     fn test_base_branch_conversion_empty_is_none() {
         let base_branch = non_empty("".to_string()).map(|s| BranchName::from(s.as_str()));
-        assert!(base_branch.is_none(), "Empty string should become None (auto-detect)");
+        assert!(
+            base_branch.is_none(),
+            "Empty string should become None (auto-detect)"
+        );
     }
 
     #[test]
     fn test_base_branch_conversion_explicit() {
-        let base_branch =
-            non_empty("develop".to_string()).map(|s| BranchName::from(s.as_str()));
+        let base_branch = non_empty("develop".to_string()).map(|s| BranchName::from(s.as_str()));
         assert_eq!(base_branch.unwrap().to_string(), "develop");
     }
 

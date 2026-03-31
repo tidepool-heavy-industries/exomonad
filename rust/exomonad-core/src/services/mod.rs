@@ -29,12 +29,11 @@ pub mod tmux_events;
 pub mod tmux_ipc;
 
 pub use self::acp_registry::AcpRegistry;
-pub use self::agent_resolver::{AgentIdentityRecord, AgentResolver};
 pub use self::agent_control::{
-    resolve_role_context_path, resolve_working_dir,
-    resolve_worktree_from_tab, AgentControlService, AgentInfo, AgentType, BatchCleanupResult,
-    BatchSpawnResult, SpawnOptions, SpawnResult,
+    resolve_role_context_path, resolve_working_dir, resolve_worktree_from_tab, AgentControlService,
+    AgentInfo, AgentType, BatchCleanupResult, BatchSpawnResult, SpawnOptions, SpawnResult,
 };
+pub use self::agent_resolver::{AgentIdentityRecord, AgentResolver};
 pub use self::claude_session_registry::ClaudeSessionRegistry;
 pub use self::event_log::EventLog;
 pub use self::event_queue::EventQueue;

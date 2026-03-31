@@ -1,4 +1,4 @@
-use crate::domain::PRNumber;
+use crate::domain::{BranchName, MergeStrategy, PRNumber};
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::github::{build_octocrab, map_octo_err, GitHubClient};
 use crate::services::repo;
@@ -14,7 +14,18 @@ pub struct MergePROutput {
     pub success: bool,
     pub message: String,
     pub git_fetched: bool,
-    pub branch_name: String,
+    pub branch_name: BranchName,
+}
+
+impl MergeStrategy {
+    /// Convert domain merge strategy to octocrab's MergeMethod.
+    pub fn as_merge_method(&self) -> MergeMethod {
+        match self {
+            Self::Squash => MergeMethod::Squash,
+            Self::Merge => MergeMethod::Merge,
+            Self::Rebase => MergeMethod::Rebase,
+        }
+    }
 }
 
 /// Merge a PR using GitHub API.
@@ -22,7 +33,7 @@ pub struct MergePROutput {
 /// If `github` is provided, uses its managed client. Otherwise falls back to `build_octocrab()`.
 pub async fn merge_pr_async(
     pr_number: PRNumber,
-    strategy: &str,
+    strategy: &MergeStrategy,
     working_dir: &str,
     git_wt: Arc<GitWorktreeService>,
     github: Option<&GitHubClient>,
@@ -32,15 +43,10 @@ pub async fn merge_pr_async(
     } else {
         working_dir
     };
-    let strat = if strategy.is_empty() {
-        "squash"
-    } else {
-        strategy
-    };
 
     info!(
         pr_number = pr_number.as_u64(),
-        strategy = strat,
+        strategy = strategy.as_str(),
         working_dir = dir,
         "Merging PR"
     );
@@ -63,17 +69,23 @@ pub async fn merge_pr_async(
         _ => None,
     };
 
-    let branch_name = pr
+    let branch_name_str = pr
         .as_ref()
         .map(|p| p.head.ref_field.clone())
         .unwrap_or_default();
 
-    if !branch_name.is_empty() {
-        info!(branch_name = %branch_name, "PR branch name identified");
+    if !branch_name_str.is_empty() {
+        info!(branch_name = %branch_name_str, "PR branch name identified");
     }
 
+    let branch_name = if branch_name_str.is_empty() {
+        BranchName::from("unknown")
+    } else {
+        BranchName::from(branch_name_str.as_str())
+    };
+
     // Step 1: merge PR
-    let merge_method = parse_merge_strategy(strat)?;
+    let merge_method = strategy.as_merge_method();
 
     let result = tokio::time::timeout(
         MERGE_TIMEOUT,
@@ -130,31 +142,16 @@ pub async fn merge_pr_async(
         success: true,
         message: if let Some(msg) = merge_res.message {
             if msg.is_empty() {
-                format!("PR #{} merged via {}", pr_number, strat)
+                format!("PR #{} merged via {}", pr_number, strategy)
             } else {
                 msg
             }
         } else {
-            format!("PR #{} merged via {}", pr_number, strat)
+            format!("PR #{} merged via {}", pr_number, strategy)
         },
         git_fetched,
         branch_name,
     })
-}
-
-/// Parse a merge strategy string into octocrab's MergeMethod.
-///
-/// Extracted for testability — the async `merge_pr_async` requires GitHub API access.
-pub(crate) fn parse_merge_strategy(strategy: &str) -> Result<MergeMethod> {
-    match strategy {
-        "merge" => Ok(MergeMethod::Merge),
-        "squash" => Ok(MergeMethod::Squash),
-        "rebase" => Ok(MergeMethod::Rebase),
-        other => Err(anyhow::anyhow!(
-            "Unknown merge strategy '{}'. Valid options: merge, squash, rebase",
-            other
-        )),
-    }
 }
 
 #[cfg(test)]
@@ -162,33 +159,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_merge_strategy_squash() {
-        let method = parse_merge_strategy("squash").unwrap();
-        assert!(matches!(method, MergeMethod::Squash));
-    }
-
-    #[test]
-    fn test_parse_merge_strategy_merge() {
-        let method = parse_merge_strategy("merge").unwrap();
-        assert!(matches!(method, MergeMethod::Merge));
-    }
-
-    #[test]
-    fn test_parse_merge_strategy_rebase() {
-        let method = parse_merge_strategy("rebase").unwrap();
-        assert!(matches!(method, MergeMethod::Rebase));
-    }
-
-    #[test]
-    fn test_parse_merge_strategy_unknown() {
-        let err = parse_merge_strategy("fast-forward").unwrap_err();
-        assert!(err.to_string().contains("Unknown merge strategy"));
-        assert!(err.to_string().contains("fast-forward"));
-    }
-
-    #[test]
-    fn test_parse_merge_strategy_empty() {
-        let err = parse_merge_strategy("").unwrap_err();
-        assert!(err.to_string().contains("Unknown merge strategy"));
+    fn test_merge_strategy_as_merge_method() {
+        assert!(matches!(
+            MergeStrategy::Squash.as_merge_method(),
+            MergeMethod::Squash
+        ));
+        assert!(matches!(
+            MergeStrategy::Merge.as_merge_method(),
+            MergeMethod::Merge
+        ));
+        assert!(matches!(
+            MergeStrategy::Rebase.as_merge_method(),
+            MergeMethod::Rebase
+        ));
     }
 }

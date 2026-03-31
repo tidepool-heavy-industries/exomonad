@@ -1024,7 +1024,10 @@ mod tests {
         // This is correct: same agent name = same directory (by design, collision).
         let dir_a = resolve_working_dir("main.tl-a-claude.my-feature-gemini");
         let dir_b = resolve_working_dir("main.tl-b-claude.my-feature-gemini");
-        assert_eq!(dir_a, dir_b, "Same agent name = same worktree dir (by design)");
+        assert_eq!(
+            dir_a, dir_b,
+            "Same agent name = same worktree dir (by design)"
+        );
     }
 
     // =========================================================================

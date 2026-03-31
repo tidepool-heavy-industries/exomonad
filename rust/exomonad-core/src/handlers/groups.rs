@@ -16,10 +16,7 @@ use super::{
 };
 
 /// Core handlers every consumer needs: logging, key-value store, filesystem.
-pub fn core_handlers(
-    project_dir: PathBuf,
-    services: &Services,
-) -> Vec<Box<dyn EffectHandler>> {
+pub fn core_handlers(project_dir: PathBuf, services: &Services) -> Vec<Box<dyn EffectHandler>> {
     vec![
         Box::new(LogHandler::new(services)),
         Box::new(KvHandler::new(project_dir.clone())),

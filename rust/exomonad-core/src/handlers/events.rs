@@ -168,20 +168,25 @@ impl EventEffects for EventHandler {
             let resolver_ref = Some(&*self.agent_resolver);
             let (parent_session_id, tab_name) = match &override_addr {
                 Address::Agent(name) => {
-                    let tab = crate::services::delivery::resolve_tab_name_for_agent(name, resolver_ref);
+                    let tab =
+                        crate::services::delivery::resolve_tab_name_for_agent(name, resolver_ref);
                     (name.as_str().to_string(), tab)
                 }
                 Address::Team {
                     member: Some(m), ..
                 } => {
-                    let tab = crate::services::delivery::resolve_tab_name_for_agent(m, resolver_ref);
+                    let tab =
+                        crate::services::delivery::resolve_tab_name_for_agent(m, resolver_ref);
                     (m.as_str().to_string(), tab)
                 }
                 Address::Team { team, member: None } => {
                     let lead = self.team_registry.resolve_lead(team.as_str()).await;
                     let id = lead.unwrap_or_else(|| "root".to_string());
                     let lead_name = crate::domain::AgentName::from(id.as_str());
-                    let tab = crate::services::delivery::resolve_tab_name_for_agent(&lead_name, resolver_ref);
+                    let tab = crate::services::delivery::resolve_tab_name_for_agent(
+                        &lead_name,
+                        resolver_ref,
+                    );
                     (id, tab)
                 }
                 Address::Supervisor => unreachable!(),
@@ -215,8 +220,10 @@ impl EventEffects for EventHandler {
             );
             let parent_session_id = info.supervisor.as_str();
             let supervisor_name = crate::domain::AgentName::from(parent_session_id);
-            let tab_name =
-                crate::services::delivery::resolve_tab_name_for_agent(&supervisor_name, Some(&*self.agent_resolver));
+            let tab_name = crate::services::delivery::resolve_tab_name_for_agent(
+                &supervisor_name,
+                Some(&*self.agent_resolver),
+            );
 
             let status = crate::services::delivery::NotifyStatus::from_str(&req.status);
             crate::services::delivery::notify_parent_delivery(

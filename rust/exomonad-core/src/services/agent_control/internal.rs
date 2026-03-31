@@ -80,12 +80,11 @@ impl AgentControlService {
         let git_wt = self.git_wt.clone();
         let verify_path = worktree_path.to_path_buf();
         let expected = branch_name.to_string();
-        let actual = tokio::task::spawn_blocking(move || {
-            git_wt.get_workspace_bookmark(&verify_path)
-        })
-        .await
-        .context("spawn_blocking failed during branch verification")?
-        .map_err(|e| anyhow!("Failed to verify worktree branch: {}", e))?;
+        let actual =
+            tokio::task::spawn_blocking(move || git_wt.get_workspace_bookmark(&verify_path))
+                .await
+                .context("spawn_blocking failed during branch verification")?
+                .map_err(|e| anyhow!("Failed to verify worktree branch: {}", e))?;
 
         if actual.as_deref() != Some(&expected) {
             return Err(anyhow!(
