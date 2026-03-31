@@ -1,14 +1,14 @@
-use crate::domain::{BranchName, CommitSha, GithubOwner, GithubRepo, PRNumber};
+use crate::domain::{BranchName, CIStatus, CommitSha, GithubOwner, GithubRepo, PRNumber};
 use crate::plugin_manager::PluginManager;
 use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::AgentType;
 use crate::services::agent_resolver::AgentResolver;
 use crate::services::event_queue::EventQueue;
-use crate::services::github::{map_octo_err, GitHubClient};
+use crate::services::github::{GitHubClient, map_octo_err};
 use crate::services::repo;
 use anyhow::Result;
 use claude_teams_bridge::TeamRegistry;
-use exomonad_proto::effects::events::{event::EventType, AgentMessage, Event};
+use exomonad_proto::effects::events::{AgentMessage, Event, event::EventType};
 use octocrab::params;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -81,7 +81,7 @@ enum PendingAction {
 #[derive(Debug, Clone)]
 struct PRState {
     last_copilot_comment_count: usize,
-    last_ci_status: String,
+    last_ci_status: CIStatus,
     branch_name: BranchName,
     agent_type: AgentType,
     first_seen: Instant,
@@ -97,12 +97,12 @@ impl PRState {
         branch: &BranchName,
         agent_type: AgentType,
         sha: &CommitSha,
-        ci_status: &str,
+        ci_status: CIStatus,
         copilot_count: usize,
     ) -> Self {
         Self {
             last_copilot_comment_count: copilot_count,
-            last_ci_status: ci_status.to_string(),
+            last_ci_status: ci_status,
             branch_name: branch.clone(),
             agent_type,
             first_seen: Instant::now(),
@@ -124,7 +124,7 @@ fn compute_pr_actions(
     pr_sha: &str,
     copilot_comments: &[CopilotComment],
     copilot_reviews: &[CopilotReview],
-    ci_status: &str,
+    ci_status: CIStatus,
     branch: &str,
     format_message: &dyn Fn(&[CopilotComment], &[CopilotReview]) -> String,
 ) -> Vec<PendingAction> {
@@ -147,7 +147,7 @@ fn compute_pr_actions(
                 payload: serde_json::json!({
                     "kind": "fixes_pushed",
                     "pr_number": pr_number.as_u64(),
-                    "ci_status": ci_status,
+                    "ci_status": ci_status.as_str(),
                 }),
             });
         } else {
@@ -158,7 +158,7 @@ fn compute_pr_actions(
                 payload: serde_json::json!({
                     "kind": "commits_pushed",
                     "pr_number": pr_number.as_u64(),
-                    "ci_status": ci_status,
+                    "ci_status": ci_status.as_str(),
                 }),
             });
         }
@@ -228,7 +228,7 @@ fn compute_pr_actions(
             event_type: "ci_status",
             payload: serde_json::json!({
                 "pr_number": pr_number.as_u64(),
-                "status": ci_status,
+                "status": ci_status.as_str(),
                 "branch": branch,
             }),
         });
@@ -238,7 +238,7 @@ fn compute_pr_actions(
             comments: None,
             reviews: None,
         });
-        old_state.last_ci_status = ci_status.to_string();
+        old_state.last_ci_status = ci_status;
     }
 
     // Shorter timeout after addressing changes (Copilot won't re-review)
@@ -808,7 +808,9 @@ impl GitHubPoller {
                 if ci_status != old_state.last_ci_status {
                     info!(
                         "[Poller] CI status changed for {}: {} -> {}",
-                        branch, old_state.last_ci_status, ci_status
+                        branch,
+                        old_state.last_ci_status.as_str(),
+                        ci_status.as_str()
                     );
                 }
 
@@ -818,7 +820,7 @@ impl GitHubPoller {
                     pr_sha.as_str(),
                     &copilot_comments,
                     &copilot_reviews,
-                    &ci_status,
+                    ci_status,
                     branch.as_str(),
                     &|c, r| self.format_copilot_message(c, r),
                 )
@@ -830,7 +832,7 @@ impl GitHubPoller {
                         branch,
                         agent_type,
                         pr_sha,
-                        &ci_status,
+                        ci_status,
                         copilot_comments.len() + copilot_reviews.len(),
                     ),
                 );
@@ -948,13 +950,13 @@ impl GitHubPoller {
         owner: &GithubOwner,
         repo: &GithubRepo,
         sha: &CommitSha,
-    ) -> Result<String> {
+    ) -> Result<CIStatus> {
         let octo = match &self.github {
             Some(client) => match client.get().await {
                 Ok(c) => c,
-                Err(_) => return Ok("unknown".to_string()),
+                Err(_) => return Ok(CIStatus::Unknown),
             },
-            None => return Ok("unknown".to_string()),
+            None => return Ok(CIStatus::Unknown),
         };
 
         let runs = match octo
@@ -964,7 +966,7 @@ impl GitHubPoller {
             .await
         {
             Ok(runs) => runs,
-            Err(_) => return Ok("unknown".to_string()),
+            Err(_) => return Ok(CIStatus::Unknown),
         };
 
         // Simplified logic: if any failure -> failure. If all success -> success. Else pending.
@@ -973,34 +975,32 @@ impl GitHubPoller {
 
         // If no check runs, consider it pending (or none)
         if runs.check_runs.is_empty() {
-            return Ok("pending".to_string());
+            return Ok(CIStatus::Pending);
         }
 
         for run in runs.check_runs {
             match run.conclusion.as_deref() {
-                Some("failure") | Some("timed_out") | Some("cancelled") => any_failure = true,
-                Some("success") => {}
-                _ => {
-                    // Pending, skipped, neutral, etc.
-                    // If it's not success or failure, it means we are not 'all_success'.
-                    if run.completed_at.is_none() {
+                Some(conclusion) => {
+                    let status = CIStatus::parse(conclusion);
+                    if status == CIStatus::Failure {
+                        any_failure = true;
+                    } else if status != CIStatus::Success && status != CIStatus::Neutral {
                         all_success = false;
                     }
-                    // For now, if skipped, we treat as neutral (don't break all_success?)
-                    // Actually, let's keep it simple: if not failure and not success, it's pending/other.
-                    if run.conclusion.is_none() {
-                        all_success = false;
-                    }
+                }
+                None => {
+                    // Still in progress/pending
+                    all_success = false;
                 }
             }
         }
 
         if any_failure {
-            Ok("failure".to_string())
+            Ok(CIStatus::Failure)
         } else if all_success {
-            Ok("success".to_string())
+            Ok(CIStatus::Success)
         } else {
-            Ok("pending".to_string())
+            Ok(CIStatus::Pending)
         }
     }
 
@@ -1189,7 +1189,7 @@ mod tests {
             &BranchName::from(branch),
             AgentType::Gemini,
             &CommitSha::from(sha),
-            "pending",
+            CIStatus::Pending,
             0,
         )
     }
@@ -1205,7 +1205,7 @@ mod tests {
             "def456", // new SHA
             &[],
             &[],
-            "success",
+            CIStatus::Success,
             "main.feature",
             &|_, _| String::new(),
         );
@@ -1228,7 +1228,7 @@ mod tests {
             "abc123",
             &[],
             &[],
-            "success",
+            CIStatus::Success,
             "main.feature",
             &|_, _| String::new(),
         );
@@ -1250,7 +1250,7 @@ mod tests {
             "abc123",
             &[],
             &reviews,
-            "success",
+            CIStatus::Success,
             "main.feature",
             &|_, _| String::new(),
         );
@@ -1262,7 +1262,7 @@ mod tests {
     #[test]
     fn test_same_sha_no_op() {
         let mut state = make_pr_state("main.feature", "abc123");
-        state.last_ci_status = "success".to_string();
+        state.last_ci_status = CIStatus::Success;
 
         let actions = compute_pr_actions(
             &mut state,
@@ -1270,7 +1270,7 @@ mod tests {
             "abc123",
             &[],
             &[],
-            "success",
+            CIStatus::Success,
             "main.feature",
             &|_, _| String::new(),
         );
@@ -1281,7 +1281,7 @@ mod tests {
     #[test]
     fn test_ci_status_change() {
         let mut state = make_pr_state("main.feature", "abc123");
-        state.last_ci_status = "pending".to_string();
+        state.last_ci_status = CIStatus::Pending;
 
         let actions = compute_pr_actions(
             &mut state,
@@ -1289,7 +1289,7 @@ mod tests {
             "abc123",
             &[],
             &[],
-            "failure",
+            CIStatus::Failure,
             "main.feature",
             &|_, _| String::new(),
         );
@@ -1301,10 +1301,12 @@ mod tests {
                 ..
             }
         )));
-        assert!(actions
-            .iter()
-            .any(|a| matches!(a, PendingAction::EmitEvent { status, .. } if status == "failure")));
-        assert_eq!(state.last_ci_status, "failure");
+        assert!(
+            actions.iter().any(
+                |a| matches!(a, PendingAction::EmitEvent { status, .. } if status == "failure")
+            )
+        );
+        assert_eq!(state.last_ci_status, CIStatus::Failure);
     }
 
     #[test]
@@ -1319,7 +1321,7 @@ mod tests {
             "abc123",
             &[],
             &[],
-            "success",
+            CIStatus::Success,
             "main.feature",
             &|_, _| String::new(),
         );

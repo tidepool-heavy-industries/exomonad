@@ -524,6 +524,50 @@ impl fmt::Display for MergeStrategy {
 }
 
 // ============================================================================
+// CI Status
+// ============================================================================
+
+/// GitHub CI check status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CIStatus {
+    Pending,
+    Success,
+    Failure,
+    Neutral,
+    Unknown,
+}
+
+impl CIStatus {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "success" => CIStatus::Success,
+            "failure" | "error" | "action_required" | "timed_out" | "cancelled"
+            | "startup_failure" => CIStatus::Failure,
+            "neutral" | "skipped" | "stale" => CIStatus::Neutral,
+            "pending" | "queued" | "in_progress" | "waiting" | "requested" => CIStatus::Pending,
+            _ => CIStatus::Unknown,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CIStatus::Pending => "pending",
+            CIStatus::Success => "success",
+            CIStatus::Failure => "failure",
+            CIStatus::Neutral => "neutral",
+            CIStatus::Unknown => "unknown",
+        }
+    }
+}
+
+impl fmt::Display for CIStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+// ============================================================================
 // Role
 // ============================================================================
 
@@ -1109,7 +1153,7 @@ mod tests {
 
     #[test]
     fn test_address_from_proto_agent() {
-        use exomonad_proto::effects::events::{address::Kind, Address as ProtoAddr};
+        use exomonad_proto::effects::events::{Address as ProtoAddr, address::Kind};
         let addr = Address::from_proto(Some(ProtoAddr {
             kind: Some(Kind::Agent("worker-1".into())),
         }));
@@ -1119,7 +1163,7 @@ mod tests {
 
     #[test]
     fn test_address_from_proto_team_with_member() {
-        use exomonad_proto::effects::events::{address::Kind, Address as ProtoAddr, TeamAddress};
+        use exomonad_proto::effects::events::{Address as ProtoAddr, TeamAddress, address::Kind};
         let addr = Address::from_proto(Some(ProtoAddr {
             kind: Some(Kind::Team(TeamAddress {
                 team: "my-team".into(),
@@ -1138,7 +1182,7 @@ mod tests {
 
     #[test]
     fn test_address_from_proto_team_lead() {
-        use exomonad_proto::effects::events::{address::Kind, Address as ProtoAddr, TeamAddress};
+        use exomonad_proto::effects::events::{Address as ProtoAddr, TeamAddress, address::Kind};
         let addr = Address::from_proto(Some(ProtoAddr {
             kind: Some(Kind::Team(TeamAddress {
                 team: "my-team".into(),
@@ -1162,7 +1206,7 @@ mod tests {
 
     #[test]
     fn test_address_from_proto_empty_agent() {
-        use exomonad_proto::effects::events::{address::Kind, Address as ProtoAddr};
+        use exomonad_proto::effects::events::{Address as ProtoAddr, address::Kind};
         let addr = Address::from_proto(Some(ProtoAddr {
             kind: Some(Kind::Agent("".into())),
         }));
@@ -1306,6 +1350,37 @@ mod tests {
             let back: MergeStrategy = serde_json::from_str(&json).unwrap();
             assert_eq!(strategy, back);
             assert_eq!(json, format!("\"{}\"", strategy.as_str()));
+        }
+    }
+
+    #[test]
+    fn test_ci_status_parse() {
+        assert_eq!(CIStatus::parse("success"), CIStatus::Success);
+        assert_eq!(CIStatus::parse("failure"), CIStatus::Failure);
+        assert_eq!(CIStatus::parse("error"), CIStatus::Failure);
+        assert_eq!(CIStatus::parse("pending"), CIStatus::Pending);
+        assert_eq!(CIStatus::parse("in_progress"), CIStatus::Pending);
+        assert_eq!(CIStatus::parse("neutral"), CIStatus::Neutral);
+        assert_eq!(CIStatus::parse("skipped"), CIStatus::Neutral);
+        assert_eq!(CIStatus::parse("weird_value"), CIStatus::Unknown);
+    }
+
+    #[test]
+    fn test_ci_status_display() {
+        assert_eq!(CIStatus::Success.to_string(), "success");
+        assert_eq!(CIStatus::Failure.to_string(), "failure");
+    }
+
+    #[test]
+    fn test_ci_status_roundtrip() {
+        for status in [
+            CIStatus::Pending,
+            CIStatus::Success,
+            CIStatus::Failure,
+            CIStatus::Neutral,
+            CIStatus::Unknown,
+        ] {
+            assert_eq!(CIStatus::parse(status.as_str()), status);
         }
     }
 
