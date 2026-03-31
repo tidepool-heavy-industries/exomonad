@@ -443,7 +443,7 @@ impl AgentControlService {
             self.resolve_tmux_session()?;
 
             // Sanitize name and construct typed identity
-            let identity = AgentIdentity::new(slugify(&options.name), AgentType::Gemini);
+            let identity = AgentIdentity::new(slugify(options.name.as_str()), AgentType::Gemini);
             let agent_name = identity.internal_name();
             let display_name = identity.display_name();
 
@@ -467,7 +467,7 @@ impl AgentControlService {
                     return Ok(SpawnResult {
                         agent_dir: PathBuf::new(),
                         agent_name,
-                        issue_title: options.name.clone(),
+                        issue_title: options.name.to_string(),
                         agent_type: AgentType::Gemini,
                     });
                 }
@@ -552,7 +552,7 @@ impl AgentControlService {
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: PathBuf::new(),
                 agent_name,
-                issue_title: options.name.clone(),
+                issue_title: options.name.to_string(),
                 agent_type: AgentType::Gemini,
             })
         })

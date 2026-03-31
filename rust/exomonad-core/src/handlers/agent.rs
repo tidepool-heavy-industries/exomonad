@@ -252,7 +252,7 @@ impl AgentEffects for AgentHandler {
             owner: parse_owner(&req.owner)?,
             repo: parse_repo(&req.repo)?,
             agent_type: convert_agent_type(req.agent_type())?,
-            subrepo: non_empty(req.subrepo),
+            subrepo: non_empty(req.subrepo).map(PathBuf::from),
             base_branch: non_empty(req.base_branch).map(|s| BirthBranch::from(s.as_str())),
         };
 
@@ -288,7 +288,7 @@ impl AgentEffects for AgentHandler {
                 owner: parse_owner(&req.owner)?,
                 repo: parse_repo(&req.repo)?,
                 agent_type,
-                subrepo: non_empty(req.subrepo.clone()),
+                subrepo: non_empty(req.subrepo.clone()).map(PathBuf::from),
                 base_branch: None,
             };
 
@@ -314,7 +314,7 @@ impl AgentEffects for AgentHandler {
             name: AgentName::from(req.name.as_str()),
             prompt: req.prompt.clone(),
             agent_type: convert_agent_type(req.agent_type())?,
-            subrepo: non_empty(req.subrepo),
+            subrepo: non_empty(req.subrepo).map(PathBuf::from),
             base_branch: non_empty(req.base_branch).map(|s| BirthBranch::from(s.as_str())),
         };
 
@@ -335,7 +335,7 @@ impl AgentEffects for AgentHandler {
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<SpawnWorkerResponse> {
         let options = SpawnWorkerOptions {
-            name: req.name.clone(),
+            name: AgentName::from(req.name.as_str()),
             prompt: req.prompt.clone(),
             claude_flags: claude_spawn_flags(
                 req.permission_mode.clone(),

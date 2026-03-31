@@ -311,7 +311,7 @@ pub struct SpawnOptions {
     pub agent_type: AgentType,
     /// Sub-repository path relative to project_dir (e.g., "urchin/").
     /// When set, the agent's project context targets this directory instead of project_dir.
-    pub subrepo: Option<String>,
+    pub subrepo: Option<PathBuf>,
     /// Base branch to branch off of (default: "main").
     pub base_branch: Option<BirthBranch>,
 }
@@ -327,7 +327,7 @@ pub struct SpawnGeminiTeammateOptions {
     #[serde(default)]
     pub agent_type: AgentType,
     /// Sub-repository path relative to project_dir
-    pub subrepo: Option<String>,
+    pub subrepo: Option<PathBuf>,
     /// Base branch to branch off of (defaults to current branch).
     pub base_branch: Option<BirthBranch>,
 }
@@ -347,7 +347,7 @@ pub struct ClaudeSpawnFlags {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnWorkerOptions {
     /// Human-readable name for the worker
-    pub name: String,
+    pub name: AgentName,
     /// Implementation instructions
     pub prompt: String,
     /// Claude-specific permission flags (ignored for Gemini).
@@ -698,20 +698,19 @@ impl AgentControlService {
     /// Resolve effective project dir for git operations.
     /// When subrepo is set, git operations target project_dir/subrepo instead.
     /// Validates that subrepo is relative and does not escape project_dir.
-    pub(crate) fn effective_project_dir(&self, subrepo: Option<&str>) -> Result<PathBuf> {
+    pub(crate) fn effective_project_dir(&self, subrepo: Option<&Path>) -> Result<PathBuf> {
         match subrepo {
-            Some(sub) => {
-                let sub_path = Path::new(sub);
+            Some(sub_path) => {
                 if sub_path.is_absolute() {
-                    return Err(anyhow!("subrepo path must be relative: {}", sub));
+                    return Err(anyhow!("subrepo path must be relative: {}", sub_path.display()));
                 }
                 for component in sub_path.components() {
                     if matches!(component, std::path::Component::ParentDir) {
-                        return Err(anyhow!("subrepo path cannot contain '..': {}", sub));
+                        return Err(anyhow!("subrepo path cannot contain '..': {}", sub_path.display()));
                     }
                 }
-                let dir = self.project_dir.join(sub);
-                info!(subrepo = %sub, effective_dir = %dir.display(), "Using subrepo for git operations");
+                let dir = self.project_dir.join(sub_path);
+                info!(subrepo = %sub_path.display(), effective_dir = %dir.display(), "Using subrepo for git operations");
                 Ok(dir)
             }
             None => Ok(self.project_dir.clone()),
