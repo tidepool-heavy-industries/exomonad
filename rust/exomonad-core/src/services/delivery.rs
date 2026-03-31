@@ -159,7 +159,7 @@ pub async fn route_message(
     acp_registry: Option<&AcpRegistry>,
     resolver: Option<&AgentResolver>,
     project_dir: &std::path::Path,
-    from: &str,
+    from: &crate::domain::AgentName,
     content: &str,
     summary: &str,
 ) -> DeliveryOutcome {
@@ -239,7 +239,7 @@ async fn resolve_and_deliver_to_lead(
     acp_registry: Option<&AcpRegistry>,
     resolver: Option<&AgentResolver>,
     project_dir: &std::path::Path,
-    from: &str,
+    from: &crate::domain::AgentName,
     content: &str,
     summary: &str,
 ) -> DeliveryOutcome {
@@ -395,7 +395,7 @@ pub async fn notify_parent_delivery(
         project_dir,
         parent_session_id,
         parent_tab_name,
-        agent_id.as_str(),
+        agent_id,
         &notification,
         summary,
     )
@@ -489,14 +489,14 @@ pub async fn deliver_to_agent(
     project_dir: &std::path::Path,
     agent_key: &str,
     tmux_target: &str,
-    from: &str,
+    from: &crate::domain::AgentName,
     message: &str,
     summary: &str,
 ) -> DeliveryResult {
     if let Some(registry) = team_registry {
         // Batch lookup: sender's team (for Tier 2 scoping) + recipient in-memory check.
         // Single lock acquisition instead of two separate get() calls.
-        let (sender_info, recipient_info) = registry.get_pair(from, agent_key).await;
+        let (sender_info, recipient_info) = registry.get_pair(from.as_str(), agent_key).await;
         let sender_team = sender_info.map(|info| info.team_name);
         // Track whether this is a Tier 1 (in-memory) resolution — CC-native agents
         // (Tier 2, config.json) don't have worktrees or routing.json, so the
@@ -517,8 +517,14 @@ pub async fn deliver_to_agent(
                 super::resilience::Backoff::Fixed(std::time::Duration::from_millis(100)),
             );
             let teams_result = super::resilience::retry(&inbox_policy, || async {
-                teams_mailbox::write_to_inbox(team_name_ref, inbox_name_ref, from, message, summary)
-                    .map_err(|e| anyhow::anyhow!("{}", e))
+                teams_mailbox::write_to_inbox(
+                    team_name_ref,
+                    inbox_name_ref,
+                    from.as_str(),
+                    message,
+                    summary,
+                )
+                .map_err(|e| anyhow::anyhow!("{}", e))
             })
             .await;
             let teams_result = match teams_result {
@@ -681,7 +687,7 @@ pub async fn deliver_to_agent(
     // Try HTTP-over-UDS delivery (for custom binary agents like shoal-agent)
     let socket_path = project_dir.join(format!(".exo/agents/{}/notify.sock", agent_key));
     if socket_path.exists() {
-        match deliver_via_uds(&socket_path, from, message, summary).await {
+        match deliver_via_uds(&socket_path, from.as_str(), message, summary).await {
             Ok(()) => {
                 tracing::Span::current().record("delivery_method", "uds");
                 info!(agent = %agent_key, socket = %socket_path.display(), "Delivered message via Unix socket");
@@ -830,6 +836,7 @@ pub async fn deliver_to_agent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::AgentName;
 
     #[test]
     fn test_format_parent_notification_success() {
@@ -881,7 +888,7 @@ mod tests {
             std::path::Path::new("/tmp/nonexistent"),
             "agent-1",
             "tab-1",
-            "test",
+            &AgentName::from("test"),
             "hello",
             "summary",
         )

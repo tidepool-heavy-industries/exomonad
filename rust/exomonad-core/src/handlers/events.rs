@@ -292,7 +292,6 @@ impl EventEffects for EventHandler {
         req: SendMessageRequest,
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<SendMessageResponse> {
-        let sender = ctx.agent_name.as_str();
         let summary = if req.summary.is_empty() {
             req.content.chars().take(50).collect::<String>()
         } else {
@@ -311,7 +310,7 @@ impl EventEffects for EventHandler {
 
         tracing::info!(
             address = %address,
-            sender = %sender,
+            sender = %ctx.agent_name,
             "send_message: routing via Address"
         );
 
@@ -321,7 +320,7 @@ impl EventEffects for EventHandler {
             Some(&*self.acp_registry),
             Some(&*self.agent_resolver),
             &self.project_dir,
-            sender,
+            &ctx.agent_name,
             &req.content,
             &summary,
         )

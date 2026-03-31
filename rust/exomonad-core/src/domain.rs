@@ -196,6 +196,16 @@ impl BirthBranch {
             None
         }
     }
+
+    /// Get the last dot-segment, or the whole string if no dots.
+    pub fn slug(&self) -> &str {
+        self.0.rsplit_once('.').map(|(_, s)| s).unwrap_or(&self.0)
+    }
+
+    /// Whether this branch has a parent (contains a dot).
+    pub fn has_parent(&self) -> bool {
+        self.0.contains('.')
+    }
 }
 
 validated_string!(
