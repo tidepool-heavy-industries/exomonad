@@ -553,12 +553,12 @@ impl AgentEffects for AgentHandler {
         let working_dir = ctx.working_dir.clone();
 
         // Generate MCP settings for the agent using stdio transport
-        let agent_name = &req.name;
+        let agent_name = AgentName::try_from(req.name.clone()).effect_err("agent")?;
         let context_path = self
             .service
             .resolve_role_context(&crate::domain::Role::worker());
         let settings_json = AgentControlService::generate_gemini_worker_settings(
-            agent_name,
+            agent_name.as_str(),
             context_path.as_deref(),
             &self.service.extra_mcp_servers,
         );
@@ -587,7 +587,7 @@ impl AgentEffects for AgentHandler {
                 "GEMINI_CLI_SYSTEM_SETTINGS_PATH".into(),
                 settings_path.to_string_lossy().into_owned(),
             ),
-            ("EXOMONAD_AGENT_ID".into(), agent_name.clone()),
+            ("EXOMONAD_AGENT_ID".into(), agent_name.to_string()),
         ];
 
         let conn = crate::services::acp_registry::connect_and_prompt(
@@ -600,17 +600,16 @@ impl AgentEffects for AgentHandler {
         .await
         .effect_err("agent")?;
 
-        registry.register(agent_name.clone(), conn).await;
+        registry.register(conn).await;
 
         // Register as synthetic team member (uses TL's actual team, not hardcoded exo-{branch})
-        let member_name = AgentName::from(agent_name.as_str());
-        self.register_synthetic_member(&member_name, "gemini-acp", ctx)
+        self.register_synthetic_member(&agent_name, "gemini-acp", ctx)
             .await;
 
         info!(agent = %agent_name, "ACP agent spawned and registered");
 
         let agent_info = exomonad_proto::effects::agent::AgentInfo {
-            id: agent_name.clone(),
+            id: agent_name.to_string(),
             issue: String::new(),
             worktree_path: String::new(),
             branch_name: String::new(),

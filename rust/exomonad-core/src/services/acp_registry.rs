@@ -16,11 +16,13 @@ use tokio::process::Command;
 use tokio::sync::RwLock;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
+use crate::domain::AgentName;
+
 /// Metadata for an active ACP connection.
 #[derive(Debug)]
 pub struct AcpConnection {
     /// Agent identifier (e.g., "worker-rust-impl").
-    pub agent_id: String,
+    pub agent_id: AgentName,
     /// ACP session ID from `new_session` response.
     pub session_id: agent_client_protocol::SessionId,
     /// The underlying ACP connection for sending prompts.
@@ -32,7 +34,7 @@ pub struct AcpConnection {
 /// Registry of active ACP connections, keyed by agent name.
 #[derive(Debug, Clone)]
 pub struct AcpRegistry {
-    connections: Arc<RwLock<HashMap<String, Arc<AcpConnection>>>>,
+    connections: Arc<RwLock<HashMap<AgentName, Arc<AcpConnection>>>>,
 }
 
 impl Default for AcpRegistry {
@@ -48,7 +50,8 @@ impl AcpRegistry {
         Self::default()
     }
 
-    pub async fn register(&self, agent_id: String, conn: AcpConnection) {
+    pub async fn register(&self, conn: AcpConnection) {
+        let agent_id = conn.agent_id.clone();
         let mut connections = self.connections.write().await;
         tracing::info!(agent = %agent_id, "Registering ACP connection");
         connections.insert(agent_id, Arc::new(conn));
@@ -75,7 +78,7 @@ impl AcpRegistry {
 ///
 /// * `gemini_command`: Name or path of the Gemini CLI binary (e.g., "gemini").
 pub async fn connect_and_prompt(
-    agent_id: String,
+    agent_id: AgentName,
     gemini_command: &str,
     working_dir: &std::path::Path,
     initial_prompt: &str,
@@ -101,7 +104,7 @@ pub async fn connect_and_prompt(
     let incoming = stdout.compat();
 
     let client = super::acp_client::ExoMonadAcpClient {
-        agent_id: agent_id.clone(),
+        agent_id: agent_id.to_string(),
     };
 
     let (conn, io_task) = ClientSideConnection::new(client, outgoing, incoming, |fut| {
