@@ -125,6 +125,12 @@ fn compute_pr_actions(
     let mut pending_actions = Vec::new();
     let copilot_count = copilot_comments.len() + copilot_reviews.len();
 
+    // Once we've notified the parent (approved or timeout), suppress further events.
+    // The TL will merge; any later activity (late Copilot reviews, CI changes) is stale.
+    if old_state.notified_parent_approved || old_state.notified_parent_timeout {
+        return pending_actions;
+    }
+
     // Reset review tracking if new commits pushed
     if pr_sha != old_state.last_sha.as_str() {
         old_state.last_sha = CommitSha::from(pr_sha);
@@ -1316,5 +1322,80 @@ mod tests {
         );
 
         assert!(actions.iter().any(|a| matches!(a, PendingAction::WasmEvent { event_type: "pr_review", payload } if payload.get("kind").and_then(|v| v.as_str()) == Some("timeout"))));
+    }
+
+    #[test]
+    fn test_no_actions_after_parent_approved() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        state.notified_parent_approved = true;
+        state.last_review_state = ReviewState::Approved;
+
+        // Late Copilot review arrives after approval — should be suppressed
+        let reviews = vec![CopilotReview {
+            body: "Some late feedback".to_string(),
+            state: ReviewState::Approved,
+        }];
+        let actions = compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "abc123",
+            &[],
+            &reviews,
+            CIStatus::Success,
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        assert!(
+            actions.is_empty(),
+            "Expected no actions after parent was notified of approval"
+        );
+    }
+
+    #[test]
+    fn test_no_actions_after_parent_timeout() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        state.notified_parent_timeout = true;
+
+        // CI status change after timeout — should be suppressed
+        let actions = compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "abc123",
+            &[],
+            &[],
+            CIStatus::Success,
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        assert!(
+            actions.is_empty(),
+            "Expected no actions after parent was notified of timeout"
+        );
+    }
+
+    #[test]
+    fn test_new_commits_after_approval_suppressed() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        state.notified_parent_approved = true;
+        state.last_review_state = ReviewState::Approved;
+
+        // New commits pushed after approval — should be suppressed
+        let actions = compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "def456", // new SHA
+            &[],
+            &[],
+            CIStatus::Pending,
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        assert!(
+            actions.is_empty(),
+            "Expected no actions for new commits after approval"
+        );
     }
 }

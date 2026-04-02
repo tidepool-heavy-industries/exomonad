@@ -149,6 +149,10 @@ ReviewState::None ──(Copilot approves)──→ ReviewState::Approved
 4. Handler returns `EventAction` (InjectMessage, NotifyParentAction, NoAction)
 5. Poller acts on the action via `handle_event_action()`
 
+### Stale Notification Guard
+
+Once the parent has been notified (via `[PR READY]` approval or `[REVIEW TIMEOUT]`), `compute_pr_actions` suppresses all further events for that PR. Late Copilot reviews, CI status changes, and new commits are silently dropped — the TL has already been told to merge, so any further notifications are stale and confusing.
+
 ### Merge Detection
 
 When a tracked PR's branch disappears from the open PR list, it was merged/closed. The poller:
