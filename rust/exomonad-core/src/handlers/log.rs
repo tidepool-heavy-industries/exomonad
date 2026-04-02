@@ -3,25 +3,24 @@
 //! Uses proto-generated types from `exomonad_proto::effects::log`.
 
 use crate::effects::{dispatch_log_effect, EffectHandler, EffectResult, LogEffects};
-use crate::services::event_log::EventLog;
 use async_trait::async_trait;
 use exomonad_proto::effects::log::*;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::services::HasEventLog;
+
 /// Log effect handler.
 ///
 /// Handles all effects in the `log.*` namespace by delegating to
 /// the generated `dispatch_log_effect` function.
-pub struct LogHandler {
-    event_log: Option<Arc<EventLog>>,
+pub struct LogHandler<C> {
+    ctx: Arc<C>,
 }
 
-impl LogHandler {
-    pub fn new(services: &crate::services::Services) -> Self {
-        Self {
-            event_log: services.event_log.clone(),
-        }
+impl<C: HasEventLog + 'static> LogHandler<C> {
+    pub fn new(ctx: Arc<C>) -> Self {
+        Self { ctx }
     }
 
     async fn do_log(
@@ -59,7 +58,7 @@ impl LogHandler {
 }
 
 #[async_trait]
-impl EffectHandler for LogHandler {
+impl<C: HasEventLog + 'static> EffectHandler for LogHandler<C> {
     fn namespace(&self) -> &str {
         "log"
     }
@@ -75,7 +74,7 @@ impl EffectHandler for LogHandler {
 }
 
 #[async_trait]
-impl LogEffects for LogHandler {
+impl<C: HasEventLog + 'static> LogEffects for LogHandler<C> {
     async fn log(
         &self,
         req: LogRequest,
@@ -147,7 +146,7 @@ impl LogEffects for LogHandler {
             "[event]"
         );
 
-        if let Some(ref log) = self.event_log {
+        if let Some(log) = self.ctx.event_log() {
             let data: serde_json::Value = if req.payload.is_empty() {
                 serde_json::json!({})
             } else {
@@ -171,14 +170,14 @@ mod tests {
 
     #[test]
     fn test_log_handler_new() {
-        let services = Services::test();
-        let _handler = LogHandler::new(&services);
+        let services = Arc::new(Services::test());
+        let _handler = LogHandler::new(services);
     }
 
     #[test]
     fn test_log_handler_namespace() {
-        let services = Services::test();
-        let handler = LogHandler::new(&services);
+        let services = Arc::new(Services::test());
+        let handler = LogHandler::new(services);
         assert_eq!(handler.namespace(), "log");
     }
 }

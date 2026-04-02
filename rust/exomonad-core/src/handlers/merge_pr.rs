@@ -1,33 +1,42 @@
 use crate::effects::{dispatch_merge_pr_effect, EffectResult, MergePrEffects, ResultExt};
-use crate::services::event_log::EventLog;
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::merge_pr;
-use crate::services::GitHubClient;
 use async_trait::async_trait;
 use exomonad_proto::effects::merge_pr::*;
 use std::sync::Arc;
 use tracing::instrument;
 
-pub struct MergePRHandler {
+use crate::services::{HasEventLog, HasGitHubClient};
+
+pub struct MergePRHandler<C> {
     git_wt: Arc<GitWorktreeService>,
-    github_client: Option<Arc<GitHubClient>>,
-    event_log: Option<Arc<EventLog>>,
+    ctx: Arc<C>,
 }
 
-impl MergePRHandler {
-    pub fn new(git_wt: Arc<GitWorktreeService>, services: &crate::services::Services) -> Self {
-        Self {
-            git_wt,
-            github_client: services.github_client.clone(),
-            event_log: services.event_log.clone(),
-        }
+impl<C: HasGitHubClient + HasEventLog + 'static> MergePRHandler<C> {
+    pub fn new(git_wt: Arc<GitWorktreeService>, ctx: Arc<C>) -> Self {
+        Self { git_wt, ctx }
     }
 }
 
-crate::impl_pass_through_handler!(MergePRHandler, "merge_pr", dispatch_merge_pr_effect);
+#[async_trait]
+impl<C: HasGitHubClient + HasEventLog + 'static> crate::effects::EffectHandler for MergePRHandler<C> {
+    fn namespace(&self) -> &str {
+        "merge_pr"
+    }
+
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> crate::effects::EffectResult<Vec<u8>> {
+        dispatch_merge_pr_effect(self, effect_type, payload, ctx).await
+    }
+}
 
 #[async_trait]
-impl MergePrEffects for MergePRHandler {
+impl<C: HasGitHubClient + HasEventLog + 'static> MergePrEffects for MergePRHandler<C> {
     #[instrument(skip_all, fields(agent_name = %ctx.agent_name, pr_number = req.pr_number))]
     async fn merge_pr(
         &self,
@@ -46,7 +55,7 @@ impl MergePrEffects for MergePRHandler {
             &strategy,
             &req.working_dir,
             self.git_wt.clone(),
-            self.github_client.as_deref(),
+            self.ctx.github_client(),
         )
         .await
         .effect_err("merge_pr")?;
@@ -64,7 +73,7 @@ impl MergePrEffects for MergePRHandler {
                 git_fetched = result.git_fetched,
                 "[event] pr.merged"
             );
-            if let Some(ref log) = self.event_log {
+            if let Some(log) = self.ctx.event_log() {
                 let _ = log.append(
                     "pr.merged",
                     ctx.agent_name.as_ref(),
@@ -82,7 +91,7 @@ impl MergePrEffects for MergePRHandler {
                 error = %result.message,
                 "[event] pr.merge_failed"
             );
-            if let Some(ref log) = self.event_log {
+            if let Some(log) = self.ctx.event_log() {
                 let _ = log.append(
                     "pr.merge_failed",
                     ctx.agent_name.as_ref(),
@@ -123,8 +132,8 @@ mod tests {
     fn test_namespace() {
         let _ctx = test_ctx();
         let git_wt = Arc::new(GitWorktreeService::new(PathBuf::from(".")));
-        let services = Services::test();
-        let handler = MergePRHandler::new(git_wt, &services);
+        let services = Arc::new(Services::test());
+        let handler = MergePRHandler::new(git_wt, services);
         assert_eq!(handler.namespace(), "merge_pr");
     }
 

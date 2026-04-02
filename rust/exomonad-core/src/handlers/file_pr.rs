@@ -7,37 +7,32 @@ use crate::domain::BranchName;
 use crate::effects::{
     dispatch_file_pr_effect, EffectHandler, EffectResult, FilePrEffects, ResultExt,
 };
-use crate::services::event_log::EventLog;
 use crate::services::file_pr::{self, FilePRInput};
 use crate::services::git_worktree::GitWorktreeService;
-use crate::services::GitHubClient;
 use async_trait::async_trait;
 use exomonad_proto::effects::file_pr::*;
 use std::sync::Arc;
 use tracing::instrument;
 
+use crate::services::{HasEventLog, HasGitHubClient};
+
 /// File PR effect handler.
 ///
 /// Handles all effects in the `file_pr.*` namespace by delegating to
 /// the generated `dispatch_file_pr_effect` function.
-pub struct FilePRHandler {
+pub struct FilePRHandler<C> {
     git_wt: Arc<GitWorktreeService>,
-    github_client: Option<Arc<GitHubClient>>,
-    event_log: Option<Arc<EventLog>>,
+    ctx: Arc<C>,
 }
 
-impl FilePRHandler {
-    pub fn new(git_wt: Arc<GitWorktreeService>, services: &crate::services::Services) -> Self {
-        Self {
-            git_wt,
-            github_client: services.github_client.clone(),
-            event_log: services.event_log.clone(),
-        }
+impl<C: HasGitHubClient + HasEventLog + 'static> FilePRHandler<C> {
+    pub fn new(git_wt: Arc<GitWorktreeService>, ctx: Arc<C>) -> Self {
+        Self { git_wt, ctx }
     }
 }
 
 #[async_trait]
-impl EffectHandler for FilePRHandler {
+impl<C: HasGitHubClient + HasEventLog + 'static> EffectHandler for FilePRHandler<C> {
     fn namespace(&self) -> &str {
         "file_pr"
     }
@@ -53,7 +48,7 @@ impl EffectHandler for FilePRHandler {
 }
 
 #[async_trait]
-impl FilePrEffects for FilePRHandler {
+impl<C: HasGitHubClient + HasEventLog + 'static> FilePrEffects for FilePRHandler<C> {
     #[instrument(skip_all, fields(agent_name = %ctx.agent_name, pr_title = %req.title))]
     async fn file_pr(
         &self,
@@ -73,7 +68,7 @@ impl FilePrEffects for FilePRHandler {
         };
 
         let output =
-            file_pr::file_pr_async(&input, self.git_wt.clone(), self.github_client.as_deref())
+            file_pr::file_pr_async(&input, self.git_wt.clone(), self.ctx.github_client())
                 .await
                 .effect_err("file_pr")?;
 
@@ -101,7 +96,7 @@ impl FilePrEffects for FilePRHandler {
             event_type
         );
 
-        if let Some(ref log) = self.event_log {
+        if let Some(log) = self.ctx.event_log() {
             if let Err(e) = log.append(
                 event_type,
                 ctx.agent_name.as_ref(),
@@ -147,8 +142,8 @@ mod tests {
     #[test]
     fn test_namespace() {
         let git_wt = Arc::new(GitWorktreeService::new(PathBuf::from(".")));
-        let services = Services::test();
-        let handler = FilePRHandler::new(git_wt, &services);
+        let services = Arc::new(Services::test());
+        let handler = FilePRHandler::new(git_wt, services);
         assert_eq!(handler.namespace(), "file_pr");
     }
 

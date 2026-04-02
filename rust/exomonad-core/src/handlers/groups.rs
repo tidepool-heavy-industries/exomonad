@@ -17,8 +17,9 @@ use super::{
 
 /// Core handlers every consumer needs: logging, key-value store, filesystem.
 pub fn core_handlers(project_dir: PathBuf, services: &Services) -> Vec<Box<dyn EffectHandler>> {
+    let ctx = Arc::new(services.clone());
     vec![
-        Box::new(LogHandler::new(services)),
+        Box::new(LogHandler::new(ctx)),
         Box::new(KvHandler::new(project_dir.clone())),
         Box::new(FsHandler::new(Arc::new(FileSystemService::new(
             project_dir,
@@ -36,10 +37,11 @@ pub fn git_handlers(
     git: Arc<GitService>,
     git_wt: Arc<GitWorktreeService>,
 ) -> Vec<Box<dyn EffectHandler>> {
+    let ctx = Arc::new(services.clone());
     let mut handlers: Vec<Box<dyn EffectHandler>> = vec![
         Box::new(GitHandler::new(git)),
-        Box::new(FilePRHandler::new(git_wt.clone(), services)),
-        Box::new(MergePRHandler::new(git_wt, services)),
+        Box::new(FilePRHandler::new(git_wt.clone(), ctx.clone())),
+        Box::new(MergePRHandler::new(git_wt, ctx)),
         Box::new(CopilotHandler::new()),
     ];
     if let Some(ref client) = services.github_client {
@@ -62,13 +64,14 @@ pub fn orchestration_handlers(
     event_queue_scope: Option<String>,
 ) -> Vec<Box<dyn EffectHandler>> {
     let tasks_dir = dirs::home_dir().unwrap_or_default().join(".claude/tasks");
+    let ctx = Arc::new(services.clone());
 
     vec![
-        Box::new(AgentHandler::new(agent_control, services)),
+        Box::new(AgentHandler::new(agent_control, ctx.clone())),
         Box::new(EventHandler::new(services, event_queue_scope, project_dir)),
-        Box::new(SessionHandler::new(services)),
-        Box::new(TasksHandler::new(tasks_dir, services)),
-        Box::new(CoordinationHandler::new(services)),
+        Box::new(SessionHandler::new(ctx.clone())),
+        Box::new(TasksHandler::new(tasks_dir, ctx.clone())),
+        Box::new(CoordinationHandler::new(ctx)),
     ]
 }
 

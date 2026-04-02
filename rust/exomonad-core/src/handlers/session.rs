@@ -5,35 +5,52 @@
 
 use crate::domain::ClaudeSessionUuid;
 use crate::effects::{dispatch_session_effect, EffectResult, SessionEffects};
-use crate::services::claude_session_registry::ClaudeSessionRegistry;
-use crate::services::supervisor_registry::{SupervisorInfo, SupervisorRegistry};
+use crate::services::supervisor_registry::SupervisorInfo;
 use async_trait::async_trait;
-use claude_teams_bridge::{TeamInfo, TeamRegistry};
+use claude_teams_bridge::TeamInfo;
 use exomonad_proto::effects::session::*;
 use std::sync::Arc;
 use tracing::info;
 
+use crate::services::{
+    HasClaudeSessionRegistry, HasSupervisorRegistry, HasTeamRegistry,
+};
+
 /// Session effect handler.
-pub struct SessionHandler {
-    registry: Arc<ClaudeSessionRegistry>,
-    team_registry: Arc<TeamRegistry>,
-    supervisor_registry: Arc<SupervisorRegistry>,
+pub struct SessionHandler<C> {
+    ctx: Arc<C>,
 }
 
-impl SessionHandler {
-    pub fn new(services: &crate::services::Services) -> Self {
-        Self {
-            registry: services.claude_session_registry.clone(),
-            team_registry: services.team_registry.clone(),
-            supervisor_registry: services.supervisor_registry.clone(),
-        }
+impl<C: HasClaudeSessionRegistry + HasTeamRegistry + HasSupervisorRegistry + 'static>
+    SessionHandler<C>
+{
+    pub fn new(ctx: Arc<C>) -> Self {
+        Self { ctx }
     }
 }
 
-crate::impl_pass_through_handler!(SessionHandler, "session", dispatch_session_effect);
+#[async_trait]
+impl<C: HasClaudeSessionRegistry + HasTeamRegistry + HasSupervisorRegistry + 'static>
+    crate::effects::EffectHandler for SessionHandler<C>
+{
+    fn namespace(&self) -> &str {
+        "session"
+    }
+
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> crate::effects::EffectResult<Vec<u8>> {
+        dispatch_session_effect(self, effect_type, payload, ctx).await
+    }
+}
 
 #[async_trait]
-impl SessionEffects for SessionHandler {
+impl<C: HasClaudeSessionRegistry + HasTeamRegistry + HasSupervisorRegistry + 'static>
+    SessionEffects for SessionHandler<C>
+{
     async fn register_claude_id(
         &self,
         req: RegisterClaudeSessionRequest,
@@ -55,11 +72,17 @@ impl SessionEffects for SessionHandler {
             "Registering Claude session via effect"
         );
 
-        self.registry.register(&key, claude_uuid.clone()).await;
+        self.ctx
+            .claude_session_registry()
+            .register(&key, claude_uuid.clone())
+            .await;
 
         // Also store under slug variant (strip -claude suffix) for broader lookup
         if let Some(slug) = key.strip_suffix("-claude") {
-            self.registry.register(slug, claude_uuid).await;
+            self.ctx
+                .claude_session_registry()
+                .register(slug, claude_uuid)
+                .await;
         }
 
         Ok(RegisterClaudeSessionResponse { success: true })
@@ -91,18 +114,21 @@ impl SessionEffects for SessionHandler {
             inbox_name: req.inbox_name.clone(),
         };
 
-        self.team_registry.register(&key, team_info.clone()).await;
+        self.ctx.team_registry().register(&key, team_info.clone()).await;
 
         // Also store under birth_branch — notify_parent looks up by parent's birth_branch.
         let bb = ctx.birth_branch.to_string();
         if bb != key {
             info!(key = %bb, team_name = %req.team_name, "Also registering team under birth_branch");
-            self.team_registry.register(&bb, team_info.clone()).await;
+            self.ctx
+                .team_registry()
+                .register(&bb, team_info.clone())
+                .await;
         }
 
         // Also store under slug variant for broader lookup
         if let Some(slug) = key.strip_suffix("-claude") {
-            self.team_registry.register(slug, team_info).await;
+            self.ctx.team_registry().register(slug, team_info).await;
         }
 
         Ok(RegisterTeamResponse { success: true })
@@ -134,7 +160,8 @@ impl SessionEffects for SessionHandler {
             "Registering supervisor for children"
         );
 
-        self.supervisor_registry
+        self.ctx
+            .supervisor_registry()
             .register(
                 &children,
                 SupervisorInfo {
@@ -160,7 +187,7 @@ impl SessionEffects for SessionHandler {
             children_count = children.len(),
             "Deregistering supervisor for children"
         );
-        self.supervisor_registry.deregister(&children).await;
+        self.ctx.supervisor_registry().deregister(&children).await;
         Ok(DeregisterSupervisorResponse { success: true })
     }
 
@@ -178,17 +205,17 @@ impl SessionEffects for SessionHandler {
 
         info!(key = %key, "Deregistering Claude Teams info via effect");
 
-        self.team_registry.deregister(&key).await;
+        self.ctx.team_registry().deregister(&key).await;
 
         // Also deregister under birth_branch
         let bb = ctx.birth_branch.to_string();
         if bb != key {
-            self.team_registry.deregister(&bb).await;
+            self.ctx.team_registry().deregister(&bb).await;
         }
 
         // Also deregister slug variant
         if let Some(slug) = key.strip_suffix("-claude") {
-            self.team_registry.deregister(slug).await;
+            self.ctx.team_registry().deregister(slug).await;
         }
 
         Ok(DeregisterTeamResponse { success: true })
@@ -212,15 +239,15 @@ mod tests {
 
     #[test]
     fn test_namespace() {
-        let services = Services::test();
-        let handler = SessionHandler::new(&services);
+        let services = Arc::new(Services::test());
+        let handler = SessionHandler::new(services);
         assert_eq!(handler.namespace(), "session");
     }
 
     #[tokio::test]
     async fn test_register_claude_id() {
-        let services = Services::test();
-        let handler = SessionHandler::new(&services);
+        let services = Arc::new(Services::test());
+        let handler = SessionHandler::new(services.clone());
         let ctx = test_ctx();
 
         let req = RegisterClaudeSessionRequest {
@@ -239,8 +266,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_team() {
-        let services = Services::test();
-        let handler = SessionHandler::new(&services);
+        let services = Arc::new(Services::test());
+        let handler = SessionHandler::new(services.clone());
         let ctx = test_ctx();
 
         let req = RegisterTeamRequest {
@@ -261,8 +288,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_deregister_team() {
-        let services = Services::test();
-        let handler = SessionHandler::new(&services);
+        let services = Arc::new(Services::test());
+        let handler = SessionHandler::new(services.clone());
         let ctx = test_ctx();
 
         handler
@@ -291,8 +318,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_team_slug_variant() {
-        let services = Services::test();
-        let handler = SessionHandler::new(&services);
+        let services = Arc::new(Services::test());
+        let handler = SessionHandler::new(services.clone());
 
         let ctx = EffectContext {
             agent_name: AgentName::from("foo-claude"),
@@ -313,8 +340,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_claude_id_slug_variant() {
-        let services = Services::test();
-        let handler = SessionHandler::new(&services);
+        let services = Arc::new(Services::test());
+        let handler = SessionHandler::new(services.clone());
 
         let ctx = EffectContext {
             agent_name: AgentName::from("foo-claude"),

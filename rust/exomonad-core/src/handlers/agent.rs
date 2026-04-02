@@ -9,45 +9,45 @@ use crate::effects::{
 };
 
 use super::non_empty;
-use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::{
     AgentControlService, AgentInfo, AgentType as ServiceAgentType, ClaudeSpawnFlags,
     SpawnGeminiTeammateOptions, SpawnLeafOptions, SpawnOptions, SpawnSubtreeOptions,
     SpawnWorkerOptions,
 };
-use crate::services::claude_session_registry::ClaudeSessionRegistry;
-use crate::services::supervisor_registry::{SupervisorInfo, SupervisorRegistry};
+use crate::services::supervisor_registry::SupervisorInfo;
 use crate::{GithubOwner, GithubRepo, IssueNumber};
 use async_trait::async_trait;
-use claude_teams_bridge::TeamRegistry;
 use exomonad_proto::effects::agent::*;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{info, warn};
 
+use crate::services::{
+    HasAcpRegistry, HasAgentResolver, HasClaudeSessionRegistry, HasEventLog, HasSupervisorRegistry,
+    HasTeamRegistry,
+};
+
 /// Agent effect handler.
 ///
 /// Handles all effects in the `agent.*` namespace by delegating to
 /// the generated `dispatch_agent_effect` function.
-pub struct AgentHandler {
+pub struct AgentHandler<C> {
     service: Arc<AgentControlService>,
-    claude_session_registry: Arc<ClaudeSessionRegistry>,
-    acp_registry: Arc<AcpRegistry>,
-    event_log: Option<Arc<crate::services::event_log::EventLog>>,
-    supervisor_registry: Arc<SupervisorRegistry>,
-    team_registry: Arc<TeamRegistry>,
+    ctx: Arc<C>,
 }
 
-impl AgentHandler {
-    pub fn new(service: Arc<AgentControlService>, services: &crate::services::Services) -> Self {
-        Self {
-            service,
-            claude_session_registry: services.claude_session_registry.clone(),
-            acp_registry: services.acp_registry.clone(),
-            event_log: services.event_log.clone(),
-            supervisor_registry: services.supervisor_registry.clone(),
-            team_registry: services.team_registry.clone(),
-        }
+impl<
+        C: HasTeamRegistry
+            + HasAcpRegistry
+            + HasAgentResolver
+            + HasSupervisorRegistry
+            + HasClaudeSessionRegistry
+            + HasEventLog
+            + 'static,
+    > AgentHandler<C>
+{
+    pub fn new(service: Arc<AgentControlService>, ctx: Arc<C>) -> Self {
+        Self { service, ctx }
     }
 
     /// Auto-register a spawned child in the SupervisorRegistry.
@@ -58,8 +58,8 @@ impl AgentHandler {
         child_key: &str,
         ctx: &crate::effects::EffectContext,
     ) {
-        let sup_reg = &self.supervisor_registry;
-        let team_reg = &self.team_registry;
+        let sup_reg = self.ctx.supervisor_registry();
+        let team_reg = self.ctx.team_registry();
         let agent_key = ctx.agent_name.to_string();
         let team_name = if let Some(info) = team_reg.get(&agent_key).await {
             TeamName::from(info.team_name.as_str())
@@ -96,7 +96,7 @@ impl AgentHandler {
         agent_type: &str,
         ctx: &crate::effects::EffectContext,
     ) {
-        let team_reg = &self.team_registry;
+        let team_reg = self.ctx.team_registry();
         let agent_key = ctx.agent_name.to_string();
         let team_name = if let Some(info) = team_reg.get(&agent_key).await {
             TeamName::from(info.team_name.as_str())
@@ -135,7 +135,7 @@ impl AgentHandler {
         child_branch: &str,
         ctx: &crate::effects::EffectContext,
     ) {
-        let team_reg = &self.team_registry;
+        let team_reg = self.ctx.team_registry();
         let agent_key = ctx.agent_name.to_string();
         let parent_team = if let Some(info) = team_reg.get(&agent_key).await {
             info
@@ -187,7 +187,16 @@ impl AgentHandler {
 }
 
 #[async_trait]
-impl EffectHandler for AgentHandler {
+impl<
+        C: HasTeamRegistry
+            + HasAcpRegistry
+            + HasAgentResolver
+            + HasSupervisorRegistry
+            + HasClaudeSessionRegistry
+            + HasEventLog
+            + 'static,
+    > EffectHandler for AgentHandler<C>
+{
     fn namespace(&self) -> &str {
         "agent"
     }
@@ -250,7 +259,16 @@ fn parse_repo(repo: &str) -> EffectResult<GithubRepo> {
 }
 
 #[async_trait]
-impl AgentEffects for AgentHandler {
+impl<
+        C: HasTeamRegistry
+            + HasAcpRegistry
+            + HasAgentResolver
+            + HasSupervisorRegistry
+            + HasClaudeSessionRegistry
+            + HasEventLog
+            + 'static,
+    > AgentEffects for AgentHandler<C>
+{
     async fn spawn(
         &self,
         req: SpawnRequest,
@@ -369,7 +387,7 @@ impl AgentEffects for AgentHandler {
             spawn_type = "worker",
             "[event] agent.spawned"
         );
-        if let Some(ref log) = self.event_log {
+        if let Some(log) = self.ctx.event_log() {
             let _ = log.append(
                 "agent.spawned",
                 ctx.agent_name.as_ref(),
@@ -409,7 +427,7 @@ impl AgentEffects for AgentHandler {
             } else {
                 ctx.agent_name.clone()
             };
-            let claude_uuid = self.claude_session_registry.get(key.as_str()).await;
+            let claude_uuid = self.ctx.claude_session_registry().get(key.as_str()).await;
             info!(
                 key = %key,
                 claude_uuid = ?claude_uuid,
@@ -464,7 +482,7 @@ impl AgentEffects for AgentHandler {
             spawn_type = "subtree",
             "[event] agent.spawned"
         );
-        if let Some(ref log) = self.event_log {
+        if let Some(log) = self.ctx.event_log() {
             let _ = log.append(
                 "agent.spawned",
                 ctx.agent_name.as_ref(),
@@ -529,7 +547,7 @@ impl AgentEffects for AgentHandler {
             spawn_type = "leaf_subtree",
             "[event] agent.spawned"
         );
-        if let Some(ref log) = self.event_log {
+        if let Some(log) = self.ctx.event_log() {
             let _ = log.append("agent.spawned", ctx.agent_name.as_ref(), &serde_json::json!({
                 "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "leaf_subtree",
                 "branch": agent_info.branch_name,
@@ -556,7 +574,7 @@ impl AgentEffects for AgentHandler {
         req: SpawnAcpRequest,
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<SpawnAcpResponse> {
-        let registry = &self.acp_registry;
+        let registry = self.ctx.acp_registry();
 
         // Resolve working directory from context
         let working_dir = ctx.working_dir.clone();
@@ -640,7 +658,7 @@ impl AgentEffects for AgentHandler {
             spawn_type = "acp",
             "[event] agent.spawned"
         );
-        if let Some(ref log) = self.event_log {
+        if let Some(log) = self.ctx.event_log() {
             let _ = log.append(
                 "agent.spawned",
                 ctx.agent_name.as_ref(),
@@ -802,16 +820,15 @@ impl AgentEffects for AgentHandler {
         // AgentResolver is the canonical source for agent identity.
         if closed {
             {
-                let team_reg = &self.team_registry;
-                let member_name = if let Some(ref resolver) = self.service.agent_resolver {
+                let team_reg = self.ctx.team_registry();
+                let member_name = {
+                    let resolver = self.ctx.agent_resolver();
                     let name = crate::domain::AgentName::from(resolved_internal_name.as_str());
                     if let Ok(records) = resolver.records_ref().try_read() {
                         records.get(&name).map(|r| r.agent_name.clone())
                     } else {
                         None
                     }
-                } else {
-                    None
                 };
                 if let Some(member_name) = member_name {
                     let birth_branch_str = ctx.birth_branch.as_str();
@@ -1002,12 +1019,12 @@ mod tests {
     use crate::services::git_worktree::GitWorktreeService;
     use std::path::PathBuf;
 
-    fn test_handler() -> AgentHandler {
+    fn test_handler() -> AgentHandler<crate::services::Services> {
         let dir = PathBuf::from(".");
         let git_wt = Arc::new(GitWorktreeService::new(dir.clone()));
         let service = Arc::new(AgentControlService::new(dir, None, git_wt));
-        let services = crate::services::Services::test();
-        AgentHandler::new(service, &services)
+        let services = Arc::new(crate::services::Services::test());
+        AgentHandler::new(service, services)
     }
 
     #[test]

@@ -3,34 +3,43 @@
 //! Provides distributed mutexes for agents to coordinate access to shared resources.
 
 use crate::effects::{dispatch_coordination_effect, CoordinationEffects, EffectResult};
-use crate::services::mutex_registry::MutexRegistry;
 use async_trait::async_trait;
 use exomonad_proto::effects::coordination::*;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
 
+use crate::services::HasMutexRegistry;
+
 /// Coordination effect handler.
-pub struct CoordinationHandler {
-    registry: Arc<MutexRegistry>,
+pub struct CoordinationHandler<C> {
+    ctx: Arc<C>,
 }
 
-impl CoordinationHandler {
-    pub fn new(services: &crate::services::Services) -> Self {
-        Self {
-            registry: services.mutex_registry.clone(),
-        }
+impl<C: HasMutexRegistry + 'static> CoordinationHandler<C> {
+    pub fn new(ctx: Arc<C>) -> Self {
+        Self { ctx }
     }
 }
 
-crate::impl_pass_through_handler!(
-    CoordinationHandler,
-    "coordination",
-    dispatch_coordination_effect
-);
+#[async_trait]
+impl<C: HasMutexRegistry + 'static> crate::effects::EffectHandler for CoordinationHandler<C> {
+    fn namespace(&self) -> &str {
+        "coordination"
+    }
+
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> crate::effects::EffectResult<Vec<u8>> {
+        dispatch_coordination_effect(self, effect_type, payload, ctx).await
+    }
+}
 
 #[async_trait]
-impl CoordinationEffects for CoordinationHandler {
+impl<C: HasMutexRegistry + 'static> CoordinationEffects for CoordinationHandler<C> {
     async fn acquire_mutex(
         &self,
         req: AcquireMutexRequest,
@@ -62,7 +71,8 @@ impl CoordinationEffects for CoordinationHandler {
         );
 
         let resp = self
-            .registry
+            .ctx
+            .mutex_registry()
             .acquire(
                 resource,
                 agent,
@@ -91,7 +101,7 @@ impl CoordinationEffects for CoordinationHandler {
             "Releasing mutex via effect"
         );
 
-        let released = self.registry.release(resource, lock_id).await;
+        let released = self.ctx.mutex_registry().release(resource, lock_id).await;
 
         Ok(ReleaseMutexResponse { released })
     }
@@ -114,15 +124,15 @@ mod tests {
 
     #[test]
     fn test_namespace() {
-        let services = Services::test();
-        let handler = CoordinationHandler::new(&services);
+        let services = Arc::new(Services::test());
+        let handler = CoordinationHandler::new(services);
         assert_eq!(handler.namespace(), "coordination");
     }
 
     #[tokio::test]
     async fn test_acquire_and_release() {
-        let services = Services::test();
-        let handler = CoordinationHandler::new(&services);
+        let services = Arc::new(Services::test());
+        let handler = CoordinationHandler::new(services.clone());
         let ctx = test_ctx();
 
         let req = AcquireMutexRequest {
@@ -148,8 +158,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_idempotent_acquire() {
-        let services = Services::test();
-        let handler = CoordinationHandler::new(&services);
+        let services = Arc::new(Services::test());
+        let handler = CoordinationHandler::new(services);
         let ctx = test_ctx();
 
         let req = AcquireMutexRequest {
@@ -169,8 +179,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_release_wrong_lock_id() {
-        let services = Services::test();
-        let handler = CoordinationHandler::new(&services);
+        let services = Arc::new(Services::test());
+        let handler = CoordinationHandler::new(services);
         let ctx = test_ctx();
 
         let req = AcquireMutexRequest {

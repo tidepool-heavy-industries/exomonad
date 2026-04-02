@@ -1,6 +1,5 @@
 use crate::effects::{dispatch_tasks_effect, EffectResult, ResultExt, TasksEffects};
 use async_trait::async_trait;
-use claude_teams_bridge::TeamRegistry;
 use exomonad_proto::effects::tasks::*;
 use std::io::Write;
 use std::path::PathBuf;
@@ -9,17 +8,16 @@ use tempfile::NamedTempFile;
 use tokio::fs;
 use tracing::info;
 
-pub struct TasksHandler {
+use crate::services::HasTeamRegistry;
+
+pub struct TasksHandler<C> {
     tasks_dir: PathBuf,
-    team_registry: Arc<TeamRegistry>,
+    ctx: Arc<C>,
 }
 
-impl TasksHandler {
-    pub fn new(tasks_dir: PathBuf, services: &crate::services::Services) -> Self {
-        Self {
-            tasks_dir,
-            team_registry: services.team_registry.clone(),
-        }
+impl<C: HasTeamRegistry + 'static> TasksHandler<C> {
+    pub fn new(tasks_dir: PathBuf, ctx: Arc<C>) -> Self {
+        Self { tasks_dir, ctx }
     }
 
     async fn resolve_team(
@@ -33,20 +31,20 @@ impl TasksHandler {
 
         // Try agent_name
         let key = ctx.agent_name.to_string();
-        if let Some(info) = self.team_registry.get(&key).await {
+        if let Some(info) = self.ctx.team_registry().get(&key).await {
             return Some(info.team_name);
         }
 
         // Try birth_branch
         let bb = ctx.birth_branch.to_string();
-        if let Some(info) = self.team_registry.get(&bb).await {
+        if let Some(info) = self.ctx.team_registry().get(&bb).await {
             return Some(info.team_name);
         }
 
         // Try parent birth_branch
         if let Some(parent) = ctx.birth_branch.parent() {
             let p_bb = parent.to_string();
-            if let Some(info) = self.team_registry.get(&p_bb).await {
+            if let Some(info) = self.ctx.team_registry().get(&p_bb).await {
                 return Some(info.team_name);
             }
         }
@@ -88,10 +86,24 @@ fn parse_task(task_val: &serde_json::Value) -> Task {
     }
 }
 
-crate::impl_pass_through_handler!(TasksHandler, "tasks", dispatch_tasks_effect);
+#[async_trait]
+impl<C: HasTeamRegistry + 'static> crate::effects::EffectHandler for TasksHandler<C> {
+    fn namespace(&self) -> &str {
+        "tasks"
+    }
+
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> crate::effects::EffectResult<Vec<u8>> {
+        dispatch_tasks_effect(self, effect_type, payload, ctx).await
+    }
+}
 
 #[async_trait]
-impl TasksEffects for TasksHandler {
+impl<C: HasTeamRegistry + 'static> TasksEffects for TasksHandler<C> {
     async fn list_tasks(
         &self,
         req: ListTasksRequest,
@@ -246,8 +258,8 @@ mod tests {
     #[tokio::test]
     async fn test_list_tasks_empty() {
         let tmp = tempdir().unwrap();
-        let services = Services::test();
-        let handler = TasksHandler::new(tmp.path().to_path_buf(), &services);
+        let services = Arc::new(Services::test());
+        let handler = TasksHandler::new(tmp.path().to_path_buf(), services);
         let ctx = test_ctx();
 
         let req = ListTasksRequest {
@@ -277,8 +289,8 @@ mod tests {
         }"#;
         fs::write(team_dir.join("1.json"), task_json).await.unwrap();
 
-        let services = Services::test();
-        let handler = TasksHandler::new(tasks_dir, &services);
+        let services = Arc::new(Services::test());
+        let handler = TasksHandler::new(tasks_dir, services);
         let ctx = test_ctx();
 
         // List
