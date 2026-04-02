@@ -44,15 +44,56 @@ pub use self::mutex_registry::MutexRegistry;
 pub use self::secrets::Secrets;
 pub use self::supervisor_registry::SupervisorRegistry;
 use claude_teams_bridge::TeamRegistry;
+use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
+
+// ============================================================================
+// Capability Traits — each consumer declares only what it needs
+// ============================================================================
+
+pub trait HasTeamRegistry: Send + Sync {
+    fn team_registry(&self) -> &TeamRegistry;
+}
+pub trait HasAcpRegistry: Send + Sync {
+    fn acp_registry(&self) -> &AcpRegistry;
+}
+pub trait HasAgentResolver: Send + Sync {
+    fn agent_resolver(&self) -> &AgentResolver;
+}
+pub trait HasEventQueue: Send + Sync {
+    fn event_queue(&self) -> &EventQueue;
+}
+pub trait HasEventLog: Send + Sync {
+    fn event_log(&self) -> Option<&EventLog>;
+}
+pub trait HasProjectDir: Send + Sync {
+    fn project_dir(&self) -> &std::path::Path;
+}
+pub trait HasSupervisorRegistry: Send + Sync {
+    fn supervisor_registry(&self) -> &SupervisorRegistry;
+}
+pub trait HasClaudeSessionRegistry: Send + Sync {
+    fn claude_session_registry(&self) -> &ClaudeSessionRegistry;
+}
+pub trait HasMutexRegistry: Send + Sync {
+    fn mutex_registry(&self) -> &MutexRegistry;
+}
+pub trait HasGitHubClient: Send + Sync {
+    fn github_client(&self) -> Option<&GitHubClient>;
+}
+
+// ============================================================================
+// Services — the concrete type that implements all traits
+// ============================================================================
 
 /// Shared services context, constructed once and threaded through the app.
 ///
 /// Contains all shared registries and infrastructure services. Handlers and
-/// services read what they need from this at construction time.
+/// services access what they need via Has* capability trait bounds.
 #[derive(Clone)]
 pub struct Services {
+    pub project_dir: PathBuf,
     pub github_client: Option<Arc<GitHubClient>>,
     pub event_log: Option<Arc<EventLog>>,
     pub team_registry: Arc<TeamRegistry>,
@@ -64,11 +105,63 @@ pub struct Services {
     pub mutex_registry: Arc<MutexRegistry>,
 }
 
+impl HasTeamRegistry for Services {
+    fn team_registry(&self) -> &TeamRegistry {
+        &self.team_registry
+    }
+}
+impl HasAcpRegistry for Services {
+    fn acp_registry(&self) -> &AcpRegistry {
+        &self.acp_registry
+    }
+}
+impl HasAgentResolver for Services {
+    fn agent_resolver(&self) -> &AgentResolver {
+        &self.agent_resolver
+    }
+}
+impl HasEventQueue for Services {
+    fn event_queue(&self) -> &EventQueue {
+        &self.event_queue
+    }
+}
+impl HasEventLog for Services {
+    fn event_log(&self) -> Option<&EventLog> {
+        self.event_log.as_deref()
+    }
+}
+impl HasProjectDir for Services {
+    fn project_dir(&self) -> &std::path::Path {
+        &self.project_dir
+    }
+}
+impl HasSupervisorRegistry for Services {
+    fn supervisor_registry(&self) -> &SupervisorRegistry {
+        &self.supervisor_registry
+    }
+}
+impl HasClaudeSessionRegistry for Services {
+    fn claude_session_registry(&self) -> &ClaudeSessionRegistry {
+        &self.claude_session_registry
+    }
+}
+impl HasMutexRegistry for Services {
+    fn mutex_registry(&self) -> &MutexRegistry {
+        &self.mutex_registry
+    }
+}
+impl HasGitHubClient for Services {
+    fn github_client(&self) -> Option<&GitHubClient> {
+        self.github_client.as_deref()
+    }
+}
+
 #[cfg(test)]
 impl Services {
     /// Construct a Services with empty/default registries for testing.
     pub fn test() -> Self {
         Self {
+            project_dir: PathBuf::from("."),
             github_client: None,
             event_log: None,
             team_registry: Arc::new(TeamRegistry::new()),

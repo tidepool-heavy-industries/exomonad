@@ -915,6 +915,7 @@ Run `exomonad recompile` first to build it.",
 
     // Build Services once — all shared registries in one struct
     let services = exomonad_core::services::Services {
+        project_dir: project_dir.clone(),
         github_client: github_client.clone(),
         event_log: event_log.clone(),
         team_registry: team_registry.clone(),

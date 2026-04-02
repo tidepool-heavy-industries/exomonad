@@ -119,7 +119,11 @@ pub use handlers::{
     GitHubHandler, KvHandler, LogHandler, MergePRHandler,
 };
 #[cfg(feature = "runtime")]
-pub use services::{validate_gh_cli, validate_git};
+pub use services::{
+    validate_gh_cli, validate_git, HasAcpRegistry, HasAgentResolver, HasClaudeSessionRegistry,
+    HasEventLog, HasEventQueue, HasGitHubClient, HasMutexRegistry, HasProjectDir,
+    HasSupervisorRegistry, HasTeamRegistry,
+};
 
 /// Prelude module for convenient imports.
 #[cfg(feature = "runtime")]
