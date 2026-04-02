@@ -206,6 +206,21 @@ impl<C: HasClaudeSessionRegistry + HasTeamRegistry + HasSupervisorRegistry + 'st
 
         info!(key = %key, "Deregistering Claude Teams info via effect");
 
+        // Remove all exomonad synthetic members from config.json BEFORE
+        // deregistering from TeamRegistry. This prevents ghost members
+        // from blocking CC's TeamDelete (which checks config.json).
+        if let Some(team_info) = self.ctx.team_registry().get(&key).await {
+            let team_name = crate::domain::TeamName::from(team_info.team_name.as_str());
+            match crate::services::synthetic_members::remove_all_synthetic_members(&team_name) {
+                Ok(removed) => {
+                    info!(team = %team_name, removed, "Cleaned synthetic members before team deregister");
+                }
+                Err(e) => {
+                    tracing::warn!(team = %team_name, error = %e, "Failed to clean synthetic members");
+                }
+            }
+        }
+
         self.ctx.team_registry().deregister(&key).await;
 
         // Also deregister under birth_branch
