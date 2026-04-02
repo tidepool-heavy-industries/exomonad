@@ -1,38 +1,32 @@
 use crate::domain::{BranchName, CIStatus, CommitSha, GithubOwner, GithubRepo, PRNumber};
 use crate::plugin_manager::PluginManager;
-use crate::services::acp_registry::AcpRegistry;
 use crate::services::agent_control::AgentType;
-use crate::services::agent_resolver::AgentResolver;
-use crate::services::event_queue::EventQueue;
-use crate::services::github::{map_octo_err, GitHubClient};
+use crate::services::github::map_octo_err;
 use crate::services::repo;
 use anyhow::Result;
-use claude_teams_bridge::TeamRegistry;
 use exomonad_proto::effects::events::{event::EventType, AgentMessage, Event};
 use octocrab::params;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, instrument, warn};
 
+use crate::services::{
+    HasAcpRegistry, HasAgentResolver, HasEventLog, HasEventQueue, HasGitHubClient, HasProjectDir,
+    HasTeamRegistry,
+};
+
 type PluginMap = Arc<RwLock<HashMap<crate::AgentName, Arc<PluginManager>>>>;
 
-pub struct GitHubPoller {
-    event_queue: Arc<EventQueue>,
-    project_dir: PathBuf,
+pub struct GitHubPoller<C> {
+    ctx: Arc<C>,
     poll_interval: Duration,
     state: Arc<Mutex<HashMap<PRNumber, PRState>>>,
     repo_info: Arc<Mutex<Option<(GithubOwner, GithubRepo)>>>, // (owner, name)
-    team_registry: Option<Arc<TeamRegistry>>,
-    acp_registry: Option<Arc<AcpRegistry>>,
-    agent_resolver: Option<Arc<AgentResolver>>,
     plugins: Option<PluginMap>,
-    event_log: Option<Arc<super::event_log::EventLog>>,
-    github: Option<Arc<GitHubClient>>,
 }
 
 /// A Copilot review comment with optional file context.
@@ -273,31 +267,25 @@ enum EventActionResponse {
     NoAction,
 }
 
-impl GitHubPoller {
-    pub fn new(event_queue: Arc<EventQueue>, project_dir: PathBuf) -> Self {
+impl<
+        C: HasTeamRegistry
+            + HasAcpRegistry
+            + HasAgentResolver
+            + HasEventLog
+            + HasEventQueue
+            + HasProjectDir
+            + HasGitHubClient
+            + 'static,
+    > GitHubPoller<C>
+{
+    pub fn new(ctx: Arc<C>) -> Self {
         Self {
-            event_queue,
-            project_dir,
+            ctx,
             poll_interval: Duration::from_secs(60),
             state: Arc::new(Mutex::new(HashMap::new())),
             repo_info: Arc::new(Mutex::new(None)),
-            team_registry: None,
-            acp_registry: None,
-            agent_resolver: None,
             plugins: None,
-            event_log: None,
-            github: None,
         }
-    }
-
-    /// Set shared registries from Services in one call.
-    pub fn with_services(mut self, services: &super::Services) -> Self {
-        self.team_registry = Some(services.team_registry.clone());
-        self.acp_registry = Some(services.acp_registry.clone());
-        self.agent_resolver = Some(services.agent_resolver.clone());
-        self.event_log = services.event_log.clone();
-        self.github = services.github_client.clone();
-        self
     }
 
     pub fn with_poll_interval(mut self, interval: Duration) -> Self {
@@ -360,7 +348,7 @@ impl GitHubPoller {
                     }
 
                     // Report failure to GitHubClient for health tracking and rebuild.
-                    if let Some(ref client) = self.github {
+                    if let Some(client) = self.ctx.github_client() {
                         client.report_failure().await;
                     }
                 }
@@ -439,7 +427,7 @@ impl GitHubPoller {
                     action = %action_str,
                     "[event] event.dispatched"
                 );
-                if let Some(ref log) = self.event_log {
+                if let Some(log) = self.ctx.event_log() {
                     let _ = log.append(
                         "event.dispatched",
                         agent_name,
@@ -465,7 +453,7 @@ impl GitHubPoller {
                     error = %e,
                     "[event] event.dispatch_failed"
                 );
-                if let Some(ref log) = self.event_log {
+                if let Some(log) = self.ctx.event_log() {
                     let _ = log.append(
                         "event.dispatch_failed",
                         agent_name,
@@ -490,25 +478,19 @@ impl GitHubPoller {
     ) {
         match action {
             EventActionResponse::InjectMessage { message } => {
-                let resolver_ref = self.agent_resolver.as_deref();
                 let agent_name = crate::domain::AgentName::from(branch);
-                let tab_name = if let Some(resolver) = resolver_ref {
-                    if let Ok(records) = resolver.records_ref().try_read() {
+                let tab_name =
+                    if let Ok(records) = self.ctx.agent_resolver().records_ref().try_read() {
                         records.get(&agent_name).map(|r| r.display_name.clone())
                     } else {
                         None
                     }
-                } else {
-                    None
-                }
-                .unwrap_or_else(|| {
-                    let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
-                    agent_type.tab_display_name(slug)
-                });
+                    .unwrap_or_else(|| {
+                        let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
+                        agent_type.tab_display_name(slug)
+                    });
                 crate::services::delivery::deliver_to_agent(
-                    self.team_registry.as_deref(),
-                    self.acp_registry.as_deref(),
-                    &self.project_dir,
+                    &*self.ctx,
                     branch,
                     &tab_name,
                     &crate::domain::AgentName::from("event-handler"),
@@ -529,17 +511,13 @@ impl GitHubPoller {
                 let parent_name = crate::domain::AgentName::from(parent_session_id.as_str());
                 let parent_tab = crate::services::delivery::resolve_tab_name_for_agent(
                     &parent_name,
-                    self.agent_resolver.as_deref(),
+                    Some(self.ctx.agent_resolver()),
                 );
 
                 let summary = format!("Auto-notify: PR #{}", pr_num);
                 let agent_name = crate::domain::AgentName::from(agent_slug);
                 crate::services::delivery::notify_parent_delivery(
-                    self.team_registry.as_deref(),
-                    self.acp_registry.as_deref(),
-                    self.event_log.as_deref(),
-                    &self.event_queue,
-                    &self.project_dir,
+                    &*self.ctx,
                     &agent_name,
                     &parent_session_id,
                     &parent_tab,
@@ -574,7 +552,7 @@ impl GitHubPoller {
         }
 
         // 2. Fetch all open PRs
-        let octo = match &self.github {
+        let octo = match self.ctx.github_client() {
             Some(client) => client.get().await.map_err(|e| {
                 tracing::warn!("GitHubPoller: no octocrab client: {}", e);
                 e
@@ -692,7 +670,7 @@ impl GitHubPoller {
                         parent = %parent_branch,
                         "[event] agent.sibling_merged"
                     );
-                    if let Some(ref log) = self.event_log {
+                    if let Some(log) = self.ctx.event_log() {
                         let _ = log.append(
                             "agent.sibling_merged",
                             branch.as_str(),
@@ -732,7 +710,7 @@ impl GitHubPoller {
             return Ok(Some(info.clone()));
         }
 
-        match repo::get_repo_info(&self.project_dir).await {
+        match repo::get_repo_info(self.ctx.project_dir()).await {
             Ok(info) => {
                 let result = (
                     GithubOwner::from(info.owner.as_str()),
@@ -749,7 +727,7 @@ impl GitHubPoller {
     }
 
     async fn scan_worktrees(&self) -> Result<Vec<WorktreeBranch>> {
-        let worktrees_dir = self.project_dir.join(".exo/worktrees");
+        let worktrees_dir = self.ctx.project_dir().join(".exo/worktrees");
         if !worktrees_dir.exists() {
             return Ok(vec![]);
         }
@@ -884,7 +862,7 @@ impl GitHubPoller {
         repo: &GithubRepo,
         pr_number: PRNumber,
     ) -> Result<(Vec<CopilotComment>, Vec<CopilotReview>)> {
-        let octo = match &self.github {
+        let octo = match self.ctx.github_client() {
             Some(client) => match client.get().await {
                 Ok(c) => c,
                 Err(_) => return Ok((Vec::new(), Vec::new())),
@@ -951,7 +929,7 @@ impl GitHubPoller {
         repo: &GithubRepo,
         sha: &CommitSha,
     ) -> Result<CIStatus> {
-        let octo = match &self.github {
+        let octo = match self.ctx.github_client() {
             Some(client) => match client.get().await {
                 Ok(c) => c,
                 Err(_) => return Ok(CIStatus::Unknown),
@@ -1115,7 +1093,7 @@ impl GitHubPoller {
             "[event] {}",
             event_name
         );
-        if let Some(ref log) = self.event_log {
+        if let Some(log) = self.ctx.event_log() {
             let _ = log.append(
                 event_name,
                 branch,
@@ -1138,7 +1116,7 @@ impl GitHubPoller {
                 changes: vec![],
             })),
         };
-        self.event_queue.notify_event(branch, event).await;
+        self.ctx.event_queue().notify_event(branch, event).await;
     }
 }
 
@@ -1148,14 +1126,16 @@ mod tests {
 
     #[test]
     fn test_format_copilot_message_empty() {
-        let poller = GitHubPoller::new(Arc::new(EventQueue::new()), PathBuf::from("."));
+        let services = Arc::new(crate::services::Services::test());
+        let poller = GitHubPoller::new(services);
         let msg = poller.format_copilot_message(&[], &[]);
         assert_eq!(msg, "Copilot review activity detected (no body text)");
     }
 
     #[test]
     fn test_format_copilot_message_with_reviews() {
-        let poller = GitHubPoller::new(Arc::new(EventQueue::new()), PathBuf::from("."));
+        let services = Arc::new(crate::services::Services::test());
+        let poller = GitHubPoller::new(services);
         let reviews = vec![
             CopilotReview {
                 body: "LGTM!".to_string(),
@@ -1174,7 +1154,8 @@ mod tests {
 
     #[test]
     fn test_format_copilot_message_with_inline_comments() {
-        let poller = GitHubPoller::new(Arc::new(EventQueue::new()), PathBuf::from("."));
+        let services = Arc::new(crate::services::Services::test());
+        let poller = GitHubPoller::new(services);
         let inline = vec![
             CopilotComment {
                 body: "Fix this typo".to_string(),

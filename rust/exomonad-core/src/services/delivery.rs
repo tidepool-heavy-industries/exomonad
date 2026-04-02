@@ -1,7 +1,4 @@
 use crate::domain::Address;
-use crate::services::acp_registry::AcpRegistry;
-use crate::services::agent_resolver::AgentResolver;
-use crate::services::event_queue::EventQueue;
 use crate::services::tmux_events;
 use agent_client_protocol::{Agent, PromptRequest};
 use claude_teams_bridge as teams_mailbox;
@@ -152,80 +149,40 @@ impl DeliveryOutcome {
 /// Resolves the Address to a concrete agent key and tab name, then delegates
 /// to `deliver_to_agent()`. For `Address::Team` with no member, resolves the
 /// team lead from the TeamRegistry.
-#[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, fields(address = %address, from = %from))]
 pub async fn route_message(
+    ctx: &(impl super::HasTeamRegistry
+          + super::HasAcpRegistry
+          + super::HasAgentResolver
+          + super::HasProjectDir),
     address: &Address,
-    team_registry: Option<&TeamRegistry>,
-    acp_registry: Option<&AcpRegistry>,
-    resolver: Option<&AgentResolver>,
-    project_dir: &std::path::Path,
     from: &crate::domain::AgentName,
     content: &str,
     summary: &str,
 ) -> DeliveryOutcome {
     match address {
         Address::Agent(name) => {
-            let tab_name = resolve_tab_name_for_agent(name, resolver);
+            let tab_name = resolve_tab_name_for_agent(name, Some(ctx.agent_resolver()));
             let agent_key = name.as_str();
-            let result = deliver_to_agent(
-                team_registry,
-                acp_registry,
-                project_dir,
-                agent_key,
-                &tab_name,
-                from,
-                content,
-                summary,
-            )
-            .await;
+            let result = deliver_to_agent(ctx, agent_key, &tab_name, from, content, summary).await;
             DeliveryOutcome::from_result(result, agent_key)
         }
         Address::Team { team, member } => {
             if let Some(member_name) = member {
                 // Direct team member delivery
-                let tab_name = resolve_tab_name_for_agent(member_name, resolver);
+                let tab_name = resolve_tab_name_for_agent(member_name, Some(ctx.agent_resolver()));
                 let agent_key = member_name.as_str();
-                let result = deliver_to_agent(
-                    team_registry,
-                    acp_registry,
-                    project_dir,
-                    agent_key,
-                    &tab_name,
-                    from,
-                    content,
-                    summary,
-                )
-                .await;
+                let result =
+                    deliver_to_agent(ctx, agent_key, &tab_name, from, content, summary).await;
                 DeliveryOutcome::from_result(result, agent_key)
             } else {
                 // Team lead resolution: find who owns this team
-                resolve_and_deliver_to_lead(
-                    team.as_str(),
-                    team_registry,
-                    acp_registry,
-                    resolver,
-                    project_dir,
-                    from,
-                    content,
-                    summary,
-                )
-                .await
+                resolve_and_deliver_to_lead(ctx, team.as_str(), from, content, summary).await
             }
         }
         Address::Supervisor => {
             // Supervisor resolves to "root" by default (the root TL)
-            let result = deliver_to_agent(
-                team_registry,
-                acp_registry,
-                project_dir,
-                "root",
-                "TL",
-                from,
-                content,
-                summary,
-            )
-            .await;
+            let result = deliver_to_agent(ctx, "root", "TL", from, content, summary).await;
             DeliveryOutcome::from_result(result, "root")
         }
     }
@@ -233,13 +190,12 @@ pub async fn route_message(
 
 /// Resolve team lead and deliver. Uses `config.json`'s `leadAgentId` to find
 /// the lead, falls back to first in-memory entry, then to "root".
-#[allow(clippy::too_many_arguments)]
 async fn resolve_and_deliver_to_lead(
+    ctx: &(impl super::HasTeamRegistry
+          + super::HasAcpRegistry
+          + super::HasAgentResolver
+          + super::HasProjectDir),
     team_name: &str,
-    team_registry: Option<&TeamRegistry>,
-    acp_registry: Option<&AcpRegistry>,
-    resolver: Option<&AgentResolver>,
-    project_dir: &std::path::Path,
     from: &crate::domain::AgentName,
     content: &str,
     summary: &str,
@@ -247,14 +203,11 @@ async fn resolve_and_deliver_to_lead(
     let original = format!("team:{}:lead", team_name);
 
     // Resolve lead: config.json leadAgentId → in-memory first entry → "root"
-    let lead_key = if let Some(registry) = team_registry {
-        registry
-            .resolve_lead(team_name)
-            .await
-            .unwrap_or_else(|| "root".to_string())
-    } else {
-        "root".to_string()
-    };
+    let lead_key = ctx
+        .team_registry()
+        .resolve_lead(team_name)
+        .await
+        .unwrap_or_else(|| "root".to_string());
 
     info!(
         team = %team_name,
@@ -263,18 +216,8 @@ async fn resolve_and_deliver_to_lead(
     );
 
     let lead_agent = crate::domain::AgentName::from(lead_key.as_str());
-    let tab_name = resolve_tab_name_for_agent(&lead_agent, resolver);
-    let result = deliver_to_agent(
-        team_registry,
-        acp_registry,
-        project_dir,
-        &lead_key,
-        &tab_name,
-        from,
-        content,
-        summary,
-    )
-    .await;
+    let tab_name = resolve_tab_name_for_agent(&lead_agent, Some(ctx.agent_resolver()));
+    let result = deliver_to_agent(ctx, &lead_key, &tab_name, from, content, summary).await;
 
     match result {
         DeliveryResult::Failed => DeliveryOutcome::Failed {
@@ -339,11 +282,11 @@ pub fn resolve_tab_name_for_agent(
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, fields(agent_id = %agent_id, parent_session_id = %parent_session_id, status = %status))]
 pub async fn notify_parent_delivery(
-    team_registry: Option<&TeamRegistry>,
-    acp_registry: Option<&AcpRegistry>,
-    event_log: Option<&super::event_log::EventLog>,
-    event_queue: &EventQueue,
-    project_dir: &std::path::Path,
+    ctx: &(impl super::HasTeamRegistry
+          + super::HasAcpRegistry
+          + super::HasEventLog
+          + super::HasEventQueue
+          + super::HasProjectDir),
     agent_id: &crate::domain::AgentName,
     parent_session_id: &str,
     parent_tab_name: &str,
@@ -360,7 +303,7 @@ pub async fn notify_parent_delivery(
         source = %source,
         "[event] agent.notify_parent"
     );
-    if let Some(log) = event_log {
+    if let Some(log) = ctx.event_log() {
         let _ = log.append(
             "agent.notify_parent",
             agent_id.as_str(),
@@ -383,7 +326,9 @@ pub async fn notify_parent_delivery(
             changes: Vec::new(),
         })),
     };
-    event_queue.notify_event(parent_session_id, event).await;
+    ctx.event_queue()
+        .notify_event(parent_session_id, event)
+        .await;
 
     // 3. Format and deliver
     let notification = format_parent_notification(agent_id, status, message);
@@ -391,9 +336,7 @@ pub async fn notify_parent_delivery(
     let summary = summary.unwrap_or(&default_summary);
 
     let delivery_result = deliver_to_agent(
-        team_registry,
-        acp_registry,
-        project_dir,
+        ctx,
         parent_session_id,
         parent_tab_name,
         agent_id,
@@ -482,205 +425,200 @@ async fn deliver_via_uds(
 /// Attempts ACP prompt delivery if a registry is provided and agent is registered.
 /// Attempts HTTP-over-UDS delivery for custom binary agents (e.g., shoal-agent).
 /// Falls back to tmux input injection if other delivery methods fail or are not available.
-#[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, fields(agent_key = %agent_key, from = %from, delivery_method = tracing::field::Empty))]
 pub async fn deliver_to_agent(
-    team_registry: Option<&TeamRegistry>,
-    acp_registry: Option<&super::acp_registry::AcpRegistry>,
-    project_dir: &std::path::Path,
+    ctx: &(impl super::HasTeamRegistry + super::HasAcpRegistry + super::HasProjectDir),
     agent_key: &str,
     tmux_target: &str,
     from: &crate::domain::AgentName,
     message: &str,
     summary: &str,
 ) -> DeliveryResult {
-    if let Some(registry) = team_registry {
-        // Batch lookup: sender's team (for Tier 2 scoping) + recipient in-memory check.
-        // Single lock acquisition instead of two separate get() calls.
-        let (sender_info, recipient_info) = registry.get_pair(from.as_str(), agent_key).await;
-        let sender_team = sender_info.map(|info| info.team_name);
-        // Track whether this is a Tier 1 (in-memory) resolution — CC-native agents
-        // (Tier 2, config.json) don't have worktrees or routing.json, so the
-        // verifier's tmux fallback should be skipped for them.
-        let is_in_memory = recipient_info.is_some();
-        // Use in-memory result directly, or fall back to Tier 2 (config.json scan)
-        let resolved = recipient_info.or_else(|| {
-            sender_team
-                .as_deref()
-                .and_then(|team| TeamRegistry::resolve_from_config(team, agent_key))
-        });
-        if let Some(team_info) = resolved {
-            // Retry inbox writes up to 3 times before falling back
-            let team_name_ref = &team_info.team_name;
-            let inbox_name_ref = &team_info.inbox_name;
-            let inbox_policy = super::resilience::RetryPolicy::new(
-                3,
-                super::resilience::Backoff::Fixed(std::time::Duration::from_millis(100)),
-            );
-            let teams_result = super::resilience::retry(&inbox_policy, || async {
-                teams_mailbox::write_to_inbox(
-                    team_name_ref,
-                    inbox_name_ref,
-                    from.as_str(),
-                    message,
-                    summary,
-                )
-                .map_err(|e| anyhow::anyhow!("{}", e))
-            })
-            .await;
-            let teams_result = match teams_result {
-                Ok(timestamp) => Some(timestamp),
-                Err(e) => {
-                    warn!(
-                        agent = %agent_key,
-                        error = %e,
-                        "Teams inbox write failed after 3 attempts, falling back to ACP/tmux"
-                    );
-                    tracing::info!(
-                        otel.name = "message.delivery",
-                        agent_id = %from,
-                        recipient = %agent_key,
-                        method = "teams_inbox",
-                        outcome = "failed",
-                        detail = %e,
-                        "[event] message.delivery"
-                    );
-                    None
-                }
-            };
+    let team_registry = ctx.team_registry();
+    let acp_registry = ctx.acp_registry();
+    let project_dir = ctx.project_dir();
 
-            if let Some(timestamp) = teams_result {
-                tracing::Span::current().record("delivery_method", "teams");
-                info!(
+    // Batch lookup: sender's team (for Tier 2 scoping) + recipient in-memory check.
+    // Single lock acquisition instead of two separate get() calls.
+    let (sender_info, recipient_info) = team_registry.get_pair(from.as_str(), agent_key).await;
+    let sender_team = sender_info.map(|info| info.team_name);
+    // Track whether this is a Tier 1 (in-memory) resolution — CC-native agents
+    // (Tier 2, config.json) don't have worktrees or routing.json, so the
+    // verifier's tmux fallback should be skipped for them.
+    let is_in_memory = recipient_info.is_some();
+    // Use in-memory result directly, or fall back to Tier 2 (config.json scan)
+    let resolved = recipient_info.or_else(|| {
+        sender_team
+            .as_deref()
+            .and_then(|team| TeamRegistry::resolve_from_config(team, agent_key))
+    });
+    if let Some(team_info) = resolved {
+        // Retry inbox writes up to 3 times before falling back
+        let team_name_ref = &team_info.team_name;
+        let inbox_name_ref = &team_info.inbox_name;
+        let inbox_policy = super::resilience::RetryPolicy::new(
+            3,
+            super::resilience::Backoff::Fixed(std::time::Duration::from_millis(100)),
+        );
+        let teams_result = super::resilience::retry(&inbox_policy, || async {
+            teams_mailbox::write_to_inbox(
+                team_name_ref,
+                inbox_name_ref,
+                from.as_str(),
+                message,
+                summary,
+            )
+            .map_err(|e| anyhow::anyhow!("{}", e))
+        })
+        .await;
+        let teams_result = match teams_result {
+            Ok(timestamp) => Some(timestamp),
+            Err(e) => {
+                warn!(
                     agent = %agent_key,
-                    team = %team_info.team_name,
-                    inbox = %team_info.inbox_name,
-                    timestamp = %timestamp,
-                    "Wrote message to Teams inbox, spawning delivery verifier (30s)"
+                    error = %e,
+                    "Teams inbox write failed after 3 attempts, falling back to ACP/tmux"
                 );
-
                 tracing::info!(
                     otel.name = "message.delivery",
                     agent_id = %from,
                     recipient = %agent_key,
                     method = "teams_inbox",
-                    outcome = "success",
-                    detail = format!("{}/{}", team_info.team_name, team_info.inbox_name),
+                    outcome = "failed",
+                    detail = %e,
                     "[event] message.delivery"
                 );
+                None
+            }
+        };
 
-                // Spawn background task to verify CC's InboxPoller read the message.
-                // If not read within 30s, fall back to tmux STDIN injection.
-                // For Tier 2 (CC-native) recipients, skip tmux fallback — they don't
-                // have exomonad worktrees or routing.json. CC's InboxPoller owns delivery.
-                let team_name = team_info.team_name.clone();
-                let inbox_name = team_info.inbox_name.clone();
-                let agent = agent_key.to_string();
-                let target = tmux_target.to_string();
-                let msg = message.to_string();
-                let has_tmux_fallback = is_in_memory;
-                let worktree = if agent_key.contains('.') {
-                    crate::services::resolve_working_dir(agent_key)
-                } else if tmux_target == "TL" {
-                    std::path::PathBuf::from(".")
-                } else {
-                    crate::services::resolve_worktree_from_tab(tmux_target)
-                };
-                let pd = project_dir.join(worktree);
-                tokio::spawn(async move {
-                    let verify_policy = crate::services::resilience::RetryPolicy::new(
-                        3,
-                        crate::services::resilience::Backoff::Fixed(
-                            std::time::Duration::from_secs(10),
-                        ),
+        if let Some(timestamp) = teams_result {
+            tracing::Span::current().record("delivery_method", "teams");
+            info!(
+                agent = %agent_key,
+                team = %team_info.team_name,
+                inbox = %team_info.inbox_name,
+                timestamp = %timestamp,
+                "Wrote message to Teams inbox, spawning delivery verifier (30s)"
+            );
+
+            tracing::info!(
+                otel.name = "message.delivery",
+                agent_id = %from,
+                recipient = %agent_key,
+                method = "teams_inbox",
+                outcome = "success",
+                detail = format!("{}/{}", team_info.team_name, team_info.inbox_name),
+                "[event] message.delivery"
+            );
+
+            // Spawn background task to verify CC's InboxPoller read the message.
+            // If not read within 30s, fall back to tmux STDIN injection.
+            // For Tier 2 (CC-native) recipients, skip tmux fallback — they don't
+            // have exomonad worktrees or routing.json. CC's InboxPoller owns delivery.
+            let team_name = team_info.team_name.clone();
+            let inbox_name = team_info.inbox_name.clone();
+            let agent = agent_key.to_string();
+            let target = tmux_target.to_string();
+            let msg = message.to_string();
+            let has_tmux_fallback = is_in_memory;
+            let worktree = if agent_key.contains('.') {
+                crate::services::resolve_working_dir(agent_key)
+            } else if tmux_target == "TL" {
+                std::path::PathBuf::from(".")
+            } else {
+                crate::services::resolve_worktree_from_tab(tmux_target)
+            };
+            let pd = project_dir.join(worktree);
+            tokio::spawn(async move {
+                let verify_policy = crate::services::resilience::RetryPolicy::new(
+                    3,
+                    crate::services::resilience::Backoff::Fixed(std::time::Duration::from_secs(10)),
+                );
+                let verified = crate::services::resilience::retry(&verify_policy, || {
+                    let is_read =
+                        teams_mailbox::is_message_read(&team_name, &inbox_name, &timestamp);
+                    info!(
+                        agent = %agent,
+                        team = %team_name,
+                        inbox = %inbox_name,
+                        timestamp = %timestamp,
+                        is_read,
+                        "Delivery verifier poll"
                     );
-                    let verified = crate::services::resilience::retry(&verify_policy, || {
-                        let is_read =
-                            teams_mailbox::is_message_read(&team_name, &inbox_name, &timestamp);
-                        info!(
-                            agent = %agent,
-                            team = %team_name,
-                            inbox = %inbox_name,
-                            timestamp = %timestamp,
-                            is_read,
-                            "Delivery verifier poll"
-                        );
-                        async move {
-                            if is_read {
-                                Ok(())
-                            } else {
-                                anyhow::bail!("message not yet read")
-                            }
+                    async move {
+                        if is_read {
+                            Ok(())
+                        } else {
+                            anyhow::bail!("message not yet read")
                         }
-                    })
-                    .await;
-                    if verified.is_ok() {
-                        return;
                     }
-                    if !has_tmux_fallback {
-                        warn!(
-                            agent = %agent,
-                            team = %team_name,
-                            "Teams inbox message not read after 30s (Tier 2 recipient, no tmux fallback)"
-                        );
-                        return;
-                    }
+                })
+                .await;
+                if verified.is_ok() {
+                    return;
+                }
+                if !has_tmux_fallback {
                     warn!(
                         agent = %agent,
                         team = %team_name,
-                        target = %target,
-                        "Teams inbox message not read after 30s, falling back to tmux injection"
+                        "Teams inbox message not read after 30s (Tier 2 recipient, no tmux fallback)"
                     );
-                    if let Err(e) = tmux_events::inject_input(&target, &msg, &pd).await {
-                        warn!(target = %target, error = %e, "tmux inject_input failed (Teams fallback)");
-                    }
-                });
-                return DeliveryResult::Teams;
-            }
+                    return;
+                }
+                warn!(
+                    agent = %agent,
+                    team = %team_name,
+                    target = %target,
+                    "Teams inbox message not read after 30s, falling back to tmux injection"
+                );
+                if let Err(e) = tmux_events::inject_input(&target, &msg, &pd).await {
+                    warn!(target = %target, error = %e, "tmux inject_input failed (Teams fallback)");
+                }
+            });
+            return DeliveryResult::Teams;
         }
     }
 
-    if let Some(registry) = acp_registry {
-        if let Some(conn) = registry.get(agent_key).await {
-            match conn
-                .conn
-                .prompt(PromptRequest::new(
-                    conn.session_id.clone(),
-                    // ACP prompt content can be multiple messages, but we deliver one-at-a-time here.
-                    vec![message.into()],
-                ))
-                .await
-            {
-                Ok(_) => {
-                    tracing::Span::current().record("delivery_method", "acp");
-                    info!(agent = %agent_key, "Delivered message via ACP prompt");
-                    tracing::info!(
-                        otel.name = "message.delivery",
-                        agent_id = %from,
-                        recipient = %agent_key,
-                        method = "acp",
-                        outcome = "success",
-                        detail = %conn.session_id,
-                        "[event] message.delivery"
-                    );
-                    return DeliveryResult::Acp;
-                }
-                Err(e) => {
-                    warn!(
-                        agent = %agent_key,
-                        error = ?e,
-                        "ACP prompt failed, falling back to tmux"
-                    );
-                    tracing::info!(
-                        otel.name = "message.delivery",
-                        agent_id = %from,
-                        recipient = %agent_key,
-                        method = "acp",
-                        outcome = "failed",
-                        detail = ?e,
-                        "[event] message.delivery"
-                    );
-                }
+    if let Some(conn) = acp_registry.get(agent_key).await {
+        match conn
+            .conn
+            .prompt(PromptRequest::new(
+                conn.session_id.clone(),
+                // ACP prompt content can be multiple messages, but we deliver one-at-a-time here.
+                vec![message.into()],
+            ))
+            .await
+        {
+            Ok(_) => {
+                tracing::Span::current().record("delivery_method", "acp");
+                info!(agent = %agent_key, "Delivered message via ACP prompt");
+                tracing::info!(
+                    otel.name = "message.delivery",
+                    agent_id = %from,
+                    recipient = %agent_key,
+                    method = "acp",
+                    outcome = "success",
+                    detail = %conn.session_id,
+                    "[event] message.delivery"
+                );
+                return DeliveryResult::Acp;
+            }
+            Err(e) => {
+                warn!(
+                    agent = %agent_key,
+                    error = ?e,
+                    "ACP prompt failed, falling back to tmux"
+                );
+                tracing::info!(
+                    otel.name = "message.delivery",
+                    agent_id = %from,
+                    recipient = %agent_key,
+                    method = "acp",
+                    outcome = "failed",
+                    detail = ?e,
+                    "[event] message.delivery"
+                );
             }
         }
     }
@@ -883,10 +821,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_deliver_no_registry_returns_tmux() {
+        let services = crate::services::Services::test();
         let result = deliver_to_agent(
-            None,
-            None,
-            std::path::Path::new("/tmp/nonexistent"),
+            &services,
             "agent-1",
             "tab-1",
             &AgentName::from("test"),

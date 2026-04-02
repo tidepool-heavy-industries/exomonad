@@ -914,7 +914,7 @@ Run `exomonad recompile` first to build it.",
         Arc::new(exomonad_core::services::claude_session_registry::ClaudeSessionRegistry::new());
 
     // Build Services once — all shared registries in one struct
-    let services = exomonad_core::services::Services {
+    let services = Arc::new(exomonad_core::services::Services {
         project_dir: project_dir.clone(),
         github_client: github_client.clone(),
         event_log: event_log.clone(),
@@ -925,7 +925,7 @@ Run `exomonad recompile` first to build it.",
         agent_resolver: agent_resolver.clone(),
         event_queue: event_queue.clone(),
         mutex_registry,
-    };
+    });
 
     let mut agent_control = exomonad_core::services::agent_control::AgentControlService::new(
         project_dir.clone(),
@@ -967,11 +967,14 @@ Run `exomonad recompile` first to build it.",
             "tasks".to_string(),
         ]);
 
-    builder = builder.with_handlers(exomonad_core::core_handlers(project_dir.clone(), &services));
-    builder = builder.with_handlers(exomonad_core::git_handlers(&services, git, git_wt));
+    builder = builder.with_handlers(exomonad_core::core_handlers(
+        project_dir.clone(),
+        services.clone(),
+    ));
+    builder = builder.with_handlers(exomonad_core::git_handlers(services.clone(), git, git_wt));
     builder = builder.with_handlers(exomonad_core::orchestration_handlers(
         agent_control.clone(),
-        &services,
+        services.clone(),
         project_dir.clone(),
         Some(event_session_id),
     ));
@@ -1027,12 +1030,8 @@ Run `exomonad recompile` first to build it.",
     info!(path = %server_pid_path.display(), "Wrote server.pid");
 
     // Start GitHub Poller (background service)
-    let mut poller = exomonad_core::services::github_poller::GitHubPoller::new(
-        services.event_queue.clone(),
-        project_dir.clone(),
-    )
-    .with_services(&services)
-    .with_plugins(plugins.clone());
+    let mut poller = exomonad_core::services::github_poller::GitHubPoller::new(services.clone())
+        .with_plugins(plugins.clone());
     if let Some(interval) = config.poll_interval {
         if interval == 0 {
             anyhow::bail!("Invalid configuration: `poll_interval` must be >= 1 second, got 0");

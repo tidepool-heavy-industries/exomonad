@@ -20,7 +20,9 @@ impl<C: HasGitHubClient + HasEventLog + 'static> MergePRHandler<C> {
 }
 
 #[async_trait]
-impl<C: HasGitHubClient + HasEventLog + 'static> crate::effects::EffectHandler for MergePRHandler<C> {
+impl<C: HasGitHubClient + HasEventLog + 'static> crate::effects::EffectHandler
+    for MergePRHandler<C>
+{
     fn namespace(&self) -> &str {
         "merge_pr"
     }

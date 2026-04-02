@@ -12,9 +12,7 @@ use exomonad_proto::effects::session::*;
 use std::sync::Arc;
 use tracing::info;
 
-use crate::services::{
-    HasClaudeSessionRegistry, HasSupervisorRegistry, HasTeamRegistry,
-};
+use crate::services::{HasClaudeSessionRegistry, HasSupervisorRegistry, HasTeamRegistry};
 
 /// Session effect handler.
 pub struct SessionHandler<C> {
@@ -48,8 +46,8 @@ impl<C: HasClaudeSessionRegistry + HasTeamRegistry + HasSupervisorRegistry + 'st
 }
 
 #[async_trait]
-impl<C: HasClaudeSessionRegistry + HasTeamRegistry + HasSupervisorRegistry + 'static>
-    SessionEffects for SessionHandler<C>
+impl<C: HasClaudeSessionRegistry + HasTeamRegistry + HasSupervisorRegistry + 'static> SessionEffects
+    for SessionHandler<C>
 {
     async fn register_claude_id(
         &self,
@@ -114,7 +112,10 @@ impl<C: HasClaudeSessionRegistry + HasTeamRegistry + HasSupervisorRegistry + 'st
             inbox_name: req.inbox_name.clone(),
         };
 
-        self.ctx.team_registry().register(&key, team_info.clone()).await;
+        self.ctx
+            .team_registry()
+            .register(&key, team_info.clone())
+            .await;
 
         // Also store under birth_branch — notify_parent looks up by parent's birth_branch.
         let bb = ctx.birth_branch.to_string();

@@ -4,59 +4,47 @@
 
 use crate::domain::Address;
 use crate::effects::{dispatch_events_effect, EffectHandler, EffectResult, EventEffects};
-use crate::services::acp_registry::AcpRegistry;
-use crate::services::agent_resolver::AgentResolver;
-use crate::services::supervisor_registry::SupervisorRegistry;
-use crate::services::EventQueue;
 use async_trait::async_trait;
-use claude_teams_bridge::TeamRegistry;
 use exomonad_proto::effects::events::*;
 use std::sync::Arc;
 use std::time::Duration;
+
+use crate::services::{
+    HasAcpRegistry, HasAgentResolver, HasEventLog, HasEventQueue, HasProjectDir,
+    HasSupervisorRegistry, HasTeamRegistry,
+};
 
 /// Events effect handler.
 ///
 /// Handles all effects in the `events.*` namespace.
 /// Delegates to the local `EventQueue` service.
-pub struct EventHandler {
-    queue: Arc<EventQueue>,
+pub struct EventHandler<C> {
+    ctx: Arc<C>,
     /// Event queue scope ID (server-internal UUID, NOT the birth-branch).
     event_queue_scope: String,
-    /// Claude Teams registry for inbox-based delivery.
-    team_registry: Arc<TeamRegistry>,
-    /// ACP connection registry for prompt-based delivery.
-    acp_registry: Arc<AcpRegistry>,
-    /// Supervisor registry for child → parent routing.
-    supervisor_registry: Arc<SupervisorRegistry>,
-    /// Canonical agent identity resolver.
-    agent_resolver: Arc<AgentResolver>,
-    /// Project root directory for resolving UDS socket paths.
-    project_dir: std::path::PathBuf,
-    /// JSONL event log for offline analysis.
-    event_log: Option<Arc<crate::services::event_log::EventLog>>,
 }
 
-impl EventHandler {
-    pub fn new(
-        services: &crate::services::Services,
-        event_queue_scope: Option<String>,
-        project_dir: std::path::PathBuf,
-    ) -> Self {
+impl<C: HasEventQueue> EventHandler<C> {
+    pub fn new(ctx: Arc<C>, event_queue_scope: Option<String>) -> Self {
         Self {
-            queue: services.event_queue.clone(),
+            ctx,
             event_queue_scope: event_queue_scope.unwrap_or_else(|| "default".to_string()),
-            team_registry: services.team_registry.clone(),
-            acp_registry: services.acp_registry.clone(),
-            supervisor_registry: services.supervisor_registry.clone(),
-            agent_resolver: services.agent_resolver.clone(),
-            project_dir,
-            event_log: services.event_log.clone(),
         }
     }
 }
 
 #[async_trait]
-impl EffectHandler for EventHandler {
+impl<
+        C: HasTeamRegistry
+            + HasAcpRegistry
+            + HasAgentResolver
+            + HasEventLog
+            + HasEventQueue
+            + HasProjectDir
+            + HasSupervisorRegistry
+            + 'static,
+    > EffectHandler for EventHandler<C>
+{
     fn namespace(&self) -> &str {
         "events"
     }
@@ -72,7 +60,17 @@ impl EffectHandler for EventHandler {
 }
 
 #[async_trait]
-impl EventEffects for EventHandler {
+impl<
+        C: HasTeamRegistry
+            + HasAcpRegistry
+            + HasAgentResolver
+            + HasEventLog
+            + HasEventQueue
+            + HasProjectDir
+            + HasSupervisorRegistry
+            + 'static,
+    > EventEffects for EventHandler<C>
+{
     async fn wait_for_event(
         &self,
         req: WaitForEventRequest,
@@ -94,7 +92,8 @@ impl EventEffects for EventHandler {
         };
 
         let event = self
-            .queue
+            .ctx
+            .event_queue()
             .wait_for_event(
                 &self.event_queue_scope,
                 &req.types,
@@ -121,7 +120,10 @@ impl EventEffects for EventHandler {
         );
         // Local handling
         if let Some(event) = req.event {
-            self.queue.notify_event(&req.session_id, event).await;
+            self.ctx
+                .event_queue()
+                .notify_event(&req.session_id, event)
+                .await;
             Ok(NotifyEventResponse { success: true })
         } else {
             Ok(NotifyEventResponse { success: false })
@@ -165,7 +167,7 @@ impl EventEffects for EventHandler {
                 "notify_parent: using override_recipient"
             );
             // Resolve the override address to a concrete agent key for notify_parent_delivery
-            let resolver_ref = Some(&*self.agent_resolver);
+            let resolver_ref = Some(self.ctx.agent_resolver());
             let (parent_session_id, tab_name) = match &override_addr {
                 Address::Agent(name) => {
                     let tab =
@@ -180,7 +182,7 @@ impl EventEffects for EventHandler {
                     (m.as_str().to_string(), tab)
                 }
                 Address::Team { team, member: None } => {
-                    let lead = self.team_registry.resolve_lead(team.as_str()).await;
+                    let lead = self.ctx.team_registry().resolve_lead(team.as_str()).await;
                     let id = lead.unwrap_or_else(|| "root".to_string());
                     let lead_name = crate::domain::AgentName::from(id.as_str());
                     let tab = crate::services::delivery::resolve_tab_name_for_agent(
@@ -194,11 +196,7 @@ impl EventEffects for EventHandler {
 
             let status = crate::services::delivery::NotifyStatus::parse(&req.status);
             crate::services::delivery::notify_parent_delivery(
-                Some(&*self.team_registry),
-                Some(&*self.acp_registry),
-                self.event_log.as_deref(),
-                &self.queue,
-                &self.project_dir,
+                &*self.ctx,
                 &agent_id,
                 &parent_session_id,
                 &tab_name,
@@ -212,7 +210,12 @@ impl EventEffects for EventHandler {
         }
 
         // Check SupervisorRegistry for this agent's birth-branch
-        if let Some(info) = self.supervisor_registry.lookup(birth_branch.as_str()).await {
+        if let Some(info) = self
+            .ctx
+            .supervisor_registry()
+            .lookup(birth_branch.as_str())
+            .await
+        {
             tracing::info!(
                 supervisor = %info.supervisor,
                 team = %info.team,
@@ -222,16 +225,12 @@ impl EventEffects for EventHandler {
             let supervisor_name = crate::domain::AgentName::from(parent_session_id);
             let tab_name = crate::services::delivery::resolve_tab_name_for_agent(
                 &supervisor_name,
-                Some(&*self.agent_resolver),
+                Some(self.ctx.agent_resolver()),
             );
 
             let status = crate::services::delivery::NotifyStatus::parse(&req.status);
             crate::services::delivery::notify_parent_delivery(
-                Some(&*self.team_registry),
-                Some(&*self.acp_registry),
-                self.event_log.as_deref(),
-                &self.queue,
-                &self.project_dir,
+                &*self.ctx,
                 &agent_id,
                 parent_session_id,
                 &tab_name,
@@ -264,16 +263,12 @@ impl EventEffects for EventHandler {
         let parent_agent = crate::domain::AgentName::from(parent_session_id.as_str());
         let tab_name = crate::services::delivery::resolve_tab_name_for_agent(
             &parent_agent,
-            Some(&*self.agent_resolver),
+            Some(self.ctx.agent_resolver()),
         );
 
         let status = crate::services::delivery::NotifyStatus::parse(&req.status);
         crate::services::delivery::notify_parent_delivery(
-            Some(&*self.team_registry),
-            Some(&*self.acp_registry),
-            self.event_log.as_deref(),
-            &self.queue,
-            &self.project_dir,
+            &*self.ctx,
             &agent_id,
             &parent_session_id,
             &tab_name,
@@ -315,11 +310,8 @@ impl EventEffects for EventHandler {
         );
 
         let outcome = crate::services::delivery::route_message(
+            &*self.ctx,
             &address,
-            Some(&*self.team_registry),
-            Some(&*self.acp_registry),
-            Some(&*self.agent_resolver),
-            &self.project_dir,
             &ctx.agent_name,
             &req.content,
             &summary,
@@ -350,8 +342,8 @@ mod tests {
 
     #[test]
     fn test_event_handler_namespace() {
-        let services = crate::services::Services::test();
-        let handler = EventHandler::new(&services, None, std::path::PathBuf::from("."));
+        let services = Arc::new(crate::services::Services::test());
+        let handler = EventHandler::new(services, None);
         assert_eq!(handler.namespace(), "events");
     }
 }

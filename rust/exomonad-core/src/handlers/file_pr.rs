@@ -67,10 +67,9 @@ impl<C: HasGitHubClient + HasEventLog + 'static> FilePrEffects for FilePRHandler
             working_dir: Some(working_dir.to_string_lossy().to_string()),
         };
 
-        let output =
-            file_pr::file_pr_async(&input, self.git_wt.clone(), self.ctx.github_client())
-                .await
-                .effect_err("file_pr")?;
+        let output = file_pr::file_pr_async(&input, self.git_wt.clone(), self.ctx.github_client())
+            .await
+            .effect_err("file_pr")?;
 
         tracing::info!(
             pr_number = output.pr_number.as_u64(),
