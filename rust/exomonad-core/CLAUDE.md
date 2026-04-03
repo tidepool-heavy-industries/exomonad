@@ -81,7 +81,7 @@ pub fn orchestration_handlers(
 ) -> Vec<Box<dyn EffectHandler>>
 ```
 
-**Handlers unchanged** (no `Services`/`ctx` dependency): `GitHandler`, `FsHandler`, `ProcessHandler`, `CopilotHandler`, `KvHandler`, `GitHubHandler`.
+**Handlers unchanged** (no `Services`/`ctx` dependency): `GitHandler`, `ProcessHandler`, `CopilotHandler`, `GitHubHandler`.
 
 ## ACP Integration
 
