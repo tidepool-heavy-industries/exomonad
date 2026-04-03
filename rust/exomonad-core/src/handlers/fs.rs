@@ -7,45 +7,26 @@ use crate::services::filesystem::FileSystemService;
 use crate::services::HasProjectDir;
 use async_trait::async_trait;
 use exomonad_proto::effects::fs::*;
-use std::sync::Arc;
 
 /// Filesystem effect handler.
 ///
 /// Handles all effects in the `fs.*` namespace by delegating to
 /// the generated `dispatch_filesystem_effect` function.
-pub struct FsHandler<C> {
+pub struct FsHandler {
     service: FileSystemService,
-    _ctx: std::marker::PhantomData<C>,
 }
 
-impl<C: HasProjectDir> FsHandler<C> {
-    pub fn new(ctx: Arc<C>) -> Self {
+impl FsHandler {
+    pub fn new(ctx: &impl HasProjectDir) -> Self {
         let service = FileSystemService::new(ctx.project_dir().to_path_buf());
-        Self {
-            service,
-            _ctx: std::marker::PhantomData,
-        }
+        Self { service }
     }
 }
 
-#[async_trait]
-impl<C: HasProjectDir + 'static> crate::effects::EffectHandler for FsHandler<C> {
-    fn namespace(&self) -> &str {
-        "fs"
-    }
-
-    async fn handle(
-        &self,
-        effect_type: &str,
-        payload: &[u8],
-        ctx: &crate::effects::EffectContext,
-    ) -> crate::effects::EffectResult<Vec<u8>> {
-        dispatch_fs_effect(self, effect_type, payload, ctx).await
-    }
-}
+crate::impl_pass_through_handler!(FsHandler, "fs", dispatch_fs_effect);
 
 #[async_trait]
-impl<C: HasProjectDir + 'static> FilesystemEffects for FsHandler<C> {
+impl FilesystemEffects for FsHandler {
     async fn read_file(
         &self,
         req: ReadFileRequest,
@@ -216,10 +197,10 @@ mod tests {
         }
     }
 
-    fn make_handler(dir: &Path) -> FsHandler<TestCtx> {
-        FsHandler::new(Arc::new(TestCtx {
+    fn make_handler(dir: &Path) -> FsHandler {
+        FsHandler::new(&TestCtx {
             project_dir: dir.to_path_buf(),
-        }))
+        })
     }
 
     fn test_ctx() -> EffectContext {

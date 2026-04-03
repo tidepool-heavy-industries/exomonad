@@ -17,7 +17,7 @@ pub fn core_handlers(services: Arc<Services>) -> Vec<Box<dyn EffectHandler>> {
     vec![
         Box::new(LogHandler::new(services.clone())),
         Box::new(KvHandler::new(services.clone())),
-        Box::new(FsHandler::new(services.clone())),
+        Box::new(FsHandler::new(&*services)),
         Box::new(ProcessHandler::new()),
     ]
 }
