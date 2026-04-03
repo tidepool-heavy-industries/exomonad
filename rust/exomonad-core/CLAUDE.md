@@ -53,7 +53,8 @@ Handlers and delivery functions are generic over a context `C` bounded by capabi
 | `HasSupervisorRegistry` | `&SupervisorRegistry` |
 | `HasClaudeSessionRegistry` | `&ClaudeSessionRegistry` |
 | `HasMutexRegistry` | `&MutexRegistry` |
-| `HasGitHubClient` | `Option<&GitHubClient>` |
+| `HasGitHubClient` | `Option<&Arc<GitHubClient>>` |
+| `HasGitWorktreeService` | `&Arc<GitWorktreeService>` |
 
 **Handler pattern** — each handler is `Handler<C>` with `Arc<C>`:
 ```rust
@@ -74,7 +75,7 @@ pub async fn route_message(
 ```rust
 // groups.rs — the bridge between generic handlers and concrete Services
 pub fn orchestration_handlers(
-    agent_control: Arc<AgentControlService>,
+    agent_control: Arc<AgentControlService<Services>>,
     services: Arc<Services>,
     ...
 ) -> Vec<Box<dyn EffectHandler>>

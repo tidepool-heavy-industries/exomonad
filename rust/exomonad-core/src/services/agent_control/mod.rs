@@ -26,7 +26,6 @@ pub(crate) use tokio::process::Command;
 pub(crate) use tokio::time::{timeout, Duration};
 pub(crate) use tracing::{debug, info, instrument, warn};
 
-pub(crate) use super::acp_registry::AcpRegistry;
 pub(crate) use super::agent_resolver::{AgentIdentityRecord, AgentResolver};
 pub(crate) use super::git_worktree::GitWorktreeService;
 pub(crate) use super::github::{GitHubClient, GitHubService, Repo};
@@ -505,58 +504,51 @@ impl FFIBoundary for BatchCleanupResult {}
 // ============================================================================
 
 /// Agent control service for high-level agent lifecycle management.
+///
+/// Generic over `C` (capability context) which provides shared registries
+/// via Has* trait bounds. The same `C` is typically `Services`.
 #[derive(Clone)]
-pub struct AgentControlService {
-    /// Project root directory
-    pub(crate) project_dir: PathBuf,
+pub struct AgentControlService<C> {
+    /// Capability context providing shared registries.
+    pub(crate) ctx: Arc<C>,
     /// Base directory for worktrees (default: .exo/worktrees)
     pub(crate) worktree_base: PathBuf,
-    /// GitHub client for fetching issues
-    pub(crate) github: Option<Arc<GitHubClient>>,
     /// tmux session name for event emission
     pub(crate) tmux_session: Option<String>,
     /// Direct tmux IPC client.
     pub(crate) tmux_ipc: Option<super::tmux_ipc::TmuxIpc>,
     /// This agent's birth-branch (git identity). Root TL = "main".
     pub(crate) birth_branch: BirthBranch,
-    /// Git worktree service
-    pub(crate) git_wt: Arc<GitWorktreeService>,
-    /// ACP connection registry for Gemini agents.
-    pub(crate) acp_registry: Option<Arc<AcpRegistry>>,
-    /// Team registry for resolving agent team membership.
-    pub(crate) team_registry: Option<Arc<TeamRegistry>>,
     /// When true, spawned Gemini agents receive `--yolo` flag.
     pub(crate) yolo: bool,
     /// WASM name for role context resolution (default: "devswarm").
     pub(crate) wasm_name: String,
     /// Pre-serialized extra MCP servers to include in spawned agent configs.
     pub(crate) extra_mcp_servers: HashMap<String, serde_json::Value>,
-    /// Canonical agent identity resolver.
-    pub(crate) agent_resolver: Option<Arc<AgentResolver>>,
 }
 
-impl AgentControlService {
+impl<
+        C: super::HasGitHubClient
+            + super::HasAcpRegistry
+            + super::HasTeamRegistry
+            + super::HasAgentResolver
+            + super::HasProjectDir
+            + super::HasGitWorktreeService
+            + 'static,
+    > AgentControlService<C>
+{
     /// Create a new agent control service.
-    pub fn new(
-        project_dir: PathBuf,
-        github: Option<Arc<GitHubClient>>,
-        git_wt: Arc<GitWorktreeService>,
-    ) -> Self {
-        let worktree_base = project_dir.join(".exo/worktrees");
+    pub fn new(ctx: Arc<C>) -> Self {
+        let worktree_base = ctx.project_dir().join(".exo/worktrees");
         Self {
-            project_dir,
+            ctx,
             worktree_base,
-            github,
             tmux_session: None,
             tmux_ipc: None,
             birth_branch: BirthBranch::from("unset"),
-            git_wt,
-            acp_registry: None,
-            team_registry: None,
             yolo: false,
             wasm_name: "devswarm".to_string(),
             extra_mcp_servers: HashMap::new(),
-            agent_resolver: None,
         }
     }
 
@@ -569,14 +561,6 @@ impl AgentControlService {
     /// Set the WASM name for role context resolution.
     pub fn with_wasm_name(mut self, wasm_name: String) -> Self {
         self.wasm_name = wasm_name;
-        self
-    }
-
-    /// Set shared registries from Services in one call.
-    pub fn with_services(mut self, services: &super::Services) -> Self {
-        self.acp_registry = Some(services.acp_registry.clone());
-        self.team_registry = Some(services.team_registry.clone());
-        self.agent_resolver = Some(services.agent_resolver.clone());
         self
     }
 
@@ -605,6 +589,31 @@ impl AgentControlService {
         self
     }
 
+    /// Project root directory (from capability context).
+    pub(crate) fn project_dir(&self) -> &std::path::Path {
+        self.ctx.project_dir()
+    }
+
+    /// GitHub client (from capability context).
+    pub(crate) fn github(&self) -> Option<&Arc<GitHubClient>> {
+        self.ctx.github_client()
+    }
+
+    /// Git worktree service Arc (from capability context).
+    pub(crate) fn git_wt(&self) -> &Arc<GitWorktreeService> {
+        self.ctx.git_worktree_service()
+    }
+
+    /// Team registry (from capability context).
+    pub(crate) fn team_registry(&self) -> &TeamRegistry {
+        self.ctx.team_registry()
+    }
+
+    /// Agent resolver (from capability context).
+    pub(crate) fn agent_resolver(&self) -> &AgentResolver {
+        self.ctx.agent_resolver()
+    }
+
     /// Resolve the effective birth branch for spawn operations.
     ///
     /// Callers pass the birth branch from EffectContext. Falls back to `self.birth_branch`
@@ -630,17 +639,15 @@ impl AgentControlService {
         identity: Option<AgentIdentityRecord>,
     ) -> Result<PathBuf> {
         let agent_config_dir = self
-            .project_dir
+            .project_dir()
             .join(".exo/agents")
             .join(agent_name.as_str());
         fs::create_dir_all(&agent_config_dir).await?;
         routing.write_to_dir(&agent_config_dir).await?;
 
         if let Some(record) = identity {
-            if let Some(ref resolver) = self.agent_resolver {
-                if let Err(e) = resolver.register(record).await {
-                    warn!(agent = %agent_name, error = %e, "Failed to register agent identity (non-fatal)");
-                }
+            if let Err(e) = self.agent_resolver().register(record).await {
+                warn!(agent = %agent_name, error = %e, "Failed to register agent identity (non-fatal)");
             }
         }
 
@@ -668,33 +675,6 @@ impl AgentControlService {
         Ok(())
     }
 
-    /// Create from environment (loads secrets from ~/.exo/secrets).
-    pub fn from_env() -> Result<Self> {
-        let project_dir = std::env::current_dir().context("Failed to get current directory")?;
-
-        // Try to load GitHub token from secrets
-        let secrets = super::secrets::Secrets::load();
-        let github = secrets.github_token().map(|_| GitHubClient::new(5));
-
-        let git_wt = Arc::new(GitWorktreeService::new(project_dir.clone()));
-
-        Ok(Self {
-            project_dir: project_dir.clone(),
-            worktree_base: project_dir.join(".exo/worktrees"),
-            github,
-            tmux_session: None,
-            tmux_ipc: None,
-            birth_branch: BirthBranch::root()?,
-            git_wt,
-            acp_registry: None,
-            team_registry: None,
-            yolo: false,
-            wasm_name: "devswarm".to_string(),
-            extra_mcp_servers: HashMap::new(),
-            agent_resolver: None,
-        })
-    }
-
     /// Resolve effective project dir for git operations.
     /// When subrepo is set, git operations target project_dir/subrepo instead.
     /// Validates that subrepo is relative and does not escape project_dir.
@@ -715,11 +695,11 @@ impl AgentControlService {
                         ));
                     }
                 }
-                let dir = self.project_dir.join(sub_path);
+                let dir = self.project_dir().join(sub_path);
                 info!(subrepo = %sub_path.display(), effective_dir = %dir.display(), "Using subrepo for git operations");
                 Ok(dir)
             }
-            None => Ok(self.project_dir.clone()),
+            None => Ok(self.project_dir().to_path_buf()),
         }
     }
 
@@ -749,12 +729,12 @@ impl AgentControlService {
                 continue;
             }
 
-            let source_dir = self.project_dir.join(dir_path);
+            let source_dir = self.project_dir().join(dir_path);
 
             // Canonicalize and verify the resolved path is within project_dir
             match source_dir.canonicalize() {
                 Ok(canonical_source) => {
-                    let canonical_project = self.project_dir.canonicalize()?;
+                    let canonical_project = self.project_dir().canonicalize()?;
                     if !canonical_source.starts_with(&canonical_project) {
                         tracing::error!("allowed_dir '{}' rejected: outside project_dir", dir_str);
                         continue;

@@ -925,15 +925,12 @@ Run `exomonad recompile` first to build it.",
         agent_resolver: agent_resolver.clone(),
         event_queue: event_queue.clone(),
         mutex_registry,
+        git_wt,
     });
 
-    let mut agent_control = exomonad_core::services::agent_control::AgentControlService::new(
-        project_dir.clone(),
-        github_client.clone(),
-        git_wt.clone(),
-    )
-    .with_services(&services)
-    .with_wasm_name(wasm_name.clone());
+    let mut agent_control =
+        exomonad_core::services::agent_control::AgentControlService::new(services.clone())
+            .with_wasm_name(wasm_name.clone());
     let worktree_base = config.worktree_base.clone();
     agent_control = agent_control.with_worktree_base(worktree_base.clone());
     agent_control =
@@ -971,7 +968,7 @@ Run `exomonad recompile` first to build it.",
         project_dir.clone(),
         services.clone(),
     ));
-    builder = builder.with_handlers(exomonad_core::git_handlers(services.clone(), git, git_wt));
+    builder = builder.with_handlers(exomonad_core::git_handlers(services.clone(), git));
     builder = builder.with_handlers(exomonad_core::orchestration_handlers(
         agent_control.clone(),
         services.clone(),

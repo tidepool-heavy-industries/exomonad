@@ -8,31 +8,31 @@ use crate::effects::{
     dispatch_file_pr_effect, EffectHandler, EffectResult, FilePrEffects, ResultExt,
 };
 use crate::services::file_pr::{self, FilePRInput};
-use crate::services::git_worktree::GitWorktreeService;
 use async_trait::async_trait;
 use exomonad_proto::effects::file_pr::*;
 use std::sync::Arc;
 use tracing::instrument;
 
-use crate::services::{HasEventLog, HasGitHubClient};
+use crate::services::{HasEventLog, HasGitHubClient, HasGitWorktreeService};
 
 /// File PR effect handler.
 ///
 /// Handles all effects in the `file_pr.*` namespace by delegating to
 /// the generated `dispatch_file_pr_effect` function.
 pub struct FilePRHandler<C> {
-    git_wt: Arc<GitWorktreeService>,
     ctx: Arc<C>,
 }
 
-impl<C: HasGitHubClient + HasEventLog + 'static> FilePRHandler<C> {
-    pub fn new(git_wt: Arc<GitWorktreeService>, ctx: Arc<C>) -> Self {
-        Self { git_wt, ctx }
+impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static> FilePRHandler<C> {
+    pub fn new(ctx: Arc<C>) -> Self {
+        Self { ctx }
     }
 }
 
 #[async_trait]
-impl<C: HasGitHubClient + HasEventLog + 'static> EffectHandler for FilePRHandler<C> {
+impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static> EffectHandler
+    for FilePRHandler<C>
+{
     fn namespace(&self) -> &str {
         "file_pr"
     }
@@ -48,7 +48,9 @@ impl<C: HasGitHubClient + HasEventLog + 'static> EffectHandler for FilePRHandler
 }
 
 #[async_trait]
-impl<C: HasGitHubClient + HasEventLog + 'static> FilePrEffects for FilePRHandler<C> {
+impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static> FilePrEffects
+    for FilePRHandler<C>
+{
     #[instrument(skip_all, fields(agent_name = %ctx.agent_name, pr_title = %req.title))]
     async fn file_pr(
         &self,
@@ -67,9 +69,13 @@ impl<C: HasGitHubClient + HasEventLog + 'static> FilePrEffects for FilePRHandler
             working_dir: Some(working_dir.to_string_lossy().to_string()),
         };
 
-        let output = file_pr::file_pr_async(&input, self.git_wt.clone(), self.ctx.github_client())
-            .await
-            .effect_err("file_pr")?;
+        let output = file_pr::file_pr_async(
+            &input,
+            self.ctx.git_worktree_service().clone(),
+            self.ctx.github_client().map(|arc| arc.as_ref()),
+        )
+        .await
+        .effect_err("file_pr")?;
 
         tracing::info!(
             pr_number = output.pr_number.as_u64(),
@@ -140,9 +146,8 @@ mod tests {
 
     #[test]
     fn test_namespace() {
-        let git_wt = Arc::new(GitWorktreeService::new(PathBuf::from(".")));
         let services = Arc::new(Services::test());
-        let handler = FilePRHandler::new(git_wt, services);
+        let handler = FilePRHandler::new(services);
         assert_eq!(handler.namespace(), "file_pr");
     }
 

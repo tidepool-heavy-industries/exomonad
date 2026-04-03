@@ -247,8 +247,10 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
         info!("Gemini MCP configuration written to .gemini/settings.json");
 
         // Pre-trust CWD to prevent Gemini's interactive "Trust this folder?" dialog
-        exomonad_core::services::agent_control::AgentControlService::gemini_trust_folder(&cwd)
-            .await;
+        exomonad_core::services::agent_control::AgentControlService::<
+            exomonad_core::services::Services,
+        >::gemini_trust_folder(&cwd)
+        .await;
     }
 
     // Validate tmux is available
@@ -747,9 +749,9 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
                     None => String::new(),
                 };
                 // Pre-trust CWD for Gemini
-                exomonad_core::services::agent_control::AgentControlService::gemini_trust_folder(
-                    &companion_cwd,
-                )
+                exomonad_core::services::agent_control::AgentControlService::<
+                    exomonad_core::services::Services,
+                >::gemini_trust_folder(&companion_cwd)
                 .await;
                 format!(
                     "{env_prefix}GEMINI_CLI_SYSTEM_SETTINGS_PATH={} {}{model_flag}{yolo_flag}{}",

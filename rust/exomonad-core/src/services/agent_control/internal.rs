@@ -1,6 +1,15 @@
 use super::*;
 
-impl AgentControlService {
+impl<
+        C: super::super::HasGitHubClient
+            + super::super::HasAcpRegistry
+            + super::super::HasTeamRegistry
+            + super::super::HasAgentResolver
+            + super::super::HasProjectDir
+            + super::super::HasGitWorktreeService
+            + 'static,
+    > AgentControlService<C>
+{
     pub(crate) fn resolve_tmux_session(&self) -> Result<String> {
         self.tmux_session
             .clone()
@@ -28,7 +37,7 @@ impl AgentControlService {
     ) -> Result<()> {
         if worktree_path.exists() {
             info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
-            let git_wt = self.git_wt.clone();
+            let git_wt = self.git_wt().clone();
             let path = worktree_path.to_path_buf();
             match tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await {
                 Err(join_err) => {
@@ -48,7 +57,7 @@ impl AgentControlService {
             "Creating git worktree"
         );
 
-        let git_wt = self.git_wt.clone();
+        let git_wt = self.git_wt().clone();
         let path = worktree_path.to_path_buf();
         let bookmark = branch_name.clone();
         let base = base_branch.clone();
@@ -77,7 +86,7 @@ impl AgentControlService {
         }
 
         // Verify the worktree is on the expected branch
-        let git_wt = self.git_wt.clone();
+        let git_wt = self.git_wt().clone();
         let verify_path = worktree_path.to_path_buf();
         let expected = branch_name.to_string();
         let actual =
@@ -305,7 +314,7 @@ impl AgentControlService {
 
         // Write prompt to file to avoid shell quoting issues
         let prompt_file = match prompt {
-            Some(p) => Some(Self::write_prompt_file(&self.project_dir, name, p).await?),
+            Some(p) => Some(Self::write_prompt_file(self.project_dir(), name, p).await?),
             None => None,
         };
 
@@ -414,7 +423,7 @@ impl AgentControlService {
 
         // Write prompt to file to avoid shell quoting issues
         let prompt_file = match prompt {
-            Some(p) => Some(Self::write_prompt_file(&self.project_dir, name, p).await?),
+            Some(p) => Some(Self::write_prompt_file(self.project_dir(), name, p).await?),
             None => None,
         };
 
@@ -582,7 +591,7 @@ impl AgentControlService {
 
     /// Symlink server socket into worktree so agents find it without walk-up.
     pub(crate) async fn create_socket_symlink(&self, worktree_path: &Path) {
-        let source = self.project_dir.join(".exo/server.sock");
+        let source = self.project_dir().join(".exo/server.sock");
         let target_dir = worktree_path.join(".exo");
         let target = target_dir.join("server.sock");
 
@@ -623,7 +632,7 @@ impl AgentControlService {
 
     /// Resolve role context file with two-tier fallback: project-local > global.
     pub(crate) fn resolve_role_context(&self, role: &crate::domain::Role) -> Option<PathBuf> {
-        resolve_role_context_path(&self.project_dir, &self.wasm_name, role.as_str())
+        resolve_role_context_path(self.project_dir(), &self.wasm_name, role.as_str())
     }
 
     /// Generate MCP configuration JSON for an agent using stdio transport.
@@ -782,11 +791,12 @@ impl AgentControlService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    type ACS = AgentControlService<crate::services::Services>;
 
     #[test]
     fn test_escape_for_shell_command_simple() {
         assert_eq!(
-            AgentControlService::escape_for_shell_command("hello world"),
+            ACS::escape_for_shell_command("hello world"),
             "'hello world'"
         );
     }
@@ -796,14 +806,14 @@ mod tests {
         // Standard shell escaping: end quote, escaped quote, start quote
         // 'user'\''s issue' = 'user' + \' + 's issue'
         assert_eq!(
-            AgentControlService::escape_for_shell_command("user's issue"),
+            ACS::escape_for_shell_command("user's issue"),
             r"'user'\''s issue'"
         );
     }
 
     #[test]
     fn test_escape_for_shell_command_shell_chars() {
-        let result = AgentControlService::escape_for_shell_command("Test $VAR and `code`");
+        let result = ACS::escape_for_shell_command("Test $VAR and `code`");
         assert!(result.contains("$VAR"));
         assert!(result.contains("`code`"));
         assert_eq!(result, "'Test $VAR and `code`'");
@@ -811,7 +821,7 @@ mod tests {
 
     #[test]
     fn test_build_initial_prompt_format() {
-        let prompt = AgentControlService::build_initial_prompt(
+        let prompt = ACS::build_initial_prompt(
             "123",
             "Fix the bug",
             "Description",
@@ -827,7 +837,7 @@ mod tests {
 
     #[test]
     fn test_build_initial_prompt_no_labels() {
-        let prompt = AgentControlService::build_initial_prompt(
+        let prompt = ACS::build_initial_prompt(
             "123",
             "Fix the bug",
             "Description",
@@ -840,7 +850,7 @@ mod tests {
 
     #[test]
     fn test_claude_mcp_config_format() {
-        let config = AgentControlService::generate_mcp_config(
+        let config = ACS::generate_mcp_config(
             "test-claude",
             AgentType::Claude,
             "tl",
@@ -859,7 +869,7 @@ mod tests {
 
     #[test]
     fn test_gemini_mcp_config_format() {
-        let config = AgentControlService::generate_mcp_config(
+        let config = ACS::generate_mcp_config(
             "test-gemini",
             AgentType::Gemini,
             "dev",
@@ -911,11 +921,7 @@ mod tests {
 
     #[test]
     fn test_gemini_worker_settings_schema_compliance() {
-        let settings = AgentControlService::generate_gemini_worker_settings(
-            "test-worker",
-            None,
-            &HashMap::new(),
-        );
+        let settings = ACS::generate_gemini_worker_settings("test-worker", None, &HashMap::new());
 
         // 1. MCP config uses stdio transport
         assert_eq!(settings["mcpServers"]["exomonad"]["type"], "stdio");
@@ -968,6 +974,16 @@ mod tests {
         );
     }
 
+    fn test_services(project_dir: PathBuf) -> Arc<crate::services::Services> {
+        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(
+            project_dir.clone(),
+        ));
+        let mut services = crate::services::Services::test();
+        services.project_dir = project_dir;
+        services.git_wt = git_wt;
+        Arc::new(services)
+    }
+
     #[tokio::test]
     async fn test_create_socket_symlink() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -978,10 +994,8 @@ mod tests {
             .await
             .unwrap();
 
-        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(
-            project_dir.clone(),
-        ));
-        let service = AgentControlService::new(project_dir.clone(), None, git_wt);
+        let services = test_services(project_dir.clone());
+        let service = AgentControlService::new(services);
 
         let worktree = temp_dir.path().join("child-wt");
         tokio::fs::create_dir_all(&worktree).await.unwrap();
@@ -996,11 +1010,9 @@ mod tests {
 
     #[test]
     fn test_common_spawn_env_core_vars() {
-        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(
-            PathBuf::from("."),
-        ));
-        let service = AgentControlService::new(PathBuf::from("."), None, git_wt)
-            .with_birth_branch(BirthBranch::from("main.tl-auth"));
+        let services = test_services(PathBuf::from("."));
+        let service =
+            AgentControlService::new(services).with_birth_branch(BirthBranch::from("main.tl-auth"));
 
         let agent = AgentName::from("fix-oauth-gemini");
         let session_id = BranchName::from("main.tl-auth.fix-oauth-gemini");
@@ -1023,10 +1035,8 @@ mod tests {
 
     #[test]
     fn test_common_spawn_env_tmux_session() {
-        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(
-            PathBuf::from("."),
-        ));
-        let service = AgentControlService::new(PathBuf::from("."), None, git_wt)
+        let services = test_services(PathBuf::from("."));
+        let service = AgentControlService::new(services)
             .with_birth_branch(BirthBranch::from("main"))
             .with_tmux_session("exo-test-session".to_string());
 
@@ -1044,11 +1054,9 @@ mod tests {
 
     #[test]
     fn test_common_spawn_env_no_tmux_session() {
-        let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(
-            PathBuf::from("."),
-        ));
-        let service = AgentControlService::new(PathBuf::from("."), None, git_wt)
-            .with_birth_branch(BirthBranch::from("main"));
+        let services = test_services(PathBuf::from("."));
+        let service =
+            AgentControlService::new(services).with_birth_branch(BirthBranch::from("main"));
 
         let agent = AgentName::from("worker-1");
         let session_id = BranchName::from("main");

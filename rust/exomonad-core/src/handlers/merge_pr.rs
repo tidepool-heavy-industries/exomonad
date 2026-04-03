@@ -1,27 +1,25 @@
 use crate::effects::{dispatch_merge_pr_effect, EffectResult, MergePrEffects, ResultExt};
-use crate::services::git_worktree::GitWorktreeService;
 use crate::services::merge_pr;
 use async_trait::async_trait;
 use exomonad_proto::effects::merge_pr::*;
 use std::sync::Arc;
 use tracing::instrument;
 
-use crate::services::{HasEventLog, HasGitHubClient};
+use crate::services::{HasEventLog, HasGitHubClient, HasGitWorktreeService};
 
 pub struct MergePRHandler<C> {
-    git_wt: Arc<GitWorktreeService>,
     ctx: Arc<C>,
 }
 
-impl<C: HasGitHubClient + HasEventLog + 'static> MergePRHandler<C> {
-    pub fn new(git_wt: Arc<GitWorktreeService>, ctx: Arc<C>) -> Self {
-        Self { git_wt, ctx }
+impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static> MergePRHandler<C> {
+    pub fn new(ctx: Arc<C>) -> Self {
+        Self { ctx }
     }
 }
 
 #[async_trait]
-impl<C: HasGitHubClient + HasEventLog + 'static> crate::effects::EffectHandler
-    for MergePRHandler<C>
+impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static>
+    crate::effects::EffectHandler for MergePRHandler<C>
 {
     fn namespace(&self) -> &str {
         "merge_pr"
@@ -38,7 +36,9 @@ impl<C: HasGitHubClient + HasEventLog + 'static> crate::effects::EffectHandler
 }
 
 #[async_trait]
-impl<C: HasGitHubClient + HasEventLog + 'static> MergePrEffects for MergePRHandler<C> {
+impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static> MergePrEffects
+    for MergePRHandler<C>
+{
     #[instrument(skip_all, fields(agent_name = %ctx.agent_name, pr_number = req.pr_number))]
     async fn merge_pr(
         &self,
@@ -56,8 +56,8 @@ impl<C: HasGitHubClient + HasEventLog + 'static> MergePrEffects for MergePRHandl
             pr_number,
             &strategy,
             &req.working_dir,
-            self.git_wt.clone(),
-            self.ctx.github_client(),
+            self.ctx.git_worktree_service().clone(),
+            self.ctx.github_client().map(|arc| arc.as_ref()),
         )
         .await
         .effect_err("merge_pr")?;
@@ -120,7 +120,6 @@ mod tests {
     use crate::domain::{AgentName, BirthBranch, PRNumber};
     use crate::effects::{EffectContext, EffectHandler};
     use crate::services::Services;
-    use std::path::PathBuf;
 
     fn test_ctx() -> EffectContext {
         EffectContext {
@@ -133,9 +132,8 @@ mod tests {
     #[test]
     fn test_namespace() {
         let _ctx = test_ctx();
-        let git_wt = Arc::new(GitWorktreeService::new(PathBuf::from(".")));
         let services = Arc::new(Services::test());
-        let handler = MergePRHandler::new(git_wt, services);
+        let handler = MergePRHandler::new(services);
         assert_eq!(handler.namespace(), "merge_pr");
     }
 

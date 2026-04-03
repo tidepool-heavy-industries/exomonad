@@ -23,8 +23,8 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::services::{
-    HasAcpRegistry, HasAgentResolver, HasClaudeSessionRegistry, HasEventLog, HasSupervisorRegistry,
-    HasTeamRegistry,
+    HasAcpRegistry, HasAgentResolver, HasClaudeSessionRegistry, HasEventLog, HasGitHubClient,
+    HasGitWorktreeService, HasProjectDir, HasSupervisorRegistry, HasTeamRegistry,
 };
 
 /// Agent effect handler.
@@ -32,7 +32,7 @@ use crate::services::{
 /// Handles all effects in the `agent.*` namespace by delegating to
 /// the generated `dispatch_agent_effect` function.
 pub struct AgentHandler<C> {
-    service: Arc<AgentControlService>,
+    service: Arc<AgentControlService<C>>,
     ctx: Arc<C>,
 }
 
@@ -40,13 +40,16 @@ impl<
         C: HasTeamRegistry
             + HasAcpRegistry
             + HasAgentResolver
+            + HasGitHubClient
+            + HasProjectDir
+            + HasGitWorktreeService
             + HasSupervisorRegistry
             + HasClaudeSessionRegistry
             + HasEventLog
             + 'static,
     > AgentHandler<C>
 {
-    pub fn new(service: Arc<AgentControlService>, ctx: Arc<C>) -> Self {
+    pub fn new(service: Arc<AgentControlService<C>>, ctx: Arc<C>) -> Self {
         Self { service, ctx }
     }
 
@@ -191,6 +194,9 @@ impl<
         C: HasTeamRegistry
             + HasAcpRegistry
             + HasAgentResolver
+            + HasGitHubClient
+            + HasProjectDir
+            + HasGitWorktreeService
             + HasSupervisorRegistry
             + HasClaudeSessionRegistry
             + HasEventLog
@@ -263,6 +269,9 @@ impl<
         C: HasTeamRegistry
             + HasAcpRegistry
             + HasAgentResolver
+            + HasGitHubClient
+            + HasProjectDir
+            + HasGitWorktreeService
             + HasSupervisorRegistry
             + HasClaudeSessionRegistry
             + HasEventLog
@@ -584,7 +593,7 @@ impl<
         let context_path = self
             .service
             .resolve_role_context(&crate::domain::Role::worker());
-        let settings_json = AgentControlService::generate_gemini_worker_settings(
+        let settings_json = AgentControlService::<C>::generate_gemini_worker_settings(
             agent_name.as_str(),
             context_path.as_deref(),
             &self.service.extra_mcp_servers,
@@ -1016,14 +1025,10 @@ fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::Ag
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::git_worktree::GitWorktreeService;
-    use std::path::PathBuf;
 
     fn test_handler() -> AgentHandler<crate::services::Services> {
-        let dir = PathBuf::from(".");
-        let git_wt = Arc::new(GitWorktreeService::new(dir.clone()));
-        let service = Arc::new(AgentControlService::new(dir, None, git_wt));
         let services = Arc::new(crate::services::Services::test());
+        let service = Arc::new(AgentControlService::new(services.clone()));
         AgentHandler::new(service, services)
     }
 

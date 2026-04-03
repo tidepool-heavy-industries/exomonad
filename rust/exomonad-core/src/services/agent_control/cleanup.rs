@@ -1,6 +1,15 @@
 use super::*;
 
-impl AgentControlService {
+impl<
+        C: super::super::HasGitHubClient
+            + super::super::HasAcpRegistry
+            + super::super::HasTeamRegistry
+            + super::super::HasAgentResolver
+            + super::super::HasProjectDir
+            + super::super::HasGitWorktreeService
+            + 'static,
+    > AgentControlService<C>
+{
     /// Clean up an agent by identifier (internal_name or issue_id).
     ///
     /// Kills the tmux window, unregisters from Teams config.json,
@@ -22,7 +31,8 @@ impl AgentControlService {
 
         // Parse identifier into AgentIdentity to get consistent slug/internal_name/display_name.
         // Try resolver first for authoritative identity, then fall back to derivation.
-        let identity = if let Some(ref resolver) = self.agent_resolver {
+        let identity = {
+            let resolver = self.agent_resolver();
             let agent_name_key = AgentName::from(identifier);
             if let Some(record) = resolver.get(&agent_name_key).await {
                 let slug = record.slug.as_str().to_string();
@@ -30,22 +40,12 @@ impl AgentControlService {
             } else {
                 AgentIdentity::from_internal_name(identifier)
             }
-        } else {
-            match agent {
-                Some(a) => {
-                    let at = a.agent_type.unwrap_or(AgentType::Gemini);
-                    let s = a.slug.as_ref().map(|s| s.as_str()).unwrap_or(identifier);
-                    let suffix = format!("-{}", at.suffix());
-                    let clean = s.strip_suffix(&suffix).unwrap_or(s);
-                    AgentIdentity::new(clean.to_string(), at)
-                }
-                None => AgentIdentity::from_internal_name(identifier),
-            }
         };
 
         // Remove synthetic team member registration (non-fatal if not registered).
         // Synthetic members are registered under internal_name (e.g., "beta-claude").
-        if let Some(ref team_reg) = self.team_registry {
+        {
+            let team_reg = self.team_registry();
             let birth_branch_str = self.birth_branch.as_str();
             let team_info = if let Some(info) = team_reg.get(birth_branch_str).await {
                 Some(info)
@@ -66,8 +66,6 @@ impl AgentControlService {
             } else {
                 debug!(member = %member_name, "No team found in registry — skipping synthetic member removal");
             }
-        } else {
-            debug!(member = %identity.internal_name(), "No team registry — skipping synthetic member removal");
         }
 
         let internal_name = identity.internal_name();
@@ -75,7 +73,7 @@ impl AgentControlService {
 
         // Remove per-agent config directory (.exo/agents/{name}/)
         let agent_config_dir = self
-            .project_dir
+            .project_dir()
             .join(".exo")
             .join("agents")
             .join(internal_name.as_str());
@@ -136,7 +134,7 @@ impl AgentControlService {
             }
         };
         if worktree_path.exists() {
-            let git_wt = self.git_wt.clone();
+            let git_wt = self.git_wt().clone();
             let path = worktree_path.clone();
             let join_result =
                 tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
@@ -162,7 +160,8 @@ impl AgentControlService {
         }
 
         // Deregister identity from resolver
-        if let Some(ref resolver) = self.agent_resolver {
+        {
+            let resolver = self.agent_resolver();
             if let Err(e) = resolver.deregister(&internal_name).await {
                 warn!(agent = %internal_name, error = %e, "Failed to deregister agent identity (non-fatal)");
             }
@@ -317,7 +316,7 @@ impl AgentControlService {
         }
 
         // 3. Scan root .exo/agents for workers
-        let root_agents_dir = self.project_dir.join(".exo/agents");
+        let root_agents_dir = self.project_dir().join(".exo/agents");
         if root_agents_dir.exists() {
             self.scan_workers(&root_agents_dir, &windows, &mut agents)
                 .await?;

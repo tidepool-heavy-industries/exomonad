@@ -80,7 +80,10 @@ pub trait HasMutexRegistry: Send + Sync {
     fn mutex_registry(&self) -> &MutexRegistry;
 }
 pub trait HasGitHubClient: Send + Sync {
-    fn github_client(&self) -> Option<&GitHubClient>;
+    fn github_client(&self) -> Option<&Arc<GitHubClient>>;
+}
+pub trait HasGitWorktreeService: Send + Sync {
+    fn git_worktree_service(&self) -> &Arc<GitWorktreeService>;
 }
 
 // ============================================================================
@@ -103,6 +106,7 @@ pub struct Services {
     pub agent_resolver: Arc<AgentResolver>,
     pub event_queue: Arc<EventQueue>,
     pub mutex_registry: Arc<MutexRegistry>,
+    pub git_wt: Arc<GitWorktreeService>,
 }
 
 impl HasTeamRegistry for Services {
@@ -151,8 +155,13 @@ impl HasMutexRegistry for Services {
     }
 }
 impl HasGitHubClient for Services {
-    fn github_client(&self) -> Option<&GitHubClient> {
-        self.github_client.as_deref()
+    fn github_client(&self) -> Option<&Arc<GitHubClient>> {
+        self.github_client.as_ref()
+    }
+}
+impl HasGitWorktreeService for Services {
+    fn git_worktree_service(&self) -> &Arc<GitWorktreeService> {
+        &self.git_wt
     }
 }
 
@@ -171,6 +180,7 @@ impl Services {
             agent_resolver: Arc::new(AgentResolver::empty()),
             event_queue: Arc::new(EventQueue::new()),
             mutex_registry: Arc::new(MutexRegistry::new()),
+            git_wt: Arc::new(GitWorktreeService::new(PathBuf::from("."))),
         }
     }
 }

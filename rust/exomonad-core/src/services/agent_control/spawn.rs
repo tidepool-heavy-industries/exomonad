@@ -1,6 +1,15 @@
 use super::*;
 
-impl AgentControlService {
+impl<
+        C: super::super::HasGitHubClient
+            + super::super::HasAcpRegistry
+            + super::super::HasTeamRegistry
+            + super::super::HasAgentResolver
+            + super::super::HasProjectDir
+            + super::super::HasGitWorktreeService
+            + 'static,
+    > AgentControlService<C>
+{
     /// Spawn an agent for a GitHub issue.
     ///
     /// This is the high-level semantic operation that:
@@ -27,8 +36,7 @@ impl AgentControlService {
 
             // Get GitHub client
             let github_client = self
-                .github
-                .as_ref()
+                .github()
                 .ok_or_else(|| anyhow!("GitHub service not available (GITHUB_TOKEN not set)"))?;
             let github = GitHubService::new(github_client.clone());
 
@@ -443,7 +451,7 @@ impl AgentControlService {
             let display_name = identity.display_name();
 
             // Idempotency: check if agent config dir already exists (workers are panes, not tabs)
-            let agent_config_dir = self.project_dir
+            let agent_config_dir = self.project_dir()
                 .join(".exo")
                 .join("agents")
                 .join(agent_name.as_str());
@@ -501,13 +509,13 @@ impl AgentControlService {
             );
 
             // Pre-trust the caller's worktree for Gemini
-            let caller_worktree_for_trust = self.project_dir.join(&ctx.working_dir);
+            let caller_worktree_for_trust = self.project_dir().join(&ctx.working_dir);
             Self::gemini_trust_folder(&caller_worktree_for_trust).await;
 
             // Resolve caller's context (tab and worktree) from its context.
             let caller_tab = resolve_own_tab_name(ctx);
             let caller_worktree = ctx.working_dir.clone();
-            let absolute_worktree = self.project_dir.join(caller_worktree);
+            let absolute_worktree = self.project_dir().join(caller_worktree);
 
             // Worker role context is loaded via context.fileName in settings.json.
             // Prompt goes through a temp file to avoid shell quoting issues.
@@ -583,7 +591,7 @@ impl AgentControlService {
                 return Err(anyhow!("Subtree depth limit reached (max 3). Current birth-branch: {}, depth: {}", effective_birth, depth));
             }
 
-            let effective_project_dir = &self.project_dir;
+            let effective_project_dir = self.project_dir();
 
             // Sanitize branch name and construct typed identity
             let agent_type = options.agent_type;
@@ -607,7 +615,7 @@ impl AgentControlService {
             let current_branch = BranchName::from(effective_birth.as_parent_branch());
 
             // Push parent branch so child PRs can reference it as base
-            ensure_branch_pushed(&self.git_wt, &current_branch, effective_project_dir).await;
+            ensure_branch_pushed(self.git_wt(), &current_branch, effective_project_dir).await;
 
             // Branch: {current_branch}.{agent_name} (suffixed for unified namespace)
             let child_birth = effective_birth.child(agent_name.as_str());
@@ -681,7 +689,7 @@ impl AgentControlService {
 
             // Write .claude/settings.local.json with hooks (SessionStart registers UUID for --fork-session)
             let binary_path = crate::util::find_exomonad_binary();
-            crate::hooks::HookConfig::write_persistent(&worktree_path, &binary_path, options.permissions.as_ref(), Some(&self.project_dir))
+            crate::hooks::HookConfig::write_persistent(&worktree_path, &binary_path, options.permissions.as_ref(), Some(self.project_dir()))
                 .map_err(|e| anyhow!("Failed to write hook config in worktree: {}", e))?;
             info!(worktree = %worktree_path.display(), "Wrote hook configuration for spawned Claude agent");
 
@@ -699,7 +707,7 @@ impl AgentControlService {
                         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
                         .collect()
                 };
-                let canonical_project_dir = self.project_dir.canonicalize().unwrap_or_else(|_| self.project_dir.clone());
+                let canonical_project_dir = self.project_dir().canonicalize().unwrap_or_else(|_| self.project_dir().to_path_buf());
                 let parent_encoded = encode_path(&canonical_project_dir);
                 let worktree_encoded = encode_path(&worktree_path);
                 let parent_project = claude_projects_dir.join(&parent_encoded);
@@ -735,7 +743,7 @@ impl AgentControlService {
             let fork_id = options.parent_session_id.as_ref().map(|id| id.as_str());
 
             // Open tmux window with cwd = worktree_path
-            let agent_config_dir = self.project_dir.join(".exo").join("agents").join(agent_name.as_str());
+            let agent_config_dir = self.project_dir().join(".exo").join("agents").join(agent_name.as_str());
             let window_id = match self.new_tmux_window_inner(
                 &display_name,
                 &worktree_path,
@@ -752,7 +760,7 @@ impl AgentControlService {
                     let _ = fs::remove_dir_all(&agent_config_dir).await;
                     // Remove worktree if it was created
                     if worktree_path.exists() {
-                        let git_wt = self.git_wt.clone();
+                        let git_wt = self.git_wt().clone();
                         let path = worktree_path.clone();
                         let _ = tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
                     }
@@ -808,7 +816,7 @@ impl AgentControlService {
             // No depth check for leaf nodes.
 
             let effective_birth = self.effective_birth_branch(Some(caller_bb));
-            let effective_project_dir = &self.project_dir;
+            let effective_project_dir = self.project_dir();
 
             // Parent branch derived from typed birth-branch.
             let current_branch = BranchName::from(effective_birth.as_parent_branch());
@@ -832,7 +840,7 @@ impl AgentControlService {
             }
 
             // Push parent branch so child PRs can reference it as base
-            ensure_branch_pushed(&self.git_wt, &current_branch, effective_project_dir).await;
+            ensure_branch_pushed(self.git_wt(), &current_branch, effective_project_dir).await;
 
             let child_birth = effective_birth.child(agent_name.as_str());
             let branch_name = BranchName::from(child_birth.to_string().as_str());
@@ -871,7 +879,7 @@ impl AgentControlService {
 
             // Open tmux window (not pane)
             // Task already includes leaf completion protocol — rendered by Haskell Prompt builder.
-            let agent_config_dir = self.project_dir.join(".exo").join("agents").join(agent_name.as_str());
+            let agent_config_dir = self.project_dir().join(".exo").join("agents").join(agent_name.as_str());
             let window_id = match self.new_tmux_window(
                 &display_name,
                 &worktree_path,
@@ -886,7 +894,7 @@ impl AgentControlService {
                     let _ = fs::remove_dir_all(&agent_config_dir).await;
                     // Remove worktree if it was created
                     if worktree_path.exists() {
-                        let git_wt = self.git_wt.clone();
+                        let git_wt = self.git_wt().clone();
                         let path = worktree_path.clone();
                         let _ = tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
                     }
@@ -950,7 +958,10 @@ mod tests {
         let git_wt = Arc::new(crate::services::git_worktree::GitWorktreeService::new(
             project_dir.clone(),
         ));
-        let service = AgentControlService::new(project_dir.clone(), None, git_wt);
+        let mut services = crate::services::Services::test();
+        services.project_dir = project_dir.clone();
+        services.git_wt = git_wt;
+        let service = AgentControlService::new(Arc::new(services));
 
         // Test valid copy
         service

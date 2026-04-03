@@ -32,7 +32,7 @@
 //! let mut builder = RuntimeBuilder::new()
 //!     .with_wasm_path(wasm_path)
 //!     .with_handlers(core_handlers(project_dir.clone(), None))
-//!     .with_handlers(git_handlers(&services, git, git_wt));
+//!     .with_handlers(git_handlers(services.clone(), git));
 //!
 //! // Add custom domain handlers
 //! builder = builder.with_effect_handler(MyDomainHandler::new());
@@ -121,8 +121,8 @@ pub use handlers::{
 #[cfg(feature = "runtime")]
 pub use services::{
     validate_gh_cli, validate_git, HasAcpRegistry, HasAgentResolver, HasClaudeSessionRegistry,
-    HasEventLog, HasEventQueue, HasGitHubClient, HasMutexRegistry, HasProjectDir,
-    HasSupervisorRegistry, HasTeamRegistry,
+    HasEventLog, HasEventQueue, HasGitHubClient, HasGitWorktreeService, HasMutexRegistry,
+    HasProjectDir, HasSupervisorRegistry, HasTeamRegistry,
 };
 
 /// Prelude module for convenient imports.
