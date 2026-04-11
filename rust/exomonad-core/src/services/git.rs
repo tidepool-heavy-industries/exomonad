@@ -71,8 +71,8 @@ pub struct WorktreeInfo {
     /// Absolute path to the worktree directory.
     pub path: String,
 
-    /// Current branch name (or "HEAD" if detached).
-    pub branch: BranchName,
+    /// Current branch name (None if detached).
+    pub branch: Option<BranchName>,
 }
 
 /// Git repository information.
@@ -80,8 +80,8 @@ pub struct WorktreeInfo {
 /// Returned by [`GitService::get_repo_info()`].
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct RepoInfo {
-    /// Current branch name.
-    pub branch: BranchName,
+    /// Current branch name (None if detached).
+    pub branch: Option<BranchName>,
 
     /// Repository owner (parsed from remote URL, if available).
     ///
@@ -110,7 +110,7 @@ pub struct RepoInfo {
 /// let git = GitService::new(executor);
 ///
 /// let branch = git.get_branch(".").await?;
-/// println!("On branch: {}", branch);
+/// println!("On branch: {:?}", branch);
 /// # Ok(())
 /// # }
 /// ```
@@ -132,11 +132,15 @@ impl GitService {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn get_branch(&self, dir: &str) -> Result<BranchName> {
+    pub async fn get_branch(&self, dir: &str) -> Result<Option<BranchName>> {
         let output = self.exec_git(dir, &["branch", "--show-current"]).await?;
-        Ok(BranchName::from(output.trim()))
+        let trimmed = output.trim();
+        if trimmed.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(BranchName::from(trimmed)))
+        }
     }
-
     #[tracing::instrument(skip(self))]
     pub async fn get_worktree(&self, dir: &str) -> Result<WorktreeInfo> {
         let path = self
@@ -266,19 +270,27 @@ mod tests {
         let mock = Arc::new(MockExecutor::new(vec![Ok("main\n".to_string())]));
         let git = GitService::new(mock);
         let branch = git.get_branch("/app").await.unwrap();
-        assert_eq!(branch.as_str(), "main");
+        assert_eq!(branch.unwrap().as_str(), "main");
+    }
+
+    #[tokio::test]
+    async fn test_get_branch_detached_head() {
+        let mock = Arc::new(MockExecutor::new(vec![Ok("\n".to_string())]));
+        let git = GitService::new(mock);
+        let branch = git.get_branch("/app").await.unwrap();
+        assert!(branch.is_none());
     }
 
     #[tokio::test]
     async fn test_get_worktree() {
         let mock = Arc::new(MockExecutor::new(vec![
             Ok("/app\n".to_string()),        // rev-parse --show-toplevel
-            Ok("feature/123\n".to_string()), // rev-parse --abbrev-ref HEAD
+            Ok("feature/123\n".to_string()), // branch --show-current
         ]));
         let git = GitService::new(mock);
         let wt = git.get_worktree("/app/src").await.unwrap();
         assert_eq!(wt.path, "/app");
-        assert_eq!(wt.branch.as_str(), "feature/123");
+        assert_eq!(wt.branch.unwrap().as_str(), "feature/123");
     }
 
     #[tokio::test]

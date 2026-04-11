@@ -184,6 +184,12 @@ impl<
                 Address::Team { team, member: None } => {
                     let lead = self.ctx.team_registry().resolve_lead(team.as_str()).await;
                     let id = lead.unwrap_or_else(|| "root".to_string());
+                    if id.is_empty() {
+                        return Err(crate::effects::EffectError::custom(
+                            "events_empty_id",
+                            "empty agent id from registry",
+                        ));
+                    }
                     let lead_name = crate::domain::AgentName::from(id.as_str());
                     let tab = crate::services::delivery::resolve_tab_name_for_agent(
                         &lead_name,
@@ -339,11 +345,58 @@ impl<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{AgentName, BirthBranch};
+    use crate::effects::EffectContext;
 
     #[test]
     fn test_event_handler_namespace() {
         let services = Arc::new(crate::services::Services::test());
         let handler = EventHandler::new(services, None);
         assert_eq!(handler.namespace(), "events");
+    }
+
+    #[tokio::test]
+    async fn test_notify_parent_empty_lead() {
+        let services = Arc::new(crate::services::Services::test());
+        // Register an empty lead for "test-team"
+        services
+            .team_registry()
+            .register(
+                "",
+                claude_teams_bridge::TeamInfo {
+                    team_name: "test-team".to_string(),
+                    inbox_name: "lead".to_string(),
+                },
+            )
+            .await;
+
+        let handler = EventHandler::new(services, None);
+        let ctx = EffectContext {
+            agent_name: AgentName::from("agent"),
+            birth_branch: BirthBranch::from("main"),
+            working_dir: std::path::PathBuf::from("."),
+        };
+
+        let req = NotifyParentRequest {
+            message: "hello".to_string(),
+            status: "success".to_string(),
+            agent_id: "".to_string(),
+            override_recipient: Some(exomonad_proto::effects::events::Address {
+                kind: Some(exomonad_proto::effects::events::address::Kind::Team(
+                    exomonad_proto::effects::events::TeamAddress {
+                        team: "test-team".to_string(),
+                        member: "".to_string(),
+                    },
+                )),
+            }),
+        };
+
+        let result = handler.notify_parent(req, &ctx).await;
+        assert!(result.is_err());
+        if let Err(crate::effects::EffectError::Custom { code, .. }) = result {
+            assert_eq!(code, "events_empty_id");
+        } else {
+            panic!("Expected events_empty_id error, got {:?}", result);
+        }
     }
 }

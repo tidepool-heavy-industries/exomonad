@@ -52,10 +52,13 @@ impl GitEffects for GitHandler {
             .await
             .effect_err("git")?;
 
-        info!(branch = %branch, "[Git] get_branch complete");
+        let detached = branch.is_none();
+        let branch_str = branch.map(|b| b.to_string()).unwrap_or_default();
+
+        info!(branch = %branch_str, detached, "[Git] get_branch complete");
         Ok(GetBranchResponse {
-            branch: branch.to_string(),
-            detached: false,
+            branch: branch_str,
+            detached,
         })
     }
 
@@ -196,9 +199,10 @@ impl GitEffects for GitHandler {
             .await
             .effect_err("git")?;
 
-        info!(branch = %info.branch, "[Git] get_repo_info complete");
+        let branch_str = info.branch.map(|b| b.to_string()).unwrap_or_default();
+        info!(branch = %branch_str, "[Git] get_repo_info complete");
         Ok(GetRepoInfoResponse {
-            branch: info.branch.to_string(),
+            branch: branch_str,
             owner: info.owner.map(Into::into).unwrap_or_else(|| {
                 tracing::debug!("Could not determine repo owner from remote URL");
                 String::new()
@@ -224,10 +228,11 @@ impl GitEffects for GitHandler {
             .await
             .effect_err("git")?;
 
-        info!(path = %info.path, branch = %info.branch, "[Git] get_worktree complete");
+        let branch_str = info.branch.map(|b| b.to_string()).unwrap_or_default();
+        info!(path = %info.path, branch = %branch_str, "[Git] get_worktree complete");
         Ok(GetWorktreeResponse {
             path: info.path,
-            branch: info.branch.to_string(),
+            branch: branch_str,
             head_commit: String::new(),
             is_linked: false,
         })
