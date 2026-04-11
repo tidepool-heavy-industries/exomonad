@@ -26,7 +26,7 @@ import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (Parser, explicitParseField, explicitParseFieldMaybe)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Map qualified as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -43,7 +43,7 @@ import ExoMonad.Effects.GitHub (GitHubGetPullRequest)
 import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
 import ExoMonad.Effects.MergePR (MergePRMergePr)
 import ExoMonad.Effects.Process (ProcessRun)
-import ExoMonad.Guest.Tool.Class (Effects, MCPCallOutput (..), MCPTool (..), errorResult, successResult)
+import ExoMonad.Guest.Tool.Class (Effects, MCPCallOutput (..))
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import GHC.Generics (Generic)
@@ -196,13 +196,28 @@ mergePRRender output =
             "pull_error" .= mpoPullError output,
             "next" .= nextGuidance output
           ]
-   in MCPCallOutput fullySuccess (Just res) (if fullySuccess then Nothing else Just (nextGuidance output))
+   in MCPCallOutput fullySuccess (Just res) (mergePRError output)
+
+mergePRError :: MergePROutput -> Maybe Text
+mergePRError output
+  | fullySuccess = Nothing
+  | isJust pullErr = Just (guidance <> " Pull error: " <> fromMaybe "" pullErr)
+  | not (T.null msg) = Just (guidance <> " Details: " <> msg)
+  | otherwise = Just guidance
+  where
+    fullySuccess = mpoMerged output && mpoLocalSynced output
+    guidance = nextGuidance output
+    pullErr = mpoPullError output
+    msg = mpoMessage output
 
 nextGuidance :: MergePROutput -> Text
 nextGuidance output
   | not (mpoMerged output) = "Merge did not complete. Check `message` for the reason."
   | not (mpoLocalSynced output) = "PR merged but local branch is out of sync. Run `git pull --rebase` manually, then verify build with `cargo check --workspace`."
-  | not (mpoCleanupOk output) = "PR merged and synced, but post-merge cleanup failed. Run `git branch -D <branch>` and cleanup the worktree manually if needed."
+  | not (mpoCleanupOk output) =
+      "PR merged and synced, but post-merge cleanup failed. Run `git branch -D "
+        <> mpoBranchName output
+        <> "` and cleanup the worktree manually if needed."
   | otherwise = "Verify build: cargo check --workspace."
 
 -- | Copilot review readiness.
@@ -355,7 +370,7 @@ doMerge args = do
               Nothing -> pure True
 
             pure (syncOk, syncErr, cleanOk)
-          else pure (True, Nothing, True)
+          else pure (False, Nothing, True)
 
       pure $
         Right $

@@ -1,11 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 module ExoMonad.Guest.Tools.MergePRTests where
 
-import Data.Aeson (Value, object, (.=), encode)
-import Data.Text (Text)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..))
 import ExoMonad.Guest.Tools.MergePR
-import qualified Data.ByteString.Lazy.Char8 as BSL
 
 -- Note: These are manual verification tests since a full test runner 
 -- isn't yet configured for the WASM guest in this environment.
