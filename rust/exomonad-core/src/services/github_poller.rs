@@ -177,51 +177,51 @@ fn compute_pr_actions(
                 reviews: Some(copilot_reviews.to_vec()),
             });
 
-            // Fire WASM event handler
-            pending_actions.push(PendingAction::WasmEvent {
-                event_type: "pr_review",
-                payload: serde_json::json!({
-                    "kind": "review_received",
-                    "pr_number": pr_number.as_u64(),
-                    "comments": message,
-                }),
+            // Check for state changes (approved or changes_requested)
+            let approved = copilot_reviews.iter().any(|r| {
+                r.state == ReviewState::Approved || r.body.to_lowercase().contains("approved")
             });
+            let changes_requested = copilot_reviews
+                .iter()
+                .any(|r| r.state == ReviewState::ChangesRequested);
+
+            if approved && old_state.last_review_state != ReviewState::Approved {
+                old_state.last_review_state = ReviewState::Approved;
+                old_state.notified_parent_approved = true;
+                pending_actions.push(PendingAction::WasmEvent {
+                    event_type: "pr_review",
+                    payload: serde_json::json!({
+                        "kind": "approved",
+                        "pr_number": pr_number.as_u64(),
+                    }),
+                });
+            } else if changes_requested
+                && old_state.last_review_state != ReviewState::ChangesRequested
+            {
+                old_state.last_review_state = ReviewState::ChangesRequested;
+                old_state.addressed_changes = false; // New review cycle starts
+                pending_actions.push(PendingAction::WasmEvent {
+                    event_type: "pr_review",
+                    payload: serde_json::json!({
+                        "kind": "review_received",
+                        "pr_number": pr_number.as_u64(),
+                        "comments": message,
+                    }),
+                });
+            } else {
+                // General review/comment activity
+                pending_actions.push(PendingAction::WasmEvent {
+                    event_type: "pr_review",
+                    payload: serde_json::json!({
+                        "kind": "review_received",
+                        "pr_number": pr_number.as_u64(),
+                        "comments": message,
+                    }),
+                });
+            }
         }
         // Update state even if count decreased (to sync with reality)
         old_state.last_copilot_comment_count = copilot_count;
-    }
-
-    // Check for Copilot approval
-    let approved = copilot_reviews
-        .iter()
-        .any(|r| r.state == ReviewState::Approved || r.body.to_lowercase().contains("approved"));
-    if approved && old_state.last_review_state != ReviewState::Approved {
-        old_state.last_review_state = ReviewState::Approved;
-        old_state.notified_parent_approved = true;
-        pending_actions.push(PendingAction::WasmEvent {
-            event_type: "pr_review",
-            payload: serde_json::json!({
-                "kind": "approved",
-                "pr_number": pr_number.as_u64(),
-            }),
-        });
-    }
-
-    // Check for changes_requested
-    let changes_requested = copilot_reviews
-        .iter()
-        .any(|r| r.state == ReviewState::ChangesRequested);
-    if changes_requested && old_state.last_review_state != ReviewState::ChangesRequested {
-        old_state.last_review_state = ReviewState::ChangesRequested;
-        old_state.addressed_changes = false; // New review cycle starts
-        pending_actions.push(PendingAction::WasmEvent {
-            event_type: "pr_review",
-            payload: serde_json::json!({
-                "kind": "review_received",
-                "pr_number": pr_number.as_u64(),
-                "comments": format_message(copilot_comments, copilot_reviews),
-            }),
-        });
     }
 
     // Check CI changes
@@ -1405,7 +1405,8 @@ mod tests {
     fn test_first_seen_resets_on_sha_change_in_none_state() {
         let mut state = make_pr_state("main.feature", "abc123");
         state.last_review_state = ReviewState::None;
-        state.first_seen = Instant::now() - Duration::from_secs(10 * 60);
+        let old_first_seen = Instant::now() - Duration::from_secs(10 * 60);
+        state.first_seen = old_first_seen;
 
         compute_pr_actions(
             &mut state,
@@ -1418,7 +1419,7 @@ mod tests {
             &|_, _| String::new(),
         );
 
-        assert!(state.first_seen.elapsed() < Duration::from_secs(1));
+        assert!(state.first_seen > old_first_seen);
     }
 
     #[test]
@@ -1484,10 +1485,16 @@ mod tests {
         assert_eq!(state.addressed_changes, true);
 
         // (c) New review arrives -> ChangesRequested, addressed_changes=false
-        let reviews2 = vec![CopilotReview {
-            body: "Second review".to_string(),
-            state: ReviewState::ChangesRequested,
-        }];
+        let reviews2 = vec![
+            CopilotReview {
+                body: "Initial review".to_string(),
+                state: ReviewState::ChangesRequested,
+            },
+            CopilotReview {
+                body: "Second review".to_string(),
+                state: ReviewState::ChangesRequested,
+            },
+        ];
         compute_pr_actions(
             &mut state,
             PRNumber::new(123),
