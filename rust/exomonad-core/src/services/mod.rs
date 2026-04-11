@@ -88,6 +88,9 @@ pub trait HasGitWorktreeService: Send + Sync {
 pub trait HasTasksDir: Send + Sync {
     fn tasks_dir(&self) -> &std::path::Path;
 }
+pub trait HasTmuxIpc: Send + Sync {
+    fn tmux_ipc(&self) -> &self::tmux_ipc::TmuxIpc;
+}
 
 // ============================================================================
 // Services — the concrete type that implements all traits
@@ -112,6 +115,7 @@ pub struct Services {
     event_queue: Arc<EventQueue>,
     mutex_registry: Arc<MutexRegistry>,
     git_wt: Arc<GitWorktreeService>,
+    tmux_ipc: Arc<self::tmux_ipc::TmuxIpc>,
 }
 
 /// Builder for [`Services`]. All required fields are passed to `new()`; optional
@@ -121,6 +125,7 @@ pub struct ServicesBuilder {
     project_dir: PathBuf,
     tasks_dir: PathBuf,
     git_wt: Arc<GitWorktreeService>,
+    tmux_ipc: Arc<self::tmux_ipc::TmuxIpc>,
     github_client: Option<Arc<GitHubClient>>,
     event_log: Option<Arc<EventLog>>,
     team_registry: Arc<TeamRegistry>,
@@ -133,11 +138,17 @@ pub struct ServicesBuilder {
 }
 
 impl ServicesBuilder {
-    pub fn new(project_dir: PathBuf, tasks_dir: PathBuf, git_wt: Arc<GitWorktreeService>) -> Self {
+    pub fn new(
+        project_dir: PathBuf,
+        tasks_dir: PathBuf,
+        git_wt: Arc<GitWorktreeService>,
+        tmux_ipc: Arc<self::tmux_ipc::TmuxIpc>,
+    ) -> Self {
         Self {
             project_dir,
             tasks_dir,
             git_wt,
+            tmux_ipc,
             github_client: None,
             event_log: None,
             team_registry: Arc::new(TeamRegistry::new()),
@@ -209,6 +220,7 @@ impl ServicesBuilder {
             event_queue: self.event_queue,
             mutex_registry: self.mutex_registry,
             git_wt: self.git_wt,
+            tmux_ipc: self.tmux_ipc,
         }
     }
 }
@@ -273,6 +285,11 @@ impl HasTasksDir for Services {
         &self.tasks_dir
     }
 }
+impl HasTmuxIpc for Services {
+    fn tmux_ipc(&self) -> &self::tmux_ipc::TmuxIpc {
+        &self.tmux_ipc
+    }
+}
 
 #[cfg(test)]
 impl Services {
@@ -280,12 +297,36 @@ impl Services {
     pub fn test() -> Self {
         Self::test_with_project_dir(PathBuf::from("."))
     }
-
     /// Construct a test Services rooted at `project_dir`. The `git_wt` service
     /// is constructed from the same directory.
     pub fn test_with_project_dir(project_dir: PathBuf) -> Self {
         let git_wt = Arc::new(GitWorktreeService::new(project_dir.clone()));
-        ServicesBuilder::new(project_dir, PathBuf::from(".claude/tasks"), git_wt).build()
+        // Use a dummy socket for tests to avoid hitting the real tmux server
+        // unless explicitly requested via test_with_tmux().
+        let tmux_ipc = Arc::new(self::tmux_ipc::TmuxIpc::new_with_socket(
+            "test-session",
+            Some("exomonad-test-dummy".to_string()),
+        ));
+        ServicesBuilder::new(
+            project_dir,
+            PathBuf::from(".claude/tasks"),
+            git_wt,
+            tmux_ipc,
+        )
+        .build()
+    }
+
+    /// Construct a test Services with a specific TmuxIpc.
+    pub fn test_with_tmux(tmux_ipc: Arc<self::tmux_ipc::TmuxIpc>) -> Self {
+        let project_dir = PathBuf::from(".");
+        let git_wt = Arc::new(GitWorktreeService::new(project_dir.clone()));
+        ServicesBuilder::new(
+            project_dir,
+            PathBuf::from(".claude/tasks"),
+            git_wt,
+            tmux_ipc,
+        )
+        .build()
     }
 
     /// Test-only setter for injecting a GitHubClient into an already-built

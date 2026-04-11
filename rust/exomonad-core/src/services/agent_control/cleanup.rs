@@ -7,6 +7,7 @@ impl<
             + super::super::HasAgentResolver
             + super::super::HasProjectDir
             + super::super::HasGitWorktreeService
+            + super::super::HasTmuxIpc
             + 'static,
     > AgentControlService<C>
 {

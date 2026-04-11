@@ -274,7 +274,7 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
         }
     }
 
-    let session_alive = TmuxIpc::has_session(&session).await?;
+    let session_alive = TmuxIpc::has_session(&session, None).await?;
 
     if recreate {
         // Kill the running server process before tearing down the session
@@ -307,12 +307,12 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
 
         if session_alive {
             info!(session = %session, "Deleting session (--recreate)");
-            TmuxIpc::kill_session(&session).await?;
+            TmuxIpc::kill_session(&session, None).await?;
         }
     } else if session_alive {
         // Attach to running session
         info!(session = %session, "Attaching to session");
-        return TmuxIpc::attach_session(&session).await;
+        return TmuxIpc::attach_session(&session, None).await;
     }
 
     // Create fresh session
@@ -354,10 +354,10 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     info!("Wrote .mcp.json with {} MCP server(s)", mcp_servers.len());
 
     // 2. Create session in background
-    let server_window_id = TmuxIpc::new_session(&session, &cwd).await?;
+    let server_window_id = TmuxIpc::new_session(&session, &cwd, None).await?;
 
     // Verify session
-    if !TmuxIpc::has_session(&session).await? {
+    if !TmuxIpc::has_session(&session, None).await? {
         anyhow::bail!(
             "tmux session '{}' was created but is not responding.",
             session
@@ -787,7 +787,7 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
 
     // 6. Attach
     info!(session = %session, "Attaching to session");
-    TmuxIpc::attach_session(&session).await
+    TmuxIpc::attach_session(&session, None).await
 }
 
 pub fn ensure_gitignore(project_dir: &Path) -> Result<()> {

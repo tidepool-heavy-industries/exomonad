@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use crate::services::{
     HasAcpRegistry, HasAgentResolver, HasEventLog, HasEventQueue, HasProjectDir,
-    HasSupervisorRegistry, HasTeamRegistry,
+    HasSupervisorRegistry, HasTeamRegistry, HasTmuxIpc,
 };
 
 /// Events effect handler.
@@ -42,6 +42,7 @@ impl<
             + HasEventQueue
             + HasProjectDir
             + HasSupervisorRegistry
+            + HasTmuxIpc
             + 'static,
     > EffectHandler for EventHandler<C>
 {
@@ -68,6 +69,7 @@ impl<
             + HasEventQueue
             + HasProjectDir
             + HasSupervisorRegistry
+            + HasTmuxIpc
             + 'static,
     > EventEffects for EventHandler<C>
 {

@@ -113,6 +113,7 @@ impl<
             + super::super::HasAgentResolver
             + super::super::HasProjectDir
             + super::super::HasGitWorktreeService
+            + super::super::HasTmuxIpc
             + 'static,
     > AgentControlService<C>
 {
@@ -122,13 +123,21 @@ impl<
             .ok_or_else(|| anyhow!("No tmux session configured (call with_tmux_session)"))
     }
 
-    /// Get the direct tmux IPC client, falling back to creating one from config or env.
+    /// Get the direct tmux IPC client from context.
     pub(crate) fn tmux(&self) -> Result<super::tmux_ipc::TmuxIpc> {
-        if let Some(ref ipc) = self.tmux_ipc {
-            return Ok(ipc.clone());
+        let tmux = self.ctx.tmux_ipc().clone();
+        let configured_session = self.resolve_tmux_session()?;
+        let ctx_session = tmux.session_name();
+
+        if configured_session != ctx_session {
+            anyhow::bail!(
+                "Configured tmux session '{}' does not match context tmux session '{}'",
+                configured_session,
+                ctx_session
+            );
         }
-        let session = self.resolve_tmux_session()?;
-        Ok(super::tmux_ipc::TmuxIpc::new(&session))
+
+        Ok(tmux)
     }
 
     /// Clean up an existing worktree (if present) and create a fresh one.
@@ -1166,7 +1175,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let project_dir = temp_dir.path().to_path_buf();
         let services = test_services(project_dir.clone());
-        let tmux = super::tmux_ipc::TmuxIpc::new("test");
+        let isolated = super::tmux_ipc::IsolatedTmux::new().await.unwrap();
         let git_wt = services.git_worktree_service().clone();
 
         let wt_path = project_dir.join("test-wt");
@@ -1174,7 +1183,7 @@ mod tests {
         assert!(wt_path.exists());
 
         {
-            let mut rollback = SpawnRollback::new(tmux, git_wt);
+            let mut rollback = SpawnRollback::new(isolated.ipc.clone(), git_wt);
             rollback.set_worktree(wt_path.clone());
             // Drop without disarming
         }
@@ -1193,10 +1202,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_rollback_disarmed_preserves_state() {
+        if !super::tmux_ipc::IsolatedTmux::is_available().await {
+            eprintln!("skipping test_spawn_rollback_disarmed_preserves_state: tmux not available");
+            return;
+        }
         let temp_dir = tempfile::tempdir().unwrap();
         let project_dir = temp_dir.path().to_path_buf();
         let services = test_services(project_dir.clone());
-        let tmux = super::tmux_ipc::TmuxIpc::new("test");
+        let isolated = super::tmux_ipc::IsolatedTmux::new().await.unwrap();
         let git_wt = services.git_worktree_service().clone();
 
         let wt_path = project_dir.join("test-wt-preserved");
@@ -1204,7 +1217,7 @@ mod tests {
         assert!(wt_path.exists());
 
         {
-            let mut rollback = SpawnRollback::new(tmux, git_wt);
+            let mut rollback = SpawnRollback::new(isolated.ipc.clone(), git_wt);
             rollback.set_worktree(wt_path.clone());
             rollback.disarm();
             // Drop while disarmed
