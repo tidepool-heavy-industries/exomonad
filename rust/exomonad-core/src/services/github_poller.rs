@@ -134,10 +134,11 @@ fn compute_pr_actions(
     // Reset review tracking if new commits pushed
     if pr_sha != old_state.last_sha.as_str() {
         old_state.last_sha = CommitSha::from(pr_sha);
+        old_state.first_seen = Instant::now();
+
         if old_state.last_review_state == ReviewState::ChangesRequested {
             old_state.last_review_state = ReviewState::None;
             old_state.notified_parent_timeout = false;
-            old_state.first_seen = Instant::now();
             old_state.addressed_changes = true;
 
             // Fire FixesPushed event — Copilot does NOT re-review,
@@ -212,6 +213,7 @@ fn compute_pr_actions(
         .any(|r| r.state == ReviewState::ChangesRequested);
     if changes_requested && old_state.last_review_state != ReviewState::ChangesRequested {
         old_state.last_review_state = ReviewState::ChangesRequested;
+        old_state.addressed_changes = false; // New review cycle starts
         pending_actions.push(PendingAction::WasmEvent {
             event_type: "pr_review",
             payload: serde_json::json!({
@@ -1397,5 +1399,106 @@ mod tests {
             actions.is_empty(),
             "Expected no actions for new commits after approval"
         );
+    }
+
+    #[test]
+    fn test_first_seen_resets_on_sha_change_in_none_state() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        state.last_review_state = ReviewState::None;
+        state.first_seen = Instant::now() - Duration::from_secs(10 * 60);
+
+        compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "def456", // new SHA
+            &[],
+            &[],
+            CIStatus::Success,
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        assert!(state.first_seen.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn test_addressed_changes_resets_on_new_review() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        state.addressed_changes = true;
+        state.last_review_state = ReviewState::None;
+
+        let reviews = vec![CopilotReview {
+            body: "Need changes".to_string(),
+            state: ReviewState::ChangesRequested,
+        }];
+
+        compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "abc123",
+            &[],
+            &reviews,
+            CIStatus::Success,
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        assert_eq!(state.addressed_changes, false);
+        assert_eq!(state.last_review_state, ReviewState::ChangesRequested);
+    }
+
+    #[test]
+    fn test_full_cycle_addressed_changes_transitions() {
+        let mut state = make_pr_state("main.feature", "abc123");
+
+        // (a) Review arrives -> ChangesRequested, addressed_changes remains false
+        let reviews = vec![CopilotReview {
+            body: "Initial review".to_string(),
+            state: ReviewState::ChangesRequested,
+        }];
+        compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "abc123",
+            &[],
+            &reviews,
+            CIStatus::Success,
+            "main.feature",
+            &|_, _| String::new(),
+        );
+        assert_eq!(state.last_review_state, ReviewState::ChangesRequested);
+        assert_eq!(state.addressed_changes, false);
+
+        // (b) Agent pushes fix -> SHA changes -> state None, addressed_changes=true
+        compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "def456", // new SHA
+            &[],
+            &[],
+            CIStatus::Success,
+            "main.feature",
+            &|_, _| String::new(),
+        );
+        assert_eq!(state.last_review_state, ReviewState::None);
+        assert_eq!(state.addressed_changes, true);
+
+        // (c) New review arrives -> ChangesRequested, addressed_changes=false
+        let reviews2 = vec![CopilotReview {
+            body: "Second review".to_string(),
+            state: ReviewState::ChangesRequested,
+        }];
+        compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "def456",
+            &[],
+            &reviews2,
+            CIStatus::Success,
+            "main.feature",
+            &|_, _| String::new(),
+        );
+        assert_eq!(state.last_review_state, ReviewState::ChangesRequested);
+        assert_eq!(state.addressed_changes, false);
     }
 }
