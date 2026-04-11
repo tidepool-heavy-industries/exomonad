@@ -3,6 +3,7 @@ use exomonad::config::Config;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use axum::http::HeaderMap;
 use axum::{
     body::Bytes,
     extract::{Extension, Path, Query, State},
@@ -694,11 +695,25 @@ pub async fn call_tool(
     Path((role, name)): Path<(String, String)>,
     State(state): State<AppState>,
     Extension(plugin): Extension<Arc<PluginManager>>,
+    headers: HeaderMap,
     Json(body): Json<ToolCallRequest>,
 ) -> impl IntoResponse {
     tracing::info!(tool = %body.name, "Executing tool");
 
-    let arguments = exomonad_core::mcp::harness_compat::coerce_harness_value(body.arguments);
+    // Coerce arguments if requested or if we detect a harness that needs it.
+    // We always coerce containers (Arrays/Objects) because they are almost
+    // never intended as plain strings if they are valid JSON.
+    // Scalars (Numbers/Bools) are only coerced if the harness-compat header is set,
+    // to avoid false positives on legitimate string fields like digit-only IDs.
+    let coerce_scalars = headers
+        .get("x-exomonad-harness-compat")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v == "true")
+        .unwrap_or(false); // Default to false for scalars to preserve plain strings.
+
+    let arguments =
+        exomonad_core::mcp::harness_compat::coerce_harness_value(body.arguments, coerce_scalars);
+
     let input =
         exomonad_core::mcp::tools::MCPCallInput::new(role.clone(), body.name.clone(), arguments);
 
