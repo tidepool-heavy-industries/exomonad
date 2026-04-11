@@ -1499,3 +1499,78 @@ async fn test_cc_native_members_preserved() {
     assert!(disk_config.members.iter().any(|m| m.name == "native-1"));
     assert!(disk_config.members.iter().any(|m| m.name == "worker-1"));
 }
+
+#[tokio::test]
+#[serial]
+async fn test_register_member_moves_between_teams() {
+    let tmp = tempdir().unwrap();
+    let _home = ScopedHome::new(tmp.path());
+
+    let team1 = "team-1";
+    let team2 = "team-2";
+
+    for team in [team1, team2] {
+        let config = TeamConfig {
+            name: team.into(),
+            description: "test".into(),
+            created_at: 0,
+            lead_agent_id: "lead".into(),
+            lead_session_id: "session".into(),
+            members: vec![TeamMember {
+                agent_id: "lead".into(),
+                name: "lead".into(),
+                agent_type: "claude".into(),
+                model: "opus".into(),
+                joined_at: 0,
+                cwd: "/tmp".into(),
+                backend_type: None,
+            }],
+        };
+        write_team_config(team, &config).unwrap();
+    }
+
+    let registry = TeamRegistry::new();
+
+    // Register in team 1
+    registry
+        .register_member(
+            "agent-x",
+            TeamInfo {
+                team_name: team1.into(),
+                inbox_name: "agent-x".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(read_team_config(team1)
+        .unwrap()
+        .members
+        .iter()
+        .any(|m| m.name == "agent-x"));
+
+    // Move to team 2
+    registry
+        .register_member(
+            "agent-x",
+            TeamInfo {
+                team_name: team2.into(),
+                inbox_name: "agent-x".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+    // Should be in team 2
+    assert!(read_team_config(team2)
+        .unwrap()
+        .members
+        .iter()
+        .any(|m| m.name == "agent-x"));
+    // Should be GONE from team 1
+    assert!(!read_team_config(team1)
+        .unwrap()
+        .members
+        .iter()
+        .any(|m| m.name == "agent-x"));
+}

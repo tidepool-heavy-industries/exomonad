@@ -51,12 +51,20 @@ impl TeamRegistry {
             "Registering Claude Teams info"
         );
         let mut map = self.inner.lock().await;
-        map.insert(key.to_string(), info);
+        let previous = map.insert(key.to_string(), info);
+        let old_team_name = previous
+            .and_then(|prev| (prev.team_name != team_name).then_some(prev.team_name));
         drop(map);
 
         // Best-effort sync to disk for backward-compatible API
         if let Err(e) = self.persist_config(&team_name).await {
             debug!(team = %team_name, error = %e, "Failed to sync team config to disk (non-fatal)");
+        }
+
+        if let Some(old_team) = old_team_name {
+            if let Err(e) = self.persist_config(&old_team).await {
+                debug!(team = %old_team, error = %e, "Failed to sync previous team config after move (non-fatal)");
+            }
         }
     }
 
@@ -64,9 +72,17 @@ impl TeamRegistry {
     pub async fn register_member(&self, key: &str, info: TeamInfo) -> std::io::Result<()> {
         let team_name = info.team_name.clone();
         let mut map = self.inner.lock().await;
-        map.insert(key.to_string(), info);
+        let previous = map.insert(key.to_string(), info);
+        let old_team_name = previous
+            .and_then(|prev| (prev.team_name != team_name).then_some(prev.team_name));
         drop(map);
-        self.persist_config(&team_name).await
+
+        self.persist_config(&team_name).await?;
+
+        if let Some(old_team) = old_team_name {
+            self.persist_config(&old_team).await?;
+        }
+        Ok(())
     }
 
     pub async fn get(&self, key: &str) -> Option<TeamInfo> {
@@ -205,16 +221,28 @@ impl TeamRegistry {
 
     /// Synchronize in-memory registry state for a team with its on-disk config.json.
     ///
-    /// CC-native members (those without backendType: "exomonad") are preserved.
+    /// CC-native members (those without backendType: "exomonad") are preserved as-is.
     /// Exomonad members are updated or added based on the current in-memory registry.
-    /// Members deduplicated by inbox_name.
+    /// Deduplication by inbox_name applies only to exomonad/in-memory entries written
+    /// by this bridge; existing CC-native members already present on disk are not
+    /// deduplicated or otherwise validated here.
     async fn persist_config(&self, team_name: &str) -> std::io::Result<()> {
+        let path = crate::paths::config_path(team_name).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "HOME directory not found")
+        })?;
+
+        // Acquire advisory lock to prevent read-modify-write races
+        let _lock = crate::file_lock::FileLock::acquire(&path, std::time::Duration::from_secs(10))?;
+
         let mut config = match crate::config::read_team_config(team_name) {
             Ok(c) => c,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 // If config doesn't exist, we can't persist to it.
                 // Claude Code owns the team lifecycle; we only augment existing teams.
-                return Ok(());
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("team config.json not found for team '{team_name}'"),
+                ));
             }
             Err(e) => return Err(e),
         };
@@ -254,7 +282,7 @@ impl TeamRegistry {
                     name: inbox_name,
                     agent_type: "exomonad-agent".into(),
                     model: "gemini".into(),
-                    joined_at: chrono::Utc::now().timestamp_millis() as u64,
+                    joined_at: chrono::Utc::now().timestamp() as u64,
                     cwd: std::env::current_dir()
                         .unwrap_or_default()
                         .to_string_lossy()
