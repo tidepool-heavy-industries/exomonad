@@ -67,27 +67,42 @@ impl Drop for SpawnRollback {
         let pane_id = self.tmux_pane_id.take();
         let prompt = self.prompt_file.take();
         let config_dir = self.agent_config_dir.take();
+
+        if wt_path.is_none()
+            && window_id.is_none()
+            && pane_id.is_none()
+            && prompt.is_none()
+            && config_dir.is_none()
+        {
+            return;
+        }
+
         let tmux = self.tmux.clone();
         let git_wt = self.git_wt.clone();
 
-        tokio::spawn(async move {
-            if let Some(id) = window_id {
-                let _ = tmux.kill_window(&id).await;
-            }
-            if let Some(id) = pane_id {
-                let _ = tmux.kill_pane(&id).await;
-            }
-            if let Some(path) = wt_path {
-                let _ = tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
-            }
-            if let Some(p) = prompt {
-                let _ = tokio::fs::remove_file(p).await;
-            }
-            if let Some(d) = config_dir {
-                let _ = tokio::fs::remove_dir_all(d).await;
-            }
-            tracing::warn!("SpawnRollback: cleaned up partial spawn state");
-        });
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                if let Some(id) = window_id {
+                    let _ = tmux.kill_window(&id).await;
+                }
+                if let Some(id) = pane_id {
+                    let _ = tmux.kill_pane(&id).await;
+                }
+                if let Some(path) = wt_path {
+                    let _ =
+                        tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
+                }
+                if let Some(p) = prompt {
+                    let _ = tokio::fs::remove_file(p).await;
+                }
+                if let Some(d) = config_dir {
+                    let _ = tokio::fs::remove_dir_all(d).await;
+                }
+                tracing::info!("SpawnRollback: cleaned up partial spawn state");
+            });
+        } else {
+            tracing::error!("SpawnRollback: no tokio runtime available for cleanup");
+        }
     }
 }
 
@@ -1164,12 +1179,16 @@ mod tests {
             // Drop without disarming
         }
 
-        // Wait for async cleanup
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        assert!(
-            !wt_path.exists(),
-            "Worktree should have been removed by rollback"
-        );
+        // Poll for async cleanup
+        let mut cleaned = false;
+        for _ in 0..10 {
+            if !wt_path.exists() {
+                cleaned = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(cleaned, "Worktree should have been removed by rollback");
     }
 
     #[tokio::test]
@@ -1196,31 +1215,5 @@ mod tests {
             wt_path.exists(),
             "Worktree should NOT have been removed when disarmed"
         );
-    }
-
-    #[tokio::test]
-    async fn test_spawn_agent_idempotent() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let project_dir = temp_dir.path().to_path_buf();
-        // Mock git repo
-        let _ = tokio::process::Command::new("git")
-            .args(["init"])
-            .current_dir(&project_dir)
-            .output()
-            .await;
-        let _ = tokio::process::Command::new("git")
-            .args(["commit", "--allow-empty", "-m", "init"])
-            .current_dir(&project_dir)
-            .output()
-            .await;
-
-        let services = test_services(project_dir.clone());
-        let _service = AgentControlService::new(services)
-            .with_birth_branch(BirthBranch::from("main"))
-            .with_tmux_session("test".to_string());
-
-        // We can't easily test the full spawn_agent without a GitHub mock,
-        // but we can test that it returns existing if tab is alive.
-        // Idempotency check in spawn_agent calls is_tmux_window_alive.
     }
 }
