@@ -698,11 +698,9 @@ pub async fn call_tool(
 ) -> impl IntoResponse {
     tracing::info!(tool = %body.name, "Executing tool");
 
-    let input = exomonad_core::mcp::tools::MCPCallInput::new(
-        role.clone(),
-        body.name.clone(),
-        body.arguments,
-    );
+    let arguments = exomonad_core::mcp::harness_compat::coerce_harness_value(body.arguments);
+    let input =
+        exomonad_core::mcp::tools::MCPCallInput::new(role.clone(), body.name.clone(), arguments);
 
     let start = std::time::Instant::now();
     let result: Result<exomonad_core::mcp::tools::MCPCallOutput, anyhow::Error> =

@@ -5,6 +5,7 @@
 //! - WASM call types (MCPCallInput/MCPCallOutput)
 //! - Tool schema discovery via WASM
 
+pub mod harness_compat;
 pub mod tools;
 
 use serde::{Deserialize, Serialize};

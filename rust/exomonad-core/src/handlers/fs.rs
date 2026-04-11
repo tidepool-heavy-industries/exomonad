@@ -435,7 +435,6 @@ mod tests {
         assert!(resp.is_directory);
     }
 
-
     #[tokio::test]
     async fn test_list_directory() {
         let dir = tempdir().unwrap();
