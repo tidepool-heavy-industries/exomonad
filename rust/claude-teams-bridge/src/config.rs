@@ -26,6 +26,9 @@ pub struct TeamMember {
     pub model: String,
     pub joined_at: u64,
     pub cwd: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub backend_type: Option<String>,
 }
 
 /// Read team config from `~/.claude/teams/{team}/config.json`.
@@ -76,6 +79,7 @@ mod tests {
                 model: "opus".into(),
                 joined_at: 1700000001,
                 cwd: "/tmp".into(),
+                backend_type: None,
             }],
         }
     }

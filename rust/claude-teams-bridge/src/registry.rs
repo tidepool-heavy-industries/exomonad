@@ -43,14 +43,30 @@ impl TeamRegistry {
     }
 
     pub async fn register(&self, key: &str, info: TeamInfo) {
+        let team_name = info.team_name.clone();
         info!(
             key = %key,
-            team_name = %info.team_name,
+            team_name = %team_name,
             inbox_name = %info.inbox_name,
             "Registering Claude Teams info"
         );
         let mut map = self.inner.lock().await;
         map.insert(key.to_string(), info);
+        drop(map);
+
+        // Best-effort sync to disk for backward-compatible API
+        if let Err(e) = self.persist_config(&team_name).await {
+            debug!(team = %team_name, error = %e, "Failed to sync team config to disk (non-fatal)");
+        }
+    }
+
+    /// Explicitly register a member and sync to disk. Returns IO error if persistence fails.
+    pub async fn register_member(&self, key: &str, info: TeamInfo) -> std::io::Result<()> {
+        let team_name = info.team_name.clone();
+        let mut map = self.inner.lock().await;
+        map.insert(key.to_string(), info);
+        drop(map);
+        self.persist_config(&team_name).await
     }
 
     pub async fn get(&self, key: &str) -> Option<TeamInfo> {
@@ -162,7 +178,94 @@ impl TeamRegistry {
     pub async fn deregister(&self, key: &str) {
         info!(key = %key, "Deregistering Claude Teams info");
         let mut map = self.inner.lock().await;
+        let team_name = map.get(key).map(|info| info.team_name.clone());
         map.remove(key);
+        drop(map);
+
+        if let Some(team) = team_name {
+            // Best-effort sync to disk for backward-compatible API
+            if let Err(e) = self.persist_config(&team).await {
+                debug!(team = %team, error = %e, "Failed to sync team config to disk after deregister (non-fatal)");
+            }
+        }
+    }
+
+    /// Explicitly deregister a member and sync to disk. Returns IO error if persistence fails.
+    pub async fn remove_member(&self, key: &str) -> std::io::Result<()> {
+        let mut map = self.inner.lock().await;
+        let team_name = map.get(key).map(|info| info.team_name.clone());
+        map.remove(key);
+        drop(map);
+
+        if let Some(team) = team_name {
+            self.persist_config(&team).await?;
+        }
+        Ok(())
+    }
+
+    /// Synchronize in-memory registry state for a team with its on-disk config.json.
+    ///
+    /// CC-native members (those without backendType: "exomonad") are preserved.
+    /// Exomonad members are updated or added based on the current in-memory registry.
+    /// Members deduplicated by inbox_name.
+    async fn persist_config(&self, team_name: &str) -> std::io::Result<()> {
+        let mut config = match crate::config::read_team_config(team_name) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // If config doesn't exist, we can't persist to it.
+                // Claude Code owns the team lifecycle; we only augment existing teams.
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
+
+        let in_memory = self.get_all_for_team(team_name).await;
+        if in_memory.is_empty()
+            && config
+                .members
+                .iter()
+                .all(|m| m.backend_type.as_deref() != Some("exomonad"))
+        {
+            // Optimization: nothing to do if no in-memory entries and no exomonad members on disk
+            return Ok(());
+        }
+
+        // 1. Collect CC-native members to keep
+        let mut new_members: Vec<crate::config::TeamMember> = config
+            .members
+            .into_iter()
+            .filter(|m| m.backend_type.as_deref() != Some("exomonad"))
+            .collect();
+
+        // 2. Add/update in-memory members (deduplicated by inbox_name)
+        let mut unique_in_memory = HashMap::new();
+        for (key, info) in in_memory {
+            // Prefer the key that matches the inbox_name if available (usually the agent name)
+            if !unique_in_memory.contains_key(&info.inbox_name) || key == info.inbox_name {
+                unique_in_memory.insert(info.inbox_name.clone(), key);
+            }
+        }
+
+        for (inbox_name, key) in unique_in_memory {
+            let existing = new_members.iter().find(|m| m.name == inbox_name);
+            if existing.is_none() {
+                new_members.push(crate::config::TeamMember {
+                    agent_id: key,
+                    name: inbox_name,
+                    agent_type: "exomonad-agent".into(),
+                    model: "gemini".into(),
+                    joined_at: chrono::Utc::now().timestamp_millis() as u64,
+                    cwd: std::env::current_dir()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string(),
+                    backend_type: Some("exomonad".into()),
+                });
+            }
+        }
+
+        config.members = new_members;
+        crate::config::write_team_config(team_name, &config)
     }
 }
 
@@ -338,6 +441,7 @@ mod tests {
                     model: "opus".into(),
                     joined_at: 0,
                     cwd: "/tmp".into(),
+                    backend_type: None,
                 },
                 crate::config::TeamMember {
                     agent_id: "uuid-worker".into(),
@@ -346,6 +450,7 @@ mod tests {
                     model: "haiku".into(),
                     joined_at: 0,
                     cwd: "/tmp".into(),
+                    backend_type: None,
                 },
             ],
         };
@@ -442,6 +547,7 @@ mod tests {
                 model: "opus".into(),
                 joined_at: 0,
                 cwd: "/tmp".into(),
+                backend_type: None,
             }],
         };
         crate::config::write_team_config(team_name, &config).unwrap();
@@ -479,6 +585,7 @@ mod tests {
                     model: "opus".into(),
                     joined_at: 0,
                     cwd: cwd.into(),
+                    backend_type: None,
                 }],
             };
             crate::config::write_team_config(team, &config).unwrap();
