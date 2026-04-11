@@ -31,6 +31,8 @@ impl<
             // Validate we're in tmux
             self.resolve_tmux_session()?;
 
+            let mut rollback = SpawnRollback::new(self.tmux()?, self.git_wt().clone());
+
             // Resolve effective project dir.
             let effective_project_dir = self.effective_project_dir(options.subrepo.as_deref())?;
 
@@ -54,6 +56,18 @@ impl<
             let identity =
                 AgentIdentity::new(format!("gh-{}-{}", issue_id, slug), options.agent_type);
             let agent_name = identity.internal_name();
+            let display_name = options.agent_type.display_name(&issue_id, &slug);
+
+            // Idempotency check: if tmux window is alive, return existing info
+            if self.is_tmux_window_alive(&display_name).await {
+                info!(issue_id, "Agent already running, returning existing");
+                return Ok(SpawnResult {
+                    agent_dir: self.worktree_base.join(agent_name.as_str()),
+                    agent_name,
+                    issue_title: issue.title,
+                    agent_type: options.agent_type,
+                });
+            }
 
             // Determine base branch (use birth_branch for root detection)
             let default_base = self.birth_branch.as_parent_branch().to_string();
@@ -78,6 +92,7 @@ impl<
 
             self.create_worktree_checked(&worktree_path, &branch_name, &base_branch)
                 .await?;
+            rollback.set_worktree(worktree_path.clone());
 
             // Use worktree path as agent_dir
             let agent_dir = worktree_path;
@@ -116,8 +131,11 @@ impl<
                 "Built initial prompt for agent"
             );
 
-            // tmux display name (emoji + short format)
-            let display_name = options.agent_type.display_name(&issue_id, &slug);
+            // Write prompt to file and set on rollback
+            let prompt_path =
+                Self::write_prompt_file(self.project_dir(), agent_name.as_str(), &initial_prompt)
+                    .await?;
+            rollback.set_prompt_file(prompt_path.clone());
 
             let parent_bb = self.effective_birth_branch(Some(caller_bb));
             let session_branch = BranchName::from(parent_bb.as_str());
@@ -129,10 +147,11 @@ impl<
                     &display_name,
                     &agent_dir,
                     options.agent_type,
-                    Some(&initial_prompt),
+                    Some(prompt_path),
                     env_vars,
                 )
                 .await?;
+            rollback.set_window(window_id.clone());
 
             // Store window_id for message delivery and cleanup
             let routing = RoutingInfo::window(window_id);
@@ -147,10 +166,14 @@ impl<
                 display_name: display_name.clone(),
                 topology: Topology::WorktreePerAgent,
             };
-            self.finalize_spawn(&agent_name, routing, Some(identity_record))
+            let agent_config_dir = self
+                .finalize_spawn(&agent_name, routing, Some(identity_record))
                 .await?;
+            rollback.set_agent_config_dir(agent_config_dir);
 
             self.emit_agent_started(&agent_name)?;
+
+            rollback.disarm();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: agent_dir.clone(),
@@ -222,6 +245,8 @@ impl<
         let result = timeout(SPAWN_TIMEOUT, async {
             self.resolve_tmux_session()?;
 
+            let mut rollback = SpawnRollback::new(self.tmux()?, self.git_wt().clone());
+
             let effective_project_dir = self.effective_project_dir(options.subrepo.as_deref())?;
 
             // Sanitize name and construct typed identity
@@ -274,6 +299,7 @@ impl<
 
             self.create_worktree_checked(&worktree_path, &branch_name, &base_branch)
                 .await?;
+            rollback.set_worktree(worktree_path.clone());
 
             let role = crate::domain::Role::dev();
             let mut env_vars = self.common_spawn_env(&agent_name, &branch_name, &role);
@@ -297,15 +323,22 @@ impl<
                 Self::gemini_trust_folder(&worktree_path).await;
             }
 
+            // Write prompt to file and set on rollback
+            let prompt_path =
+                Self::write_prompt_file(self.project_dir(), agent_name.as_str(), &options.prompt)
+                    .await?;
+            rollback.set_prompt_file(prompt_path.clone());
+
             let window_id = self
                 .new_tmux_window(
                     &display_name,
                     &worktree_path,
                     options.agent_type,
-                    Some(&options.prompt),
+                    Some(prompt_path),
                     env_vars,
                 )
                 .await?;
+            rollback.set_window(window_id.clone());
 
             // Store window_id for message delivery and cleanup
             let routing = RoutingInfo::window(window_id);
@@ -321,10 +354,14 @@ impl<
                 display_name: display_name.clone(),
                 topology: Topology::WorktreePerAgent,
             };
-            self.finalize_spawn(&agent_name, routing, Some(identity_record))
+            let agent_config_dir = self
+                .finalize_spawn(&agent_name, routing, Some(identity_record))
                 .await?;
+            rollback.set_agent_config_dir(agent_config_dir);
 
             self.emit_agent_started(&agent_name)?;
+
+            rollback.disarm();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: PathBuf::new(),
@@ -445,6 +482,8 @@ impl<
         let result = timeout(SPAWN_TIMEOUT, async {
             self.resolve_tmux_session()?;
 
+            let mut rollback = SpawnRollback::new(self.tmux()?, self.git_wt().clone());
+
             // Sanitize name and construct typed identity
             let identity = AgentIdentity::new(slugify(options.name.as_str()), AgentType::Gemini);
             let agent_name = identity.internal_name();
@@ -488,6 +527,7 @@ impl<
 
             // Write Gemini settings to worker config dir in project root
             fs::create_dir_all(&agent_config_dir).await?;
+            rollback.set_agent_config_dir(agent_config_dir.clone());
 
             // Legacy .birth_branch file for serve.rs fallback resolution.
             // identity.json (written via finalize_spawn) is the canonical source,
@@ -520,6 +560,10 @@ impl<
             // Worker role context is loaded via context.fileName in settings.json.
             // Prompt goes through a temp file to avoid shell quoting issues.
 
+            // Write prompt to file and set on rollback
+            let prompt_path = Self::write_prompt_file(self.project_dir(), agent_name.as_str(), &options.prompt).await?;
+            rollback.set_prompt_file(prompt_path.clone());
+
             // Write routing info so send_message can target this pane correctly.
             // Workers are panes in the parent's tab — pane_id is the stable identifier
             // Spawn pane in caller's tab, cwd = caller's worktree
@@ -527,12 +571,13 @@ impl<
                 &display_name,
                 &absolute_worktree,
                 AgentType::Gemini,
-                Some(&options.prompt),
+                Some(prompt_path),
                 env_vars,
                 Some(&caller_tab),
                 Some(&options.claude_flags),
             )
             .await?;
+            rollback.set_pane(pane_id.clone());
 
             // Store pane_id for message delivery and cleanup
             let routing = RoutingInfo::pane(pane_id, &caller_tab);
@@ -551,6 +596,8 @@ impl<
                 .await?;
 
             self.emit_agent_started(&agent_name)?;
+
+            rollback.disarm();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: PathBuf::new(),
@@ -581,6 +628,8 @@ impl<
 
         let result = timeout(SPAWN_TIMEOUT, async {
             self.resolve_tmux_session()?;
+
+            let mut rollback = SpawnRollback::new(self.tmux()?, self.git_wt().clone());
 
             let effective_birth = self.effective_birth_branch(Some(caller_bb));
 
@@ -638,6 +687,7 @@ impl<
             } else if !is_custom_dir {
                 let branch = BranchName::from(branch_name.as_str());
                 self.create_worktree_checked(&worktree_path, &branch, &current_branch).await?;
+                rollback.set_worktree(worktree_path.clone());
             }
 
             self.create_socket_symlink(&worktree_path).await;
@@ -742,31 +792,22 @@ impl<
             // Determine fork mode from parent_session_id
             let fork_id = options.parent_session_id.as_ref().map(|id| id.as_str());
 
+            // Write prompt to file and set on rollback
+            let prompt_path = Self::write_prompt_file(self.project_dir(), agent_name.as_str(), &task_with_context).await?;
+            rollback.set_prompt_file(prompt_path.clone());
+
             // Open tmux window with cwd = worktree_path
-            let agent_config_dir = self.project_dir().join(".exo").join("agents").join(agent_name.as_str());
-            let window_id = match self.new_tmux_window_inner(
+            let window_id = self.new_tmux_window_inner(
                 &display_name,
                 &worktree_path,
                 agent_type,
-                Some(&task_with_context),
+                Some(prompt_path),
                 env_vars,
                 fork_id,
                 Some(&options.claude_flags),
             )
-            .await {
-                Ok(wid) => wid,
-                Err(e) => {
-                    warn!(name = %identity.slug(), error = %e, "tmux window creation failed, rolling back");
-                    let _ = fs::remove_dir_all(&agent_config_dir).await;
-                    // Remove worktree if it was created
-                    if worktree_path.exists() {
-                        let git_wt = self.git_wt().clone();
-                        let path = worktree_path.clone();
-                        let _ = tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
-                    }
-                    return Err(e);
-                }
-            };
+            .await?;
+            rollback.set_window(window_id.clone());
 
             // Store window_id for message delivery and cleanup
             let routing = RoutingInfo::window(window_id);
@@ -780,8 +821,11 @@ impl<
                 display_name: display_name.clone(),
                 topology: Topology::WorktreePerAgent,
             };
-            self.finalize_spawn(&agent_name, routing, Some(identity_record))
+            let agent_config_dir = self.finalize_spawn(&agent_name, routing, Some(identity_record))
                 .await?;
+            rollback.set_agent_config_dir(agent_config_dir);
+
+            rollback.disarm();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: worktree_path.clone(),
@@ -812,6 +856,8 @@ impl<
 
         let result = timeout(SPAWN_TIMEOUT, async {
             self.resolve_tmux_session()?;
+
+            let mut rollback = SpawnRollback::new(self.tmux()?, self.git_wt().clone());
 
             // No depth check for leaf nodes.
 
@@ -854,6 +900,7 @@ impl<
                 }
             } else {
                 self.create_worktree_checked(&worktree_path, &branch_name, &current_branch).await?;
+                rollback.set_worktree(worktree_path.clone());
             }
 
             self.create_socket_symlink(&worktree_path).await;
@@ -877,30 +924,21 @@ impl<
                 task.push_str("\n\nShared technical dependencies are available as read-only reference in `.exo/context/`. Do not modify files in this directory.");
             }
 
+            // Write prompt to file and set on rollback
+            let prompt_path = Self::write_prompt_file(self.project_dir(), agent_name.as_str(), &task).await?;
+            rollback.set_prompt_file(prompt_path.clone());
+
             // Open tmux window (not pane)
             // Task already includes leaf completion protocol — rendered by Haskell Prompt builder.
-            let agent_config_dir = self.project_dir().join(".exo").join("agents").join(agent_name.as_str());
-            let window_id = match self.new_tmux_window(
+            let window_id = self.new_tmux_window(
                 &display_name,
                 &worktree_path,
                 agent_type,
-                Some(&task),
+                Some(prompt_path),
                 env_vars,
             )
-            .await {
-                Ok(wid) => wid,
-                Err(e) => {
-                    warn!(name = %identity.slug(), error = %e, "tmux window creation failed, rolling back");
-                    let _ = fs::remove_dir_all(&agent_config_dir).await;
-                    // Remove worktree if it was created
-                    if worktree_path.exists() {
-                        let git_wt = self.git_wt().clone();
-                        let path = worktree_path.clone();
-                        let _ = tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
-                    }
-                    return Err(e);
-                }
-            };
+            .await?;
+            rollback.set_window(window_id.clone());
 
             // Store window_id for message delivery and cleanup
             let routing = RoutingInfo::window(window_id);
@@ -914,8 +952,11 @@ impl<
                 display_name: display_name.clone(),
                 topology: Topology::WorktreePerAgent,
             };
-            self.finalize_spawn(&agent_name, routing, Some(identity_record))
+            let agent_config_dir = self.finalize_spawn(&agent_name, routing, Some(identity_record))
                 .await?;
+            rollback.set_agent_config_dir(agent_config_dir);
+
+            rollback.disarm();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: worktree_path.clone(),
