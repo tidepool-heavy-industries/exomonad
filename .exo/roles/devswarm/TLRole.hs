@@ -64,7 +64,7 @@ instance MCPTool TLMergePR where
     case result of
       Left err -> pure $ errorResult err
       Right output -> do
-        when (mpoSuccess output) $ do
+        when (mpoMerged output) $ do
           case extractAgentName (mpoBranchName output) of
             Just slug -> do
               branch <- getCurrentBranch

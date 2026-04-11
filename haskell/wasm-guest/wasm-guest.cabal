@@ -65,6 +65,7 @@ library wasm-guest-internal
         -- Tools
         ExoMonad.Guest.Tools.FilePR
         ExoMonad.Guest.Tools.MergePR
+        ExoMonad.Guest.Tools.MergePRTests
         ExoMonad.Guest.Tools.Spawn
         ExoMonad.Guest.Tools.Events
         ExoMonad.Guest.Tools.Tasks

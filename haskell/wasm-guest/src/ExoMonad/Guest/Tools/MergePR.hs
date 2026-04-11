@@ -43,7 +43,7 @@ import ExoMonad.Effects.GitHub (GitHubGetPullRequest)
 import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
 import ExoMonad.Effects.MergePR (MergePRMergePr)
 import ExoMonad.Effects.Process (ProcessRun)
-import ExoMonad.Guest.Tool.Class (Effects, MCPCallOutput, MCPTool (..), errorResult, successResult)
+import ExoMonad.Guest.Tool.Class (Effects, MCPCallOutput (..), MCPTool (..), errorResult, successResult)
 import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import GHC.Generics (Generic)
@@ -95,22 +95,24 @@ parseFlexibleBool v =
   fail ("force must be a Bool or bool-shaped String, got: " <> show v)
 
 data MergePROutput = MergePROutput
-  { mpoSuccess :: Bool,
+  { mpoMerged :: Bool,        -- ^ The GitHub PR was successfully merged.
+    mpoLocalSynced :: Bool,   -- ^ Local working branch is in sync with remote after the merge.
+    mpoCleanupOk :: Bool,     -- ^ The post-merge cleanup (close tab, remove worktree) succeeded.
     mpoMessage :: Text,
-    mpoGitFetched :: Bool,
     mpoBranchName :: Text,
-    mpoPullOk :: Bool
+    mpoPullError :: Maybe Text  -- ^ When mpoLocalSynced is False, the git pull stderr/reason.
   }
   deriving (Show, Eq, Generic)
 
 instance Aeson.ToJSON MergePROutput where
-  toJSON (MergePROutput s m g b p) =
+  toJSON out =
     object
-      [ "success" .= s,
-        "message" .= m,
-        "git_fetched" .= g,
-        "branch_name" .= b,
-        "pull_ok" .= p
+      [ "merged" .= mpoMerged out,
+        "local_synced" .= mpoLocalSynced out,
+        "cleanup_ok" .= mpoCleanupOk out,
+        "message" .= mpoMessage out,
+        "branch_name" .= mpoBranchName out,
+        "pull_error" .= mpoPullError out
       ]
 
 -- | Shared tool description for merge_pr.
@@ -182,17 +184,26 @@ mergePRCore args = do
 -- | Render a MergePROutput to MCPCallOutput.
 mergePRRender :: MergePROutput -> MCPCallOutput
 mergePRRender output =
-  successResult $
-    object
-      [ "success" .= mpoSuccess output,
-        "message" .= mpoMessage output,
-        "git_fetched" .= mpoGitFetched output,
-        "next"
-          .= ( if mpoPullOk output
-                 then "Verify build: cargo check --workspace. Especially important after parallel merges — changes may interact." :: Text
-                 else "git pull failed — run 'git pull --rebase' manually to sync your local branch. Then verify build: cargo check --workspace." :: Text
-             )
-      ]
+  let fullySuccess = mpoMerged output && mpoLocalSynced output
+      res =
+        object
+          [ "success" .= fullySuccess,
+            "merged" .= mpoMerged output,
+            "local_synced" .= mpoLocalSynced output,
+            "cleanup_ok" .= mpoCleanupOk output,
+            "message" .= mpoMessage output,
+            "branch_name" .= mpoBranchName output,
+            "pull_error" .= mpoPullError output,
+            "next" .= nextGuidance output
+          ]
+   in MCPCallOutput fullySuccess (Just res) (if fullySuccess then Nothing else Just (nextGuidance output))
+
+nextGuidance :: MergePROutput -> Text
+nextGuidance output
+  | not (mpoMerged output) = "Merge did not complete. Check `message` for the reason."
+  | not (mpoLocalSynced output) = "PR merged but local branch is out of sync. Run `git pull --rebase` manually, then verify build with `cargo check --workspace`."
+  | not (mpoCleanupOk output) = "PR merged and synced, but post-merge cleanup failed. Run `git branch -D <branch>` and cleanup the worktree manually if needed."
+  | otherwise = "Verify build: cargo check --workspace."
 
 -- | Copilot review readiness.
 data Readiness = Ready | NotReady Text
@@ -272,11 +283,10 @@ doMerge args = do
       let branchName = TL.toStrict (MP.mergePrResponseBranchName resp)
           mergeSuccess = MP.mergePrResponseSuccess resp
           mergeMsg = TL.toStrict (MP.mergePrResponseMessage resp)
-          gitFetched = MP.mergePrResponseGitFetched resp
 
       void $ suspendEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: " <> mergeMsg), Log.infoRequestFields = ""})
 
-      pullOk <-
+      (localSynced, pullError, cleanupOk) <-
         if mergeSuccess
           then do
             let eventPayload =
@@ -296,7 +306,7 @@ doMerge args = do
                 )
 
             -- Fast-forward local branch after merge
-            pullOkStatus <- do
+            (syncOk, syncErr) <- do
               let pullReq =
                     Proc.RunRequest
                       { Proc.runRequestCommand = "git",
@@ -307,11 +317,14 @@ doMerge args = do
                       }
               pullResult <- suspendEffect @ProcessRun pullReq
               case pullResult of
-                Left _ -> pure False
-                Right pullResp -> pure (Proc.runResponseExitCode pullResp == 0)
+                Left err -> pure (False, Just (T.pack (show err)))
+                Right pullResp ->
+                  if Proc.runResponseExitCode pullResp == 0
+                    then pure (True, Nothing)
+                    else pure (False, Just (TL.toStrict (Proc.runResponseStderr pullResp)))
 
             -- Auto-cleanup: close agent tab, remove worktree, unregister
-            case extractAgentName branchName of
+            cleanOk <- case extractAgentName branchName of
               Just slug -> do
                 let cleanupReq =
                       Agent.CleanupRequest
@@ -321,7 +334,7 @@ doMerge args = do
                         }
                 cleanupResult <- suspendEffect @AgentCleanup cleanupReq
                 case cleanupResult of
-                  Left cleanupErr ->
+                  Left cleanupErr -> do
                     void $
                       suspendEffect_ @LogInfo
                         ( Log.InfoRequest
@@ -329,7 +342,8 @@ doMerge args = do
                               Log.infoRequestFields = ""
                             }
                         )
-                  Right _ ->
+                    pure False
+                  Right _ -> do
                     void $
                       suspendEffect_ @LogInfo
                         ( Log.InfoRequest
@@ -337,17 +351,19 @@ doMerge args = do
                               Log.infoRequestFields = ""
                             }
                         )
-              Nothing -> pure ()
+                    pure True
+              Nothing -> pure True
 
-            pure pullOkStatus
-          else pure True
+            pure (syncOk, syncErr, cleanOk)
+          else pure (True, Nothing, True)
 
       pure $
         Right $
           MergePROutput
-            { mpoSuccess = mergeSuccess,
+            { mpoMerged = mergeSuccess,
+              mpoLocalSynced = localSynced,
+              mpoCleanupOk = cleanupOk,
               mpoMessage = mergeMsg,
-              mpoGitFetched = gitFetched,
               mpoBranchName = branchName,
-              mpoPullOk = pullOk
+              mpoPullError = pullError
             }
