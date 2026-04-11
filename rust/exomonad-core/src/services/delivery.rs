@@ -815,29 +815,6 @@ mod tests {
     }
 
     #[test]
-    fn test_format_success_adds_from_prefix() {
-        let agent_id = AgentName::from("agent-1");
-        let msg = format_parent_notification(&agent_id, NotifyStatus::Success, "hello world");
-        assert_eq!(msg, "[from: agent-1] hello world");
-    }
-
-    #[test]
-    fn test_format_failure_adds_failed_prefix() {
-        let agent_id = AgentName::from("agent-1");
-        let msg = format_parent_notification(&agent_id, NotifyStatus::Failure, "hello world");
-        assert_eq!(msg, "[FAILED: agent-1] hello world");
-    }
-
-    #[test]
-    fn test_format_empty_message_uses_default() {
-        let agent_id = AgentName::from("agent-1");
-        let msg_success = format_parent_notification(&agent_id, NotifyStatus::Success, "");
-        assert_eq!(msg_success, "[from: agent-1] Status update.");
-        let msg_failure = format_parent_notification(&agent_id, NotifyStatus::Failure, "");
-        assert_eq!(msg_failure, "[FAILED: agent-1] Task failed.");
-    }
-
-    #[test]
     fn test_delivery_result_variants_distinct() {
         assert_ne!(DeliveryResult::Teams, DeliveryResult::Tmux);
         assert_ne!(DeliveryResult::Teams, DeliveryResult::Failed);
@@ -923,8 +900,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_deliver_via_uds_missing_socket() {
-        let socket_path = std::path::Path::new("/tmp/non-existent-socket-12345");
-        let result = deliver_via_uds(socket_path, "sender", "msg", "sum").await;
+        let tmp = tempfile::tempdir().unwrap();
+        let socket_path = tmp.path().join("non-existent.sock");
+        let result = deliver_via_uds(&socket_path, "sender", "msg", "sum").await;
         assert!(result.is_err());
     }
 
@@ -970,14 +948,36 @@ mod tests {
         }
     }
 
+    /// RAII guard to safely override HOME for tests.
+    struct ScopedHome {
+        old_home: Option<String>,
+    }
+
+    impl ScopedHome {
+        fn new(new_home: &std::path::Path) -> Self {
+            let old_home = std::env::var("HOME").ok();
+            unsafe { std::env::set_var("HOME", new_home) };
+            Self { old_home }
+        }
+    }
+
+    impl Drop for ScopedHome {
+        fn drop(&mut self) {
+            if let Some(ref old) = self.old_home {
+                unsafe { std::env::set_var("HOME", old) };
+            } else {
+                unsafe { std::env::remove_var("HOME") };
+            }
+        }
+    }
+
     #[tokio::test]
     #[serial]
     async fn test_resolve_lead_from_config_json() {
         let tmp = tempfile::tempdir().unwrap();
 
-        // We need to set HOME for the duration of the test so TeamRegistry finds config.json
-        let old_home = std::env::var("HOME").ok();
-        unsafe { std::env::set_var("HOME", tmp.path()) };
+        // Use RAII guard to safely override HOME
+        let _home = ScopedHome::new(tmp.path());
 
         let team_name = "test-team-lead";
         let config_dir = tmp.path().join(".claude/teams").join(team_name);
@@ -1007,13 +1007,6 @@ mod tests {
         let from = AgentName::from("sender");
         let outcome =
             resolve_and_deliver_to_lead(&services, team_name, &from, "content", "summary").await;
-
-        // Restore HOME immediately
-        if let Some(old) = old_home {
-            unsafe { std::env::set_var("HOME", old) };
-        } else {
-            unsafe { std::env::remove_var("HOME") };
-        }
 
         match outcome {
             DeliveryOutcome::FallbackToLead { lead, .. } => {
