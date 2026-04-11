@@ -50,15 +50,18 @@ impl GitEffects for GitHandler {
             .service
             .get_branch(&working_dir)
             .await
-            .effect_err("git")?;
+            .effect_err("git")?
+            .ok_or_else(|| {
+                crate::effects::EffectError::custom(
+                    "git.detached_head",
+                    "Not on a branch (detached HEAD)",
+                )
+            })?;
 
-        let detached = branch.is_none();
-        let branch_str = branch.map(|b| b.to_string()).unwrap_or_default();
-
-        info!(branch = %branch_str, detached, "[Git] get_branch complete");
+        info!(branch = %branch, "[Git] get_branch complete");
         Ok(GetBranchResponse {
-            branch: branch_str,
-            detached,
+            branch: branch.to_string(),
+            detached: false,
         })
     }
 
@@ -199,10 +202,16 @@ impl GitEffects for GitHandler {
             .await
             .effect_err("git")?;
 
-        let branch_str = info.branch.map(|b| b.to_string()).unwrap_or_default();
-        info!(branch = %branch_str, "[Git] get_repo_info complete");
+        let branch = info.branch.ok_or_else(|| {
+            crate::effects::EffectError::custom(
+                "git.detached_head",
+                "Not on a branch (detached HEAD)",
+            )
+        })?;
+
+        info!(branch = %branch, "[Git] get_repo_info complete");
         Ok(GetRepoInfoResponse {
-            branch: branch_str,
+            branch: branch.to_string(),
             owner: info.owner.map(Into::into).unwrap_or_else(|| {
                 tracing::debug!("Could not determine repo owner from remote URL");
                 String::new()
@@ -228,11 +237,17 @@ impl GitEffects for GitHandler {
             .await
             .effect_err("git")?;
 
-        let branch_str = info.branch.map(|b| b.to_string()).unwrap_or_default();
-        info!(path = %info.path, branch = %branch_str, "[Git] get_worktree complete");
+        let branch = info.branch.ok_or_else(|| {
+            crate::effects::EffectError::custom(
+                "git.detached_head",
+                "Not on a branch (detached HEAD)",
+            )
+        })?;
+
+        info!(path = %info.path, branch = %branch, "[Git] get_worktree complete");
         Ok(GetWorktreeResponse {
             path: info.path,
-            branch: branch_str,
+            branch: branch.to_string(),
             head_commit: String::new(),
             is_linked: false,
         })

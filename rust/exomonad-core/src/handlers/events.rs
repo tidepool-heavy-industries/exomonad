@@ -186,7 +186,7 @@ impl<
                     let id = lead.unwrap_or_else(|| "root".to_string());
                     if id.is_empty() {
                         return Err(crate::effects::EffectError::custom(
-                            "events_empty_id",
+                            "events.empty_id",
                             "empty agent id from registry",
                         ));
                     }
@@ -394,9 +394,9 @@ mod tests {
         let result = handler.notify_parent(req, &ctx).await;
         assert!(result.is_err());
         if let Err(crate::effects::EffectError::Custom { code, .. }) = result {
-            assert_eq!(code, "events_empty_id");
+            assert_eq!(code, "events.empty_id");
         } else {
-            panic!("Expected events_empty_id error, got {:?}", result);
+            panic!("Expected events.empty_id error, got {:?}", result);
         }
     }
 }
