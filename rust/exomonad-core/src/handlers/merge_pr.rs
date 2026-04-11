@@ -1,24 +1,27 @@
 use crate::effects::{dispatch_merge_pr_effect, EffectResult, MergePrEffects, ResultExt};
 use crate::services::merge_pr;
 use async_trait::async_trait;
+use exomonad_proto::effects::events::{event::EventType, AgentMessage, Event};
 use exomonad_proto::effects::merge_pr::*;
 use std::sync::Arc;
 use tracing::instrument;
 
-use crate::services::{HasEventLog, HasGitHubClient, HasGitWorktreeService};
+use crate::services::{HasEventLog, HasEventQueue, HasGitHubClient, HasGitWorktreeService};
 
 pub struct MergePRHandler<C> {
     ctx: Arc<C>,
 }
 
-impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static> MergePRHandler<C> {
+impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + HasEventQueue + 'static>
+    MergePRHandler<C>
+{
     pub fn new(ctx: Arc<C>) -> Self {
         Self { ctx }
     }
 }
 
 #[async_trait]
-impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static>
+impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + HasEventQueue + 'static>
     crate::effects::EffectHandler for MergePRHandler<C>
 {
     fn namespace(&self) -> &str {
@@ -36,8 +39,8 @@ impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static>
 }
 
 #[async_trait]
-impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static> MergePrEffects
-    for MergePRHandler<C>
+impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + HasEventQueue + 'static>
+    MergePrEffects for MergePRHandler<C>
 {
     #[instrument(skip_all, fields(agent_name = %ctx.agent_name, pr_number = req.pr_number))]
     async fn merge_pr(
@@ -86,6 +89,21 @@ impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static> MergePr
                     }),
                 );
             }
+
+            // Notify EventQueue so GitHubPoller can drop tracking immediately
+            let event = Event {
+                event_id: 0,
+                event_type: Some(EventType::AgentMessage(AgentMessage {
+                    agent_id: "system".to_string(),
+                    status: "pr.merged".to_string(),
+                    message: pr_number.to_string(),
+                    changes: vec![],
+                })),
+            };
+            self.ctx
+                .event_queue()
+                .notify_event("system.pr_merged", event)
+                .await;
         } else {
             tracing::info!(
                 otel.name = "pr.merge_failed",
