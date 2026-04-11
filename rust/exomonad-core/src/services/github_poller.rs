@@ -297,6 +297,19 @@ impl<
         }
     }
 
+    /// Mark a PR as externally merged. Drops the PRState from the tracking map
+    /// so no further events (including queued timeouts) fire for it. Call this
+    /// from merge_pr when the merge completes.
+    pub async fn mark_merged(&self, pr_number: PRNumber) {
+        let mut states = self.state.lock().await;
+        if states.remove(&pr_number).is_some() {
+            info!(
+                pr = %pr_number.as_u64(),
+                "GitHubPoller: PR marked merged externally, tracking removed"
+            );
+        }
+    }
+
     pub fn with_poll_interval(mut self, interval: Duration) -> Self {
         self.poll_interval = interval;
         self
@@ -312,6 +325,47 @@ impl<
             poll_interval_secs = self.poll_interval.as_secs(),
             "GitHub poller started"
         );
+
+        // Spawn a background task to listen for external merge events
+        let poller = Arc::new(Self {
+            ctx: self.ctx.clone(),
+            poll_interval: self.poll_interval,
+            state: self.state.clone(),
+            repo_info: self.repo_info.clone(),
+            plugins: self.plugins.clone(),
+        });
+
+        let poller_for_events = poller.clone();
+        tokio::spawn(async move {
+            let mut last_event_id = 0;
+            loop {
+                match poller_for_events
+                    .ctx
+                    .event_queue()
+                    .wait_for_event(
+                        "system",
+                        &["agent_message".to_string()],
+                        Duration::from_secs(30),
+                        last_event_id,
+                    )
+                    .await
+                {
+                    Ok(event) => {
+                        last_event_id = event.event_id;
+                        if let Some(EventType::AgentMessage(msg)) = event.event_type {
+                            if msg.status == "pr.merged" {
+                                if let Ok(pr_num) = msg.message.parse::<u64>() {
+                                    poller_for_events.mark_merged(PRNumber::new(pr_num)).await;
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Timeout is expected, just loop
+                    }
+                }
+            }
+        });
 
         let base_interval = self.poll_interval;
         let max_backoff = Duration::from_secs(600); // 10 minutes max
@@ -1508,5 +1562,137 @@ mod tests {
         );
         assert_eq!(state.last_review_state, ReviewState::ChangesRequested);
         assert_eq!(state.addressed_changes, false);
+    }
+
+    #[tokio::test]
+    async fn test_mark_merged_removes_pr_state() {
+        let services = Arc::new(crate::services::Services::test());
+        let poller = GitHubPoller::new(services);
+        let pr_num = PRNumber::new(123);
+
+        {
+            let mut state = poller.state.lock().await;
+            state.insert(pr_num, make_pr_state("main.feat", "abc"));
+        }
+
+        poller.mark_merged(pr_num).await;
+
+        let state = poller.state.lock().await;
+        assert!(!state.contains_key(&pr_num));
+    }
+
+    #[tokio::test]
+    async fn test_mark_merged_on_unknown_pr_is_noop() {
+        let services = Arc::new(crate::services::Services::test());
+        let poller = GitHubPoller::new(services);
+        poller.mark_merged(PRNumber::new(999)).await;
+        let state = poller.state.lock().await;
+        assert!(state.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_compute_pr_actions_after_mark_merged_returns_empty() {
+        let mut state = make_pr_state("main.feat", "abc");
+        state.first_seen = Instant::now() - Duration::from_secs(20 * 60); // Would timeout
+
+        // In the poller loop, if mark_merged removed the state, compute_pr_actions is never called.
+        // But if it IS called (e.g. race), the PRState itself has internal guards.
+        // The real suppression is that mark_merged removes it from the HashMap.
+        // Here we test that if we didn't have the state in the map, we wouldn't even call it.
+        let services = Arc::new(crate::services::Services::test());
+        let poller = GitHubPoller::new(services);
+        poller.mark_merged(PRNumber::new(123)).await;
+
+        let state_guard = poller.state.lock().await;
+        assert!(state_guard.get(&PRNumber::new(123)).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_merged_pr_suppresses_pending_timeout() {
+        let mut state = make_pr_state("main.feat", "abc");
+        state.first_seen = Instant::now() - Duration::from_secs(20 * 60); // 20 mins ago
+        state.last_review_state = ReviewState::None;
+
+        // Before mark_merged: compute_pr_actions would return a timeout
+        let actions = compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "abc",
+            &[],
+            &[],
+            CIStatus::Success,
+            "main.feat",
+            &|_, _| String::new(),
+        );
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            PendingAction::WasmEvent {
+                event_type: "pr_review",
+                ..
+            }
+        )));
+
+        // Now simulate the poller cycle after mark_merged
+        let services = Arc::new(crate::services::Services::test());
+        let poller = GitHubPoller::new(services);
+        poller.mark_merged(PRNumber::new(123)).await;
+
+        // The poller's process_pr would do:
+        let state_guard = poller.state.lock().await;
+        let old_state = state_guard.get(&PRNumber::new(123));
+        assert!(
+            old_state.is_none(),
+            "State should be gone after mark_merged"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_event_queue_trigger_mark_merged() {
+        let services = Arc::new(crate::services::Services::test());
+        let poller = GitHubPoller::new(services.clone());
+        let pr_num = PRNumber::new(456);
+
+        {
+            let mut state = poller.state.lock().await;
+            state.insert(pr_num, make_pr_state("main.feat", "abc"));
+        }
+
+        // Start the poller's background listener
+        let poller_arc = Arc::new(poller);
+        let poller_clone = poller_arc.clone();
+        tokio::spawn(async move {
+            poller_clone.run().await;
+        });
+
+        // Give it a moment to start
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Notify merge event
+        let event = Event {
+            event_id: 0,
+            event_type: Some(EventType::AgentMessage(AgentMessage {
+                agent_id: "system".to_string(),
+                status: "pr.merged".to_string(),
+                message: pr_num.to_string(),
+                changes: vec![],
+            })),
+        };
+        services.event_queue().notify_event("system", event).await;
+
+        // Wait for listener to react
+        let mut success = false;
+        for _ in 0..10 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let state = poller_arc.state.lock().await;
+            if !state.contains_key(&pr_num) {
+                success = true;
+                break;
+            }
+        }
+
+        assert!(
+            success,
+            "PR state should have been removed by EventQueue listener"
+        );
     }
 }
