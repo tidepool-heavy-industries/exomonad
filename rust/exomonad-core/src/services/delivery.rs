@@ -776,6 +776,8 @@ pub async fn deliver_to_agent(
 mod tests {
     use super::*;
     use crate::domain::AgentName;
+    use crate::services::HasEventQueue;
+    use serial_test::serial;
 
     #[test]
     fn test_format_parent_notification_success() {
@@ -813,6 +815,29 @@ mod tests {
     }
 
     #[test]
+    fn test_format_success_adds_from_prefix() {
+        let agent_id = AgentName::from("agent-1");
+        let msg = format_parent_notification(&agent_id, NotifyStatus::Success, "hello world");
+        assert_eq!(msg, "[from: agent-1] hello world");
+    }
+
+    #[test]
+    fn test_format_failure_adds_failed_prefix() {
+        let agent_id = AgentName::from("agent-1");
+        let msg = format_parent_notification(&agent_id, NotifyStatus::Failure, "hello world");
+        assert_eq!(msg, "[FAILED: agent-1] hello world");
+    }
+
+    #[test]
+    fn test_format_empty_message_uses_default() {
+        let agent_id = AgentName::from("agent-1");
+        let msg_success = format_parent_notification(&agent_id, NotifyStatus::Success, "");
+        assert_eq!(msg_success, "[from: agent-1] Status update.");
+        let msg_failure = format_parent_notification(&agent_id, NotifyStatus::Failure, "");
+        assert_eq!(msg_failure, "[FAILED: agent-1] Task failed.");
+    }
+
+    #[test]
     fn test_delivery_result_variants_distinct() {
         assert_ne!(DeliveryResult::Teams, DeliveryResult::Tmux);
         assert_ne!(DeliveryResult::Teams, DeliveryResult::Failed);
@@ -832,5 +857,175 @@ mod tests {
         )
         .await;
         assert_eq!(result, DeliveryResult::Tmux);
+    }
+
+    #[tokio::test]
+    async fn test_route_message_to_agent_address_unknown() {
+        let services = crate::services::Services::test();
+        let from = AgentName::from("sender");
+        let address = Address::Agent(AgentName::from("unknown"));
+        let outcome = route_message(&services, &address, &from, "content", "summary").await;
+
+        // Currently deliver_to_agent falls back to Tmux if everything else fails.
+        // The test verifies the branch runs without panic.
+        assert!(outcome.is_success());
+    }
+
+    #[tokio::test]
+    async fn test_route_message_to_team_with_explicit_member() {
+        let services = crate::services::Services::test();
+        let from = AgentName::from("sender");
+        let address = Address::Team {
+            team: "team-a".into(),
+            member: Some(AgentName::from("member-1")),
+        };
+        let outcome = route_message(&services, &address, &from, "content", "summary").await;
+        assert!(outcome.is_success());
+    }
+
+    #[tokio::test]
+    async fn test_route_message_to_team_lead_fallback_no_config() {
+        let services = crate::services::Services::test();
+        let from = AgentName::from("sender");
+        let address = Address::Team {
+            team: "team-a".into(),
+            member: None,
+        };
+        let outcome = route_message(&services, &address, &from, "content", "summary").await;
+
+        // Should resolve to "root" by default and return FallbackToLead or Delivered(Tmux)
+        match outcome {
+            DeliveryOutcome::FallbackToLead { lead, .. } => {
+                assert_eq!(lead.as_str(), "root");
+            }
+            DeliveryOutcome::Delivered { recipient, .. } => {
+                assert_eq!(recipient.as_str(), "root");
+            }
+            _ => panic!("Expected fallback to root, got {:?}", outcome),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_deliver_to_agent_no_routing() {
+        let services = crate::services::Services::test();
+        let result = deliver_to_agent(
+            &services,
+            "agent-no-routing",
+            "target",
+            &AgentName::from("sender"),
+            "msg",
+            "sum",
+        )
+        .await;
+        // Falls back to Tmux
+        assert_eq!(result, DeliveryResult::Tmux);
+    }
+
+    #[tokio::test]
+    async fn test_deliver_via_uds_missing_socket() {
+        let socket_path = std::path::Path::new("/tmp/non-existent-socket-12345");
+        let result = deliver_via_uds(socket_path, "sender", "msg", "sum").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_notify_parent_delivery_publishes_event() {
+        let services = crate::services::Services::test();
+        let agent_id = AgentName::from("agent-1");
+
+        notify_parent_delivery(
+            &services,
+            &agent_id,
+            "parent-1",
+            "TL",
+            NotifyStatus::Success,
+            "test message",
+            None,
+            "source",
+        )
+        .await;
+
+        // Verify event published to event queue
+        let len = services.event_queue().queue_len("parent-1").await;
+        assert_eq!(len, 1);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_lead_root_fallback() {
+        let services = crate::services::Services::test();
+        let from = AgentName::from("sender");
+        // No config.json and empty TeamRegistry should fallback to root
+        let outcome =
+            resolve_and_deliver_to_lead(&services, "unknown-team", &from, "content", "summary")
+                .await;
+
+        match outcome {
+            DeliveryOutcome::FallbackToLead { lead, .. } => {
+                assert_eq!(lead.as_str(), "root");
+            }
+            DeliveryOutcome::Delivered { recipient, .. } => {
+                assert_eq!(recipient.as_str(), "root");
+            }
+            _ => panic!("Expected fallback to root, got {:?}", outcome),
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_resolve_lead_from_config_json() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // We need to set HOME for the duration of the test so TeamRegistry finds config.json
+        let old_home = std::env::var("HOME").ok();
+        unsafe { std::env::set_var("HOME", tmp.path()) };
+
+        let team_name = "test-team-lead";
+        let config_dir = tmp.path().join(".claude/teams").join(team_name);
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let config_file = config_dir.join("config.json");
+
+        let config = serde_json::json!({
+            "name": team_name,
+            "description": "test",
+            "createdAt": 1700000000,
+            "leadAgentId": "lead-agent",
+            "leadSessionId": "session-1",
+            "members": [
+                {
+                    "agentId": "lead-agent",
+                    "name": "resolved-lead",
+                    "agentType": "claude",
+                    "model": "opus",
+                    "joinedAt": 1700000001,
+                    "cwd": "/tmp"
+                }
+            ]
+        });
+        std::fs::write(&config_file, serde_json::to_string(&config).unwrap()).unwrap();
+
+        let services = crate::services::Services::test();
+        let from = AgentName::from("sender");
+        let outcome =
+            resolve_and_deliver_to_lead(&services, team_name, &from, "content", "summary").await;
+
+        // Restore HOME immediately
+        if let Some(old) = old_home {
+            unsafe { std::env::set_var("HOME", old) };
+        } else {
+            unsafe { std::env::remove_var("HOME") };
+        }
+
+        match outcome {
+            DeliveryOutcome::FallbackToLead { lead, .. } => {
+                assert_eq!(lead.as_str(), "resolved-lead");
+            }
+            DeliveryOutcome::Delivered { recipient, .. } => {
+                assert_eq!(recipient.as_str(), "resolved-lead");
+            }
+            _ => panic!(
+                "Expected FallbackToLead or Delivered to resolved-lead, got {:?}",
+                outcome
+            ),
+        }
     }
 }
