@@ -283,7 +283,12 @@ extractAgentName branch
 
 -- | Helper for working directory defaults (defaults to ".").
 workingDirOrDefault :: Maybe Text -> TL.Text
-workingDirOrDefault = maybe "." TL.fromStrict
+workingDirOrDefault mWorkingDir =
+  case fmap T.strip mWorkingDir of
+    Nothing -> "."
+    Just dir
+      | T.null dir -> "."
+      | otherwise -> TL.fromStrict dir
 
 -- | Execute the actual merge after readiness check passes.
 doMerge :: MergePRArgs -> Eff Effects (Either Text MergePROutput)
