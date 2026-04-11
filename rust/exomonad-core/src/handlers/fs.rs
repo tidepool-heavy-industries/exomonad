@@ -14,18 +14,24 @@ use exomonad_proto::effects::fs::*;
 /// the generated `dispatch_filesystem_effect` function.
 pub struct FsHandler {
     service: FileSystemService,
+    project_dir: std::path::PathBuf,
 }
 
 impl FsHandler {
     pub fn new(ctx: &impl HasProjectDir) -> Self {
-        let service = FileSystemService::new(ctx.project_dir().to_path_buf());
-        Self { service }
+        let project_dir = ctx.project_dir().to_path_buf();
+        let service = FileSystemService::new(project_dir.clone());
+        Self {
+            service,
+            project_dir,
+        }
     }
 }
 
 crate::impl_pass_through_handler!(FsHandler, "fs", dispatch_fs_effect);
 
 fn resolve_path(
+    project_dir: &std::path::Path,
     working_dir: &std::path::Path,
     user_path: &str,
 ) -> EffectResult<std::path::PathBuf> {
@@ -33,21 +39,24 @@ fn resolve_path(
         return Err(EffectError::custom("fs_path_invalid", "null byte in path"));
     }
     let p = std::path::Path::new(user_path);
-    if p.is_absolute() {
-        return Err(EffectError::custom(
-            "fs_path_absolute",
-            format!("absolute path rejected: {}", user_path),
-        ));
+    for component in p.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                return Err(EffectError::custom(
+                    "fs_path_escape",
+                    format!("parent-dir component rejected: {}", user_path),
+                ));
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err(EffectError::custom(
+                    "fs_path_absolute",
+                    format!("absolute path rejected: {}", user_path),
+                ));
+            }
+            _ => {}
+        }
     }
-    if p.components()
-        .any(|c| matches!(c, std::path::Component::ParentDir))
-    {
-        return Err(EffectError::custom(
-            "fs_path_escape",
-            format!("parent-dir component rejected: {}", user_path),
-        ));
-    }
-    Ok(working_dir.join(user_path))
+    Ok(project_dir.join(working_dir).join(user_path))
 }
 
 #[async_trait]
@@ -58,7 +67,7 @@ impl FilesystemEffects for FsHandler {
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<ReadFileResponse> {
         tracing::info!(path = %req.path, "[Fs] read_file starting");
-        let path = resolve_path(&ctx.working_dir, &req.path)?;
+        let path = resolve_path(&self.project_dir, &ctx.working_dir, &req.path)?;
 
         let max_bytes = if req.max_bytes <= 0 {
             1_048_576 // 1MB default
@@ -92,7 +101,7 @@ impl FilesystemEffects for FsHandler {
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<WriteFileResponse> {
         tracing::info!(path = %req.path, content_bytes = req.content.len(), "[Fs] write_file starting");
-        let path = resolve_path(&ctx.working_dir, &req.path)?;
+        let path = resolve_path(&self.project_dir, &ctx.working_dir, &req.path)?;
 
         let input = crate::services::filesystem::WriteFileInput {
             path: path.to_string_lossy().to_string(),
@@ -118,7 +127,7 @@ impl FilesystemEffects for FsHandler {
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<FileExistsResponse> {
         tracing::info!(path = %req.path, "[Fs] file_exists starting");
-        let path = resolve_path(&ctx.working_dir, &req.path)?;
+        let path = resolve_path(&self.project_dir, &ctx.working_dir, &req.path)?;
         let exists = path.exists();
         let is_file = path.is_file();
         let is_directory = path.is_dir();
@@ -137,7 +146,7 @@ impl FilesystemEffects for FsHandler {
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<ListDirectoryResponse> {
         tracing::info!(path = %req.path, "[Fs] list_directory starting");
-        let path = resolve_path(&ctx.working_dir, &req.path)?;
+        let path = resolve_path(&self.project_dir, &ctx.working_dir, &req.path)?;
         if !path.is_dir() {
             return Err(EffectError::not_found(format!(
                 "Directory not found: {}",
@@ -188,7 +197,7 @@ impl FilesystemEffects for FsHandler {
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<DeleteFileResponse> {
         tracing::info!(path = %req.path, recursive = req.recursive, "[Fs] delete_file starting");
-        let path = resolve_path(&ctx.working_dir, &req.path)?;
+        let path = resolve_path(&self.project_dir, &ctx.working_dir, &req.path)?;
         if !path.exists() {
             return Ok(DeleteFileResponse { deleted: false });
         }
@@ -232,11 +241,11 @@ mod tests {
         })
     }
 
-    fn test_ctx(working_dir: PathBuf) -> EffectContext {
+    fn test_ctx() -> EffectContext {
         EffectContext {
             agent_name: AgentName::from("test"),
             birth_branch: BirthBranch::from("main"),
-            working_dir,
+            working_dir: PathBuf::from("."),
         }
     }
 
@@ -251,7 +260,7 @@ mod tests {
     async fn test_read_file() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let filename = "hello.txt";
         std::fs::write(dir.path().join(filename), "hello world").unwrap();
@@ -276,7 +285,7 @@ mod tests {
     async fn test_read_file_truncated() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let filename = "big.txt";
         std::fs::write(dir.path().join(filename), "abcdefghij").unwrap();
@@ -302,7 +311,7 @@ mod tests {
     async fn test_read_file_nonexistent() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let result = handler
             .read_file(
@@ -321,7 +330,7 @@ mod tests {
     async fn test_write_file() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let filename = "out.txt";
         let resp = handler
@@ -347,7 +356,7 @@ mod tests {
     async fn test_write_file_create_parents() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let rel_path = "a/b/c.txt";
         let resp = handler
@@ -373,7 +382,7 @@ mod tests {
     async fn test_file_exists() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let filename = "exists.txt";
         std::fs::write(dir.path().join(filename), "hello").unwrap();
@@ -407,7 +416,7 @@ mod tests {
     async fn test_file_exists_directory() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let sub = "subdir";
         std::fs::create_dir(dir.path().join(sub)).unwrap();
@@ -426,11 +435,12 @@ mod tests {
         assert!(resp.is_directory);
     }
 
+
     #[tokio::test]
     async fn test_list_directory() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         std::fs::write(dir.path().join("a.txt"), "a").unwrap();
         std::fs::create_dir(dir.path().join("subdir")).unwrap();
@@ -452,7 +462,7 @@ mod tests {
     async fn test_list_directory_hidden_files() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         std::fs::write(dir.path().join("visible.txt"), "").unwrap();
         std::fs::write(dir.path().join(".hidden"), "").unwrap();
@@ -491,7 +501,7 @@ mod tests {
     async fn test_list_directory_with_metadata() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         std::fs::write(dir.path().join("file.txt"), "12345").unwrap();
 
@@ -515,7 +525,7 @@ mod tests {
     async fn test_list_directory_nonexistent() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let result = handler
             .list_directory(
@@ -534,7 +544,7 @@ mod tests {
     async fn test_delete_file() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let filename = "delete_me.txt";
         let file_path = dir.path().join(filename);
@@ -558,7 +568,7 @@ mod tests {
     async fn test_delete_nonexistent() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let resp = handler
             .delete_file(
@@ -577,7 +587,7 @@ mod tests {
     async fn test_delete_directory_recursive() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let sub_name = "to_delete";
         let sub = dir.path().join(sub_name);
@@ -600,8 +610,9 @@ mod tests {
 
     #[test]
     fn test_resolve_path_rejects_null_byte() {
-        let working_dir = PathBuf::from("/tmp");
-        let result = resolve_path(&working_dir, "foo\0bar");
+        let project_dir = PathBuf::from("/project");
+        let working_dir = PathBuf::from("work");
+        let result = resolve_path(&project_dir, &working_dir, "foo\0bar");
         assert!(result.is_err());
         let err = result.unwrap_err();
         if let EffectError::Custom { code, message, .. } = err {
@@ -614,37 +625,43 @@ mod tests {
 
     #[test]
     fn test_resolve_path_rejects_parent_dir_component() {
-        let working_dir = PathBuf::from("/tmp");
-        assert!(resolve_path(&working_dir, "../secret").is_err());
-        assert!(resolve_path(&working_dir, "a/../../etc/passwd").is_err());
-        assert!(resolve_path(&working_dir, "a/../b").is_err());
+        let project_dir = PathBuf::from("/project");
+        let working_dir = PathBuf::from("work");
+        assert!(resolve_path(&project_dir, &working_dir, "../secret").is_err());
+        assert!(resolve_path(&project_dir, &working_dir, "a/../../etc/passwd").is_err());
+        assert!(resolve_path(&project_dir, &working_dir, "a/../b").is_err());
     }
 
     #[test]
     fn test_resolve_path_rejects_absolute() {
-        let working_dir = PathBuf::from("/tmp");
-        let result = resolve_path(&working_dir, "/etc/passwd");
+        let project_dir = PathBuf::from("/project");
+        let working_dir = PathBuf::from("work");
+        // Unix absolute
+        let result = resolve_path(&project_dir, &working_dir, "/etc/passwd");
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        if let EffectError::Custom { code, .. } = err {
+        if let Err(EffectError::Custom { code, .. }) = result {
             assert_eq!(code, "fs_path_absolute");
         } else {
             panic!("Expected fs_path_absolute error");
         }
+        // Windows absolute/prefix (if path parsing allows)
+        // Note: On non-windows systems, C:\foo is a single Normal component.
+        // But RootDir (/) is always a RootDir component.
     }
 
     #[test]
     fn test_resolve_path_allows_nested() {
-        let working_dir = PathBuf::from("/tmp");
-        let result = resolve_path(&working_dir, "subdir/file.txt").unwrap();
-        assert_eq!(result, PathBuf::from("/tmp/subdir/file.txt"));
+        let project_dir = PathBuf::from("/project");
+        let working_dir = PathBuf::from("work");
+        let result = resolve_path(&project_dir, &working_dir, "subdir/file.txt").unwrap();
+        assert_eq!(result, PathBuf::from("/project/work/subdir/file.txt"));
     }
 
     #[test]
     fn test_resolve_path_allows_dot_segments() {
-        let working_dir = PathBuf::from("/tmp");
-        let result = resolve_path(&working_dir, "./file.txt").unwrap();
-        // PathBuf::join with "./file.txt" results in "/tmp/./file.txt" which is functionally equivalent
+        let project_dir = PathBuf::from("/project");
+        let working_dir = PathBuf::from("work");
+        let result = resolve_path(&project_dir, &working_dir, "./file.txt").unwrap();
         assert!(result.to_string_lossy().contains("file.txt"));
     }
 
@@ -652,7 +669,7 @@ mod tests {
     async fn test_read_file_rejects_traversal() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let result = handler
             .read_file(
@@ -677,7 +694,7 @@ mod tests {
     async fn test_delete_file_rejects_traversal() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let result = handler
             .delete_file(
@@ -695,7 +712,7 @@ mod tests {
     async fn test_list_directory_rejects_traversal() {
         let dir = tempdir().unwrap();
         let handler = make_handler(dir.path());
-        let ctx = test_ctx(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let result = handler
             .list_directory(
