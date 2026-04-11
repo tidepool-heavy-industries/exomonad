@@ -1,7 +1,7 @@
 use claude_teams_bridge::{
     config_path, inbox_path, is_message_read, list_inboxes, list_teams, read_inbox,
-    write_team_config, write_to_inbox, TeamConfig, TeamInfo, TeamMember, TeamRegistry,
-    TeamsMessage,
+    read_team_config, write_team_config, write_to_inbox, TeamConfig, TeamInfo, TeamMember,
+    TeamRegistry, TeamsMessage,
 };
 use serial_test::serial;
 use std::env;
@@ -75,6 +75,7 @@ fn config_json_matches_cc_format() {
             model: "opus".into(),
             joined_at: 1711022401,
             cwd: "/tmp".into(),
+            backend_type: None,
         }],
     };
 
@@ -310,6 +311,7 @@ async fn resolve_tier2_e2e_inbox_delivery() {
                 model: "opus".into(),
                 joined_at: 1711022401,
                 cwd: "/tmp/exo".into(),
+                backend_type: None,
             },
             TeamMember {
                 agent_id: "cc-supervisor-uuid".into(),
@@ -318,6 +320,7 @@ async fn resolve_tier2_e2e_inbox_delivery() {
                 model: "opus".into(),
                 joined_at: 1711022402,
                 cwd: "/tmp/cc".into(),
+                backend_type: None,
             },
         ],
     };
@@ -548,6 +551,7 @@ async fn lead_deregistered_still_resolves_via_config() {
                 model: "opus".into(),
                 joined_at: 1711022400,
                 cwd: "/tmp".into(),
+                backend_type: None,
             },
             TeamMember {
                 agent_id: "w1-uuid".into(),
@@ -556,6 +560,7 @@ async fn lead_deregistered_still_resolves_via_config() {
                 model: "haiku".into(),
                 joined_at: 1711022401,
                 cwd: "/tmp".into(),
+                backend_type: None,
             },
             TeamMember {
                 agent_id: "w2-uuid".into(),
@@ -564,6 +569,7 @@ async fn lead_deregistered_still_resolves_via_config() {
                 model: "haiku".into(),
                 joined_at: 1711022402,
                 cwd: "/tmp".into(),
+                backend_type: None,
             },
         ],
     };
@@ -620,6 +626,7 @@ async fn lead_replaced_config_authoritative() {
                 model: "opus".into(),
                 joined_at: 1711022400,
                 cwd: "/tmp".into(),
+                backend_type: None,
             },
             TeamMember {
                 agent_id: "uuid-new-lead".into(),
@@ -628,6 +635,7 @@ async fn lead_replaced_config_authoritative() {
                 model: "opus".into(),
                 joined_at: 1711022401,
                 cwd: "/tmp".into(),
+                backend_type: None,
             },
         ],
     };
@@ -697,6 +705,7 @@ async fn cross_team_name_collision() {
             model: "opus".into(),
             joined_at: 1711022401,
             cwd: "/tmp".into(),
+            backend_type: None,
         }],
     };
 
@@ -758,10 +767,12 @@ async fn orphaned_agent_returns_none() {
             name: "lead".into(),
             agent_type: "claude".into(),
             model: "opus".into(),
-            joined_at: 1711022400,
+            joined_at: 1711022401,
             cwd: "/tmp".into(),
+            backend_type: None,
         }],
     };
+
     write_team_config(team, &config).unwrap();
 
     let registry = TeamRegistry::new();
@@ -804,6 +815,7 @@ async fn resolve_lead_name_match_fallback() {
                 model: "opus".into(),
                 joined_at: 1711022400,
                 cwd: "/tmp".into(),
+                backend_type: None,
             },
             TeamMember {
                 agent_id: "uuid-worker".into(),
@@ -812,6 +824,7 @@ async fn resolve_lead_name_match_fallback() {
                 model: "haiku".into(),
                 joined_at: 1711022401,
                 cwd: "/tmp".into(),
+                backend_type: None,
             },
         ],
     };
@@ -835,10 +848,12 @@ async fn resolve_lead_name_match_fallback() {
             name: "someone".into(),
             agent_type: "claude".into(),
             model: "opus".into(),
-            joined_at: 1711022400,
+            joined_at: 1711022401,
             cwd: "/tmp".into(),
+            backend_type: None,
         }],
     };
+
     write_team_config(team2, &config2).unwrap();
 
     // No in-memory entries → None (config doesn't match by UUID or name)
@@ -880,6 +895,7 @@ async fn inbox_survives_config_restructuring() {
             model: "opus".into(),
             joined_at: 1711022401,
             cwd: "/tmp".into(),
+            backend_type: None,
         }],
     };
     write_team_config(team, &config_v1).unwrap();
@@ -909,6 +925,7 @@ async fn inbox_survives_config_restructuring() {
             model: "opus".into(),
             joined_at: 1711022401,
             cwd: "/tmp".into(),
+            backend_type: None,
         }],
     };
     write_team_config(team, &config_v2).unwrap();
@@ -990,6 +1007,7 @@ async fn supervisor_to_lead_routing_chain() {
                 model: "opus".into(),
                 joined_at: 1711022400,
                 cwd: "/tmp".into(),
+                backend_type: None,
             },
             TeamMember {
                 agent_id: "child-uuid".into(),
@@ -998,6 +1016,7 @@ async fn supervisor_to_lead_routing_chain() {
                 model: "haiku".into(),
                 joined_at: 1711022401,
                 cwd: "/tmp".into(),
+                backend_type: None,
             },
         ],
     };
@@ -1319,4 +1338,239 @@ async fn live_teams_e2e() {
     );
     println!("[e2e] CC's InboxPoller will deliver them to the agents");
     println!("[e2e] Lead inbox: check for messages from 'e2e-test-runner', 'e2e-worker-alpha', 'e2e-worker-beta', 'e2e-worker-gamma'");
+}
+
+// --- Sync persistence tests ---
+
+#[tokio::test]
+#[serial]
+async fn test_register_syncs_to_disk() {
+    let tmp = tempdir().unwrap();
+    let _home = ScopedHome::new(tmp.path());
+
+    let team = "drift-team";
+    let config = TeamConfig {
+        name: team.into(),
+        description: "Drift test".into(),
+        created_at: 1711022400,
+        lead_agent_id: "lead".into(),
+        lead_session_id: "session".into(),
+        members: vec![TeamMember {
+            agent_id: "lead".into(),
+            name: "lead".into(),
+            agent_type: "claude".into(),
+            model: "opus".into(),
+            joined_at: 1711022400,
+            cwd: "/tmp".into(),
+            backend_type: None,
+        }],
+    };
+    write_team_config(team, &config).unwrap();
+
+    let registry = TeamRegistry::new();
+
+    // Register a new member in-memory
+    registry
+        .register(
+            "worker-1",
+            TeamInfo {
+                team_name: team.into(),
+                inbox_name: "worker-1".into(),
+            },
+        )
+        .await;
+
+    // Verify it's ON disk (fix: register now syncs to disk)
+    let disk_config = read_team_config(team).unwrap();
+    let on_disk = disk_config.members.iter().any(|m| m.name == "worker-1");
+    assert!(on_disk, "Fix: member in-memory should also be on disk");
+
+    let member = disk_config
+        .members
+        .iter()
+        .find(|m| m.name == "worker-1")
+        .unwrap();
+    assert_eq!(member.backend_type.as_deref(), Some("exomonad"));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_remove_member_persists_to_disk() {
+    let tmp = tempdir().unwrap();
+    let _home = ScopedHome::new(tmp.path());
+
+    let team = "remove-sync-team";
+    let config = TeamConfig {
+        name: team.into(),
+        description: "test".into(),
+        created_at: 0,
+        lead_agent_id: "lead".into(),
+        lead_session_id: "session".into(),
+        members: vec![TeamMember {
+            agent_id: "lead".into(),
+            name: "lead".into(),
+            agent_type: "claude".into(),
+            model: "opus".into(),
+            joined_at: 0,
+            cwd: "/tmp".into(),
+            backend_type: None,
+        }],
+    };
+    write_team_config(team, &config).unwrap();
+
+    let registry = TeamRegistry::new();
+    registry
+        .register(
+            "worker-1",
+            TeamInfo {
+                team_name: team.into(),
+                inbox_name: "worker-1".into(),
+            },
+        )
+        .await;
+
+    // Verify it's on disk
+    assert!(read_team_config(team)
+        .unwrap()
+        .members
+        .iter()
+        .any(|m| m.name == "worker-1"));
+
+    // Remove it
+    registry.deregister("worker-1").await;
+
+    // Verify it's GONE from disk
+    let disk_config = read_team_config(team).unwrap();
+    assert!(!disk_config.members.iter().any(|m| m.name == "worker-1"));
+    // Lead should still be there
+    assert!(disk_config.members.iter().any(|m| m.name == "lead"));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_cc_native_members_preserved() {
+    let tmp = tempdir().unwrap();
+    let _home = ScopedHome::new(tmp.path());
+
+    let team = "preserve-team";
+    let config = TeamConfig {
+        name: team.into(),
+        description: "test".into(),
+        created_at: 0,
+        lead_agent_id: "lead".into(),
+        lead_session_id: "session".into(),
+        members: vec![
+            TeamMember {
+                agent_id: "lead".into(),
+                name: "lead".into(),
+                agent_type: "haiku".into(),
+                model: "opus".into(),
+                joined_at: 0,
+                cwd: "/tmp".into(),
+                backend_type: None, // CC-native
+            },
+            TeamMember {
+                agent_id: "native-1".into(),
+                name: "native-1".into(),
+                agent_type: "haiku".into(),
+                model: "opus".into(),
+                joined_at: 0,
+                cwd: "/tmp".into(),
+                backend_type: None, // CC-native
+            },
+        ],
+    };
+    write_team_config(team, &config).unwrap();
+
+    let registry = TeamRegistry::new();
+    registry
+        .register(
+            "worker-1",
+            TeamInfo {
+                team_name: team.into(),
+                inbox_name: "worker-1".into(),
+            },
+        )
+        .await;
+
+    let disk_config = read_team_config(team).unwrap();
+    assert_eq!(disk_config.members.len(), 3);
+    assert!(disk_config.members.iter().any(|m| m.name == "lead"));
+    assert!(disk_config.members.iter().any(|m| m.name == "native-1"));
+    assert!(disk_config.members.iter().any(|m| m.name == "worker-1"));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_register_member_moves_between_teams() {
+    let tmp = tempdir().unwrap();
+    let _home = ScopedHome::new(tmp.path());
+
+    let team1 = "team-1";
+    let team2 = "team-2";
+
+    for team in [team1, team2] {
+        let config = TeamConfig {
+            name: team.into(),
+            description: "test".into(),
+            created_at: 0,
+            lead_agent_id: "lead".into(),
+            lead_session_id: "session".into(),
+            members: vec![TeamMember {
+                agent_id: "lead".into(),
+                name: "lead".into(),
+                agent_type: "claude".into(),
+                model: "opus".into(),
+                joined_at: 0,
+                cwd: "/tmp".into(),
+                backend_type: None,
+            }],
+        };
+        write_team_config(team, &config).unwrap();
+    }
+
+    let registry = TeamRegistry::new();
+
+    // Register in team 1
+    registry
+        .register_member(
+            "agent-x",
+            TeamInfo {
+                team_name: team1.into(),
+                inbox_name: "agent-x".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(read_team_config(team1)
+        .unwrap()
+        .members
+        .iter()
+        .any(|m| m.name == "agent-x"));
+
+    // Move to team 2
+    registry
+        .register_member(
+            "agent-x",
+            TeamInfo {
+                team_name: team2.into(),
+                inbox_name: "agent-x".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+    // Should be in team 2
+    assert!(read_team_config(team2)
+        .unwrap()
+        .members
+        .iter()
+        .any(|m| m.name == "agent-x"));
+    // Should be GONE from team 1
+    assert!(!read_team_config(team1)
+        .unwrap()
+        .members
+        .iter()
+        .any(|m| m.name == "agent-x"));
 }
