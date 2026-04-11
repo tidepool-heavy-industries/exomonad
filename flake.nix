@@ -58,6 +58,62 @@
           jujutsu  # jj
         ];
 
+        # Exomonad Rust binary
+        exomonad = pkgs.rustPlatform.buildRustPackage {
+          pname = "exomonad";
+          version = "0.1.0";
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = path: type:
+              let
+                baseName = builtins.baseNameOf path;
+                relPath = pkgs.lib.removePrefix (toString ./.) (toString path);
+              in
+              # Include Rust workspace files
+              baseName == "Cargo.toml" || baseName == "Cargo.lock"
+              || pkgs.lib.hasPrefix "/rust" relPath
+              # Include proto files (needed by prost-build)
+              || pkgs.lib.hasPrefix "/proto" relPath
+              # Include vendored ACP SDK (path dependency)
+              || pkgs.lib.hasPrefix "/vendor/acp-rust-sdk" relPath
+              # Allow directories to be traversed
+              || type == "directory";
+          };
+
+          cargoHash = "sha256-UeHbNtTYzto+pGt/8lfBisKk+S8CPtZhwPDukwdmLRE=";
+
+          nativeBuildInputs = with pkgs; [
+            protobuf  # protoc for prost-build
+            pkg-config
+          ];
+
+          buildInputs = with pkgs; [
+            openssl
+          ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin (with pkgs.darwin.apple_sdk.frameworks; [
+            Security
+            SystemConfiguration
+          ]);
+
+          # Only build the exomonad binary
+          cargoBuildFlags = [ "-p" "exomonad" ];
+          cargoTestFlags = [ "-p" "exomonad" ];
+
+          # Proto symlinks need to be resolved for the nix sandbox
+          preBuild = ''
+            # Replace proto symlinks with actual directories
+            rm -rf rust/exomonad-proto/proto/exomonad rust/exomonad-proto/proto/effects
+            cp -r proto/exomonad rust/exomonad-proto/proto/exomonad
+            cp -r proto/effects rust/exomonad-proto/proto/effects
+          '';
+
+          meta = with pkgs.lib; {
+            description = "Type-safe LLM agent orchestration";
+            homepage = "https://github.com/tidepool-heavy-industries/exomonad";
+            license = licenses.bsd3;
+            mainProgram = "exomonad";
+          };
+        };
+
         # NotebookLM MCP server (vendored, optional)
         notebooklm-mcp = pkgs.buildNpmPackage {
           pname = "notebooklm-mcp";
@@ -155,10 +211,8 @@
         };
 
         packages = {
-          default = pkgs.writeShellScriptBin "exomonad-env-check" ''
-            echo "ExoMonad environment check"
-            echo "Run 'nix develop' to enter the development shell"
-          '';
+          default = exomonad;
+          inherit exomonad;
           inherit notebooklm-mcp;
         };
       }
