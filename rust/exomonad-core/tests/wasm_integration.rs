@@ -782,6 +782,28 @@ async fn wasm_notify_parent_rejects_whitespace_only_message() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial]
+async fn wasm_notify_parent_rejects_empty_message_with_pr() {
+    let runtime = build_test_runtime().await;
+
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "notify_parent",
+        json!({
+            "status": "success",
+            "message": "",
+            "pr_number": 123
+        }),
+    )
+    .await;
+
+    assert_tool_error(&output, "notify_parent");
+    let error = output["error"].as_str().unwrap();
+    assert!(error.contains("`message` is required and must not be empty"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
 async fn wasm_notify_parent_ignores_tasks_completed() {
     let runtime = build_test_runtime().await;
 

@@ -109,12 +109,11 @@ notifyParentSchema =
 -- Returns Left on delivery failure, Right () on success.
 notifyParentCore :: NotifyParentArgs -> Eff Effects (Either Text ())
 notifyParentCore args = do
-  let richMessage = composeNotifyMessage args
-
   -- Validate: message must not be empty
-  if T.null (T.strip richMessage)
+  if T.null (T.strip (npMessage args))
     then pure $ Left "notify_parent: `message` is required and must not be empty. Put your report text in the `message` argument."
     else do
+      let richMessage = composeNotifyMessage args
       -- Emit event via suspend
       let eventPayload =
             BSL.toStrict $
