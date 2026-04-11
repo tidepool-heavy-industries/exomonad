@@ -14,25 +14,61 @@ use exomonad_proto::effects::fs::*;
 /// the generated `dispatch_filesystem_effect` function.
 pub struct FsHandler {
     service: FileSystemService,
+    project_dir: std::path::PathBuf,
 }
 
 impl FsHandler {
     pub fn new(ctx: &impl HasProjectDir) -> Self {
-        let service = FileSystemService::new(ctx.project_dir().to_path_buf());
-        Self { service }
+        let project_dir = ctx.project_dir().to_path_buf();
+        let service = FileSystemService::new(project_dir.clone());
+        Self {
+            service,
+            project_dir,
+        }
     }
 }
 
 crate::impl_pass_through_handler!(FsHandler, "fs", dispatch_fs_effect);
+
+fn resolve_path(
+    project_dir: &std::path::Path,
+    working_dir: &std::path::Path,
+    user_path: &str,
+) -> EffectResult<std::path::PathBuf> {
+    if user_path.contains('\0') {
+        return Err(EffectError::custom("fs_path_invalid", "null byte in path"));
+    }
+    let p = std::path::Path::new(user_path);
+    for component in p.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                return Err(EffectError::custom(
+                    "fs_path_escape",
+                    format!("parent-dir component rejected: {}", user_path),
+                ));
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err(EffectError::custom(
+                    "fs_path_absolute",
+                    format!("absolute path rejected: {}", user_path),
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(project_dir.join(working_dir).join(user_path))
+}
 
 #[async_trait]
 impl FilesystemEffects for FsHandler {
     async fn read_file(
         &self,
         req: ReadFileRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<ReadFileResponse> {
         tracing::info!(path = %req.path, "[Fs] read_file starting");
+        let path = resolve_path(&self.project_dir, &ctx.working_dir, &req.path)?;
+
         let max_bytes = if req.max_bytes <= 0 {
             1_048_576 // 1MB default
         } else {
@@ -40,7 +76,7 @@ impl FilesystemEffects for FsHandler {
         };
 
         let input = crate::services::filesystem::ReadFileInput {
-            path: req.path,
+            path: path.to_string_lossy().to_string(),
             max_bytes,
         };
 
@@ -62,11 +98,13 @@ impl FilesystemEffects for FsHandler {
     async fn write_file(
         &self,
         req: WriteFileRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<WriteFileResponse> {
         tracing::info!(path = %req.path, content_bytes = req.content.len(), "[Fs] write_file starting");
+        let path = resolve_path(&self.project_dir, &ctx.working_dir, &req.path)?;
+
         let input = crate::services::filesystem::WriteFileInput {
-            path: req.path.clone(),
+            path: path.to_string_lossy().to_string(),
             content: req.content,
             create_parents: req.create_parents,
         };
@@ -86,10 +124,10 @@ impl FilesystemEffects for FsHandler {
     async fn file_exists(
         &self,
         req: FileExistsRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<FileExistsResponse> {
         tracing::info!(path = %req.path, "[Fs] file_exists starting");
-        let path = std::path::Path::new(&req.path);
+        let path = resolve_path(&self.project_dir, &ctx.working_dir, &req.path)?;
         let exists = path.exists();
         let is_file = path.is_file();
         let is_directory = path.is_dir();
@@ -105,10 +143,10 @@ impl FilesystemEffects for FsHandler {
     async fn list_directory(
         &self,
         req: ListDirectoryRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<ListDirectoryResponse> {
         tracing::info!(path = %req.path, "[Fs] list_directory starting");
-        let path = std::path::Path::new(&req.path);
+        let path = resolve_path(&self.project_dir, &ctx.working_dir, &req.path)?;
         if !path.is_dir() {
             return Err(EffectError::not_found(format!(
                 "Directory not found: {}",
@@ -117,7 +155,7 @@ impl FilesystemEffects for FsHandler {
         }
 
         let mut entries = Vec::new();
-        let mut read_dir = tokio::fs::read_dir(path).await.effect_err("fs")?;
+        let mut read_dir = tokio::fs::read_dir(&path).await.effect_err("fs")?;
 
         while let Some(entry) = read_dir.next_entry().await.effect_err("fs")? {
             let name = entry.file_name().to_string_lossy().to_string();
@@ -156,22 +194,22 @@ impl FilesystemEffects for FsHandler {
     async fn delete_file(
         &self,
         req: DeleteFileRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<DeleteFileResponse> {
         tracing::info!(path = %req.path, recursive = req.recursive, "[Fs] delete_file starting");
-        let path = std::path::Path::new(&req.path);
+        let path = resolve_path(&self.project_dir, &ctx.working_dir, &req.path)?;
         if !path.exists() {
             return Ok(DeleteFileResponse { deleted: false });
         }
 
         if path.is_dir() {
             if req.recursive {
-                tokio::fs::remove_dir_all(path).await.effect_err("fs")?;
+                tokio::fs::remove_dir_all(&path).await.effect_err("fs")?;
             } else {
-                tokio::fs::remove_dir(path).await.effect_err("fs")?;
+                tokio::fs::remove_dir(&path).await.effect_err("fs")?;
             }
         } else {
-            tokio::fs::remove_file(path).await.effect_err("fs")?;
+            tokio::fs::remove_file(&path).await.effect_err("fs")?;
         }
 
         tracing::info!(path = %req.path, "[Fs] delete_file complete");
@@ -207,7 +245,7 @@ mod tests {
         EffectContext {
             agent_name: AgentName::from("test"),
             birth_branch: BirthBranch::from("main"),
-            working_dir: std::path::PathBuf::from("."),
+            working_dir: PathBuf::from("."),
         }
     }
 
@@ -224,13 +262,13 @@ mod tests {
         let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
-        let file_path = dir.path().join("hello.txt");
-        std::fs::write(&file_path, "hello world").unwrap();
+        let filename = "hello.txt";
+        std::fs::write(dir.path().join(filename), "hello world").unwrap();
 
         let resp = handler
             .read_file(
                 ReadFileRequest {
-                    path: file_path.to_string_lossy().to_string(),
+                    path: filename.to_string(),
                     max_bytes: 0,
                     offset: 0,
                 },
@@ -249,13 +287,13 @@ mod tests {
         let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
-        let file_path = dir.path().join("big.txt");
-        std::fs::write(&file_path, "abcdefghij").unwrap();
+        let filename = "big.txt";
+        std::fs::write(dir.path().join(filename), "abcdefghij").unwrap();
 
         let resp = handler
             .read_file(
                 ReadFileRequest {
-                    path: file_path.to_string_lossy().to_string(),
+                    path: filename.to_string(),
                     max_bytes: 5,
                     offset: 0,
                 },
@@ -278,7 +316,7 @@ mod tests {
         let result = handler
             .read_file(
                 ReadFileRequest {
-                    path: dir.path().join("nope.txt").to_string_lossy().to_string(),
+                    path: "nope.txt".to_string(),
                     max_bytes: 0,
                     offset: 0,
                 },
@@ -294,11 +332,11 @@ mod tests {
         let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
-        let file_path = dir.path().join("out.txt");
+        let filename = "out.txt";
         let resp = handler
             .write_file(
                 WriteFileRequest {
-                    path: file_path.to_string_lossy().to_string(),
+                    path: filename.to_string(),
                     content: "written".into(),
                     create_parents: false,
                     append: false,
@@ -308,7 +346,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.bytes_written, 7);
-        assert_eq!(std::fs::read_to_string(&file_path).unwrap(), "written");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(filename)).unwrap(),
+            "written"
+        );
     }
 
     #[tokio::test]
@@ -317,11 +358,11 @@ mod tests {
         let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
-        let file_path = dir.path().join("a").join("b").join("c.txt");
+        let rel_path = "a/b/c.txt";
         let resp = handler
             .write_file(
                 WriteFileRequest {
-                    path: file_path.to_string_lossy().to_string(),
+                    path: rel_path.to_string(),
                     content: "nested".into(),
                     create_parents: true,
                     append: false,
@@ -331,7 +372,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.bytes_written, 6);
-        assert_eq!(std::fs::read_to_string(&file_path).unwrap(), "nested");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(rel_path)).unwrap(),
+            "nested"
+        );
     }
 
     #[tokio::test]
@@ -340,13 +384,13 @@ mod tests {
         let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
-        let file_path = dir.path().join("exists.txt");
-        std::fs::write(&file_path, "hello").unwrap();
+        let filename = "exists.txt";
+        std::fs::write(dir.path().join(filename), "hello").unwrap();
 
         let resp = handler
             .file_exists(
                 FileExistsRequest {
-                    path: file_path.to_string_lossy().to_string(),
+                    path: filename.to_string(),
                 },
                 &ctx,
             )
@@ -359,7 +403,7 @@ mod tests {
         let resp_none = handler
             .file_exists(
                 FileExistsRequest {
-                    path: dir.path().join("none").to_string_lossy().to_string(),
+                    path: "none".to_string(),
                 },
                 &ctx,
             )
@@ -374,13 +418,13 @@ mod tests {
         let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
-        let sub = dir.path().join("subdir");
-        std::fs::create_dir(&sub).unwrap();
+        let sub = "subdir";
+        std::fs::create_dir(dir.path().join(sub)).unwrap();
 
         let resp = handler
             .file_exists(
                 FileExistsRequest {
-                    path: sub.to_string_lossy().to_string(),
+                    path: sub.to_string(),
                 },
                 &ctx,
             )
@@ -390,6 +434,7 @@ mod tests {
         assert!(!resp.is_file);
         assert!(resp.is_directory);
     }
+
 
     #[tokio::test]
     async fn test_list_directory() {
@@ -401,7 +446,7 @@ mod tests {
         std::fs::create_dir(dir.path().join("subdir")).unwrap();
 
         let req = ListDirectoryRequest {
-            path: dir.path().to_string_lossy().to_string(),
+            path: ".".to_string(),
             include_hidden: false,
             include_metadata: false,
         };
@@ -426,7 +471,7 @@ mod tests {
         let resp = handler
             .list_directory(
                 ListDirectoryRequest {
-                    path: dir.path().to_string_lossy().to_string(),
+                    path: ".".to_string(),
                     include_hidden: false,
                     include_metadata: false,
                 },
@@ -441,7 +486,7 @@ mod tests {
         let resp = handler
             .list_directory(
                 ListDirectoryRequest {
-                    path: dir.path().to_string_lossy().to_string(),
+                    path: ".".to_string(),
                     include_hidden: true,
                     include_metadata: false,
                 },
@@ -463,7 +508,7 @@ mod tests {
         let resp = handler
             .list_directory(
                 ListDirectoryRequest {
-                    path: dir.path().to_string_lossy().to_string(),
+                    path: ".".to_string(),
                     include_hidden: false,
                     include_metadata: true,
                 },
@@ -485,7 +530,7 @@ mod tests {
         let result = handler
             .list_directory(
                 ListDirectoryRequest {
-                    path: dir.path().join("nope").to_string_lossy().to_string(),
+                    path: "nope".to_string(),
                     include_hidden: false,
                     include_metadata: false,
                 },
@@ -501,13 +546,14 @@ mod tests {
         let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
-        let file_path = dir.path().join("delete_me.txt");
+        let filename = "delete_me.txt";
+        let file_path = dir.path().join(filename);
         std::fs::write(&file_path, "bye").unwrap();
 
         let resp = handler
             .delete_file(
                 DeleteFileRequest {
-                    path: file_path.to_string_lossy().to_string(),
+                    path: filename.to_string(),
                     recursive: false,
                 },
                 &ctx,
@@ -527,7 +573,7 @@ mod tests {
         let resp = handler
             .delete_file(
                 DeleteFileRequest {
-                    path: dir.path().join("ghost.txt").to_string_lossy().to_string(),
+                    path: "ghost.txt".to_string(),
                     recursive: false,
                 },
                 &ctx,
@@ -543,14 +589,15 @@ mod tests {
         let handler = make_handler(dir.path());
         let ctx = test_ctx();
 
-        let sub = dir.path().join("to_delete");
+        let sub_name = "to_delete";
+        let sub = dir.path().join(sub_name);
         std::fs::create_dir(&sub).unwrap();
         std::fs::write(sub.join("inner.txt"), "").unwrap();
 
         let resp = handler
             .delete_file(
                 DeleteFileRequest {
-                    path: sub.to_string_lossy().to_string(),
+                    path: sub_name.to_string(),
                     recursive: true,
                 },
                 &ctx,
@@ -559,5 +606,124 @@ mod tests {
             .unwrap();
         assert!(resp.deleted);
         assert!(!sub.exists());
+    }
+
+    #[test]
+    fn test_resolve_path_rejects_null_byte() {
+        let project_dir = PathBuf::from("/project");
+        let working_dir = PathBuf::from("work");
+        let result = resolve_path(&project_dir, &working_dir, "foo\0bar");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        if let EffectError::Custom { code, message, .. } = err {
+            assert_eq!(code, "fs_path_invalid");
+            assert!(message.contains("null"));
+        } else {
+            panic!("Expected custom error");
+        }
+    }
+
+    #[test]
+    fn test_resolve_path_rejects_parent_dir_component() {
+        let project_dir = PathBuf::from("/project");
+        let working_dir = PathBuf::from("work");
+        assert!(resolve_path(&project_dir, &working_dir, "../secret").is_err());
+        assert!(resolve_path(&project_dir, &working_dir, "a/../../etc/passwd").is_err());
+        assert!(resolve_path(&project_dir, &working_dir, "a/../b").is_err());
+    }
+
+    #[test]
+    fn test_resolve_path_rejects_absolute() {
+        let project_dir = PathBuf::from("/project");
+        let working_dir = PathBuf::from("work");
+        // Unix absolute
+        let result = resolve_path(&project_dir, &working_dir, "/etc/passwd");
+        assert!(result.is_err());
+        if let Err(EffectError::Custom { code, .. }) = result {
+            assert_eq!(code, "fs_path_absolute");
+        } else {
+            panic!("Expected fs_path_absolute error");
+        }
+        // Windows absolute/prefix (if path parsing allows)
+        // Note: On non-windows systems, C:\foo is a single Normal component.
+        // But RootDir (/) is always a RootDir component.
+    }
+
+    #[test]
+    fn test_resolve_path_allows_nested() {
+        let project_dir = PathBuf::from("/project");
+        let working_dir = PathBuf::from("work");
+        let result = resolve_path(&project_dir, &working_dir, "subdir/file.txt").unwrap();
+        assert_eq!(result, PathBuf::from("/project/work/subdir/file.txt"));
+    }
+
+    #[test]
+    fn test_resolve_path_allows_dot_segments() {
+        let project_dir = PathBuf::from("/project");
+        let working_dir = PathBuf::from("work");
+        let result = resolve_path(&project_dir, &working_dir, "./file.txt").unwrap();
+        assert!(result.to_string_lossy().contains("file.txt"));
+    }
+
+    #[tokio::test]
+    async fn test_read_file_rejects_traversal() {
+        let dir = tempdir().unwrap();
+        let handler = make_handler(dir.path());
+        let ctx = test_ctx();
+
+        let result = handler
+            .read_file(
+                ReadFileRequest {
+                    path: "../secret".to_string(),
+                    max_bytes: 0,
+                    offset: 0,
+                },
+                &ctx,
+            )
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        if let EffectError::Custom { code, .. } = err {
+            assert_eq!(code, "fs_path_escape");
+        } else {
+            panic!("Expected fs_path_escape error");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete_file_rejects_traversal() {
+        let dir = tempdir().unwrap();
+        let handler = make_handler(dir.path());
+        let ctx = test_ctx();
+
+        let result = handler
+            .delete_file(
+                DeleteFileRequest {
+                    path: "../secret".to_string(),
+                    recursive: false,
+                },
+                &ctx,
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_list_directory_rejects_traversal() {
+        let dir = tempdir().unwrap();
+        let handler = make_handler(dir.path());
+        let ctx = test_ctx();
+
+        let result = handler
+            .list_directory(
+                ListDirectoryRequest {
+                    path: "../etc".to_string(),
+                    include_hidden: false,
+                    include_metadata: false,
+                },
+                &ctx,
+            )
+            .await;
+        assert!(result.is_err());
     }
 }
