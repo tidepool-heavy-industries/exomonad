@@ -125,7 +125,19 @@ impl<
 
     /// Get the direct tmux IPC client from context.
     pub(crate) fn tmux(&self) -> Result<super::tmux_ipc::TmuxIpc> {
-        Ok(self.ctx.tmux_ipc().clone())
+        let tmux = self.ctx.tmux_ipc().clone();
+        let configured_session = self.resolve_tmux_session()?;
+        let ctx_session = tmux.session_name();
+
+        if configured_session != ctx_session {
+            anyhow::bail!(
+                "Configured tmux session '{}' does not match context tmux session '{}'",
+                configured_session,
+                ctx_session
+            );
+        }
+
+        Ok(tmux)
     }
 
     /// Clean up an existing worktree (if present) and create a fresh one.
@@ -1190,6 +1202,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_rollback_disarmed_preserves_state() {
+        if !super::tmux_ipc::IsolatedTmux::is_available().await {
+            eprintln!("skipping test_spawn_rollback_disarmed_preserves_state: tmux not available");
+            return;
+        }
         let temp_dir = tempfile::tempdir().unwrap();
         let project_dir = temp_dir.path().to_path_buf();
         let services = test_services(project_dir.clone());

@@ -297,12 +297,16 @@ impl Services {
     pub fn test() -> Self {
         Self::test_with_project_dir(PathBuf::from("."))
     }
-
     /// Construct a test Services rooted at `project_dir`. The `git_wt` service
     /// is constructed from the same directory.
     pub fn test_with_project_dir(project_dir: PathBuf) -> Self {
         let git_wt = Arc::new(GitWorktreeService::new(project_dir.clone()));
-        let tmux_ipc = Arc::new(self::tmux_ipc::TmuxIpc::new("test-session"));
+        // Use a dummy socket for tests to avoid hitting the real tmux server
+        // unless explicitly requested via test_with_tmux().
+        let tmux_ipc = Arc::new(self::tmux_ipc::TmuxIpc::new_with_socket(
+            "test-session",
+            Some("exomonad-test-dummy".to_string()),
+        ));
         ServicesBuilder::new(
             project_dir,
             PathBuf::from(".claude/tasks"),

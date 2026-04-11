@@ -834,6 +834,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_deliver_no_registry_returns_tmux() {
+        if !crate::services::tmux_ipc::IsolatedTmux::is_available().await {
+            eprintln!("skipping test_deliver_no_registry_returns_tmux: tmux not available");
+            return;
+        }
         let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
             .await
             .expect("tmux unavailable");
@@ -854,6 +858,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_route_message_to_agent_address_unknown() {
+        if !crate::services::tmux_ipc::IsolatedTmux::is_available().await {
+            eprintln!("skipping test_route_message_to_agent_address_unknown: tmux not available");
+            return;
+        }
         let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
             .await
             .expect("tmux unavailable");
@@ -869,6 +877,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_route_message_to_team_with_explicit_member() {
+        if !crate::services::tmux_ipc::IsolatedTmux::is_available().await {
+            eprintln!(
+                "skipping test_route_message_to_team_with_explicit_member: tmux not available"
+            );
+            return;
+        }
         let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
             .await
             .expect("tmux unavailable");
@@ -884,6 +898,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_route_message_to_team_lead_fallback_no_config() {
+        if !crate::services::tmux_ipc::IsolatedTmux::is_available().await {
+            eprintln!(
+                "skipping test_route_message_to_team_lead_fallback_no_config: tmux not available"
+            );
+            return;
+        }
         let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
             .await
             .expect("tmux unavailable");
@@ -909,6 +929,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_deliver_to_agent_no_routing() {
+        if !crate::services::tmux_ipc::IsolatedTmux::is_available().await {
+            eprintln!("skipping test_deliver_to_agent_no_routing: tmux not available");
+            return;
+        }
         let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
             .await
             .expect("tmux unavailable");
@@ -961,6 +985,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_lead_root_fallback() {
+        if !crate::services::tmux_ipc::IsolatedTmux::is_available().await {
+            eprintln!("skipping test_resolve_lead_root_fallback: tmux not available");
+            return;
+        }
         let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
             .await
             .expect("tmux unavailable");

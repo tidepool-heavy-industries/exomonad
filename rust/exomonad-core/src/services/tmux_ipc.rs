@@ -703,6 +703,16 @@ pub struct IsolatedTmux {
 
 #[cfg(test)]
 impl IsolatedTmux {
+    /// Check if tmux is available in the current environment.
+    pub async fn is_available() -> bool {
+        tokio::process::Command::new("tmux")
+            .arg("-V")
+            .status()
+            .await
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
     /// Spins up a fresh tmux server on a unique socket, creates a test session,
     /// and returns a TmuxIpc bound to it. Drop kills the server.
     pub async fn new() -> Result<Self> {
@@ -710,10 +720,13 @@ impl IsolatedTmux {
         let session = "test".to_string();
         let tmp = std::env::temp_dir();
 
-        // Create the session on the isolated socket.
+        // Create the session on the isolated socket using a minimal tmux config
+        // so tests do not depend on the user's ~/.tmux.conf.
         let mut cmd = tokio::process::Command::new("tmux");
         cmd.arg("-L")
             .arg(&socket)
+            .arg("-f")
+            .arg("/dev/null")
             .args(["new-session", "-d", "-s", &session, "-c"])
             .arg(&tmp);
 
@@ -923,6 +936,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_isolated_tmux() {
+        if !IsolatedTmux::is_available().await {
+            eprintln!("skipping test_isolated_tmux: tmux not available");
+            return;
+        }
         let isolated = IsolatedTmux::new().await.unwrap();
         assert!(
             TmuxIpc::has_session(&isolated.session, Some(&isolated.socket))
