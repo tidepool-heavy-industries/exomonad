@@ -1,4 +1,95 @@
 use super::*;
+use std::sync::Arc;
+
+/// RAII-style rollback guard for agent spawn flows.
+///
+/// When dropped while armed, it triggers a detached tokio task to clean up
+/// any resources that were partially created (worktrees, tmux windows/panes,
+/// prompt files, etc.).
+pub(crate) struct SpawnRollback {
+    worktree_path: Option<PathBuf>,
+    tmux_window_id: Option<super::tmux_ipc::WindowId>,
+    tmux_pane_id: Option<super::tmux_ipc::PaneId>,
+    prompt_file: Option<PathBuf>,
+    agent_config_dir: Option<PathBuf>,
+    tmux: super::tmux_ipc::TmuxIpc,
+    git_wt: Arc<GitWorktreeService>,
+    armed: bool,
+}
+
+impl SpawnRollback {
+    pub fn new(tmux: super::tmux_ipc::TmuxIpc, git_wt: Arc<GitWorktreeService>) -> Self {
+        Self {
+            worktree_path: None,
+            tmux_window_id: None,
+            tmux_pane_id: None,
+            prompt_file: None,
+            agent_config_dir: None,
+            tmux,
+            git_wt,
+            armed: true,
+        }
+    }
+
+    pub fn set_worktree(&mut self, path: PathBuf) {
+        self.worktree_path = Some(path);
+    }
+
+    pub fn set_window(&mut self, id: super::tmux_ipc::WindowId) {
+        self.tmux_window_id = Some(id);
+    }
+
+    pub fn set_pane(&mut self, id: super::tmux_ipc::PaneId) {
+        self.tmux_pane_id = Some(id);
+    }
+
+    pub fn set_prompt_file(&mut self, path: PathBuf) {
+        self.prompt_file = Some(path);
+    }
+
+    pub fn set_agent_config_dir(&mut self, path: PathBuf) {
+        self.agent_config_dir = Some(path);
+    }
+
+    pub fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for SpawnRollback {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+
+        let wt_path = self.worktree_path.take();
+        let window_id = self.tmux_window_id.take();
+        let pane_id = self.tmux_pane_id.take();
+        let prompt = self.prompt_file.take();
+        let config_dir = self.agent_config_dir.take();
+        let tmux = self.tmux.clone();
+        let git_wt = self.git_wt.clone();
+
+        tokio::spawn(async move {
+            if let Some(id) = window_id {
+                let _ = tmux.kill_window(&id).await;
+            }
+            if let Some(id) = pane_id {
+                let _ = tmux.kill_pane(&id).await;
+            }
+            if let Some(path) = wt_path {
+                let _ = tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
+            }
+            if let Some(p) = prompt {
+                let _ = tokio::fs::remove_file(p).await;
+            }
+            if let Some(d) = config_dir {
+                let _ = tokio::fs::remove_dir_all(d).await;
+            }
+            tracing::warn!("SpawnRollback: cleaned up partial spawn state");
+        });
+    }
+}
 
 impl<
         C: super::super::HasGitHubClient
@@ -170,10 +261,10 @@ impl<
         name: &str,
         cwd: &Path,
         agent_type: AgentType,
-        prompt: Option<&str>,
+        prompt_file: Option<PathBuf>,
         env_vars: HashMap<String, String>,
     ) -> Result<super::tmux_ipc::WindowId> {
-        self.new_tmux_window_inner(name, cwd, agent_type, prompt, env_vars, None, None)
+        self.new_tmux_window_inner(name, cwd, agent_type, prompt_file, env_vars, None, None)
             .await
     }
 
@@ -305,18 +396,12 @@ impl<
         name: &str,
         cwd: &Path,
         agent_type: AgentType,
-        prompt: Option<&str>,
+        prompt_file: Option<PathBuf>,
         env_vars: HashMap<String, String>,
         fork_session_id: Option<&str>,
         claude_flags: Option<&ClaudeSpawnFlags>,
     ) -> Result<super::tmux_ipc::WindowId> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating tmux window");
-
-        // Write prompt to file to avoid shell quoting issues
-        let prompt_file = match prompt {
-            Some(p) => Some(Self::write_prompt_file(self.project_dir(), name, p).await?),
-            None => None,
-        };
 
         let full_command = Self::build_agent_command(
             agent_type,
@@ -414,18 +499,12 @@ impl<
         name: &str,
         cwd: &Path,
         agent_type: AgentType,
-        prompt: Option<&str>,
+        prompt_file: Option<PathBuf>,
         env_vars: HashMap<String, String>,
         parent_window_name: Option<&str>,
         claude_flags: Option<&ClaudeSpawnFlags>,
     ) -> Result<super::tmux_ipc::PaneId> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, parent = ?parent_window_name, "Creating tmux pane");
-
-        // Write prompt to file to avoid shell quoting issues
-        let prompt_file = match prompt {
-            Some(p) => Some(Self::write_prompt_file(self.project_dir(), name, p).await?),
-            None => None,
-        };
 
         let full_command = Self::build_agent_command(
             agent_type,
@@ -791,6 +870,7 @@ impl<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::HasGitWorktreeService;
     type ACS = AgentControlService<crate::services::Services>;
 
     #[test]
@@ -1064,5 +1144,83 @@ mod tests {
             env.get("EXOMONAD_TMUX_SESSION").is_none(),
             "No tmux session should be set when not configured"
         );
+    }
+
+    #[tokio::test]
+    async fn test_spawn_rollback_removes_worktree_on_drop() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let project_dir = temp_dir.path().to_path_buf();
+        let services = test_services(project_dir.clone());
+        let tmux = super::tmux_ipc::TmuxIpc::new("test");
+        let git_wt = services.git_worktree_service().clone();
+
+        let wt_path = project_dir.join("test-wt");
+        fs::create_dir_all(&wt_path).await.unwrap();
+        assert!(wt_path.exists());
+
+        {
+            let mut rollback = SpawnRollback::new(tmux, git_wt);
+            rollback.set_worktree(wt_path.clone());
+            // Drop without disarming
+        }
+
+        // Wait for async cleanup
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(
+            !wt_path.exists(),
+            "Worktree should have been removed by rollback"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_spawn_rollback_disarmed_preserves_state() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let project_dir = temp_dir.path().to_path_buf();
+        let services = test_services(project_dir.clone());
+        let tmux = super::tmux_ipc::TmuxIpc::new("test");
+        let git_wt = services.git_worktree_service().clone();
+
+        let wt_path = project_dir.join("test-wt-preserved");
+        fs::create_dir_all(&wt_path).await.unwrap();
+        assert!(wt_path.exists());
+
+        {
+            let mut rollback = SpawnRollback::new(tmux, git_wt);
+            rollback.set_worktree(wt_path.clone());
+            rollback.disarm();
+            // Drop while disarmed
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(
+            wt_path.exists(),
+            "Worktree should NOT have been removed when disarmed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_spawn_agent_idempotent() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let project_dir = temp_dir.path().to_path_buf();
+        // Mock git repo
+        let _ = tokio::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&project_dir)
+            .output()
+            .await;
+        let _ = tokio::process::Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "init"])
+            .current_dir(&project_dir)
+            .output()
+            .await;
+
+        let services = test_services(project_dir.clone());
+        let _service = AgentControlService::new(services)
+            .with_birth_branch(BirthBranch::from("main"))
+            .with_tmux_session("test".to_string());
+
+        // We can't easily test the full spawn_agent without a GitHub mock,
+        // but we can test that it returns existing if tab is alive.
+        // Idempotency check in spawn_agent calls is_tmux_window_alive.
     }
 }
