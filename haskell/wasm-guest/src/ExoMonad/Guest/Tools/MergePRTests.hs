@@ -61,3 +61,10 @@ test_render_includes_pull_error_when_set = mergePRRender $ MergePROutput
   , mpoPullError = Just "fatal: some error"
   }
 -- Expected: JSON includes "pull_error": "fatal: some error"
+
+-- | Test that working directory defaults to "." when Nothing is provided.
+-- This verifies the fix for the regression where "" was passed.
+test_working_dir_defaults_to_dot :: Bool
+test_working_dir_defaults_to_dot =
+  workingDirOrDefault Nothing == "." &&
+  workingDirOrDefault (Just "some/dir") == "some/dir"

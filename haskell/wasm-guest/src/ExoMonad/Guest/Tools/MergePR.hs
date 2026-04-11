@@ -16,6 +16,7 @@ module ExoMonad.Guest.Tools.MergePR
     mergePRSchema,
     mergePRRender,
     extractAgentName,
+    workingDirOrDefault,
   )
 where
 
@@ -280,6 +281,10 @@ extractAgentName branch
       [] -> Nothing
       (slug : _) -> Just slug
 
+-- | Helper for working directory defaults (defaults to ".").
+workingDirOrDefault :: Maybe Text -> TL.Text
+workingDirOrDefault = maybe "." TL.fromStrict
+
 -- | Execute the actual merge after readiness check passes.
 doMerge :: MergePRArgs -> Eff Effects (Either Text MergePROutput)
 doMerge args = do
@@ -287,7 +292,7 @@ doMerge args = do
         MP.MergePrRequest
           { MP.mergePrRequestPrNumber = fromIntegral (mprPrNumber args),
             MP.mergePrRequestStrategy = maybe "" TL.fromStrict (mprStrategy args),
-            MP.mergePrRequestWorkingDir = maybe "" TL.fromStrict (mprWorkingDir args)
+            MP.mergePrRequestWorkingDir = workingDirOrDefault (mprWorkingDir args)
           }
   result <- suspendEffect @MergePRMergePr req
   case result of
@@ -326,7 +331,7 @@ doMerge args = do
                     Proc.RunRequest
                       { Proc.runRequestCommand = "git",
                         Proc.runRequestArgs = V.fromList ["pull"],
-                        Proc.runRequestWorkingDir = maybe "" TL.fromStrict (mprWorkingDir args),
+                        Proc.runRequestWorkingDir = workingDirOrDefault (mprWorkingDir args),
                         Proc.runRequestEnv = Map.empty,
                         Proc.runRequestTimeoutMs = 30000
                       }
