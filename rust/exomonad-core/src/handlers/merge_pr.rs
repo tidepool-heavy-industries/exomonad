@@ -100,7 +100,10 @@ impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + HasEventQueue + 
                     changes: vec![],
                 })),
             };
-            self.ctx.event_queue().notify_event("system", event).await;
+            self.ctx
+                .event_queue()
+                .notify_event("system.pr_merged", event)
+                .await;
         } else {
             tracing::info!(
                 otel.name = "pr.merge_failed",

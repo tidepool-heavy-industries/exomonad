@@ -298,8 +298,9 @@ impl<
     }
 
     /// Mark a PR as externally merged. Drops the PRState from the tracking map
-    /// so no further events (including queued timeouts) fire for it. Call this
-    /// from merge_pr when the merge completes.
+    /// so no further events (including queued timeouts) fire for it. This is
+    /// used by the EventQueue-driven merge flow: `merge_pr` publishes the
+    /// merge-complete event, and the poller consumes it to remove tracking.
     pub async fn mark_merged(&self, pr_number: PRNumber) {
         let mut states = self.state.lock().await;
         if states.remove(&pr_number).is_some() {
@@ -326,7 +327,9 @@ impl<
             "GitHub poller started"
         );
 
-        // Spawn a background task to listen for external merge events
+        // Spawn a background task to listen for external merge events.
+        // We use a dedicated session ID "system.pr_merged" to avoid
+        // interfering with other system messages.
         let poller = Arc::new(Self {
             ctx: self.ctx.clone(),
             poll_interval: self.poll_interval,
@@ -343,25 +346,44 @@ impl<
                     .ctx
                     .event_queue()
                     .wait_for_event(
-                        "system",
+                        "system.pr_merged",
                         &["agent_message".to_string()],
                         Duration::from_secs(30),
                         last_event_id,
                     )
                     .await
                 {
-                    Ok(event) => {
-                        last_event_id = event.event_id;
-                        if let Some(EventType::AgentMessage(msg)) = event.event_type {
+                    Ok(event) => match event.event_type {
+                        Some(EventType::Timeout(_)) => {
+                            // Timeout is expected; keep waiting without rewinding last_event_id.
+                        }
+                        Some(EventType::AgentMessage(msg)) => {
+                            last_event_id = event.event_id;
                             if msg.status == "pr.merged" {
                                 if let Ok(pr_num) = msg.message.parse::<u64>() {
-                                    poller_for_events.mark_merged(PRNumber::new(pr_num)).await;
+                                    match PRNumber::try_from(pr_num) {
+                                        Ok(pr_number) => {
+                                            poller_for_events.mark_merged(pr_number).await;
+                                        }
+                                        Err(e) => {
+                                            warn!(
+                                                pr_num,
+                                                message = %msg.message,
+                                                error = %e,
+                                                "Ignoring invalid merged PR event"
+                                            );
+                                        }
+                                    }
                                 }
                             }
                         }
-                    }
-                    Err(_) => {
-                        // Timeout is expected, just loop
+                        _ => {
+                            last_event_id = event.event_id;
+                        }
+                    },
+                    Err(e) => {
+                        warn!("Failed waiting for GitHub poller event: {}", e);
+                        tokio::time::sleep(Duration::from_secs(1)).await;
                     }
                 }
             }
@@ -1677,7 +1699,10 @@ mod tests {
                 changes: vec![],
             })),
         };
-        services.event_queue().notify_event("system", event).await;
+        services
+            .event_queue()
+            .notify_event("system.pr_merged", event)
+            .await;
 
         // Wait for listener to react
         let mut success = false;
