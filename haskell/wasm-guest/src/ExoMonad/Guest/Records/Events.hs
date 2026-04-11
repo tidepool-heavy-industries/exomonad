@@ -10,7 +10,6 @@ module ExoMonad.Guest.Records.Events
     notifyParentDescription,
     notifyParentSchema,
     NotifyStatus (..),
-    TaskReport (..),
 
     -- * Shutdown (core + shared schema, no MCPTool instance)
     Shutdown,

@@ -738,6 +738,72 @@ async fn wasm_notify_parent_roundtrip() {
     assert_tool_success(&output, "notify_parent");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_notify_parent_rejects_empty_message() {
+    let runtime = build_test_runtime().await;
+
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "notify_parent",
+        json!({
+            "status": "success",
+            "message": ""
+        }),
+    )
+    .await;
+
+    assert_tool_error(&output, "notify_parent");
+    let error = output["error"].as_str().unwrap();
+    assert!(error.contains("`message` is required and must not be empty"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_notify_parent_rejects_whitespace_only_message() {
+    let runtime = build_test_runtime().await;
+
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "notify_parent",
+        json!({
+            "status": "success",
+            "message": "   \n\t "
+        }),
+    )
+    .await;
+
+    assert_tool_error(&output, "notify_parent");
+    let error = output["error"].as_str().unwrap();
+    assert!(error.contains("`message` is required and must not be empty"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[serial]
+async fn wasm_notify_parent_ignores_tasks_completed() {
+    let runtime = build_test_runtime().await;
+
+    let output = call_tool(
+        &runtime,
+        "tl",
+        "notify_parent",
+        json!({
+            "status": "success",
+            "message": "Report with legacy field",
+            "tasks_completed": [
+                {"what": "task1", "how": "cmd1"}
+            ]
+        }),
+    )
+    .await;
+
+    // Aeson's default is to ignore extra fields if they are not mapped.
+    // Since we removed it from NotifyParentArgs, it should just be ignored.
+    assert_tool_success(&output, "notify_parent");
+}
+
 // ============================================================================
 // Argument Validation Tests
 // ============================================================================

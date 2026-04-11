@@ -27,7 +27,6 @@ module ExoMonad.Guest.Tools.Events
     -- * Args types (role wrappers need these)
     NotifyParentArgs (..),
     NotifyStatus (..),
-    TaskReport (..),
     ShutdownArgs (..),
 
     -- * Helpers
@@ -71,33 +70,10 @@ instance ToJSON NotifyStatus where
   toJSON Success = Aeson.String "success"
   toJSON Failure = Aeson.String "failure"
 
--- | Structured task report for enriched notifications.
-data TaskReport = TaskReport
-  { trWhat :: Text,
-    trHow :: Text
-  }
-  deriving (Generic, Show)
-
-instance JsonSchema TaskReport where
-  toSchema =
-    Aeson.Object $
-      genericToolSchemaWith @TaskReport
-        [ ("what", "task description"),
-          ("how", "verification command that was run")
-        ]
-
-instance FromJSON TaskReport where
-  parseJSON = withObject "TaskReport" $ \v ->
-    TaskReport <$> v .: "what" <*> v .: "how"
-
-instance ToJSON TaskReport where
-  toJSON (TaskReport w h) = object ["what" .= w, "how" .= h]
-
 data NotifyParentArgs = NotifyParentArgs
   { npStatus :: NotifyStatus,
     npMessage :: Text,
-    npPrNumber :: Maybe Int,
-    npTasksCompleted :: Maybe [TaskReport]
+    npPrNumber :: Maybe Int
   }
   deriving (Generic, Show)
 
@@ -107,82 +83,80 @@ instance FromJSON NotifyParentArgs where
       <$> v .: "status"
       <*> v .: "message"
       <*> v .:? "pr_number"
-      <*> v .:? "tasks_completed"
 
 instance ToJSON NotifyParentArgs where
   toJSON args =
     object
       [ "status" .= npStatus args,
         "message" .= npMessage args,
-        "pr_number" .= npPrNumber args,
-        "tasks_completed" .= npTasksCompleted args
+        "pr_number" .= npPrNumber args
       ]
 
 -- | Shared tool description for notify_parent.
 notifyParentDescription :: Text
-notifyParentDescription = "Send a message to your parent agent. Use for status updates, progress reports, or failure escalation. Messages are delivered as-is with lightweight attribution. For PR-based workflows, the system auto-notifies your parent when Copilot approves — you don't need to signal completion yourself."
+notifyParentDescription = "Send a message to your parent agent. The `message` argument IS the report — put all text the parent should read there. Parents see the full `message` string as a native teammate-message in their conversation. Do not use structured fields for report content — they are not delivered. Use this tool to report task completion, request help, send status updates, or escalate failures."
 
 -- | Shared tool schema for notify_parent.
 notifyParentSchema :: Aeson.Object
 notifyParentSchema =
   genericToolSchemaWith @NotifyParentArgs
     [ ("status", "'success' = normal message (status update, progress report). 'failure' = escalation, something went wrong."),
-      ("message", "The message to send. Be concise — one or two sentences."),
-      ("pr_number", "PR number if relevant. Helps parent locate the PR without searching."),
-      ("tasks_completed", "Array of {what, how} pairs. 'what' = task description, 'how' = verification command that was run.")
+      ("message", "The entire text the parent agent will see. Put your full report here in plain text or markdown. This tool does not have any other fields for status content — anything you want your parent to read must be in `message`."),
+      ("pr_number", "PR number if relevant. Helps parent locate the PR without searching.")
     ]
 
 -- | Core notify_parent I/O: emit event + deliver message to parent.
 -- Returns Left on delivery failure, Right () on success.
 notifyParentCore :: NotifyParentArgs -> Eff Effects (Either Text ())
 notifyParentCore args = do
-  -- Emit event via suspend
-  let eventPayload =
-        BSL.toStrict $
-          Aeson.encode $
-            object
-              [ "status" .= npStatus args,
-                "message" .= npMessage args,
-                "pr_number" .= npPrNumber args,
-                "tasks_completed" .= npTasksCompleted args
-              ]
-  void $
-    suspendEffect_ @LogEmitEvent
-      ( Log.EmitEventRequest
-          { Log.emitEventRequestEventType = "agent.completed",
-            Log.emitEventRequestPayload = eventPayload,
-            Log.emitEventRequestTimestamp = 0
-          }
-      )
-
   let richMessage = composeNotifyMessage args
-  let statusText = case npStatus args of
-        Success -> "success" :: Text
-        Failure -> "failure"
-  result <-
-    suspendEffect @ProtoEvents.EventsNotifyParent
-      ( ProtoEvents.NotifyParentRequest
-          { ProtoEvents.notifyParentRequestAgentId = "",
-            ProtoEvents.notifyParentRequestStatus = TL.fromStrict statusText,
-            ProtoEvents.notifyParentRequestMessage = TL.fromStrict richMessage,
-            ProtoEvents.notifyParentRequestOverrideRecipient = Nothing
-          }
-      )
-  case result of
-    Left err -> pure $ Left (T.pack (show err))
-    Right _ -> pure $ Right ()
 
--- | Compose enriched notification message with PR number and task reports.
+  -- Validate: message must not be empty
+  if T.null (T.strip richMessage)
+    then pure $ Left "notify_parent: `message` is required and must not be empty. Put your report text in the `message` argument."
+    else do
+      -- Emit event via suspend
+      let eventPayload =
+            BSL.toStrict $
+              Aeson.encode $
+                object
+                  [ "status" .= npStatus args,
+                    "message" .= npMessage args,
+                    "pr_number" .= npPrNumber args
+                  ]
+      void $
+        suspendEffect_ @LogEmitEvent
+          ( Log.EmitEventRequest
+              { Log.emitEventRequestEventType = "agent.completed",
+                Log.emitEventRequestPayload = eventPayload,
+                Log.emitEventRequestTimestamp = 0
+              }
+          )
+
+      let statusText = case npStatus args of
+            Success -> "success" :: Text
+            Failure -> "failure"
+      result <-
+        suspendEffect @ProtoEvents.EventsNotifyParent
+          ( ProtoEvents.NotifyParentRequest
+              { ProtoEvents.notifyParentRequestAgentId = "",
+                ProtoEvents.notifyParentRequestStatus = TL.fromStrict statusText,
+                ProtoEvents.notifyParentRequestMessage = TL.fromStrict richMessage,
+                ProtoEvents.notifyParentRequestOverrideRecipient = Nothing
+              }
+          )
+      case result of
+        Left err -> pure $ Left (T.pack (show err))
+        Right _ -> pure $ Right ()
+
+-- | Compose enriched notification message with PR number.
 composeNotifyMessage :: NotifyParentArgs -> Text
 composeNotifyMessage args =
   let base = npMessage args
       prSuffix = case npPrNumber args of
         Just n -> " (PR #" <> T.pack (show n) <> ")"
         Nothing -> ""
-      taskLines = case npTasksCompleted args of
-        Just tasks -> T.concat ["\n  - " <> trWhat t <> " (verified: " <> trHow t <> ")" | t <- tasks]
-        Nothing -> ""
-   in base <> prSuffix <> taskLines
+   in base <> prSuffix
 
 -- | Send message tool (stays in SDK — no state transitions needed)
 data SendMessage = SendMessage
