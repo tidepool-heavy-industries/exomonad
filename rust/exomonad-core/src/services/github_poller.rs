@@ -16,7 +16,7 @@ use tracing::{debug, info, instrument, warn};
 
 use crate::services::{
     HasAcpRegistry, HasAgentResolver, HasEventLog, HasEventQueue, HasGitHubClient, HasProjectDir,
-    HasTeamRegistry,
+    HasTeamRegistry, HasTmuxIpc,
 };
 
 type PluginMap = Arc<RwLock<HashMap<crate::AgentName, Arc<PluginManager>>>>;
@@ -283,6 +283,7 @@ impl<
             + HasEventQueue
             + HasProjectDir
             + HasGitHubClient
+            + HasTmuxIpc
             + 'static,
     > GitHubPoller<C>
 {

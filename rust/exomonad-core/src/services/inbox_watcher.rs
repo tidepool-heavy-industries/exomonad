@@ -19,6 +19,7 @@ use claude_teams_bridge::{inbox_path, TeamsMessage};
 struct WatchState {
     last_count: usize,
     tmux_target: String,
+    tmux: Arc<crate::services::tmux_ipc::TmuxIpc>,
     project_dir: PathBuf,
     is_running: Arc<AtomicBool>,
 }
@@ -47,6 +48,7 @@ impl InboxWatcher {
         team_name: String,
         member_name: String,
         tmux_target: String,
+        tmux: Arc<crate::services::tmux_ipc::TmuxIpc>,
         project_dir: PathBuf,
     ) {
         let mut watches = self.watches.lock().await;
@@ -69,6 +71,7 @@ impl InboxWatcher {
             WatchState {
                 last_count,
                 tmux_target: tmux_target.clone(),
+                tmux,
                 project_dir: project_dir.clone(),
                 is_running: is_running.clone(),
             },
@@ -120,9 +123,13 @@ impl InboxWatcher {
                         let new_count = msgs.len() - state.last_count;
                         info!(member = %member, new_messages = new_count, "InboxWatcher: routing to tmux");
                         for msg in &msgs[state.last_count..] {
-                            if let Err(e) =
-                                inject_input(&state.tmux_target, &msg.text, &state.project_dir)
-                                    .await
+                            if let Err(e) = inject_input(
+                                &state.tmux,
+                                &state.tmux_target,
+                                &msg.text,
+                                &state.project_dir,
+                            )
+                            .await
                             {
                                 warn!(member = %member, error = %e, "Failed to inject inbox message via tmux");
                             }

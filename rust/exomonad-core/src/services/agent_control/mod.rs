@@ -517,8 +517,6 @@ pub struct AgentControlService<C> {
     pub(crate) worktree_base: PathBuf,
     /// tmux session name for event emission
     pub(crate) tmux_session: Option<String>,
-    /// Direct tmux IPC client.
-    pub(crate) tmux_ipc: Option<super::tmux_ipc::TmuxIpc>,
     /// This agent's birth-branch (git identity). Root TL = "main".
     pub(crate) birth_branch: BirthBranch,
     /// When true, spawned Gemini agents receive `--yolo` flag.
@@ -536,6 +534,7 @@ impl<
             + super::HasAgentResolver
             + super::HasProjectDir
             + super::HasGitWorktreeService
+            + super::HasTmuxIpc
             + 'static,
     > AgentControlService<C>
 {
@@ -546,7 +545,6 @@ impl<
             ctx,
             worktree_base,
             tmux_session: None,
-            tmux_ipc: None,
             birth_branch: BirthBranch::from("unset"),
             yolo: false,
             wasm_name: "devswarm".to_string(),
@@ -566,9 +564,8 @@ impl<
         self
     }
 
-    /// Set the tmux session name for event emission + direct IPC.
+    /// Set the tmux session name for event emission.
     pub fn with_tmux_session(mut self, session: String) -> Self {
-        self.tmux_ipc = Some(super::tmux_ipc::TmuxIpc::new(&session));
         self.tmux_session = Some(session);
         self
     }

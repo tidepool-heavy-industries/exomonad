@@ -24,7 +24,7 @@ use tracing::{info, warn};
 
 use crate::services::{
     HasAcpRegistry, HasAgentResolver, HasClaudeSessionRegistry, HasEventLog, HasGitHubClient,
-    HasGitWorktreeService, HasProjectDir, HasSupervisorRegistry, HasTeamRegistry,
+    HasGitWorktreeService, HasProjectDir, HasSupervisorRegistry, HasTeamRegistry, HasTmuxIpc,
 };
 
 /// Agent effect handler.
@@ -46,6 +46,7 @@ impl<
             + HasSupervisorRegistry
             + HasClaudeSessionRegistry
             + HasEventLog
+            + HasTmuxIpc
             + 'static,
     > AgentHandler<C>
 {
@@ -200,6 +201,7 @@ impl<
             + HasSupervisorRegistry
             + HasClaudeSessionRegistry
             + HasEventLog
+            + HasTmuxIpc
             + 'static,
     > EffectHandler for AgentHandler<C>
 {
@@ -275,6 +277,7 @@ impl<
             + HasSupervisorRegistry
             + HasClaudeSessionRegistry
             + HasEventLog
+            + HasTmuxIpc
             + 'static,
     > AgentEffects for AgentHandler<C>
 {
@@ -794,7 +797,10 @@ impl<
             // Try pane_id first (ephemeral workers)
             if let Some(pane_id) = r["pane_id"].as_str() {
                 info!(agent = %ctx.agent_name, pane_id = %pane_id, "Closing worker pane");
-                if let Err(e) = crate::services::tmux_events::close_worker_pane(pane_id).await {
+                if let Err(e) =
+                    crate::services::tmux_events::close_worker_pane(self.ctx.tmux_ipc(), pane_id)
+                        .await
+                {
                     warn!(agent = %ctx.agent_name, pane_id = %pane_id, error = %e, "Failed to close worker pane");
                 } else {
                     closed = true;
@@ -803,9 +809,7 @@ impl<
             // Try window_id (worktree-based agents)
             else if let Some(window_id) = r["window_id"].as_str() {
                 info!(agent = %ctx.agent_name, window_id = %window_id, "Closing agent window");
-                let session = std::env::var("EXOMONAD_TMUX_SESSION")
-                    .unwrap_or_else(|_| "exomonad".to_string());
-                let ipc = crate::services::tmux_ipc::TmuxIpc::new(&session);
+                let ipc = self.ctx.tmux_ipc();
                 match crate::services::tmux_ipc::WindowId::parse(window_id) {
                     Ok(wid) => {
                         if let Err(e) = ipc.kill_window(&wid).await {

@@ -154,7 +154,8 @@ pub async fn route_message(
     ctx: &(impl super::HasTeamRegistry
           + super::HasAcpRegistry
           + super::HasAgentResolver
-          + super::HasProjectDir),
+          + super::HasProjectDir
+          + super::HasTmuxIpc),
     address: &Address,
     from: &crate::domain::AgentName,
     content: &str,
@@ -194,7 +195,8 @@ async fn resolve_and_deliver_to_lead(
     ctx: &(impl super::HasTeamRegistry
           + super::HasAcpRegistry
           + super::HasAgentResolver
-          + super::HasProjectDir),
+          + super::HasProjectDir
+          + super::HasTmuxIpc),
     team_name: &str,
     from: &crate::domain::AgentName,
     content: &str,
@@ -286,7 +288,8 @@ pub async fn notify_parent_delivery(
           + super::HasAcpRegistry
           + super::HasEventLog
           + super::HasEventQueue
-          + super::HasProjectDir),
+          + super::HasProjectDir
+          + super::HasTmuxIpc),
     agent_id: &crate::domain::AgentName,
     parent_session_id: &str,
     parent_tab_name: &str,
@@ -427,7 +430,10 @@ async fn deliver_via_uds(
 /// Falls back to tmux input injection if other delivery methods fail or are not available.
 #[instrument(skip_all, fields(agent_key = %agent_key, from = %from, delivery_method = tracing::field::Empty))]
 pub async fn deliver_to_agent(
-    ctx: &(impl super::HasTeamRegistry + super::HasAcpRegistry + super::HasProjectDir),
+    ctx: &(impl super::HasTeamRegistry
+          + super::HasAcpRegistry
+          + super::HasProjectDir
+          + super::HasTmuxIpc),
     agent_key: &str,
     tmux_target: &str,
     from: &crate::domain::AgentName,
@@ -437,6 +443,7 @@ pub async fn deliver_to_agent(
     let team_registry = ctx.team_registry();
     let acp_registry = ctx.acp_registry();
     let project_dir = ctx.project_dir();
+    let tmux_ipc = ctx.tmux_ipc();
 
     // Batch lookup: sender's team (for Tier 2 scoping) + recipient in-memory check.
     // Single lock acquisition instead of two separate get() calls.
@@ -530,6 +537,7 @@ pub async fn deliver_to_agent(
                 crate::services::resolve_worktree_from_tab(tmux_target)
             };
             let pd = project_dir.join(worktree);
+            let tmux_ipc = tmux_ipc.clone();
             tokio::spawn(async move {
                 let verify_policy = crate::services::resilience::RetryPolicy::new(
                     3,
@@ -572,7 +580,7 @@ pub async fn deliver_to_agent(
                     target = %target,
                     "Teams inbox message not read after 30s, falling back to tmux injection"
                 );
-                if let Err(e) = tmux_events::inject_input(&target, &msg, &pd).await {
+                if let Err(e) = tmux_events::inject_input(&tmux_ipc, &target, &msg, &pd).await {
                     warn!(target = %target, error = %e, "tmux inject_input failed (Teams fallback)");
                 }
             });
@@ -721,13 +729,14 @@ pub async fn deliver_to_agent(
             crate::services::resolve_working_dir(agent_key)
         };
         let effective_pd = project_dir.join(worktree);
-        let outcome = match tmux_events::inject_input(&target, message, &effective_pd).await {
-            Ok(()) => "success",
-            Err(e) => {
-                warn!(target = %target, error = %e, "tmux inject_input failed (routing.json)");
-                "failed"
-            }
-        };
+        let outcome =
+            match tmux_events::inject_input(tmux_ipc, &target, message, &effective_pd).await {
+                Ok(()) => "success",
+                Err(e) => {
+                    warn!(target = %target, error = %e, "tmux inject_input failed (routing.json)");
+                    "failed"
+                }
+            };
         tracing::info!(
             otel.name = "message.delivery",
             agent_id = %from,
@@ -753,13 +762,14 @@ pub async fn deliver_to_agent(
         crate::services::resolve_worktree_from_tab(tmux_target)
     };
     let effective_pd = project_dir.join(worktree);
-    let outcome = match tmux_events::inject_input(tmux_target, message, &effective_pd).await {
-        Ok(()) => "success",
-        Err(e) => {
-            warn!(target = %tmux_target, error = %e, "tmux inject_input failed (fallback)");
-            "failed"
-        }
-    };
+    let outcome =
+        match tmux_events::inject_input(tmux_ipc, tmux_target, message, &effective_pd).await {
+            Ok(()) => "success",
+            Err(e) => {
+                warn!(target = %tmux_target, error = %e, "tmux inject_input failed (fallback)");
+                "failed"
+            }
+        };
     tracing::info!(
         otel.name = "message.delivery",
         agent_id = %from,
@@ -778,6 +788,7 @@ mod tests {
     use crate::domain::AgentName;
     use crate::services::HasEventQueue;
     use serial_test::serial;
+    use std::sync::Arc;
 
     #[test]
     fn test_format_parent_notification_success() {
@@ -823,7 +834,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_deliver_no_registry_returns_tmux() {
-        let services = crate::services::Services::test();
+        let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
+            .await
+            .expect("tmux unavailable");
+        let services = crate::services::Services::test_with_tmux(Arc::new(isolated.ipc.clone()));
         let result = deliver_to_agent(
             &services,
             "agent-1",
@@ -833,12 +847,17 @@ mod tests {
             "summary",
         )
         .await;
+        // In isolated tmux, tab-1 doesn't exist, so it should still return Tmux
+        // (the delivery code returns Tmux regardless of inject_input success, it just warns on Err)
         assert_eq!(result, DeliveryResult::Tmux);
     }
 
     #[tokio::test]
     async fn test_route_message_to_agent_address_unknown() {
-        let services = crate::services::Services::test();
+        let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
+            .await
+            .expect("tmux unavailable");
+        let services = crate::services::Services::test_with_tmux(Arc::new(isolated.ipc.clone()));
         let from = AgentName::from("sender");
         let address = Address::Agent(AgentName::from("unknown"));
         let outcome = route_message(&services, &address, &from, "content", "summary").await;
@@ -850,7 +869,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_route_message_to_team_with_explicit_member() {
-        let services = crate::services::Services::test();
+        let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
+            .await
+            .expect("tmux unavailable");
+        let services = crate::services::Services::test_with_tmux(Arc::new(isolated.ipc.clone()));
         let from = AgentName::from("sender");
         let address = Address::Team {
             team: "team-a".into(),
@@ -862,7 +884,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_route_message_to_team_lead_fallback_no_config() {
-        let services = crate::services::Services::test();
+        let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
+            .await
+            .expect("tmux unavailable");
+        let services = crate::services::Services::test_with_tmux(Arc::new(isolated.ipc.clone()));
         let from = AgentName::from("sender");
         let address = Address::Team {
             team: "team-a".into(),
@@ -884,7 +909,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_deliver_to_agent_no_routing() {
-        let services = crate::services::Services::test();
+        let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
+            .await
+            .expect("tmux unavailable");
+        let services = crate::services::Services::test_with_tmux(Arc::new(isolated.ipc.clone()));
         let result = deliver_to_agent(
             &services,
             "agent-no-routing",
@@ -908,7 +936,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_notify_parent_delivery_publishes_event() {
-        let services = crate::services::Services::test();
+        let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
+            .await
+            .expect("tmux unavailable");
+        let services = crate::services::Services::test_with_tmux(Arc::new(isolated.ipc.clone()));
         let agent_id = AgentName::from("agent-1");
 
         notify_parent_delivery(
@@ -930,7 +961,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_lead_root_fallback() {
-        let services = crate::services::Services::test();
+        let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
+            .await
+            .expect("tmux unavailable");
+        let services = crate::services::Services::test_with_tmux(Arc::new(isolated.ipc.clone()));
         let from = AgentName::from("sender");
         // No config.json and empty TeamRegistry should fallback to root
         let outcome =
@@ -1003,7 +1037,10 @@ mod tests {
         });
         std::fs::write(&config_file, serde_json::to_string(&config).unwrap()).unwrap();
 
-        let services = crate::services::Services::test();
+        let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
+            .await
+            .expect("tmux unavailable");
+        let services = crate::services::Services::test_with_tmux(Arc::new(isolated.ipc.clone()));
         let from = AgentName::from("sender");
         let outcome =
             resolve_and_deliver_to_lead(&services, team_name, &from, "content", "summary").await;

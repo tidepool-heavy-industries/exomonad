@@ -110,12 +110,21 @@ pub struct WindowInfo {
 #[derive(Debug, Clone)]
 pub struct TmuxIpc {
     session_name: String,
+    socket_name: Option<String>,
 }
 
 impl TmuxIpc {
     pub fn new(session_name: &str) -> Self {
         Self {
             session_name: session_name.to_string(),
+            socket_name: None,
+        }
+    }
+
+    pub fn new_with_socket(session_name: &str, socket_name: Option<String>) -> Self {
+        Self {
+            session_name: session_name.to_string(),
+            socket_name,
         }
     }
 
@@ -123,11 +132,32 @@ impl TmuxIpc {
         &self.session_name
     }
 
+    fn tmux_cmd(&self) -> Command {
+        let mut cmd = Command::new("tmux");
+        if let Some(socket) = &self.socket_name {
+            cmd.arg("-L").arg(socket);
+        }
+        cmd
+    }
+
+    #[cfg(test)]
+    fn tmux_cmd_sync(&self) -> std::process::Command {
+        let mut cmd = std::process::Command::new("tmux");
+        if let Some(socket) = &self.socket_name {
+            cmd.arg("-L").arg(socket);
+        }
+        cmd
+    }
+
     // -- Session management (static, no &self) --
 
     /// Create a new tmux session. Returns the stable window ID (@N) of the initial window.
-    pub async fn new_session(name: &str, cwd: &Path) -> Result<WindowId> {
-        let output = Command::new("tmux")
+    pub async fn new_session(name: &str, cwd: &Path, socket: Option<&str>) -> Result<WindowId> {
+        let mut cmd = Command::new("tmux");
+        if let Some(s) = socket {
+            cmd.arg("-L").arg(s);
+        }
+        let output = cmd
             .args([
                 "new-session",
                 "-d",
@@ -155,8 +185,12 @@ impl TmuxIpc {
         Ok(window_id)
     }
 
-    pub async fn has_session(name: &str) -> Result<bool> {
-        let status = Command::new("tmux")
+    pub async fn has_session(name: &str, socket: Option<&str>) -> Result<bool> {
+        let mut cmd = Command::new("tmux");
+        if let Some(s) = socket {
+            cmd.arg("-L").arg(s);
+        }
+        let status = cmd
             .args(["has-session", "-t", name])
             .status()
             .await
@@ -164,8 +198,12 @@ impl TmuxIpc {
         Ok(status.success())
     }
 
-    pub async fn kill_session(name: &str) -> Result<()> {
-        let output = Command::new("tmux")
+    pub async fn kill_session(name: &str, socket: Option<&str>) -> Result<()> {
+        let mut cmd = Command::new("tmux");
+        if let Some(s) = socket {
+            cmd.arg("-L").arg(s);
+        }
+        let output = cmd
             .args(["kill-session", "-t", name])
             .output()
             .await
@@ -181,11 +219,13 @@ impl TmuxIpc {
     }
 
     /// Exec into tmux attach (replaces current process).
-    pub async fn attach_session(name: &str) -> Result<()> {
+    pub async fn attach_session(name: &str, socket: Option<&str>) -> Result<()> {
         use std::os::unix::process::CommandExt;
-        let err = std::process::Command::new("tmux")
-            .args(["attach-session", "-t", name])
-            .exec();
+        let mut cmd = std::process::Command::new("tmux");
+        if let Some(s) = socket {
+            cmd.arg("-L").arg(s);
+        }
+        let err = cmd.args(["attach-session", "-t", name]).exec();
         Err(anyhow::anyhow!("exec tmux attach failed: {}", err))
     }
 
@@ -199,7 +239,8 @@ impl TmuxIpc {
         shell: &str,
         command: &str,
     ) -> Result<WindowId> {
-        let output = Command::new("tmux")
+        let output = self
+            .tmux_cmd()
             .args([
                 "new-window",
                 "-P",
@@ -233,7 +274,8 @@ impl TmuxIpc {
     }
 
     pub async fn list_windows(&self) -> Result<Vec<WindowInfo>> {
-        let output = Command::new("tmux")
+        let output = self
+            .tmux_cmd()
             .args([
                 "list-windows",
                 "-t",
@@ -286,7 +328,8 @@ impl TmuxIpc {
     }
 
     pub async fn kill_window(&self, window_id: &WindowId) -> Result<()> {
-        let output = Command::new("tmux")
+        let output = self
+            .tmux_cmd()
             .args(["kill-window", "-t", window_id.as_str()])
             .output()
             .await
@@ -302,7 +345,8 @@ impl TmuxIpc {
     }
 
     pub async fn select_window(&self, window_id: &WindowId) -> Result<()> {
-        let output = Command::new("tmux")
+        let output = self
+            .tmux_cmd()
             .args(["select-window", "-t", window_id.as_str()])
             .output()
             .await
@@ -326,7 +370,8 @@ impl TmuxIpc {
         shell: &str,
         command: &str,
     ) -> Result<PaneId> {
-        let output = Command::new("tmux")
+        let output = self
+            .tmux_cmd()
             .args([
                 "split-window",
                 "-P",
@@ -365,7 +410,8 @@ impl TmuxIpc {
     ) -> Result<()> {
         let qualified = format!("{}:{}", self.session_name, window_id.as_str());
         let layout_str = layout.as_str();
-        let output = Command::new("tmux")
+        let output = self
+            .tmux_cmd()
             .args(["select-layout", "-t", &qualified, layout_str])
             .output()
             .await
@@ -381,7 +427,8 @@ impl TmuxIpc {
     }
 
     pub async fn kill_pane(&self, pane_id: &PaneId) -> Result<()> {
-        let output = Command::new("tmux")
+        let output = self
+            .tmux_cmd()
             .args(["kill-pane", "-t", pane_id.as_str()])
             .output()
             .await
@@ -434,7 +481,8 @@ impl TmuxIpc {
 
         // Exit copy/scroll mode if active — copy mode intercepts input,
         // preventing paste-buffer from reaching the underlying process.
-        let mode_output = Command::new("tmux")
+        let mode_output = self
+            .tmux_cmd()
             .args([
                 "display-message",
                 "-p",
@@ -446,7 +494,8 @@ impl TmuxIpc {
             .await;
         if let Ok(output) = mode_output {
             if output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "1" {
-                let _ = Command::new("tmux")
+                let _ = self
+                    .tmux_cmd()
                     .args(["send-keys", "-t", &qualified_target, "-X", "cancel"])
                     .output()
                     .await;
@@ -464,7 +513,8 @@ impl TmuxIpc {
             .await
             .context("Failed to write temp buffer file")?;
 
-        let load_result = Command::new("tmux")
+        let load_result = self
+            .tmux_cmd()
             .args(["load-buffer", "-b", &buf_name, &tmp_path])
             .output()
             .await;
@@ -483,14 +533,16 @@ impl TmuxIpc {
         // No -p flag: bracketed paste (\e[200~...\e[201~) crashes Claude Code's
         // Ink TUI and breaks Gemini CLI's readline. Plain paste streams bytes
         // as standard keyboard input.
-        let paste_output = Command::new("tmux")
+        let paste_output = self
+            .tmux_cmd()
             .args(["paste-buffer", "-b", &buf_name, "-t", &qualified_target])
             .output()
             .await
             .context("Failed to run tmux paste-buffer")?;
 
         // Delete the named buffer
-        match Command::new("tmux")
+        match self
+            .tmux_cmd()
             .args(["delete-buffer", "-b", &buf_name])
             .output()
             .await
@@ -526,10 +578,11 @@ impl TmuxIpc {
                 initial: std::time::Duration::from_millis(200),
             },
         );
-        let qt = &qualified_target;
+        let qt = qualified_target.clone();
         crate::services::resilience::retry(&enter_policy, || async {
-            let output = Command::new("tmux")
-                .args(["send-keys", "-t", qt, "Enter"])
+            let output = self
+                .tmux_cmd()
+                .args(["send-keys", "-t", &qt, "Enter"])
                 .output()
                 .await
                 .context("Failed to run tmux send-keys")?;
@@ -563,7 +616,8 @@ impl TmuxIpc {
         let qualified = format!("{}:{}", self.session_name, target);
 
         // Read current window dimensions
-        let output = Command::new("tmux")
+        let output = self
+            .tmux_cmd()
             .args([
                 "display-message",
                 "-t",
@@ -592,7 +646,8 @@ impl TmuxIpc {
         let height: u32 = parts[1].parse().context("Failed to parse window height")?;
 
         // Resize +1 column
-        let _ = Command::new("tmux")
+        let _ = self
+            .tmux_cmd()
             .args([
                 "resize-window",
                 "-t",
@@ -608,7 +663,8 @@ impl TmuxIpc {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         // Restore original size
-        let _ = Command::new("tmux")
+        let _ = self
+            .tmux_cmd()
             .args([
                 "resize-window",
                 "-t",
@@ -628,12 +684,62 @@ impl TmuxIpc {
     // -- Query --
 
     pub async fn pane_exists(&self, pane_id: &PaneId) -> Result<bool> {
-        let status = Command::new("tmux")
+        let status = self
+            .tmux_cmd()
             .args(["display-message", "-t", pane_id.as_str(), "-p", ""])
             .status()
             .await
             .context("Failed to run tmux display-message")?;
         Ok(status.success())
+    }
+}
+
+#[cfg(test)]
+pub struct IsolatedTmux {
+    socket: String,
+    pub session: String,
+    pub ipc: TmuxIpc,
+}
+
+#[cfg(test)]
+impl IsolatedTmux {
+    /// Spins up a fresh tmux server on a unique socket, creates a test session,
+    /// and returns a TmuxIpc bound to it. Drop kills the server.
+    pub async fn new() -> Result<Self> {
+        let socket = format!("exomonad-test-{}", uuid::Uuid::new_v4());
+        let session = "test".to_string();
+        let tmp = std::env::temp_dir();
+
+        // Create the session on the isolated socket.
+        let mut cmd = tokio::process::Command::new("tmux");
+        cmd.arg("-L")
+            .arg(&socket)
+            .args(["new-session", "-d", "-s", &session, "-c"])
+            .arg(&tmp);
+
+        let output = cmd
+            .output()
+            .await
+            .context("failed to spawn isolated tmux")?;
+        anyhow::ensure!(
+            output.status.success(),
+            "isolated tmux new-session failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let ipc = TmuxIpc::new_with_socket(&session, Some(socket.clone()));
+        Ok(Self {
+            socket,
+            session,
+            ipc,
+        })
+    }
+}
+
+#[cfg(test)]
+impl Drop for IsolatedTmux {
+    fn drop(&mut self) {
+        // Kill the isolated server. Best-effort — use std::process so Drop is sync.
+        let _ = self.ipc.tmux_cmd_sync().arg("kill-server").output();
     }
 }
 
@@ -812,6 +918,16 @@ mod tests {
         assert!(
             result.is_err(),
             "wake_pane should fail without a real tmux session"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_isolated_tmux() {
+        let isolated = IsolatedTmux::new().await.unwrap();
+        assert!(
+            TmuxIpc::has_session(&isolated.session, Some(&isolated.socket))
+                .await
+                .unwrap()
         );
     }
 }

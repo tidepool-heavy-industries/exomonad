@@ -73,12 +73,12 @@ async fn gc_tmp_dir(tmp_dir: &Path) {
 /// Both Claude and Gemini auto-read `@filepath` references.
 ///
 /// Tmp files older than 1 hour are garbage-collected on each write.
-pub async fn inject_input(target: &str, text: &str, project_dir: &Path) -> Result<()> {
-    let session =
-        std::env::var("EXOMONAD_TMUX_SESSION").context("EXOMONAD_TMUX_SESSION not set")?;
-
-    let ipc = TmuxIpc::new(&session);
-
+pub async fn inject_input(
+    ipc: &TmuxIpc,
+    target: &str,
+    text: &str,
+    project_dir: &Path,
+) -> Result<()> {
     if text.contains('\n') {
         let tmp_dir = project_dir.join(".exo/tmp");
         tokio::fs::create_dir_all(&tmp_dir)
@@ -105,8 +105,7 @@ pub async fn inject_input(target: &str, text: &str, project_dir: &Path) -> Resul
             relative_path
         );
 
-        let target = target.to_string();
-        ipc.inject_input(&target, &pointer).await
+        ipc.inject_input(target, &pointer).await
     } else {
         info!(
             "[TmuxEvents] Injecting input to target '{}': {} chars",
@@ -114,22 +113,15 @@ pub async fn inject_input(target: &str, text: &str, project_dir: &Path) -> Resul
             text.len()
         );
 
-        let target = target.to_string();
-        let text = text.to_string();
-        ipc.inject_input(&target, &text).await
+        ipc.inject_input(target, text).await
     }
 }
 
 /// Close a worker pane by pane_id.
-pub async fn close_worker_pane(pane_id: &str) -> Result<()> {
-    let session =
-        std::env::var("EXOMONAD_TMUX_SESSION").context("EXOMONAD_TMUX_SESSION not set")?;
-
+pub async fn close_worker_pane(ipc: &TmuxIpc, pane_id: &str) -> Result<()> {
     info!("[TmuxEvents] Closing worker pane '{}'", pane_id);
 
     let pid = PaneId::parse(pane_id).context("Invalid pane_id")?;
-    let ipc = TmuxIpc::new(&session);
-
     ipc.kill_pane(&pid).await
 }
 

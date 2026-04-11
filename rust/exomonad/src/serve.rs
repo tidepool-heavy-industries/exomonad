@@ -913,20 +913,30 @@ Run `exomonad recompile` first to build it.",
     let claude_session_registry =
         Arc::new(exomonad_core::services::claude_session_registry::ClaudeSessionRegistry::new());
 
+    let tmux_session = config.tmux_session.clone();
+    let tmux_ipc = Arc::new(exomonad_core::services::tmux_ipc::TmuxIpc::new(
+        &tmux_session,
+    ));
+
     // Build Services once — all shared registries in one struct
     let tasks_dir = dirs::home_dir().unwrap_or_default().join(".claude/tasks");
     let services = Arc::new(
-        exomonad_core::services::ServicesBuilder::new(project_dir.clone(), tasks_dir, git_wt)
-            .github_client_opt(github_client.clone())
-            .event_log_opt(event_log.clone())
-            .team_registry(team_registry.clone())
-            .acp_registry(acp_registry.clone())
-            .supervisor_registry(supervisor_registry)
-            .claude_session_registry(claude_session_registry)
-            .agent_resolver(agent_resolver.clone())
-            .event_queue(event_queue.clone())
-            .mutex_registry(mutex_registry)
-            .build(),
+        exomonad_core::services::ServicesBuilder::new(
+            project_dir.clone(),
+            tasks_dir,
+            git_wt,
+            tmux_ipc,
+        )
+        .github_client_opt(github_client.clone())
+        .event_log_opt(event_log.clone())
+        .team_registry(team_registry.clone())
+        .acp_registry(acp_registry.clone())
+        .supervisor_registry(supervisor_registry)
+        .claude_session_registry(claude_session_registry)
+        .agent_resolver(agent_resolver.clone())
+        .event_queue(event_queue.clone())
+        .mutex_registry(mutex_registry)
+        .build(),
     );
 
     let mut agent_control =
