@@ -163,6 +163,7 @@ pub(crate) struct AgentMetadata {
     pub(crate) prompt_flag: &'static str,
     pub(crate) suffix: &'static str,
     pub(crate) emoji: &'static str,
+    pub(crate) default_model: &'static str,
 }
 
 pub(crate) const CLAUDE_META: AgentMetadata = AgentMetadata {
@@ -170,6 +171,7 @@ pub(crate) const CLAUDE_META: AgentMetadata = AgentMetadata {
     prompt_flag: "",
     suffix: "claude",
     emoji: "\u{1F916}", // 🤖
+    default_model: "claude-3-5-sonnet-20241022",
 };
 
 pub(crate) const GEMINI_META: AgentMetadata = AgentMetadata {
@@ -177,6 +179,7 @@ pub(crate) const GEMINI_META: AgentMetadata = AgentMetadata {
     prompt_flag: "--prompt-interactive",
     suffix: "gemini",
     emoji: "\u{1F48E}", // 💎
+    default_model: "gemini",
 };
 
 pub(crate) const SHOAL_META: AgentMetadata = AgentMetadata {
@@ -184,6 +187,7 @@ pub(crate) const SHOAL_META: AgentMetadata = AgentMetadata {
     prompt_flag: "",
     suffix: "shoal",
     emoji: "\u{1F30A}", // 🌊
+    default_model: "gemini",
 };
 
 pub(crate) const PROCESS_META: AgentMetadata = AgentMetadata {
@@ -191,10 +195,16 @@ pub(crate) const PROCESS_META: AgentMetadata = AgentMetadata {
     prompt_flag: "",
     suffix: "process",
     emoji: "\u{2699}\u{FE0F}", // ⚙️
+    default_model: "",
 };
 
 impl AgentType {
-    pub(crate) fn meta(&self) -> &'static AgentMetadata {
+    /// The default LLM model for this agent type.
+    pub fn default_model(&self) -> &'static str {
+        self.metadata().default_model
+    }
+
+    pub(crate) fn metadata(&self) -> &'static AgentMetadata {
         match self {
             AgentType::Claude => &CLAUDE_META,
             AgentType::Gemini => &GEMINI_META,
@@ -203,19 +213,20 @@ impl AgentType {
         }
     }
 
+
     pub(crate) fn command(&self) -> &'static str {
-        self.meta().command
+        self.metadata().command
     }
     pub(crate) fn prompt_flag(&self) -> &'static str {
-        self.meta().prompt_flag
+        self.metadata().prompt_flag
     }
     /// Agent type suffix for naming (e.g., "claude", "gemini").
     pub fn suffix(&self) -> &'static str {
-        self.meta().suffix
+        self.metadata().suffix
     }
     /// Emoji for display in tmux windows.
     pub fn emoji(&self) -> &'static str {
-        self.meta().emoji
+        self.metadata().emoji
     }
 
     /// Generate a display name for tmux windows.
@@ -867,6 +878,13 @@ mod tests {
     fn test_agent_type_prompt_flag() {
         assert_eq!(AgentType::Claude.prompt_flag(), "");
         assert_eq!(AgentType::Gemini.prompt_flag(), "--prompt-interactive");
+    }
+
+    #[test]
+    fn test_agent_type_default_model() {
+        assert_eq!(AgentType::Claude.default_model(), "claude-3-5-sonnet-20241022");
+        assert_eq!(AgentType::Gemini.default_model(), "gemini");
+        assert_eq!(AgentType::Shoal.default_model(), "gemini");
     }
 
     #[test]

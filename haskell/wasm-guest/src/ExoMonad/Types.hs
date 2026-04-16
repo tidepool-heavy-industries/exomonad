@@ -133,12 +133,10 @@ teamRegistrationPostToolUse hookInput =
       case extractTeamName (hiToolResponse hookInput) of
         Just teamName -> do
           let inboxName = "team-lead"
-          let agentType = case hiRuntime hookInput of
-                Just Gemini -> Agent.AgentTypeAGENT_TYPE_GEMINI
-                _ -> Agent.AgentTypeAGENT_TYPE_CLAUDE
-          let model = case hiRuntime hookInput of
-                Just Gemini -> "gemini"
-                _ -> "claude-3-5-sonnet-20241022"
+          let (agentType, model) = case hiRuntime hookInput of
+                Just Gemini -> (Agent.AgentTypeAGENT_TYPE_GEMINI, "gemini")
+                Just Claude -> (Agent.AgentTypeAGENT_TYPE_CLAUDE, "claude-3-5-sonnet-20241022")
+                Nothing -> (Agent.AgentTypeAGENT_TYPE_CLAUDE, "claude-3-5-sonnet-20241022")
           teamResult <- GS.registerTeam teamName inboxName agentType model
           case teamResult of
             Left _err ->

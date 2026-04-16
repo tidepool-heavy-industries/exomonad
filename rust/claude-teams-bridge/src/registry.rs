@@ -273,27 +273,35 @@ impl TeamRegistry {
             .collect();
 
         // 2. Add/update in-memory members (deduplicated by inbox_name)
-        let mut grouped_in_memory: HashMap<String, (Vec<String>, TeamInfo)> = HashMap::new();
-        for (key, info) in in_memory {
-            let entry = grouped_in_memory
+        // Group keys by inbox_name
+        let mut grouped_keys: HashMap<String, Vec<String>> = HashMap::new();
+        for (key, info) in &in_memory {
+            grouped_keys
                 .entry(info.inbox_name.clone())
-                .or_insert_with(|| (Vec::new(), info.clone()));
-            entry.0.push(key);
+                .or_default()
+                .push(key.clone());
         }
 
-        for (inbox_name, (mut keys, info)) in grouped_in_memory {
+        for (inbox_name, mut keys) in grouped_keys {
             // Pick primary key: prefers key matching inbox_name
             let primary_idx = keys.iter().position(|k| k == &inbox_name).unwrap_or(0);
             let primary_key = keys.remove(primary_idx);
             let aliases = keys; // remaining keys are aliases
+
+            // Deterministically pick metadata from the primary key's TeamInfo
+            let info = in_memory
+                .iter()
+                .find(|(k, _)| k == &primary_key)
+                .map(|(_, info)| info)
+                .unwrap();
 
             let existing = new_members.iter().find(|m| m.name == inbox_name);
             if existing.is_none() {
                 new_members.push(crate::config::TeamMember {
                     agent_id: primary_key,
                     name: inbox_name,
-                    agent_type: info.agent_type,
-                    model: info.model,
+                    agent_type: info.agent_type.clone(),
+                    model: info.model.clone(),
                     joined_at: chrono::Utc::now().timestamp() as u64,
                     cwd: std::env::current_dir()
                         .unwrap_or_default()
