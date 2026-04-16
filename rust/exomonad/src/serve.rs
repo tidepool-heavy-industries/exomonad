@@ -936,12 +936,12 @@ Run `exomonad recompile` first to build it.",
     for record in records {
         if let Some(uuid) = record.claude_session_uuid {
             claude_session_registry
-                .register(record.agent_name.as_str(), uuid)
+                .warm(record.agent_name.as_str(), uuid)
                 .await;
         }
         if let Some(supervisor) = record.supervisor {
             supervisor_registry
-                .register(&[record.birth_branch.as_str().to_string()], supervisor)
+                .warm(record.birth_branch.as_str(), supervisor)
                 .await;
         }
     }

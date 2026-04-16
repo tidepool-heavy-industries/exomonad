@@ -194,28 +194,43 @@ impl AgentResolver {
     where
         F: FnOnce(&mut AgentIdentityRecord),
     {
-        let mut records = self.records.write().await;
-        if let Some(record) = records.get_mut(name) {
+        let (record, identity_path) = {
+            let mut records = self.records.write().await;
+            let record = records
+                .get_mut(name)
+                .ok_or_else(|| anyhow::anyhow!("Agent '{}' not found in resolver", name))?;
+
             f(record);
 
-            // Write to disk
-            let agent_dir = self
+            let record_clone = record.clone();
+            let identity_path = self
                 .project_dir
                 .join(".exo/agents")
-                .join(record.agent_name.as_str());
-            tokio::fs::create_dir_all(&agent_dir).await?;
-            let identity_path = agent_dir.join(IDENTITY_FILENAME);
+                .join(record.agent_name.as_str())
+                .join(IDENTITY_FILENAME);
 
-            // Use a temporary file for atomic write
-            let tmp_path = identity_path.with_extension("tmp");
-            let json = serde_json::to_string_pretty(&record)?;
-            tokio::fs::write(&tmp_path, &json).await?;
-            tokio::fs::rename(&tmp_path, &identity_path).await?;
+            (record_clone, identity_path)
+        };
 
-            Ok(())
-        } else {
-            anyhow::bail!("Agent '{}' not found in resolver", name)
+        // Write to disk outside the lock
+        if let Some(parent) = identity_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
         }
+
+        // Use a temporary file for atomic write
+        let tmp_path = identity_path.with_extension("tmp");
+        let json = serde_json::to_string_pretty(&record)?;
+        if let Err(e) = tokio::fs::write(&tmp_path, &json).await {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(e.into());
+        }
+
+        if let Err(e) = tokio::fs::rename(&tmp_path, &identity_path).await {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(e.into());
+        }
+
+        Ok(())
     }
 
     /// Remove an agent's identity (removes from disk and memory).
@@ -240,6 +255,18 @@ impl AgentResolver {
     /// Get all registered agents.
     pub async fn all(&self) -> Vec<AgentIdentityRecord> {
         self.records.read().await.values().cloned().collect()
+    }
+
+    /// Find an agent's identity by its birth branch.
+    pub async fn find_by_birth_branch(
+        &self,
+        birth_branch: &BirthBranch,
+    ) -> Option<AgentIdentityRecord> {
+        let records = self.records.read().await;
+        records
+            .values()
+            .find(|r| &r.birth_branch == birth_branch)
+            .cloned()
     }
 
     /// Resolve an agent's birth branch and working directory, trying in-memory

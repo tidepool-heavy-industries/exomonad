@@ -27,16 +27,25 @@ impl ClaudeSessionRegistry {
     /// Register a Claude session UUID for the given agent identity key.
     pub async fn register(&self, key: &str, claude_uuid: ClaudeSessionUuid) {
         info!(key = %key, claude_uuid = %claude_uuid, "Registering Claude session ID");
-        let mut map = self.inner.lock().await;
-        map.insert(key.to_string(), claude_uuid.clone());
+        {
+            let mut map = self.inner.lock().await;
+            map.insert(key.to_string(), claude_uuid.clone());
+        }
 
-        // Persist to disk via AgentResolver if it exists.
-        // key is agent identity key, usually agent_name or slug.
-        let name = AgentName::from(key);
-        let _ = self
-            .resolver
-            .update_record(&name, |r| r.claude_session_uuid = Some(claude_uuid))
-            .await;
+        // Persist to disk via AgentResolver if it exists and the key is an AgentName.
+        // We avoid persisting slug aliases to prevent redundant I/O.
+        if let Ok(name) = AgentName::try_from(key.to_string()) {
+            let _ = self
+                .resolver
+                .update_record(&name, |r| r.claude_session_uuid = Some(claude_uuid))
+                .await;
+        }
+    }
+
+    /// Warm the registry without persisting to disk.
+    pub async fn warm(&self, key: &str, claude_uuid: ClaudeSessionUuid) {
+        let mut map = self.inner.lock().await;
+        map.insert(key.to_string(), claude_uuid);
     }
 
     /// Look up the Claude session UUID for the given agent identity key.

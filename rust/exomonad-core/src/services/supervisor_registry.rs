@@ -34,25 +34,36 @@ impl SupervisorRegistry {
 
     /// Register children as supervised by the given supervisor.
     pub async fn register(&self, children: &[String], info: SupervisorEntry) {
-        let mut map = self.inner.lock().await;
-        for child in children {
-            info!(
-                child = %child,
-                supervisor = %info.supervisor,
-                team = %info.team,
-                "Registering supervisor for child"
-            );
-            map.insert(child.clone(), info.clone());
-
-            // Persist to disk via AgentResolver
-            let records = self.resolver.all().await;
-            if let Some(record) = records.iter().find(|r| r.birth_branch.as_str() == child) {
-                let _ = self
-                    .resolver
-                    .update_record(&record.agent_name, |r| r.supervisor = Some(info.clone()))
-                    .await;
+        {
+            let mut map = self.inner.lock().await;
+            for child in children {
+                info!(
+                    child = %child,
+                    supervisor = %info.supervisor,
+                    team = %info.team,
+                    "Registering supervisor for child"
+                );
+                map.insert(child.clone(), info.clone());
             }
         }
+
+        // Persist to disk via AgentResolver outside the lock
+        for child in children {
+            if let Ok(birth_branch) = crate::domain::BirthBranch::try_from(child.to_string()) {
+                if let Some(record) = self.resolver.find_by_birth_branch(&birth_branch).await {
+                    let _ = self
+                        .resolver
+                        .update_record(&record.agent_name, |r| r.supervisor = Some(info.clone()))
+                        .await;
+                }
+            }
+        }
+    }
+
+    /// Warm the registry without persisting to disk.
+    pub async fn warm(&self, key: &str, info: SupervisorEntry) {
+        let mut map = self.inner.lock().await;
+        map.insert(key.to_string(), info);
     }
 
     /// Look up the supervisor for a given child birth-branch.
@@ -64,16 +75,14 @@ impl SupervisorRegistry {
             }
         }
 
-        // Fallback to disk via AgentResolver
-        let records = self.resolver.all().await;
-        if let Some(record) = records
-            .iter()
-            .find(|r| r.birth_branch.as_str() == birth_branch)
-        {
-            if let Some(supervisor) = record.supervisor.clone() {
-                let mut map = self.inner.lock().await;
-                map.insert(birth_branch.to_string(), supervisor.clone());
-                return Some(supervisor);
+        // Fallback to disk via AgentResolver outside the lock
+        if let Ok(bb) = crate::domain::BirthBranch::try_from(birth_branch.to_string()) {
+            if let Some(record) = self.resolver.find_by_birth_branch(&bb).await {
+                if let Some(supervisor) = record.supervisor {
+                    let mut map = self.inner.lock().await;
+                    map.insert(birth_branch.to_string(), supervisor.clone());
+                    return Some(supervisor);
+                }
             }
         }
 
@@ -82,18 +91,23 @@ impl SupervisorRegistry {
 
     /// Remove children from the registry.
     pub async fn deregister(&self, children: &[String]) {
-        let mut map = self.inner.lock().await;
-        for child in children {
-            info!(child = %child, "Deregistering supervisor for child");
-            map.remove(child);
+        {
+            let mut map = self.inner.lock().await;
+            for child in children {
+                info!(child = %child, "Deregistering supervisor for child");
+                map.remove(child);
+            }
+        }
 
-            // Also remove from disk via AgentResolver
-            let records = self.resolver.all().await;
-            if let Some(record) = records.iter().find(|r| r.birth_branch.as_str() == child) {
-                let _ = self
-                    .resolver
-                    .update_record(&record.agent_name, |r| r.supervisor = None)
-                    .await;
+        // Also remove from disk via AgentResolver outside the lock
+        for child in children {
+            if let Ok(bb) = crate::domain::BirthBranch::try_from(child.to_string()) {
+                if let Some(record) = self.resolver.find_by_birth_branch(&bb).await {
+                    let _ = self
+                        .resolver
+                        .update_record(&record.agent_name, |r| r.supervisor = None)
+                        .await;
+                }
             }
         }
     }
