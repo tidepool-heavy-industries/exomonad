@@ -368,6 +368,8 @@ mod tests {
                 claude_teams_bridge::TeamInfo {
                     team_name: "test-team".to_string(),
                     inbox_name: "lead".to_string(),
+                    agent_type: "exomonad-agent".to_string(),
+                    model: "gemini".to_string(),
                 },
             )
             .await;

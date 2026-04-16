@@ -105,11 +105,25 @@ impl<C: HasClaudeSessionRegistry + HasTeamRegistry + HasSupervisorRegistry + 'st
             "Registering Claude Teams info via effect"
         );
 
+        use exomonad_proto::effects::agent::AgentType;
+        let agent_type_str = match AgentType::try_from(req.agent_type).unwrap_or(AgentType::Unspecified) {
+            AgentType::Claude => "claude",
+            AgentType::Gemini => "gemini",
+            AgentType::Shoal => "shoal",
+            _ => "exomonad-agent",
+        };
+
         // Register in-memory only — Claude Code owns team directory lifecycle via TeamCreate.
         // SessionStart hook instructs Claude to call TeamCreate, which creates ~/.claude/teams/{name}/.
         let team_info = TeamInfo {
             team_name: req.team_name.clone(),
             inbox_name: req.inbox_name.clone(),
+            agent_type: agent_type_str.to_string(),
+            model: if req.model.is_empty() {
+                "gemini".to_string()
+            } else {
+                req.model.clone()
+            },
         };
 
         self.ctx
@@ -293,6 +307,8 @@ mod tests {
         let req = RegisterTeamRequest {
             team_name: "test-team".into(),
             inbox_name: "test-inbox".into(),
+            agent_type: exomonad_proto::effects::agent::AgentType::Gemini as i32,
+            model: "gemini-1.5-pro".into(),
         };
 
         let resp = handler.register_team(req, &ctx).await.unwrap();
@@ -317,6 +333,8 @@ mod tests {
                 RegisterTeamRequest {
                     team_name: "test-team".into(),
                     inbox_name: "test-inbox".into(),
+                    agent_type: exomonad_proto::effects::agent::AgentType::Gemini as i32,
+                    model: "gemini-1.5-pro".into(),
                 },
                 &ctx,
             )
@@ -350,6 +368,8 @@ mod tests {
         let req = RegisterTeamRequest {
             team_name: "test-team".into(),
             inbox_name: "test-inbox".into(),
+            agent_type: exomonad_proto::effects::agent::AgentType::Gemini as i32,
+            model: "gemini-1.5-pro".into(),
         };
 
         handler.register_team(req, &ctx).await.unwrap();

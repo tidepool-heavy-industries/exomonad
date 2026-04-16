@@ -22,6 +22,8 @@ use tracing::{debug, info};
 pub struct TeamInfo {
     pub team_name: String,
     pub inbox_name: String,
+    pub agent_type: String,
+    pub model: String,
 }
 
 /// Maps agent identity keys to Claude Teams info.
@@ -191,6 +193,8 @@ impl TeamRegistry {
         Some(TeamInfo {
             team_name: team_name.to_string(),
             inbox_name: member.name.clone(),
+            agent_type: member.agent_type.clone(),
+            model: member.model.clone(),
         })
     }
 
@@ -269,15 +273,15 @@ impl TeamRegistry {
             .collect();
 
         // 2. Add/update in-memory members (deduplicated by inbox_name)
-        let mut grouped_in_memory: HashMap<String, Vec<String>> = HashMap::new();
+        let mut grouped_in_memory: HashMap<String, (Vec<String>, TeamInfo)> = HashMap::new();
         for (key, info) in in_memory {
-            grouped_in_memory
+            let entry = grouped_in_memory
                 .entry(info.inbox_name.clone())
-                .or_default()
-                .push(key);
+                .or_insert_with(|| (Vec::new(), info.clone()));
+            entry.0.push(key);
         }
 
-        for (inbox_name, mut keys) in grouped_in_memory {
+        for (inbox_name, (mut keys, info)) in grouped_in_memory {
             // Pick primary key: prefers key matching inbox_name
             let primary_idx = keys.iter().position(|k| k == &inbox_name).unwrap_or(0);
             let primary_key = keys.remove(primary_idx);
@@ -288,8 +292,8 @@ impl TeamRegistry {
                 new_members.push(crate::config::TeamMember {
                     agent_id: primary_key,
                     name: inbox_name,
-                    agent_type: "exomonad-agent".into(),
-                    model: "gemini".into(),
+                    agent_type: info.agent_type,
+                    model: info.model,
                     joined_at: chrono::Utc::now().timestamp() as u64,
                     cwd: std::env::current_dir()
                         .unwrap_or_default()
@@ -324,6 +328,8 @@ mod tests {
             TeamInfo {
                 team_name: "exo-root".into(),
                 inbox_name: "root-inbox".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -340,6 +346,8 @@ mod tests {
             TeamInfo {
                 team_name: "exo-root".into(),
                 inbox_name: "root-inbox".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -356,6 +364,8 @@ mod tests {
             TeamInfo {
                 team_name: "team1".into(),
                 inbox_name: "inbox1".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -364,6 +374,8 @@ mod tests {
             TeamInfo {
                 team_name: "team2".into(),
                 inbox_name: "inbox2".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -379,6 +391,8 @@ mod tests {
             TeamInfo {
                 team_name: "team-a".into(),
                 inbox_name: "inbox-1".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -387,6 +401,8 @@ mod tests {
             TeamInfo {
                 team_name: "team-a".into(),
                 inbox_name: "inbox-2".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -395,6 +411,8 @@ mod tests {
             TeamInfo {
                 team_name: "team-b".into(),
                 inbox_name: "inbox-3".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -430,6 +448,8 @@ mod tests {
             TeamInfo {
                 team_name: "root-team".into(),
                 inbox_name: "root-inbox".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -438,6 +458,8 @@ mod tests {
             TeamInfo {
                 team_name: "agent-team".into(),
                 inbox_name: "agent-inbox".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -453,6 +475,8 @@ mod tests {
             TeamInfo {
                 team_name: "team".into(),
                 inbox_name: "a".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -515,6 +539,8 @@ mod tests {
             TeamInfo {
                 team_name: "ephemeral-team".into(),
                 inbox_name: "beta".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -531,6 +557,8 @@ mod tests {
             TeamInfo {
                 team_name: "my-team".into(),
                 inbox_name: "agent-1".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -555,6 +583,8 @@ mod tests {
             TeamInfo {
                 team_name: "in-memory-team".into(),
                 inbox_name: "agent-1".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -639,6 +669,8 @@ mod tests {
             TeamInfo {
                 team_name: team_a.into(),
                 inbox_name: "sender".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;

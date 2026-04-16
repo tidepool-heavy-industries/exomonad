@@ -179,6 +179,8 @@ impl<
         let team_info = claude_teams_bridge::TeamInfo {
             team_name: parent_team.team_name.clone(),
             inbox_name: child_agent_name.to_string(),
+            agent_type: "exomonad-agent".to_string(),
+            model: "claude-3-5-sonnet-20241022".to_string(),
         };
 
         // Register under agent_name and slug — NOT birth_branch.
@@ -1100,6 +1102,8 @@ mod tests {
                 claude_teams_bridge::TeamInfo {
                     team_name: team_name.to_string(),
                     inbox_name: parent_inbox.to_string(),
+                    agent_type: "exomonad-agent".to_string(),
+                    model: "claude-3-5-sonnet-20241022".to_string(),
                 },
             )
             .await;

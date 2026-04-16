@@ -28,10 +28,12 @@ import ExoMonad.Effects.KV (CleanupStalePhasesRequest (..), KVCleanupStalePhases
 import ExoMonad.Effects.Log (LogError, LogInfo)
 import ExoMonad.Effects.Log qualified as Log
 import ExoMonad.Effects.Session qualified as Session
+import ExoMonad.Guest.Effects.Session qualified as GS
 import ExoMonad.Guest.Events (EventHandlerConfig, defaultEventHandlers)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
-import ExoMonad.Guest.Types (AfterModelOutput (..), BeforeModelOutput (..), Effects, HookInput (..), HookOutput (..), HookSpecificOutput (..), StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
+import ExoMonad.Guest.Types (AfterModelOutput (..), BeforeModelOutput (..), Effects, HookInput (..), HookOutput (..), HookSpecificOutput (..), Runtime (..), StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
 import GHC.Generics (Generic)
+import Effects.Agent qualified as Agent
 
 -- | Role configuration.
 -- Defines the role name, available tools, and lifecycle hooks.
@@ -131,13 +133,13 @@ teamRegistrationPostToolUse hookInput =
       case extractTeamName (hiToolResponse hookInput) of
         Just teamName -> do
           let inboxName = "team-lead"
-          teamResult <-
-            suspendEffect @Session.SessionRegisterTeam
-              ( Session.RegisterTeamRequest
-                  { Session.registerTeamRequestTeamName = TL.fromStrict teamName,
-                    Session.registerTeamRequestInboxName = TL.fromStrict inboxName
-                  }
-              )
+          let agentType = case hiRuntime hookInput of
+                Just Gemini -> Agent.AgentTypeAGENT_TYPE_GEMINI
+                _ -> Agent.AgentTypeAGENT_TYPE_CLAUDE
+          let model = case hiRuntime hookInput of
+                Just Gemini -> "gemini"
+                _ -> "claude-3-5-sonnet-20241022"
+          teamResult <- GS.registerTeam teamName inboxName agentType model
           case teamResult of
             Left _err ->
               void $

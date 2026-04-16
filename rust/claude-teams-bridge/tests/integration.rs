@@ -337,6 +337,8 @@ async fn resolve_tier2_e2e_inbox_delivery() {
             TeamInfo {
                 team_name: team.into(),
                 inbox_name: "exo-worker".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -487,6 +489,8 @@ async fn live_team_resolve_and_deliver() {
             TeamInfo {
                 team_name: team.into(),
                 inbox_name: "test-harness".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -588,6 +592,8 @@ async fn lead_deregistered_still_resolves_via_config() {
             TeamInfo {
                 team_name: team.into(),
                 inbox_name: "team-lead".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -597,6 +603,8 @@ async fn lead_deregistered_still_resolves_via_config() {
             TeamInfo {
                 team_name: team.into(),
                 inbox_name: "worker-1".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -657,6 +665,8 @@ async fn lead_replaced_config_authoritative() {
             TeamInfo {
                 team_name: team.into(),
                 inbox_name: "new-lead".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -729,6 +739,8 @@ async fn cross_team_name_collision() {
             TeamInfo {
                 team_name: "alpha".into(),
                 inbox_name: "sender".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -747,6 +759,8 @@ async fn cross_team_name_collision() {
             TeamInfo {
                 team_name: "alpha".into(),
                 inbox_name: "worker".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -792,6 +806,8 @@ async fn orphaned_agent_returns_none() {
             TeamInfo {
                 team_name: team.into(),
                 inbox_name: "lead".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -880,6 +896,8 @@ async fn resolve_lead_name_match_fallback() {
             TeamInfo {
                 team_name: team2.into(),
                 inbox_name: "fallback-agent".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -971,6 +989,8 @@ async fn concurrent_register_resolve_no_panic() {
                 TeamInfo {
                     team_name: "concurrent-team".into(),
                     inbox_name: name.clone(),
+                    agent_type: "exomonad-agent".into(),
+                    model: "gemini".into(),
                 },
             )
             .await;
@@ -1047,6 +1067,8 @@ async fn supervisor_to_lead_routing_chain() {
             TeamInfo {
                 team_name: team.into(),
                 inbox_name: "team-lead".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -1229,6 +1251,8 @@ async fn live_teams_e2e() {
             TeamInfo {
                 team_name: team.into(),
                 inbox_name: "e2e-test-runner".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -1394,6 +1418,8 @@ async fn test_register_syncs_to_disk() {
             TeamInfo {
                 team_name: team.into(),
                 inbox_name: "worker-1".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -1444,6 +1470,8 @@ async fn test_remove_member_persists_to_disk() {
             TeamInfo {
                 team_name: team.into(),
                 inbox_name: "worker-1".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -1510,6 +1538,8 @@ async fn test_cc_native_members_preserved() {
             TeamInfo {
                 team_name: team.into(),
                 inbox_name: "worker-1".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await;
@@ -1560,6 +1590,8 @@ async fn test_register_member_moves_between_teams() {
             TeamInfo {
                 team_name: team1.into(),
                 inbox_name: "agent-x".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await
@@ -1578,6 +1610,8 @@ async fn test_register_member_moves_between_teams() {
             TeamInfo {
                 team_name: team2.into(),
                 inbox_name: "agent-x".into(),
+                agent_type: "exomonad-agent".into(),
+                model: "gemini".into(),
             },
         )
         .await
@@ -1627,6 +1661,8 @@ async fn test_alias_persistence_across_restart() {
     let info = TeamInfo {
         team_name: team.into(),
         inbox_name: "agent-1".into(),
+        agent_type: "exomonad-agent".into(),
+        model: "gemini".into(),
     };
 
     // Register under 3 keys
