@@ -4,8 +4,9 @@
 //! written as `identity.json` at spawn time with all derived fields pre-computed.
 //! Consumers read from the resolver — no re-derivation, no suffix stripping, no fallbacks.
 
-use crate::domain::{AgentName, BirthBranch, Slug};
+use crate::domain::{AgentName, BirthBranch, ClaudeSessionUuid, Slug};
 use crate::services::agent_control::{AgentType, Topology};
+use crate::services::supervisor_registry::SupervisorEntry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -35,6 +36,12 @@ pub struct AgentIdentityRecord {
     pub display_name: String,
     /// Workspace topology.
     pub topology: Topology,
+    /// Claude Code session UUID for context inheritance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_session_uuid: Option<ClaudeSessionUuid>,
+    /// Supervisor identity for routing child → parent messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supervisor: Option<SupervisorEntry>,
 }
 
 const IDENTITY_FILENAME: &str = "identity.json";
@@ -182,6 +189,50 @@ impl AgentResolver {
         Ok(())
     }
 
+    /// Atomically update an agent's identity record.
+    pub async fn update_record<F>(&self, name: &AgentName, f: F) -> anyhow::Result<()>
+    where
+        F: FnOnce(&mut AgentIdentityRecord),
+    {
+        let (record, identity_path) = {
+            let mut records = self.records.write().await;
+            let record = records
+                .get_mut(name)
+                .ok_or_else(|| anyhow::anyhow!("Agent '{}' not found in resolver", name))?;
+
+            f(record);
+
+            let record_clone = record.clone();
+            let identity_path = self
+                .project_dir
+                .join(".exo/agents")
+                .join(record.agent_name.as_str())
+                .join(IDENTITY_FILENAME);
+
+            (record_clone, identity_path)
+        };
+
+        // Write to disk outside the lock
+        if let Some(parent) = identity_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
+        // Use a temporary file for atomic write
+        let tmp_path = identity_path.with_extension("tmp");
+        let json = serde_json::to_string_pretty(&record)?;
+        if let Err(e) = tokio::fs::write(&tmp_path, &json).await {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(e.into());
+        }
+
+        if let Err(e) = tokio::fs::rename(&tmp_path, &identity_path).await {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(e.into());
+        }
+
+        Ok(())
+    }
+
     /// Remove an agent's identity (removes from disk and memory).
     pub async fn deregister(&self, name: &AgentName) -> anyhow::Result<()> {
         // Remove from memory
@@ -204,6 +255,18 @@ impl AgentResolver {
     /// Get all registered agents.
     pub async fn all(&self) -> Vec<AgentIdentityRecord> {
         self.records.read().await.values().cloned().collect()
+    }
+
+    /// Find an agent's identity by its birth branch.
+    pub async fn find_by_birth_branch(
+        &self,
+        birth_branch: &BirthBranch,
+    ) -> Option<AgentIdentityRecord> {
+        let records = self.records.read().await;
+        records
+            .values()
+            .find(|r| &r.birth_branch == birth_branch)
+            .cloned()
     }
 
     /// Resolve an agent's birth branch and working directory, trying in-memory
@@ -324,6 +387,8 @@ mod tests {
             working_dir: PathBuf::from(format!(".exo/worktrees/{}/", name)),
             display_name: format!("🤖 {}", name),
             topology: Topology::WorktreePerAgent,
+            claude_session_uuid: None,
+            supervisor: None,
         }
     }
 
@@ -337,6 +402,8 @@ mod tests {
             working_dir: PathBuf::from("."),
             display_name: format!("💎 {}", name),
             topology: Topology::SharedDir,
+            claude_session_uuid: None,
+            supervisor: None,
         }
     }
 
@@ -505,6 +572,39 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolver.all().await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn update_record_updates_memory_and_disk() {
+        let tmp = TempDir::new().unwrap();
+        let resolver = AgentResolver::load(tmp.path().to_path_buf()).await;
+
+        let record = test_record("feature-a-claude", "feature-a", "main.feature-a-claude");
+        resolver.register(record).await.unwrap();
+
+        let name = AgentName::from("feature-a-claude");
+        let uuid = ClaudeSessionUuid::from("uuid-123");
+        let uuid_clone = uuid.clone();
+
+        resolver
+            .update_record(&name, |r| r.claude_session_uuid = Some(uuid_clone))
+            .await
+            .unwrap();
+
+        // Verify memory
+        let got = resolver.get(&name).await.unwrap();
+        assert_eq!(got.claude_session_uuid, Some(uuid));
+
+        // Verify disk
+        let identity_path = tmp
+            .path()
+            .join(".exo/agents/feature-a-claude/identity.json");
+        let contents = tokio::fs::read_to_string(identity_path).await.unwrap();
+        let on_disk: AgentIdentityRecord = serde_json::from_str(&contents).unwrap();
+        assert_eq!(
+            on_disk.claude_session_uuid,
+            Some(ClaudeSessionUuid::from("uuid-123"))
+        );
     }
 
     #[tokio::test]

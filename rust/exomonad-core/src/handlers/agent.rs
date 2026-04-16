@@ -14,7 +14,7 @@ use crate::services::agent_control::{
     SpawnGeminiTeammateOptions, SpawnLeafOptions, SpawnOptions, SpawnSubtreeOptions,
     SpawnWorkerOptions,
 };
-use crate::services::supervisor_registry::SupervisorInfo;
+use crate::services::supervisor_registry::SupervisorEntry;
 use crate::{GithubOwner, GithubRepo, IssueNumber};
 use async_trait::async_trait;
 use exomonad_proto::effects::agent::*;
@@ -81,7 +81,7 @@ impl<
         sup_reg
             .register(
                 &[child_key.to_string()],
-                SupervisorInfo {
+                SupervisorEntry {
                     supervisor: ctx.agent_name.clone(),
                     team: team_name,
                 },
