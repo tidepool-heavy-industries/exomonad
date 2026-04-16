@@ -94,10 +94,16 @@ impl<
     /// Resolves the team from TeamRegistry (same pattern as `register_child_supervisor`)
     /// so the child is registered in the user-created team (e.g., "gh-issues"), not
     /// a hardcoded "exo-{branch}" team that CC doesn't recognize.
+    ///
+    /// `agent_type` populates the `model` field honestly (claude/gemini/shoal/process)
+    /// so CC's routing doesn't treat every synthetic member as "gemini". `kind` is
+    /// the semantic role label written to `agentType` (e.g. "claude-subtree",
+    /// "gemini-leaf", "gemini-worker", "gemini-acp").
     async fn register_synthetic_member(
         &self,
         member_name: &AgentName,
-        agent_type: &str,
+        agent_type: crate::services::agent_control::AgentType,
+        kind: &str,
         ctx: &crate::effects::EffectContext,
     ) {
         let team_reg = self.ctx.team_registry();
@@ -117,6 +123,7 @@ impl<
             &team_name,
             member_name,
             agent_type,
+            kind,
         ) {
             warn!(
                 member = %member_name,
@@ -416,8 +423,13 @@ impl<
             crate::services::agent_control::slugify(&req.name),
             crate::services::agent_control::AgentType::Gemini,
         );
-        self.register_synthetic_member(&identity.internal_name(), "gemini-worker", ctx)
-            .await;
+        self.register_synthetic_member(
+            &identity.internal_name(),
+            crate::services::agent_control::AgentType::Gemini,
+            "gemini-worker",
+            ctx,
+        )
+        .await;
         self.register_child_supervisor(&req.name, ctx).await;
 
         Ok(SpawnWorkerResponse {
@@ -512,8 +524,13 @@ impl<
             crate::services::agent_control::slugify(&req.branch_name),
             crate::services::agent_control::AgentType::Claude,
         );
-        self.register_synthetic_member(&child_identity.internal_name(), "claude-subtree", ctx)
-            .await;
+        self.register_synthetic_member(
+            &child_identity.internal_name(),
+            crate::services::agent_control::AgentType::Claude,
+            "claude-subtree",
+            ctx,
+        )
+        .await;
 
         // Propagate parent's team to sub-TL's identity keys so the sub-TL can
         // register its own workers as synthetic members when it spawns them
@@ -572,8 +589,13 @@ impl<
             crate::services::agent_control::slugify(&req.branch_name),
             crate::services::agent_control::AgentType::Gemini,
         );
-        self.register_synthetic_member(&leaf_identity.internal_name(), "gemini-leaf", ctx)
-            .await;
+        self.register_synthetic_member(
+            &leaf_identity.internal_name(),
+            crate::services::agent_control::AgentType::Gemini,
+            "gemini-leaf",
+            ctx,
+        )
+        .await;
         self.register_child_supervisor(&req.branch_name, ctx).await;
 
         Ok(SpawnLeafSubtreeResponse {
@@ -642,8 +664,13 @@ impl<
         registry.register(conn).await;
 
         // Register as synthetic team member (uses TL's actual team, not hardcoded exo-{branch})
-        self.register_synthetic_member(&agent_name, "gemini-acp", ctx)
-            .await;
+        self.register_synthetic_member(
+            &agent_name,
+            crate::services::agent_control::AgentType::Gemini,
+            "gemini-acp",
+            ctx,
+        )
+        .await;
 
         info!(agent = %agent_name, "ACP agent spawned and registered");
 

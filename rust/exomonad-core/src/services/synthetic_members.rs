@@ -1,4 +1,5 @@
 use crate::domain::{AgentName, TeamName};
+use crate::services::agent_control::AgentType;
 use anyhow::{Context, Result};
 use claude_teams_bridge::file_lock::{fsync_dir, FileLock};
 use serde_json::Value;
@@ -10,20 +11,33 @@ use tracing::{info, warn};
 /// Register a synthetic member in a Claude Teams config.json.
 ///
 /// Reads the existing config, appends to the members array, writes back atomically.
+///
+/// `agent_type` is the runtime type (Claude/Gemini/Shoal/Process) and populates
+/// the `model` field honestly — not hardcoded "gemini". `kind` is the semantic
+/// role label written to the `agentType` field (e.g. "claude-subtree",
+/// "gemini-leaf", "gemini-worker", "gemini-acp").
 pub fn register_synthetic_member(
     team_name: &TeamName,
     member_name: &AgentName,
-    agent_type: &str,
+    agent_type: AgentType,
+    kind: &str,
 ) -> Result<()> {
     let config_path = team_config_path(team_name)?;
-    register_synthetic_member_at_path(&config_path, team_name, member_name.as_str(), agent_type)
+    register_synthetic_member_at_path(
+        &config_path,
+        team_name,
+        member_name.as_str(),
+        agent_type,
+        kind,
+    )
 }
 
 fn register_synthetic_member_at_path(
     config_path: &PathBuf,
     team_name: &TeamName,
     member_name: &str,
-    agent_type: &str,
+    agent_type: AgentType,
+    kind: &str,
 ) -> Result<()> {
     // Read existing config
     let _lock = FileLock::acquire(config_path, Duration::from_secs(30)).with_context(|| {
@@ -57,8 +71,8 @@ fn register_synthetic_member_at_path(
     let entry = serde_json::json!({
         "agentId": agent_id,
         "name": member_name,
-        "agentType": agent_type,
-        "model": "gemini",
+        "agentType": kind,
+        "model": agent_type.suffix(),
         "color": "green",
         "planModeRequired": false,
         "joinedAt": now,
@@ -239,16 +253,34 @@ mod tests {
         fs::write(&config_path, serde_json::to_string_pretty(&initial_config)?)?;
 
         // Register new member
-        register_synthetic_member_at_path(&config_path, &team_name, "gemini-1", "gemini-worker")?;
+        register_synthetic_member_at_path(
+            &config_path,
+            &team_name,
+            "gemini-1",
+            AgentType::Gemini,
+            "gemini-worker",
+        )?;
 
         let content = fs::read_to_string(&config_path)?;
         let config: Value = serde_json::from_str(&content)?;
         let members = config["members"].as_array().unwrap();
         assert_eq!(members.len(), 2);
         assert!(members.iter().any(|m| m["name"] == "gemini-1"));
+        let new_entry = members
+            .iter()
+            .find(|m| m["name"] == "gemini-1")
+            .expect("gemini-1 entry present");
+        assert_eq!(new_entry["model"], "gemini");
+        assert_eq!(new_entry["agentType"], "gemini-worker");
 
         // Idempotent registration
-        register_synthetic_member_at_path(&config_path, &team_name, "gemini-1", "gemini-worker")?;
+        register_synthetic_member_at_path(
+            &config_path,
+            &team_name,
+            "gemini-1",
+            AgentType::Gemini,
+            "gemini-worker",
+        )?;
         let content = fs::read_to_string(&config_path)?;
         let config: Value = serde_json::from_str(&content)?;
         assert_eq!(config["members"].as_array().unwrap().len(), 2);
@@ -261,6 +293,35 @@ mod tests {
         assert_eq!(members.len(), 1);
         assert!(!members.iter().any(|m| m["name"] == "gemini-1"));
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_register_claude_subtree_writes_claude_model() -> Result<()> {
+        // Regression for the hardcoded `model: "gemini"` bug: every synthetic
+        // member was registered as "gemini" regardless of actual agent type.
+        // Sub-TLs are Claude but were misreported, risking wrong routing in CC.
+        let dir = tempdir()?;
+        let team_name = TeamName::from("test-team");
+        let config_path = dir.path().join("config.json");
+        fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&serde_json::json!({"members": []}))?,
+        )?;
+
+        register_synthetic_member_at_path(
+            &config_path,
+            &team_name,
+            "sub-tl",
+            AgentType::Claude,
+            "claude-subtree",
+        )?;
+
+        let config: Value = serde_json::from_str(&fs::read_to_string(&config_path)?)?;
+        let entry = &config["members"].as_array().unwrap()[0];
+        assert_eq!(entry["model"], "claude");
+        assert_eq!(entry["agentType"], "claude-subtree");
+        assert_eq!(entry["backendType"], "exomonad");
         Ok(())
     }
 
