@@ -5,7 +5,7 @@
 
 use crate::domain::ClaudeSessionUuid;
 use crate::effects::{dispatch_session_effect, EffectResult, SessionEffects};
-use crate::services::supervisor_registry::SupervisorInfo;
+use crate::services::supervisor_registry::SupervisorEntry;
 use async_trait::async_trait;
 use claude_teams_bridge::TeamInfo;
 use exomonad_proto::effects::session::*;
@@ -165,7 +165,7 @@ impl<C: HasClaudeSessionRegistry + HasTeamRegistry + HasSupervisorRegistry + 'st
             .supervisor_registry()
             .register(
                 &children,
-                SupervisorInfo {
+                SupervisorEntry {
                     supervisor: supervisor_name,
                     team: team_name,
                 },

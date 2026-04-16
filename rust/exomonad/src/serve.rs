@@ -922,9 +922,29 @@ Run `exomonad recompile` first to build it.",
     let event_queue = Arc::new(exomonad_core::services::event_queue::EventQueue::new());
     let mutex_registry = Arc::new(exomonad_core::services::MutexRegistry::new());
     mutex_registry.spawn_expiry_task();
-    let supervisor_registry = Arc::new(exomonad_core::services::SupervisorRegistry::new());
-    let claude_session_registry =
-        Arc::new(exomonad_core::services::claude_session_registry::ClaudeSessionRegistry::new());
+    let supervisor_registry = Arc::new(exomonad_core::services::SupervisorRegistry::new(
+        agent_resolver.clone(),
+    ));
+    let claude_session_registry = Arc::new(
+        exomonad_core::services::claude_session_registry::ClaudeSessionRegistry::new(
+            agent_resolver.clone(),
+        ),
+    );
+
+    // Warm registries from persisted identity records
+    let records = agent_resolver.all().await;
+    for record in records {
+        if let Some(uuid) = record.claude_session_uuid {
+            claude_session_registry
+                .register(record.agent_name.as_str(), uuid)
+                .await;
+        }
+        if let Some(supervisor) = record.supervisor {
+            supervisor_registry
+                .register(&[record.birth_branch.as_str().to_string()], supervisor)
+                .await;
+        }
+    }
 
     let tmux_session = config.tmux_session.clone();
     let tmux_ipc = Arc::new(exomonad_core::services::tmux_ipc::TmuxIpc::new(

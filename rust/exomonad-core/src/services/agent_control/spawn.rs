@@ -166,6 +166,8 @@ impl<
                 working_dir: agent_dir.clone(),
                 display_name: display_name.clone(),
                 topology: Topology::WorktreePerAgent,
+                claude_session_uuid: None,
+                supervisor: None,
             };
             let agent_config_dir = self
                 .finalize_spawn(&agent_name, routing, Some(identity_record))
@@ -354,6 +356,8 @@ impl<
                 working_dir: worktree_path.clone(),
                 display_name: display_name.clone(),
                 topology: Topology::WorktreePerAgent,
+                claude_session_uuid: None,
+                supervisor: None,
             };
             let agent_config_dir = self
                 .finalize_spawn(&agent_name, routing, Some(identity_record))
@@ -592,6 +596,8 @@ impl<
                 working_dir: ctx.working_dir.clone(),
                 display_name: display_name.clone(),
                 topology: Topology::SharedDir,
+                claude_session_uuid: None,
+                supervisor: None,
             };
             self.finalize_spawn(&agent_name, routing, Some(identity_record))
                 .await?;
@@ -821,6 +827,8 @@ impl<
                 working_dir: worktree_path.clone(),
                 display_name: display_name.clone(),
                 topology: Topology::WorktreePerAgent,
+                claude_session_uuid: None,
+                supervisor: None,
             };
             let agent_config_dir = self.finalize_spawn(&agent_name, routing, Some(identity_record))
                 .await?;
@@ -952,6 +960,8 @@ impl<
                 working_dir: worktree_path.clone(),
                 display_name: display_name.clone(),
                 topology: Topology::WorktreePerAgent,
+                claude_session_uuid: None,
+                supervisor: None,
             };
             let agent_config_dir = self.finalize_spawn(&agent_name, routing, Some(identity_record))
                 .await?;

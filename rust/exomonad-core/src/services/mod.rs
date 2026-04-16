@@ -144,6 +144,7 @@ impl ServicesBuilder {
         git_wt: Arc<GitWorktreeService>,
         tmux_ipc: Arc<self::tmux_ipc::TmuxIpc>,
     ) -> Self {
+        let agent_resolver = Arc::new(AgentResolver::empty());
         Self {
             project_dir,
             tasks_dir,
@@ -153,9 +154,9 @@ impl ServicesBuilder {
             event_log: None,
             team_registry: Arc::new(TeamRegistry::new()),
             acp_registry: Arc::new(AcpRegistry::new()),
-            supervisor_registry: Arc::new(SupervisorRegistry::new()),
-            claude_session_registry: Arc::new(ClaudeSessionRegistry::new()),
-            agent_resolver: Arc::new(AgentResolver::empty()),
+            supervisor_registry: Arc::new(SupervisorRegistry::new(agent_resolver.clone())),
+            claude_session_registry: Arc::new(ClaudeSessionRegistry::new(agent_resolver.clone())),
+            agent_resolver,
             event_queue: Arc::new(EventQueue::new()),
             mutex_registry: Arc::new(MutexRegistry::new()),
         }
