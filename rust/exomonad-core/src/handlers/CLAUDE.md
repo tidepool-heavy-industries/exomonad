@@ -175,7 +175,7 @@ The delivery verifier (background task that polls `is_message_read` for 30s) ski
 
 ### Session-Qualified Targets
 
-`TmuxIpc::inject_input` session-qualifies all targets (`{session}:{target}`) to ensure `paste-buffer` and `send-keys` resolve to the same pane deterministically. Without qualification, tmux resolves display-name targets against the "most recently used" session, which is nondeterministic for subprocess calls.
+`TmuxIpc::inject_input` qualifies targets with the session name (`{session}:{target}`) to ensure deterministic resolution. Stable global identifiers starting with `@` (window ID) or `%` (pane ID) are used as-is, as prefixing with a session name is invalid for panes and redundant for windows. Targets already containing a `:` are also used as-is.
 
 ### Injection Locking
 

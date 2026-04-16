@@ -132,6 +132,20 @@ impl TmuxIpc {
         &self.session_name
     }
 
+    /// Qualify a tmux target (window or pane) with the session name if it is not
+    /// already qualified or a stable global identifier.
+    ///
+    /// Global IDs (@N, %N) and already-qualified targets (session:target)
+    /// should be used as-is. Prefixing global IDs with session names
+    /// is redundant for windows and invalid for panes.
+    fn qualify_target(&self, target: &str) -> String {
+        if target.starts_with('@') || target.starts_with('%') || target.contains(':') {
+            target.to_string()
+        } else {
+            format!("{}:{}", self.session_name, target)
+        }
+    }
+
     fn tmux_cmd(&self) -> Command {
         let mut cmd = Command::new("tmux");
         if let Some(socket) = &self.socket_name {
@@ -408,7 +422,7 @@ impl TmuxIpc {
         window_id: &WindowId,
         layout: crate::domain::TmuxLayout,
     ) -> Result<()> {
-        let qualified = format!("{}:{}", self.session_name, window_id.as_str());
+        let qualified = self.qualify_target(window_id.as_str());
         let layout_str = layout.as_str();
         let output = self
             .tmux_cmd()
@@ -459,7 +473,7 @@ impl TmuxIpc {
     pub async fn inject_input(&self, target: &str, text: &str) -> Result<()> {
         // Session-qualify the target so paste-buffer and send-keys resolve
         // to the same pane deterministically.
-        let qualified_target = format!("{}:{}", self.session_name, target);
+        let qualified_target = self.qualify_target(target);
 
         // Serialize injections to the same target to prevent interleaving.
         // Uses Weak refs so lock entries are reclaimed when not in use.
@@ -613,7 +627,7 @@ impl TmuxIpc {
     /// until a terminal event arrives. A +1/-1 column resize triggers SIGWINCH,
     /// which wakes the event loop to process buffered input.
     pub async fn wake_pane(&self, target: &str) -> Result<()> {
-        let qualified = format!("{}:{}", self.session_name, target);
+        let qualified = self.qualify_target(target);
 
         // Read current window dimensions
         let output = self
@@ -984,5 +998,59 @@ mod tests {
 
         let fake_pane = PaneId::parse("%99999").unwrap();
         assert!(!isolated.ipc.pane_exists(&fake_pane).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_inject_input_with_pane_id() {
+        if !IsolatedTmux::is_available().await {
+            return;
+        }
+        let isolated = IsolatedTmux::new().await.unwrap();
+        let windows = isolated.ipc.list_windows().await.unwrap();
+        let pane_id = windows[0].pane_id.clone();
+
+        // tmux rejects `session:%N` targets — pane IDs are global and must be used as-is.
+        isolated
+            .ipc
+            .inject_input(pane_id.as_str(), "test content")
+            .await
+            .expect("inject_input with pane ID should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_inject_input_with_window_id() {
+        if !IsolatedTmux::is_available().await {
+            return;
+        }
+        let isolated = IsolatedTmux::new().await.unwrap();
+        let windows = isolated.ipc.list_windows().await.unwrap();
+        let window_id = windows[0].window_id.clone();
+
+        isolated
+            .ipc
+            .inject_input(window_id.as_str(), "test content")
+            .await
+            .expect("inject_input with window ID should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_qualify_target_logic() {
+        let ipc = TmuxIpc::new("mysession");
+
+        // Global IDs remain as-is
+        assert_eq!(ipc.qualify_target("@1"), "@1");
+        assert_eq!(ipc.qualify_target("%42"), "%42");
+
+        // Already qualified targets remain as-is
+        assert_eq!(
+            ipc.qualify_target("othersession:Server"),
+            "othersession:Server"
+        );
+        assert_eq!(ipc.qualify_target("mysession:3.1"), "mysession:3.1");
+
+        // Unqualified targets get prefixed
+        assert_eq!(ipc.qualify_target("Server"), "mysession:Server");
+        assert_eq!(ipc.qualify_target("3"), "mysession:3");
+        assert_eq!(ipc.qualify_target("."), "mysession:.");
     }
 }
