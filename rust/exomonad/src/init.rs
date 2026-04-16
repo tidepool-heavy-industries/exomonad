@@ -482,6 +482,27 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     // 4. Poll for server socket
     wait_for_server_socket(&cwd).await?;
 
+    // GC stale agents before spawning companions
+    {
+        use exomonad_core::services::agent_control::AgentControlService;
+        use exomonad_core::services::{GitWorktreeService, ServicesBuilder};
+        use std::sync::Arc;
+
+        let git_wt = Arc::new(GitWorktreeService::new(cwd.clone()));
+        let services = ServicesBuilder::new(
+            cwd.clone(),
+            cwd.join(".exo/tasks"),
+            git_wt,
+            Arc::new(ipc.clone()),
+        )
+        .build();
+        let agent_control = AgentControlService::new(Arc::new(services))
+            .with_tmux_session(session.clone());
+        if let Err(e) = agent_control.gc_stale_agents().await {
+            warn!(error = %e, "GC stale agents failed (non-fatal)");
+        }
+    }
+
     // 5. Spawn companion agents
     for companion in &config.companions {
         // Validate companion name (alphanumeric, hyphens, underscores only)

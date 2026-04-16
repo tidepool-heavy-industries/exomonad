@@ -9,6 +9,7 @@ mod cleanup;
 mod internal;
 mod spawn;
 
+pub use cleanup::GcStats;
 pub(crate) use internal::SpawnRollback;
 
 pub(crate) use crate::common::TimeoutError;
