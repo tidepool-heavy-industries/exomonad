@@ -218,6 +218,10 @@ impl<
             ));
         }
 
+        // Set upstream tracking by pushing the branch to origin.
+        // Non-fatal: supports offline use or repos without remotes.
+        ensure_branch_pushed(self.git_wt(), branch_name, worktree_path).await;
+
         Ok(())
     }
 

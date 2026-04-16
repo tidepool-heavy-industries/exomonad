@@ -146,7 +146,7 @@ impl GitWorktreeService {
         info!(branch = %branch, path = %workspace_path.display(), "Pushing branch");
 
         let output = std::process::Command::new("git")
-            .args(["push", "origin", branch.as_str()])
+            .args(["push", "-u", "origin", branch.as_str()])
             .current_dir(workspace_path)
             .output()
             .map_err(|e| WorktreeError::GitError {
@@ -733,5 +733,61 @@ mod tests {
         assert_eq!(resolved_a, Some(branch_a));
         assert_eq!(resolved_b, Some(branch_b));
         assert_ne!(resolved_a, resolved_b);
+    }
+
+    #[test]
+    fn test_push_bookmark_sets_upstream() {
+        // Create a bare repo to act as remote
+        let temp_remote = TempDir::new().expect("failed to create temp remote dir");
+        let remote_path = temp_remote.path();
+        let status = Command::new("git")
+            .args(["init", "--bare"])
+            .current_dir(remote_path)
+            .status()
+            .expect("failed to run git init --bare");
+        assert!(status.success());
+
+        // Create local repo
+        let temp_local = TempDir::new().expect("failed to create temp local dir");
+        let local_path = temp_local.path();
+        let run = |args: &[&str]| {
+            let status = Command::new("git")
+                .args(args)
+                .current_dir(local_path)
+                .status()
+                .expect("failed to run git command");
+            assert!(status.success(), "git command failed: {:?}", args);
+        };
+        run(&["init"]);
+        run(&["config", "user.email", "test@example.com"]);
+        run(&["config", "user.name", "Test User"]);
+        run(&["commit", "--allow-empty", "-m", "Initial commit"]);
+        run(&["remote", "add", "origin", remote_path.to_str().unwrap()]);
+
+        let service = GitWorktreeService::new(local_path.to_path_buf());
+        let branch = BranchName::from("test-upstream-branch");
+        service.create_bookmark(local_path, &branch, None).unwrap();
+
+        // Push and verify it sets upstream
+        service.push_bookmark(local_path, &branch).unwrap();
+
+        let output = Command::new("git")
+            .args([
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "test-upstream-branch@{u}",
+            ])
+            .current_dir(local_path)
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "Upstream not set for branch: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let upstream = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        assert_eq!(upstream, "origin/test-upstream-branch");
     }
 }
