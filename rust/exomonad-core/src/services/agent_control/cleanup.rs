@@ -168,6 +168,9 @@ impl<
             }
         }
 
+        // Purge AcpRegistry entry
+        self.ctx.acp_registry().remove(internal_name.as_str()).await;
+
         // Emit agent:stopped event
         if let Some(ref session) = self.tmux_session {
             if let Ok(agent_id) = crate::ui_protocol::AgentId::try_from(identifier.to_string()) {

@@ -149,6 +149,24 @@ impl TmuxIpc {
         cmd
     }
 
+    #[cfg(test)]
+    pub async fn run_tmux_command(&self, args: &[&str]) -> Result<String> {
+        let output = self
+            .tmux_cmd()
+            .args(args)
+            .output()
+            .await
+            .context("Failed to run tmux command")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux command {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
     // -- Session management (static, no &self) --
 
     /// Create a new tmux session. Returns the stable window ID (@N) of the initial window.
@@ -691,6 +709,43 @@ impl TmuxIpc {
             .await
             .context("Failed to run tmux display-message")?;
         Ok(status.success())
+    }
+
+    /// Check if a target (pane_id, window_id, or display name) exists in this session.
+    pub async fn target_alive(&self, target: &str) -> bool {
+        let qualified = if target.starts_with('%') || target.starts_with('@') || target.contains(':')
+        {
+            target.to_string()
+        } else {
+            format!("{}:{}", self.session_name, target)
+        };
+
+        // Use list-panes for pane_id (%N) and list-windows for window_id (@N)
+        // For general names, list-panes with -t session:name will fail if not found.
+        let args = if target.starts_with('@') {
+            vec!["list-windows", "-F", "#{window_id}", "-t", &qualified]
+        } else {
+            vec!["list-panes", "-F", "#{pane_id}", "-t", &qualified]
+        };
+
+        let output = self.tmux_cmd().args(&args).output().await;
+
+        match output {
+            Ok(out) => {
+                let success = out.status.success();
+                debug!(
+                    target = %qualified,
+                    success,
+                    status = ?out.status.code(),
+                    "tmux target_alive check"
+                );
+                success
+            }
+            Err(e) => {
+                warn!(target = %qualified, error = %e, "tmux list-panes/windows failed during liveness check");
+                false
+            }
+        }
     }
 }
 

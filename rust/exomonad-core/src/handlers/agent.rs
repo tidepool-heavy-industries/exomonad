@@ -829,6 +829,9 @@ impl<
             warn!(agent = %ctx.agent_name, "Could not read routing.json (tried {agent_key} and suffixed variants)");
         }
 
+        // Purge AcpRegistry entry
+        self.ctx.acp_registry().remove(resolved_internal_name.as_str()).await;
+
         // Remove synthetic team member registration after closing.
         // AgentResolver is the canonical source for agent identity.
         if closed {
