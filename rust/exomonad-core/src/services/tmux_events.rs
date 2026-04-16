@@ -12,9 +12,9 @@ use super::tmux_ipc::{PaneId, TmuxIpc};
 
 /// Emit an agent event. Log-only — no tmux interaction.
 /// Keeps function signature for callers.
-pub fn emit_event(_session: &str, event: &AgentEvent) -> Result<()> {
+pub fn emit_event(session: &str, event: &AgentEvent) -> Result<()> {
     let json = serde_json::to_string(event).context("Failed to serialize event")?;
-    info!("[TmuxEvents] Event: {}", json);
+    info!("[TmuxEvents][{}] Event: {}", session, json);
     Ok(())
 }
 
