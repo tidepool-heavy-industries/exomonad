@@ -32,6 +32,7 @@ import Control.Monad (void)
 import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Aeson qualified as Aeson
+import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8)
@@ -75,9 +76,12 @@ class (ToJSON phase, FromJSON phase, Typeable phase, Show phase) => StateMachine
   canExit :: phase -> StopCheckResult
   machineName :: Text
 
--- | Sanitize branch name for KV keys (replace dots with double-hyphens).
+-- | Sanitize branch name for KV keys.
+-- KV keys allow only [a-zA-Z0-9_-]. Any invalid character becomes a hyphen.
 sanitizeBranch :: Text -> Text
-sanitizeBranch = T.replace "." "--"
+sanitizeBranch = T.map (\c -> if isKvChar c then c else '-')
+  where
+    isKvChar c = isAsciiLower c || isAsciiUpper c || isDigit c || c == '_' || c == '-'
 
 -- | KV key scoped by machine name and branch.
 scopedPhaseKey :: forall phase event. (StateMachine phase event) => Text -> Text
