@@ -686,10 +686,20 @@ impl TmuxIpc {
     pub async fn pane_exists(&self, pane_id: &PaneId) -> Result<bool> {
         let status = self
             .tmux_cmd()
-            .args(["display-message", "-t", pane_id.as_str(), "-p", ""])
+            .args(["has-session", "-t", pane_id.as_str()])
             .status()
             .await
-            .context("Failed to run tmux display-message")?;
+            .context("Failed to run tmux has-session")?;
+        Ok(status.success())
+    }
+
+    pub async fn window_exists(&self, window_id: &WindowId) -> Result<bool> {
+        let status = self
+            .tmux_cmd()
+            .args(["has-session", "-t", window_id.as_str()])
+            .status()
+            .await
+            .context("Failed to run tmux has-session")?;
         Ok(status.success())
     }
 }
@@ -946,5 +956,33 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn test_window_exists() {
+        if !IsolatedTmux::is_available().await {
+            return;
+        }
+        let isolated = IsolatedTmux::new().await.unwrap();
+        let windows = isolated.ipc.list_windows().await.unwrap();
+        let first_window = &windows[0].window_id;
+        assert!(isolated.ipc.window_exists(first_window).await.unwrap());
+
+        let fake_window = WindowId::parse("@99999").unwrap();
+        assert!(!isolated.ipc.window_exists(&fake_window).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_pane_exists() {
+        if !IsolatedTmux::is_available().await {
+            return;
+        }
+        let isolated = IsolatedTmux::new().await.unwrap();
+        let windows = isolated.ipc.list_windows().await.unwrap();
+        let first_pane = &windows[0].pane_id;
+        assert!(isolated.ipc.pane_exists(first_pane).await.unwrap());
+
+        let fake_pane = PaneId::parse("%99999").unwrap();
+        assert!(!isolated.ipc.pane_exists(&fake_pane).await.unwrap());
     }
 }
