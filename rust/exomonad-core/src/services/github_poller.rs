@@ -995,6 +995,13 @@ impl<
                         Some(octocrab::models::pulls::ReviewState::ChangesRequested) => {
                             ReviewState::ChangesRequested
                         }
+                        Some(octocrab::models::pulls::ReviewState::Commented) => {
+                            if !inline_comments.is_empty() {
+                                ReviewState::ChangesRequested
+                            } else {
+                                ReviewState::None
+                            }
+                        }
                         _ => ReviewState::None,
                     };
                     copilot_reviews.push(CopilotReview {
@@ -1584,6 +1591,52 @@ mod tests {
         );
         assert_eq!(state.last_review_state, ReviewState::ChangesRequested);
         assert_eq!(state.addressed_changes, false);
+    }
+
+    #[test]
+    fn test_changes_requested_state_fires_review_received() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        let reviews = vec![CopilotReview {
+            body: "Mapped from COMMENTED".to_string(),
+            state: ReviewState::ChangesRequested,
+        }];
+
+        let actions = compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "abc123",
+            &[],
+            &reviews,
+            CIStatus::Success,
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        assert_eq!(state.last_review_state, ReviewState::ChangesRequested);
+        assert!(actions.iter().any(|a| matches!(a, PendingAction::WasmEvent { event_type: "pr_review", payload } if payload.get("kind").and_then(|v| v.as_str()) == Some("review_received"))));
+    }
+
+    #[test]
+    fn test_none_state_with_comments_fires_review_received_but_keeps_none_state() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        let reviews = vec![CopilotReview {
+            body: "Mapped from COMMENTED with no inline comments".to_string(),
+            state: ReviewState::None,
+        }];
+
+        let actions = compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "abc123",
+            &[],
+            &reviews,
+            CIStatus::Success,
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        assert_eq!(state.last_review_state, ReviewState::None);
+        assert!(actions.iter().any(|a| matches!(a, PendingAction::WasmEvent { event_type: "pr_review", payload } if payload.get("kind").and_then(|v| v.as_str()) == Some("review_received"))));
     }
 
     #[tokio::test]
