@@ -76,6 +76,7 @@ fn config_json_matches_cc_format() {
             joined_at: 1711022401,
             cwd: "/tmp".into(),
             backend_type: None,
+            aliases: Vec::new(),
         }],
     };
 
@@ -312,6 +313,7 @@ async fn resolve_tier2_e2e_inbox_delivery() {
                 joined_at: 1711022401,
                 cwd: "/tmp/exo".into(),
                 backend_type: None,
+                aliases: Vec::new(),
             },
             TeamMember {
                 agent_id: "cc-supervisor-uuid".into(),
@@ -321,6 +323,7 @@ async fn resolve_tier2_e2e_inbox_delivery() {
                 joined_at: 1711022402,
                 cwd: "/tmp/cc".into(),
                 backend_type: None,
+                aliases: Vec::new(),
             },
         ],
     };
@@ -552,6 +555,7 @@ async fn lead_deregistered_still_resolves_via_config() {
                 joined_at: 1711022400,
                 cwd: "/tmp".into(),
                 backend_type: None,
+                aliases: Vec::new(),
             },
             TeamMember {
                 agent_id: "w1-uuid".into(),
@@ -561,6 +565,7 @@ async fn lead_deregistered_still_resolves_via_config() {
                 joined_at: 1711022401,
                 cwd: "/tmp".into(),
                 backend_type: None,
+                aliases: Vec::new(),
             },
             TeamMember {
                 agent_id: "w2-uuid".into(),
@@ -570,6 +575,7 @@ async fn lead_deregistered_still_resolves_via_config() {
                 joined_at: 1711022402,
                 cwd: "/tmp".into(),
                 backend_type: None,
+                aliases: Vec::new(),
             },
         ],
     };
@@ -627,6 +633,7 @@ async fn lead_replaced_config_authoritative() {
                 joined_at: 1711022400,
                 cwd: "/tmp".into(),
                 backend_type: None,
+                aliases: Vec::new(),
             },
             TeamMember {
                 agent_id: "uuid-new-lead".into(),
@@ -636,6 +643,7 @@ async fn lead_replaced_config_authoritative() {
                 joined_at: 1711022401,
                 cwd: "/tmp".into(),
                 backend_type: None,
+                aliases: Vec::new(),
             },
         ],
     };
@@ -706,6 +714,7 @@ async fn cross_team_name_collision() {
             joined_at: 1711022401,
             cwd: "/tmp".into(),
             backend_type: None,
+            aliases: Vec::new(),
         }],
     };
 
@@ -770,6 +779,7 @@ async fn orphaned_agent_returns_none() {
             joined_at: 1711022401,
             cwd: "/tmp".into(),
             backend_type: None,
+            aliases: Vec::new(),
         }],
     };
 
@@ -816,6 +826,7 @@ async fn resolve_lead_name_match_fallback() {
                 joined_at: 1711022400,
                 cwd: "/tmp".into(),
                 backend_type: None,
+                aliases: Vec::new(),
             },
             TeamMember {
                 agent_id: "uuid-worker".into(),
@@ -825,6 +836,7 @@ async fn resolve_lead_name_match_fallback() {
                 joined_at: 1711022401,
                 cwd: "/tmp".into(),
                 backend_type: None,
+                aliases: Vec::new(),
             },
         ],
     };
@@ -851,6 +863,7 @@ async fn resolve_lead_name_match_fallback() {
             joined_at: 1711022401,
             cwd: "/tmp".into(),
             backend_type: None,
+            aliases: Vec::new(),
         }],
     };
 
@@ -896,6 +909,7 @@ async fn inbox_survives_config_restructuring() {
             joined_at: 1711022401,
             cwd: "/tmp".into(),
             backend_type: None,
+            aliases: Vec::new(),
         }],
     };
     write_team_config(team, &config_v1).unwrap();
@@ -926,6 +940,7 @@ async fn inbox_survives_config_restructuring() {
             joined_at: 1711022401,
             cwd: "/tmp".into(),
             backend_type: None,
+            aliases: Vec::new(),
         }],
     };
     write_team_config(team, &config_v2).unwrap();
@@ -1008,6 +1023,7 @@ async fn supervisor_to_lead_routing_chain() {
                 joined_at: 1711022400,
                 cwd: "/tmp".into(),
                 backend_type: None,
+                aliases: Vec::new(),
             },
             TeamMember {
                 agent_id: "child-uuid".into(),
@@ -1017,6 +1033,7 @@ async fn supervisor_to_lead_routing_chain() {
                 joined_at: 1711022401,
                 cwd: "/tmp".into(),
                 backend_type: None,
+                aliases: Vec::new(),
             },
         ],
     };
@@ -1363,6 +1380,7 @@ async fn test_register_syncs_to_disk() {
             joined_at: 1711022400,
             cwd: "/tmp".into(),
             backend_type: None,
+            aliases: Vec::new(),
         }],
     };
     write_team_config(team, &config).unwrap();
@@ -1414,6 +1432,7 @@ async fn test_remove_member_persists_to_disk() {
             joined_at: 0,
             cwd: "/tmp".into(),
             backend_type: None,
+            aliases: Vec::new(),
         }],
     };
     write_team_config(team, &config).unwrap();
@@ -1467,7 +1486,8 @@ async fn test_cc_native_members_preserved() {
                 model: "opus".into(),
                 joined_at: 0,
                 cwd: "/tmp".into(),
-                backend_type: None, // CC-native
+                backend_type: None,
+                aliases: Vec::new(), // CC-native
             },
             TeamMember {
                 agent_id: "native-1".into(),
@@ -1476,7 +1496,8 @@ async fn test_cc_native_members_preserved() {
                 model: "opus".into(),
                 joined_at: 0,
                 cwd: "/tmp".into(),
-                backend_type: None, // CC-native
+                backend_type: None,
+                aliases: Vec::new(), // CC-native
             },
         ],
     };
@@ -1524,6 +1545,7 @@ async fn test_register_member_moves_between_teams() {
                 joined_at: 0,
                 cwd: "/tmp".into(),
                 backend_type: None,
+                aliases: Vec::new(),
             }],
         };
         write_team_config(team, &config).unwrap();
@@ -1573,4 +1595,109 @@ async fn test_register_member_moves_between_teams() {
         .members
         .iter()
         .any(|m| m.name == "agent-x"));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_alias_persistence_across_restart() {
+    let tmp = tempdir().unwrap();
+    let _home = ScopedHome::new(tmp.path());
+
+    let team = "alias-persist-team";
+    let config = TeamConfig {
+        name: team.into(),
+        description: "test".into(),
+        created_at: 0,
+        lead_agent_id: "lead".into(),
+        lead_session_id: "session".into(),
+        members: vec![TeamMember {
+            agent_id: "lead".into(),
+            name: "lead".into(),
+            agent_type: "claude".into(),
+            model: "opus".into(),
+            joined_at: 0,
+            cwd: "/tmp".into(),
+            backend_type: None,
+            aliases: Vec::new(),
+        }],
+    };
+    write_team_config(team, &config).unwrap();
+
+    let registry = TeamRegistry::new();
+    let info = TeamInfo {
+        team_name: team.into(),
+        inbox_name: "agent-1".into(),
+    };
+
+    // Register under 3 keys
+    registry.register("agent-1", info.clone()).await;
+    registry.register("birth-branch-x", info.clone()).await;
+    registry.register("agent-1-slug", info.clone()).await;
+
+    // Verify disk content
+    let disk_config = read_team_config(team).unwrap();
+    let member = disk_config
+        .members
+        .iter()
+        .find(|m| m.name == "agent-1")
+        .unwrap();
+    assert_eq!(member.name, "agent-1");
+    assert!(member.aliases.contains(&"birth-branch-x".to_string()));
+    assert!(member.aliases.contains(&"agent-1-slug".to_string()));
+    assert_eq!(member.aliases.len(), 2);
+
+    // Simulate restart by using a fresh registry but same disk
+    let registry2 = TeamRegistry::new();
+
+    // Resolve by all 3 keys (Tier 2 should kick in for all)
+    let res1 = registry2.resolve("agent-1", Some(team)).await.unwrap();
+    let res2 = registry2
+        .resolve("birth-branch-x", Some(team))
+        .await
+        .unwrap();
+    let res3 = registry2.resolve("agent-1-slug", Some(team)).await.unwrap();
+
+    assert_eq!(res1.inbox_name, "agent-1");
+    assert_eq!(res2.inbox_name, "agent-1");
+    assert_eq!(res3.inbox_name, "agent-1");
+}
+
+#[tokio::test]
+#[serial]
+async fn test_config_json_written_by_claude_code_still_parses() {
+    let tmp = tempdir().unwrap();
+    let _home = ScopedHome::new(tmp.path());
+
+    let team = "old-config-team";
+    // Raw JSON without "aliases" field
+    let raw_json = r#"{
+  "name": "old-config-team",
+  "description": "test",
+  "createdAt": 0,
+  "leadAgentId": "lead",
+  "leadSessionId": "session",
+  "members": [
+    {
+      "agentId": "lead",
+      "name": "lead",
+      "agentType": "claude",
+      "model": "opus",
+      "joinedAt": 0,
+      "cwd": "/tmp"
+    }
+  ]
+}"#;
+
+    let config_dir = tmp.path().join(".claude").join("teams").join(team);
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("config.json"), raw_json).unwrap();
+
+    // Should parse without error
+    let config = read_team_config(team).unwrap();
+    assert_eq!(config.members[0].name, "lead");
+    assert!(config.members[0].aliases.is_empty());
+
+    // resolve_from_config should work
+    let res = TeamRegistry::resolve_from_config(team, "lead").unwrap();
+    assert_eq!(res.inbox_name, "lead");
 }

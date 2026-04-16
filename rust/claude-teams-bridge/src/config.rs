@@ -29,6 +29,8 @@ pub struct TeamMember {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub backend_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
 }
 
 /// Read team config from `~/.claude/teams/{team}/config.json`.
@@ -80,6 +82,7 @@ mod tests {
                 joined_at: 1700000001,
                 cwd: "/tmp".into(),
                 backend_type: None,
+                aliases: Vec::new(),
             }],
         }
     }
