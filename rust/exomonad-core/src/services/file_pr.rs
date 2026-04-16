@@ -163,6 +163,7 @@ pub async fn file_pr_async(
     input: &FilePRInput,
     git_wt: Arc<GitWorktreeService>,
     github: Option<&GitHubClient>,
+    tmux_ipc: &crate::services::tmux_ipc::TmuxIpc,
 ) -> Result<FilePROutput> {
     let dir = input.working_dir.as_deref().unwrap_or(".");
     let octo = match github {
@@ -236,26 +237,24 @@ pub async fn file_pr_async(
     )
     .await?;
 
-    // Emit pr:filed event (only if in tmux session)
-    if let Ok(session) = std::env::var("EXOMONAD_TMUX_SESSION") {
-        if let Some(agent_id_str) = git::extract_agent_id(head.as_str()) {
-            match crate::ui_protocol::AgentId::try_from(agent_id_str) {
-                Ok(agent_id) => {
-                    let event = crate::ui_protocol::AgentEvent::PrFiled {
-                        agent_id,
-                        pr_number: PRNumber::new(pr.number),
-                        timestamp: tmux_events::now_iso8601(),
-                    };
-                    if let Err(e) = tmux_events::emit_event(&session, &event) {
-                        warn!("Failed to emit pr:filed event: {}", e);
-                    }
+    // Emit pr:filed event
+    if let Some(agent_id_str) = git::extract_agent_id(head.as_str()) {
+        match crate::ui_protocol::AgentId::try_from(agent_id_str) {
+            Ok(agent_id) => {
+                let event = crate::ui_protocol::AgentEvent::PrFiled {
+                    agent_id,
+                    pr_number: PRNumber::new(pr.number),
+                    timestamp: tmux_events::now_iso8601(),
+                };
+                if let Err(e) = tmux_events::emit_event(tmux_ipc.session_name(), &event) {
+                    warn!("Failed to emit pr:filed event: {}", e);
                 }
-                Err(e) => {
-                    warn!(
-                        "Invalid agent_id in branch '{}', skipping event: {}",
-                        head, e
-                    );
-                }
+            }
+            Err(e) => {
+                warn!(
+                    "Invalid agent_id in branch '{}', skipping event: {}",
+                    head, e
+                );
             }
         }
     }
@@ -397,7 +396,11 @@ mod tests {
             working_dir: Some(temp_dir.path().to_string_lossy().to_string()),
         };
 
-        let result = file_pr_async(&input, git_wt, None).await;
+        let tmux_ipc = crate::services::tmux_ipc::TmuxIpc::new_with_socket(
+            "test-session",
+            Some("exomonad-test-dummy".to_string()),
+        );
+        let result = file_pr_async(&input, git_wt, None, &tmux_ipc).await;
         assert!(result.is_err());
 
         Ok(())
@@ -450,7 +453,11 @@ mod tests {
             working_dir: Some(dir.to_string_lossy().to_string()),
         };
 
-        let result = file_pr_async(&input, git_wt, None).await;
+        let tmux_ipc = crate::services::tmux_ipc::TmuxIpc::new_with_socket(
+            "test-session",
+            Some("exomonad-test-dummy".to_string()),
+        );
+        let result = file_pr_async(&input, git_wt, None, &tmux_ipc).await;
 
         if let Err(ref e) = result {
             let err_msg = e.to_string();
