@@ -37,11 +37,20 @@ struct CopilotComment {
     diff_hunk: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CopilotReviewKind {
+    Approved,
+    ChangesRequested,
+    Commented,
+    None,
+}
+
 /// A Copilot review with typed state.
 #[derive(Debug, Clone, serde::Serialize)]
 struct CopilotReview {
     body: String,
-    state: ReviewState,
+    state: CopilotReviewKind,
 }
 
 /// Branch info discovered from a worktree directory.
@@ -75,6 +84,7 @@ enum PendingAction {
 #[derive(Debug, Clone)]
 struct PRState {
     last_copilot_comment_count: usize,
+    last_copilot_inline_count: usize,
     last_ci_status: CIStatus,
     branch_name: BranchName,
     agent_type: AgentType,
@@ -93,9 +103,11 @@ impl PRState {
         sha: &CommitSha,
         ci_status: CIStatus,
         copilot_count: usize,
+        inline_count: usize,
     ) -> Self {
         Self {
             last_copilot_comment_count: copilot_count,
+            last_copilot_inline_count: inline_count,
             last_ci_status: ci_status,
             branch_name: branch.clone(),
             agent_type,
@@ -169,6 +181,8 @@ fn compute_pr_actions(
     if copilot_count != old_state.last_copilot_comment_count {
         if copilot_count > old_state.last_copilot_comment_count {
             // New activity!
+            let has_new_inline_comments =
+                copilot_comments.len() > old_state.last_copilot_inline_count;
             let message = format_message(copilot_comments, copilot_reviews);
             pending_actions.push(PendingAction::EmitEvent {
                 status: "copilot_review".to_string(),
@@ -179,11 +193,12 @@ fn compute_pr_actions(
 
             // Check for state changes (approved or changes_requested)
             let approved = copilot_reviews.iter().any(|r| {
-                r.state == ReviewState::Approved || r.body.to_lowercase().contains("approved")
+                r.state == CopilotReviewKind::Approved || r.body.to_lowercase().contains("approved")
             });
-            let changes_requested = copilot_reviews
-                .iter()
-                .any(|r| r.state == ReviewState::ChangesRequested);
+            let changes_requested = copilot_reviews.iter().any(|r| {
+                map_copilot_review_kind(r.state, has_new_inline_comments)
+                    == ReviewState::ChangesRequested
+            });
 
             if approved && old_state.last_review_state != ReviewState::Approved {
                 old_state.last_review_state = ReviewState::Approved;
@@ -222,6 +237,7 @@ fn compute_pr_actions(
         }
         // Update state even if count decreased (to sync with reality)
         old_state.last_copilot_comment_count = copilot_count;
+        old_state.last_copilot_inline_count = copilot_comments.len();
     }
 
     // Check CI changes
@@ -262,6 +278,15 @@ fn compute_pr_actions(
     }
 
     pending_actions
+}
+
+fn map_copilot_review_kind(kind: CopilotReviewKind, has_new_comments: bool) -> ReviewState {
+    match kind {
+        CopilotReviewKind::Approved => ReviewState::Approved,
+        CopilotReviewKind::ChangesRequested => ReviewState::ChangesRequested,
+        CopilotReviewKind::Commented if has_new_comments => ReviewState::ChangesRequested,
+        _ => ReviewState::None,
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -897,6 +922,7 @@ impl<
                         pr_sha,
                         ci_status,
                         copilot_comments.len() + copilot_reviews.len(),
+                        copilot_comments.len(),
                     ),
                 );
                 vec![]
@@ -990,19 +1016,15 @@ impl<
                 if user_login.to_lowercase().contains("copilot") {
                     let state = match r.state {
                         Some(octocrab::models::pulls::ReviewState::Approved) => {
-                            ReviewState::Approved
+                            CopilotReviewKind::Approved
                         }
                         Some(octocrab::models::pulls::ReviewState::ChangesRequested) => {
-                            ReviewState::ChangesRequested
+                            CopilotReviewKind::ChangesRequested
                         }
                         Some(octocrab::models::pulls::ReviewState::Commented) => {
-                            if !inline_comments.is_empty() {
-                                ReviewState::ChangesRequested
-                            } else {
-                                ReviewState::None
-                            }
+                            CopilotReviewKind::Commented
                         }
-                        _ => ReviewState::None,
+                        _ => CopilotReviewKind::None,
                     };
                     copilot_reviews.push(CopilotReview {
                         body: r.body.unwrap_or_default(),
@@ -1231,11 +1253,11 @@ mod tests {
         let reviews = vec![
             CopilotReview {
                 body: "LGTM!".to_string(),
-                state: ReviewState::Approved,
+                state: CopilotReviewKind::Approved,
             },
             CopilotReview {
                 body: "Great job.".to_string(),
-                state: ReviewState::None,
+                state: CopilotReviewKind::None,
             },
         ];
         let msg = poller.format_copilot_message(&[], &reviews);
@@ -1274,7 +1296,32 @@ mod tests {
             &CommitSha::from(sha),
             CIStatus::Pending,
             0,
+            0,
         )
+    }
+
+    #[test]
+    fn test_map_copilot_review_kind() {
+        assert_eq!(
+            map_copilot_review_kind(CopilotReviewKind::Approved, false),
+            ReviewState::Approved
+        );
+        assert_eq!(
+            map_copilot_review_kind(CopilotReviewKind::ChangesRequested, false),
+            ReviewState::ChangesRequested
+        );
+        assert_eq!(
+            map_copilot_review_kind(CopilotReviewKind::Commented, true),
+            ReviewState::ChangesRequested
+        );
+        assert_eq!(
+            map_copilot_review_kind(CopilotReviewKind::Commented, false),
+            ReviewState::None
+        );
+        assert_eq!(
+            map_copilot_review_kind(CopilotReviewKind::None, true),
+            ReviewState::None
+        );
     }
 
     #[test]
@@ -1324,7 +1371,7 @@ mod tests {
         let mut state = make_pr_state("main.feature", "abc123");
         let reviews = vec![CopilotReview {
             body: "LGTM".to_string(),
-            state: ReviewState::Approved,
+            state: CopilotReviewKind::Approved,
         }];
 
         let actions = compute_pr_actions(
@@ -1419,7 +1466,7 @@ mod tests {
         // Late Copilot review arrives after approval — should be suppressed
         let reviews = vec![CopilotReview {
             body: "Some late feedback".to_string(),
-            state: ReviewState::Approved,
+            state: CopilotReviewKind::Approved,
         }];
         let actions = compute_pr_actions(
             &mut state,
@@ -1514,7 +1561,7 @@ mod tests {
 
         let reviews = vec![CopilotReview {
             body: "Need changes".to_string(),
-            state: ReviewState::ChangesRequested,
+            state: CopilotReviewKind::ChangesRequested,
         }];
 
         compute_pr_actions(
@@ -1539,7 +1586,7 @@ mod tests {
         // (a) Review arrives -> ChangesRequested, addressed_changes remains false
         let reviews = vec![CopilotReview {
             body: "Initial review".to_string(),
-            state: ReviewState::ChangesRequested,
+            state: CopilotReviewKind::ChangesRequested,
         }];
         compute_pr_actions(
             &mut state,
@@ -1572,11 +1619,11 @@ mod tests {
         let reviews2 = vec![
             CopilotReview {
                 body: "Initial review".to_string(),
-                state: ReviewState::ChangesRequested,
+                state: CopilotReviewKind::ChangesRequested,
             },
             CopilotReview {
                 body: "Second review".to_string(),
-                state: ReviewState::ChangesRequested,
+                state: CopilotReviewKind::ChangesRequested,
             },
         ];
         compute_pr_actions(
@@ -1598,7 +1645,7 @@ mod tests {
         let mut state = make_pr_state("main.feature", "abc123");
         let reviews = vec![CopilotReview {
             body: "Mapped from COMMENTED".to_string(),
-            state: ReviewState::ChangesRequested,
+            state: CopilotReviewKind::ChangesRequested,
         }];
 
         let actions = compute_pr_actions(
@@ -1617,18 +1664,23 @@ mod tests {
     }
 
     #[test]
-    fn test_none_state_with_comments_fires_review_received_but_keeps_none_state() {
+    fn test_none_state_with_new_comments_fires_review_received_but_keeps_none_state() {
         let mut state = make_pr_state("main.feature", "abc123");
         let reviews = vec![CopilotReview {
             body: "Mapped from COMMENTED with no inline comments".to_string(),
-            state: ReviewState::None,
+            state: CopilotReviewKind::None,
+        }];
+        let comments = vec![CopilotComment {
+            body: "Some comment".to_string(),
+            path: None,
+            diff_hunk: None,
         }];
 
         let actions = compute_pr_actions(
             &mut state,
             PRNumber::new(123),
             "abc123",
-            &[],
+            &comments,
             &reviews,
             CIStatus::Success,
             "main.feature",
@@ -1636,6 +1688,92 @@ mod tests {
         );
 
         assert_eq!(state.last_review_state, ReviewState::None);
+        assert!(actions.iter().any(|a| matches!(a, PendingAction::WasmEvent { event_type: "pr_review", payload } if payload.get("kind").and_then(|v| v.as_str()) == Some("review_received"))));
+    }
+
+    #[test]
+    fn test_commented_review_with_new_comments_maps_to_changes_requested() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        let reviews = vec![CopilotReview {
+            body: "Review with comments".to_string(),
+            state: CopilotReviewKind::Commented,
+        }];
+        let comments = vec![CopilotComment {
+            body: "Fix this".to_string(),
+            path: None,
+            diff_hunk: None,
+        }];
+
+        let actions = compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "abc123",
+            &comments,
+            &reviews,
+            CIStatus::Success,
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        assert_eq!(state.last_review_state, ReviewState::ChangesRequested);
+        assert!(actions.iter().any(|a| matches!(a, PendingAction::WasmEvent { event_type: "pr_review", payload } if payload.get("kind").and_then(|v| v.as_str()) == Some("review_received"))));
+    }
+
+    #[test]
+    fn test_commented_review_without_new_comments_stays_none() {
+        let mut state = make_pr_state("main.feature", "abc123");
+        // Pretend we already saw 5 comments
+        state.last_copilot_comment_count = 5;
+        state.last_copilot_inline_count = 5;
+
+        let reviews = vec![CopilotReview {
+            body: "Purely informational".to_string(),
+            state: CopilotReviewKind::Commented,
+        }];
+        let comments = vec![
+            CopilotComment {
+                body: "c1".to_string(),
+                path: None,
+                diff_hunk: None,
+            },
+            CopilotComment {
+                body: "c2".to_string(),
+                path: None,
+                diff_hunk: None,
+            },
+            CopilotComment {
+                body: "c3".to_string(),
+                path: None,
+                diff_hunk: None,
+            },
+            CopilotComment {
+                body: "c4".to_string(),
+                path: None,
+                diff_hunk: None,
+            },
+            CopilotComment {
+                body: "c5".to_string(),
+                path: None,
+                diff_hunk: None,
+            },
+        ];
+
+        let actions = compute_pr_actions(
+            &mut state,
+            PRNumber::new(123),
+            "abc123",
+            &comments,
+            &reviews,
+            CIStatus::Success,
+            "main.feature",
+            &|_, _| String::new(),
+        );
+
+        // Reviews increased (from 0 to 1), so copilot_count changed (from 5 to 6).
+        // BUT inline_comments.len() (5) is NOT > old_state.last_copilot_inline_count (5).
+        // So COMMENTED should NOT map to ChangesRequested.
+        assert_eq!(state.last_review_state, ReviewState::None);
+        // Should still fire review_received for the activity
         assert!(actions.iter().any(|a| matches!(a, PendingAction::WasmEvent { event_type: "pr_review", payload } if payload.get("kind").and_then(|v| v.as_str()) == Some("review_received"))));
     }
 
