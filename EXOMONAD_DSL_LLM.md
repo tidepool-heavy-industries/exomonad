@@ -454,70 +454,6 @@ config = RoleConfig
 
 ---
 
-## Prompt Builder
-
-Pure prompt composition for spawning agents with structured instructions:
-
-```haskell
-newtype Prompt = Prompt [Section]
-  deriving (Semigroup, Monoid)
-
-render :: Prompt -> Text
-```
-
-**Section builders:**
-
-```haskell
-task          :: Text -> Prompt              -- ## Task
-boundary      :: [Text] -> Prompt            -- ## Anti-Patterns (DO NOT rules)
-steps         :: [Text] -> Prompt            -- ## Steps (numbered)
-context       :: Text -> Prompt              -- ## Context
-contextFile   :: Text -> Text -> Prompt      -- ## Context: {path}
-verify        :: [Text] -> Prompt            -- ## Verify
-doneCriteria  :: [Text] -> Prompt            -- ## Done Criteria
-readFirst     :: [Text] -> Prompt            -- ## Read First
-raw           :: Text -> Prompt              -- Raw markdown passthrough
-```
-
-**Built-in profiles:**
-
-```haskell
-tlProfile       :: Prompt    -- Scaffold-fork-converge protocol
-leafProfile     :: Prompt    -- Leaf implementation pattern
-workerProfile   :: Prompt    -- Ephemeral worker pattern
-researchProfile :: Prompt    -- Research pattern
-rustProfile     :: Prompt    -- Rust idioms
-haskellProfile  :: Prompt    -- Haskell idioms
-```
-
-**Example:**
-
-```haskell
-prompt = mconcat
-  [ task "Implement CSV parser"
-  , boundary
-      [ "Do NOT add external dependencies"
-      , "Do NOT use unsafe functions"
-      ]
-  , readFirst ["src/Parser.hs", "CLAUDE.md"]
-  , steps
-      [ "Define CSVRow type as [Text]"
-      , "Implement parseCSV :: Text -> Either Text [CSVRow]"
-      , "Handle quoted fields and escaped commas"
-      ]
-  , verify ["cabal test all"]
-  , doneCriteria ["All tests pass", "No warnings"]
-  ]
-
--- render prompt → structured markdown
-```
-
-**Warning (WASM):** Avoid using `Prompt`'s `<>` inside WASM tool handlers due to a GHC WASM RTS stack overflow bug (GHC #25213). Build prompts as raw `Text` instead. `Prompt` `<>` is fine in native Haskell code.
-
-**Module:** `ExoMonad.Guest.Prompt`
-
----
-
 ## Permissions DSL
 
 Declare tool permissions for spawned Claude agents:
@@ -616,7 +552,6 @@ haskell/
         Effects/          # Effect GADTs (AgentControl, FileSystem)
         Events.hs         # Event handler types
         StateMachine.hs   # State machine framework
-        Prompt.hs         # Prompt builder
         Types.hs          # HookInput, HookOutput, MCPCallOutput
         Types/
           Permissions.hs  # Permission DSL
@@ -658,7 +593,6 @@ just wasm-all
 | `ExoMonad.Guest.Tools.*` | Built-in tool core functions |
 | `ExoMonad.Guest.StateMachine` | `StateMachine` typeclass, `applyEvent`, `checkExit` |
 | `ExoMonad.Guest.Events` | `EventHandlerConfig`, event types, `EventAction` |
-| `ExoMonad.Guest.Prompt` | Prompt builder (sections, profiles, render) |
 | `ExoMonad.Guest.Types` | `HookInput`, `HookOutput`, `StopHookOutput` |
 | `ExoMonad.Guest.Types.Permissions` | `ClaudePermissions`, `ToolPattern` |
 | `ExoMonad.Types` | `RoleConfig`, `HookConfig`, `Effects` |
