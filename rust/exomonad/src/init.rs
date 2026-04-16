@@ -496,7 +496,8 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
             Arc::new(ipc.clone()),
         )
         .build();
-        let agent_control = AgentControlService::new(Arc::new(services));
+        let agent_control = AgentControlService::new(Arc::new(services))
+            .with_tmux_session(session.clone());
         if let Err(e) = agent_control.gc_stale_agents().await {
             warn!(error = %e, "GC stale agents failed (non-fatal)");
         }

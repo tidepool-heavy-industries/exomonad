@@ -53,12 +53,20 @@ impl<
                     let is_live = if let Some(wid) = &routing.window_id {
                         match self.tmux() {
                             Ok(tmux) => tmux.window_exists(wid).await.unwrap_or(false),
-                            Err(_) => false,
+                            Err(_) => {
+                                warn!(path = %path.display(), "Tmux session unavailable, skipping liveness check for agent");
+                                stats.kept_live += 1;
+                                continue;
+                            }
                         }
                     } else if let Some(pid) = &routing.pane_id {
                         match self.tmux() {
                             Ok(tmux) => tmux.pane_exists(pid).await.unwrap_or(false),
-                            Err(_) => false,
+                            Err(_) => {
+                                warn!(path = %path.display(), "Tmux session unavailable, skipping liveness check for agent");
+                                stats.kept_live += 1;
+                                continue;
+                            }
                         }
                     } else {
                         info!(path = %path.display(), reason = "neither window_id nor pane_id set in routing.json", "Pruning orphan agent directory");
@@ -531,7 +539,7 @@ mod tests {
             Arc::new(crate::services::GitWorktreeService::new(project_dir.clone())),
             Arc::new(isolated.ipc.clone()),
         ).build();
-        let service = AgentControlService::new(Arc::new(services))
+        let service = AgentControlService::new(Arc::new(services.clone()))
             .with_tmux_session(isolated.session.clone());
 
         // 1. Live agent (window)
@@ -575,10 +583,20 @@ mod tests {
         fs::create_dir_all(&malformed_dir).await.unwrap();
         fs::write(malformed_dir.join("routing.json"), "{}").await.unwrap();
 
+        // 6. Tmux unavailable (should keep the directory)
+        let no_tmux_dir = agents_dir.join("no-tmux");
+        fs::create_dir_all(&no_tmux_dir).await.unwrap();
+        let routing = RoutingInfo {
+            window_id: Some(crate::services::tmux_ipc::WindowId::parse("@123").unwrap()),
+            pane_id: None,
+            parent_tab: None,
+        };
+        fs::write(no_tmux_dir.join("routing.json"), serde_json::to_string(&routing).unwrap()).await.unwrap();
+
         let stats = service.gc_stale_agents().await.unwrap();
-        assert_eq!(stats.scanned, 5);
-        assert_eq!(stats.kept_live, 1);
-        assert_eq!(stats.pruned_dead_tmux, 1); // dead-window
+        assert_eq!(stats.scanned, 6);
+        assert_eq!(stats.kept_live, 1); // only live-window
+        assert_eq!(stats.pruned_dead_tmux, 2); // dead-window + no-tmux (now dead)
         assert_eq!(stats.pruned_orphan, 2); // old-orphan + malformed
         assert_eq!(stats.kept_recent, 1); // recent-orphan
 
@@ -587,5 +605,22 @@ mod tests {
         assert!(!old_orphan_dir.exists());
         assert!(recent_orphan_dir.exists());
         assert!(!malformed_dir.exists());
+        assert!(!no_tmux_dir.exists());
+
+        // 7. Re-create a directory for testing fail-open without tmux session
+        let fail_open_dir = agents_dir.join("fail-open");
+        fs::create_dir_all(&fail_open_dir).await.unwrap();
+        fs::write(fail_open_dir.join("routing.json"), serde_json::to_string(&routing).unwrap()).await.unwrap();
+
+        // Test with no tmux session set (should fail open for all routing.json cases)
+        let service_no_tmux = AgentControlService::new(Arc::new(services.clone()));
+        let stats = service_no_tmux.gc_stale_agents().await.unwrap();
+        // Remaining: live-window, recent-orphan, fail-open
+        assert_eq!(stats.scanned, 3);
+        assert_eq!(stats.kept_live, 2); // live-window, fail-open (both fail-open because no session)
+        assert_eq!(stats.kept_recent, 1); // recent-orphan
+        assert_eq!(stats.pruned_dead_tmux, 0);
+        assert_eq!(stats.pruned_orphan, 0);
+        assert!(fail_open_dir.exists());
     }
 }
