@@ -52,8 +52,8 @@ impl TeamRegistry {
         );
         let mut map = self.inner.lock().await;
         let previous = map.insert(key.to_string(), info);
-        let old_team_name = previous
-            .and_then(|prev| (prev.team_name != team_name).then_some(prev.team_name));
+        let old_team_name =
+            previous.and_then(|prev| (prev.team_name != team_name).then_some(prev.team_name));
         drop(map);
 
         // Best-effort sync to disk for backward-compatible API
@@ -73,8 +73,8 @@ impl TeamRegistry {
         let team_name = info.team_name.clone();
         let mut map = self.inner.lock().await;
         let previous = map.insert(key.to_string(), info);
-        let old_team_name = previous
-            .and_then(|prev| (prev.team_name != team_name).then_some(prev.team_name));
+        let old_team_name =
+            previous.and_then(|prev| (prev.team_name != team_name).then_some(prev.team_name));
         drop(map);
 
         self.persist_config(&team_name).await?;
@@ -179,7 +179,10 @@ impl TeamRegistry {
     /// to skip the in-memory check.
     pub fn resolve_from_config(team_name: &str, recipient: &str) -> Option<TeamInfo> {
         let config = crate::config::read_team_config(team_name).ok()?;
-        let member = config.members.iter().find(|m| m.name == recipient)?;
+        let member = config
+            .members
+            .iter()
+            .find(|m| m.name == recipient || m.aliases.iter().any(|a| a == recipient))?;
         debug!(
             team = %team_name,
             recipient = %recipient,
@@ -266,19 +269,24 @@ impl TeamRegistry {
             .collect();
 
         // 2. Add/update in-memory members (deduplicated by inbox_name)
-        let mut unique_in_memory = HashMap::new();
+        let mut grouped_in_memory: HashMap<String, Vec<String>> = HashMap::new();
         for (key, info) in in_memory {
-            // Prefer the key that matches the inbox_name if available (usually the agent name)
-            if !unique_in_memory.contains_key(&info.inbox_name) || key == info.inbox_name {
-                unique_in_memory.insert(info.inbox_name.clone(), key);
-            }
+            grouped_in_memory
+                .entry(info.inbox_name.clone())
+                .or_default()
+                .push(key);
         }
 
-        for (inbox_name, key) in unique_in_memory {
+        for (inbox_name, mut keys) in grouped_in_memory {
+            // Pick primary key: prefers key matching inbox_name
+            let primary_idx = keys.iter().position(|k| k == &inbox_name).unwrap_or(0);
+            let primary_key = keys.remove(primary_idx);
+            let aliases = keys; // remaining keys are aliases
+
             let existing = new_members.iter().find(|m| m.name == inbox_name);
             if existing.is_none() {
                 new_members.push(crate::config::TeamMember {
-                    agent_id: key,
+                    agent_id: primary_key,
                     name: inbox_name,
                     agent_type: "exomonad-agent".into(),
                     model: "gemini".into(),
@@ -288,6 +296,7 @@ impl TeamRegistry {
                         .to_string_lossy()
                         .to_string(),
                     backend_type: Some("exomonad".into()),
+                    aliases,
                 });
             }
         }
@@ -470,6 +479,7 @@ mod tests {
                     joined_at: 0,
                     cwd: "/tmp".into(),
                     backend_type: None,
+                    aliases: Vec::new(),
                 },
                 crate::config::TeamMember {
                     agent_id: "uuid-worker".into(),
@@ -479,6 +489,7 @@ mod tests {
                     joined_at: 0,
                     cwd: "/tmp".into(),
                     backend_type: None,
+                    aliases: Vec::new(),
                 },
             ],
         };
@@ -576,6 +587,7 @@ mod tests {
                 joined_at: 0,
                 cwd: "/tmp".into(),
                 backend_type: None,
+                aliases: Vec::new(),
             }],
         };
         crate::config::write_team_config(team_name, &config).unwrap();
@@ -614,6 +626,7 @@ mod tests {
                     joined_at: 0,
                     cwd: cwd.into(),
                     backend_type: None,
+                    aliases: Vec::new(),
                 }],
             };
             crate::config::write_team_config(team, &config).unwrap();
