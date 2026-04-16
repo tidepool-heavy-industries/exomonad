@@ -603,7 +603,7 @@ just wasm-all
 ## Key Constraints
 
 1. **No direct I/O.** Tool handlers yield effects; Rust executes them. Never shell out from WASM.
-2. **WASM Prompt `<>` bug.** Use raw `Text` concatenation in WASM handlers, not `Prompt`'s `Semigroup` instance (GHC #25213 stack overflow).
+2. **WASM lazy concat bug.** Avoid deep lazy list concatenation or large `mappend` chains in WASM handlers (GHC #25213 stack overflow). Assemble prompts as raw strict `Text`.
 3. **freer-simple stack pressure.** Deep coroutine chains consume the 1MB WASM STG stack. Keep effect chains shallow; avoid lazy accumulation.
 4. **Field name convention.** Record fields must use a common prefix (stripped) + camelCase. `saQuery` → `query`, `mtaFilePath` → `file_path`.
 5. **One WASM per role set.** All roles for a project compile into a single `.wasm` file. The server dispatches by role name at runtime.
