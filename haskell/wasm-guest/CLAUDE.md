@@ -65,13 +65,6 @@ Claude-only permissions system using the `ClaudePermissions` DSL.
 - **`ClaudePermissions`**: Record of allowed/denied tools and paths.
 - **`renderPermissions`**: Renders to Claude Code's native `settings.local.json` format.
 
-### Prompt Builder (`ExoMonad.Guest.Prompt`)
-
-Pure Haskell prompt assembly for worker/leaf agents. Replaces the former template effect round-trip (Haskell → proto → Rust disk I/O → proto → Haskell) with direct string composition.
-
-- Builder monoid: `task`, `boundary`, `steps`, `context`, `verify`, `doneCriteria`, `readFirst`, `raw`
-- Inline profiles: `tlProfile`, `leafProfile`, `workerProfile`, `researchProfile`, `generalProfile`, `rustProfile`, `haskellProfile`
-
 ### SDK/Role Split
 
 The SDK (`wasm-guest`) exports **core I/O functions** and **shared descriptions/schemas**. Role code (`.exo/roles/devswarm/`) defines **MCPTool instances** that call the core and apply role-specific state transitions.
