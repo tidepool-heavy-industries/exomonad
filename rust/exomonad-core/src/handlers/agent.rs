@@ -171,7 +171,7 @@ impl<
 
         let team_info = claude_teams_bridge::TeamInfo {
             team_name: parent_team.team_name.clone(),
-            inbox_name: parent_team.inbox_name.clone(),
+            inbox_name: child_agent_name.to_string(),
         };
 
         // Register under agent_name and slug — NOT birth_branch.
@@ -1053,5 +1053,52 @@ mod tests {
             ServiceAgentType::Gemini
         );
         assert!(convert_agent_type(AgentType::Unspecified).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_propagate_team_uses_child_name_as_inbox() {
+        let handler = test_handler();
+        let team_reg = handler.ctx.team_registry();
+
+        let parent_name = AgentName::from("parent-tl");
+        let parent_inbox = "parent-inbox-name";
+        let team_name = "test-team";
+
+        team_reg
+            .register(
+                parent_name.as_str(),
+                claude_teams_bridge::TeamInfo {
+                    team_name: team_name.to_string(),
+                    inbox_name: parent_inbox.to_string(),
+                },
+            )
+            .await;
+
+        let ctx = crate::effects::EffectContext {
+            agent_name: parent_name,
+            birth_branch: crate::domain::BirthBranch::from("main"),
+            working_dir: std::path::PathBuf::from("."),
+        };
+
+        let child_branch = "child-sub-tl";
+        handler.propagate_team_to_child(child_branch, &ctx).await;
+
+        let child_identity = crate::services::agent_control::AgentIdentity::new(
+            crate::services::agent_control::slugify(child_branch),
+            crate::services::agent_control::AgentType::Claude,
+        );
+        let child_agent_name = child_identity.internal_name();
+
+        let child_info = team_reg
+            .get(child_agent_name.as_str())
+            .await
+            .expect("Child team info not found");
+        assert_eq!(child_info.team_name, team_name);
+        assert_eq!(
+            child_info.inbox_name,
+            child_agent_name.to_string(),
+            "Inbox name must match child agent name, not parent inbox"
+        );
+        assert_ne!(child_info.inbox_name, parent_inbox);
     }
 }
