@@ -149,6 +149,24 @@ impl TmuxIpc {
         cmd
     }
 
+    #[cfg(test)]
+    pub async fn run_tmux_command(&self, args: &[&str]) -> Result<String> {
+        let output = self
+            .tmux_cmd()
+            .args(args)
+            .output()
+            .await
+            .context("Failed to run tmux command")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux command {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
     // -- Session management (static, no &self) --
 
     /// Create a new tmux session. Returns the stable window ID (@N) of the initial window.
@@ -695,7 +713,8 @@ impl TmuxIpc {
 
     /// Check if a target (pane_id, window_id, or display name) exists in this session.
     pub async fn target_alive(&self, target: &str) -> bool {
-        let qualified = if target.contains(':') {
+        let qualified = if target.starts_with('%') || target.starts_with('@') || target.contains(':')
+        {
             target.to_string()
         } else {
             format!("{}:{}", self.session_name, target)

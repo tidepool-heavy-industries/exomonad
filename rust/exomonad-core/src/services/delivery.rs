@@ -16,6 +16,12 @@ pub enum DeliveryResult {
     Failed,
 }
 
+impl DeliveryResult {
+    pub fn is_failure(self) -> bool {
+        matches!(self, DeliveryResult::StaleRouting | DeliveryResult::Failed)
+    }
+}
+
 /// Notification status for parent-facing messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotifyStatus {
@@ -226,16 +232,17 @@ async fn resolve_and_deliver_to_lead(
     let tab_name = resolve_tab_name_for_agent(&lead_agent, Some(ctx.agent_resolver()));
     let result = deliver_to_agent(ctx, &lead_key, &tab_name, from, content, summary).await;
 
-    match result {
-        DeliveryResult::Failed => DeliveryOutcome::Failed {
+    if result.is_failure() {
+        DeliveryOutcome::Failed {
             original,
-            reason: format!("delivery to resolved lead '{}' failed", lead_key),
-        },
-        _ => DeliveryOutcome::FallbackToLead {
+            reason: format!("delivery to resolved lead '{}' failed ({:?})", lead_key, result),
+        }
+    } else {
+        DeliveryOutcome::FallbackToLead {
             method: delivery_method_from_result(result),
             original,
             lead: crate::domain::AgentName::from(lead_key.as_str()),
-        },
+        }
     }
 }
 
@@ -625,9 +632,10 @@ pub async fn deliver_to_agent(
                     error = ?e,
                     "ACP prompt failed, falling back to tmux"
                 );
-                // Purge on connection-level errors (conservative check on Debug string)
-                let err_debug = format!("{:?}", e);
-                if err_debug.contains("ConnectionClosed") || err_debug.contains("BrokenPipe") {
+                // Purge on connection-level errors. ACP's Error doesn't expose ErrorKind
+                // directly, but we can check if it's an internal error from the server
+                // shutting down or a broken transport.
+                if is_acp_connection_error(&e) {
                     acp_registry.remove(agent_key).await;
                 }
                 tracing::info!(
@@ -836,6 +844,23 @@ async fn prune_stale_routing(project_dir: &std::path::Path, agent_dir_name: &str
             warn!(path = %path.display(), "Pruned stale routing.json");
         }
     }
+}
+
+/// Helper to detect if an ACP error indicates a broken connection that should
+/// be purged from the registry.
+fn is_acp_connection_error(e: &agent_client_protocol::Error) -> bool {
+    // ACP's Error uses JSON-RPC codes. InternalError is -32603.
+    // The RPC layer specifically uses "server shut down unexpectedly" for oneshot
+    // receiver failures (broken pipes/task crashes).
+    if matches!(e.code, agent_client_protocol::ErrorCode::InternalError) {
+        if let Some(data) = &e.data {
+            let s = data.to_string();
+            return s.contains("server shut down unexpectedly")
+                || s.contains("BrokenPipe")
+                || s.contains("ConnectionClosed");
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -1244,5 +1269,74 @@ mod tests {
         // Should return StaleRouting and prune the file
         assert_eq!(result, DeliveryResult::StaleRouting);
         assert!(!agent_dir.join("routing.json").exists());
+    }
+
+    #[tokio::test]
+    async fn test_routing_live_pane_target_delivers() {
+        let _ = tracing_subscriber::fmt::try_init();
+        if !crate::services::tmux_ipc::IsolatedTmux::is_available().await {
+            return;
+        }
+        let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
+            .await
+            .expect("tmux unavailable");
+        let tmp = tempfile::tempdir().unwrap();
+        let services = crate::services::ServicesBuilder::new(
+            tmp.path().to_path_buf(),
+            tmp.path().join(".claude/tasks"),
+            Arc::new(crate::services::GitWorktreeService::new(
+                tmp.path().to_path_buf(),
+            )),
+            Arc::new(isolated.ipc.clone()),
+        )
+        .build();
+
+        // Create a new window which also creates a pane
+        let window_id = isolated
+            .ipc
+            .new_window("test-pane-window", tmp.path(), "/bin/sh", "sleep 100")
+            .await
+            .unwrap();
+
+        // Find the pane_id for this window
+        let panes = isolated
+            .ipc
+            .run_tmux_command(&["list-panes", "-t", window_id.as_str(), "-F", "#{pane_id}"])
+            .await
+            .expect("failed to list panes");
+        let pane_id = panes
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with('%'))
+            .expect("expected a pane_id")
+            .to_string();
+
+        let agent_key = "test-agent-live-pane";
+        let agent_dir = tmp.path().join(".exo/agents").join(agent_key);
+        std::fs::create_dir_all(&agent_dir).unwrap();
+
+        let routing = serde_json::json!({
+            "pane_id": pane_id
+        });
+        std::fs::write(
+            agent_dir.join("routing.json"),
+            serde_json::to_string(&routing).unwrap(),
+        )
+        .unwrap();
+
+        let result = deliver_to_agent(
+            &services,
+            agent_key,
+            "fallback",
+            &AgentName::from("sender"),
+            "msg",
+            "sum",
+        )
+        .await;
+
+        // Should use routing and return Tmux
+        assert_eq!(result, DeliveryResult::Tmux);
+        // routing.json should still exist
+        assert!(agent_dir.join("routing.json").exists());
     }
 }
