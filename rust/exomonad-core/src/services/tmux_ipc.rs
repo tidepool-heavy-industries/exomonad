@@ -146,6 +146,44 @@ impl TmuxIpc {
         }
     }
 
+    /// Resolve a tmux target, converting display names with `.` to stable
+    /// `@window_id` identifiers.
+    ///
+    /// tmux parses target specifiers as `{session}:{window}.{pane}` — a `.`
+    /// in the display name is interpreted as the window/pane separator. A
+    /// window named `💎 main.foo-gemini` becomes window=`💎 main`, pane=
+    /// `foo-gemini` and tmux errors with "can't find window: 💎 main".
+    /// There is no escape syntax for `.`; only @-prefixed IDs are safe.
+    ///
+    /// Returns IDs (`@N`, `%N`, `$N`) and already-qualified targets (those
+    /// containing `:`) unchanged. For plain display names containing `.`,
+    /// queries `list-windows` and returns the matching `@window_id`. Display
+    /// names without `.` are returned unchanged — they resolve correctly
+    /// without lookup.
+    async fn resolve_target(&self, target: &str) -> Result<String> {
+        if target.starts_with('@')
+            || target.starts_with('%')
+            || target.starts_with('$')
+            || target.contains(':')
+        {
+            return Ok(target.to_string());
+        }
+        if !target.contains('.') {
+            return Ok(target.to_string());
+        }
+        let windows = self.list_windows().await?;
+        for w in &windows {
+            if w.window_name == target {
+                return Ok(w.window_id.as_str().to_string());
+            }
+        }
+        anyhow::bail!(
+            "tmux window not found by display name: '{}' (session: {})",
+            target,
+            self.session_name
+        )
+    }
+
     fn tmux_cmd(&self) -> Command {
         let mut cmd = Command::new("tmux");
         if let Some(socket) = &self.socket_name {
@@ -471,9 +509,11 @@ impl TmuxIpc {
     /// display-name targets against the "most recently used" session, which is
     /// nondeterministic for subprocess calls.
     pub async fn inject_input(&self, target: &str, text: &str) -> Result<()> {
-        // Session-qualify the target so paste-buffer and send-keys resolve
-        // to the same pane deterministically.
-        let qualified_target = self.qualify_target(target);
+        // Resolve display names containing `.` to stable @window_id first,
+        // since tmux parses `.` as window-pane separator in targets. Then
+        // qualify with session name for deterministic pane resolution.
+        let resolved = self.resolve_target(target).await?;
+        let qualified_target = self.qualify_target(&resolved);
 
         // Serialize injections to the same target to prevent interleaving.
         // Uses Weak refs so lock entries are reclaimed when not in use.
@@ -627,7 +667,8 @@ impl TmuxIpc {
     /// until a terminal event arrives. A +1/-1 column resize triggers SIGWINCH,
     /// which wakes the event loop to process buffered input.
     pub async fn wake_pane(&self, target: &str) -> Result<()> {
-        let qualified = self.qualify_target(target);
+        let resolved = self.resolve_target(target).await?;
+        let qualified = self.qualify_target(&resolved);
 
         // Read current window dimensions
         let output = self
@@ -1052,5 +1093,67 @@ mod tests {
         assert_eq!(ipc.qualify_target("Server"), "mysession:Server");
         assert_eq!(ipc.qualify_target("3"), "mysession:3");
         assert_eq!(ipc.qualify_target("."), "mysession:.");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_target_passes_through_ids() {
+        let ipc = TmuxIpc::new("mysession");
+        assert_eq!(ipc.resolve_target("@42").await.unwrap(), "@42");
+        assert_eq!(ipc.resolve_target("%17").await.unwrap(), "%17");
+        assert_eq!(ipc.resolve_target("$1").await.unwrap(), "$1");
+        assert_eq!(
+            ipc.resolve_target("session:window").await.unwrap(),
+            "session:window"
+        );
+        // Names without '.' resolve correctly without lookup
+        assert_eq!(ipc.resolve_target("plain-name").await.unwrap(), "plain-name");
+    }
+
+    #[tokio::test]
+    async fn test_inject_input_resolves_dotted_window_name() {
+        // Regression: tmux parses `.` in target as window/pane separator, so
+        // a window named `💎 main.foo-bar-gemini` used to fail injection with
+        // "can't find window: 💎 main". The fix resolves display names with
+        // `.` to stable @window_id first.
+        if !IsolatedTmux::is_available().await {
+            return;
+        }
+        let isolated = IsolatedTmux::new().await.unwrap();
+        let dotted_name = "\u{1F48E} main.foo-bar-gemini";
+        let output = isolated
+            .ipc
+            .tmux_cmd()
+            .args([
+                "new-window",
+                "-t",
+                &isolated.session,
+                "-n",
+                dotted_name,
+                "-d",
+            ])
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "new-window failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        isolated
+            .ipc
+            .inject_input(dotted_name, "hello")
+            .await
+            .expect("inject_input should succeed for dot-containing display name");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_target_not_found_errors() {
+        if !IsolatedTmux::is_available().await {
+            return;
+        }
+        let isolated = IsolatedTmux::new().await.unwrap();
+        let result = isolated.ipc.resolve_target("💎 does.not.exist").await;
+        assert!(result.is_err());
     }
 }
