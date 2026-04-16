@@ -22,9 +22,8 @@ where
 
 import Control.Monad (void, when)
 import Control.Monad.Freer (Eff)
-import Data.Aeson (FromJSON, object, withObject, (.:?), (.=))
+import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
-import Data.Aeson.Types (Parser, explicitParseField, explicitParseFieldMaybe)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe, isJust)
@@ -62,38 +61,11 @@ data MergePRArgs = MergePRArgs
 
 instance FromJSON MergePRArgs where
   parseJSON = withObject "MergePRArgs" $ \v -> do
-    prNumber <- explicitParseField parseFlexibleInt v "pr_number"
+    prNumber <- v .: "pr_number"
     strategy <- v .:? "strategy"
     workingDir <- v .:? "working_dir"
-    force <- explicitParseFieldMaybe parseFlexibleBool v "force"
+    force <- v .:? "force"
     pure (MergePRArgs prNumber strategy workingDir force)
-
--- Accept `pr_number` as either a JSON Number or a numeric JSON String.
--- Some MCP harnesses serialize scalar tool arguments as strings regardless
--- of their declared type; these helpers let both shapes through so tools
--- remain callable from any harness.
-parseFlexibleInt :: Aeson.Value -> Parser Int
-parseFlexibleInt (Aeson.Number n) =
-  let i = round n :: Int
-   in if fromIntegral i == n
-        then pure i
-        else fail ("pr_number not an integer: " <> show n)
-parseFlexibleInt (Aeson.String s) =
-  case reads (T.unpack s) :: [(Int, String)] of
-    [(i, "")] -> pure i
-    _ -> fail ("pr_number string not a valid integer: " <> T.unpack s)
-parseFlexibleInt v =
-  fail ("pr_number must be a Number or numeric String, got: " <> show v)
-
-parseFlexibleBool :: Aeson.Value -> Parser Bool
-parseFlexibleBool (Aeson.Bool b) = pure b
-parseFlexibleBool (Aeson.String s) =
-  case T.toLower s of
-    "true" -> pure True
-    "false" -> pure False
-    _ -> fail ("force string not a valid bool: " <> T.unpack s)
-parseFlexibleBool v =
-  fail ("force must be a Bool or bool-shaped String, got: " <> show v)
 
 data MergePROutput = MergePROutput
   { mpoMerged :: Bool,        -- ^ The GitHub PR was successfully merged.
