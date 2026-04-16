@@ -31,7 +31,7 @@ pub fn git_handlers(services: Arc<Services>, git: Arc<GitService>) -> Vec<Box<dy
         Box::new(GitHandler::new(git)),
         Box::new(FilePRHandler::new(services.clone())),
         Box::new(MergePRHandler::new(services.clone())),
-        Box::new(CopilotHandler::new()),
+        Box::new(CopilotHandler::new(services.clone())),
     ];
     if let Some(client) = services.github_client() {
         handlers.push(Box::new(GitHubHandler::new(GitHubService::new(

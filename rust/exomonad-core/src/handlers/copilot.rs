@@ -6,24 +6,27 @@ use crate::effects::{
     dispatch_copilot_effect, CopilotEffects, EffectHandler, EffectResult, ResultExt,
 };
 use crate::services::copilot_review;
+use crate::services::HasTmuxIpc;
 use async_trait::async_trait;
 use exomonad_proto::effects::copilot::*;
+use std::sync::Arc;
 
 /// Copilot effect handler.
 ///
 /// Handles all effects in the `copilot.*` namespace by delegating to
 /// the generated `dispatch_copilot_effect` function.
-#[derive(Default)]
-pub struct CopilotHandler;
+pub struct CopilotHandler<C> {
+    ctx: Arc<C>,
+}
 
-impl CopilotHandler {
-    pub fn new() -> Self {
-        Self
+impl<C: HasTmuxIpc + 'static> CopilotHandler<C> {
+    pub fn new(ctx: Arc<C>) -> Self {
+        Self { ctx }
     }
 }
 
 #[async_trait]
-impl EffectHandler for CopilotHandler {
+impl<C: HasTmuxIpc + 'static> EffectHandler for CopilotHandler<C> {
     fn namespace(&self) -> &str {
         "copilot"
     }
@@ -39,7 +42,7 @@ impl EffectHandler for CopilotHandler {
 }
 
 #[async_trait]
-impl CopilotEffects for CopilotHandler {
+impl<C: HasTmuxIpc + 'static> CopilotEffects for CopilotHandler<C> {
     async fn wait_for_copilot_review(
         &self,
         req: WaitForCopilotReviewRequest,
@@ -65,7 +68,7 @@ impl CopilotEffects for CopilotHandler {
             },
         };
 
-        let output = copilot_review::wait_for_copilot_review(&input)
+        let output = copilot_review::wait_for_copilot_review(&input, self.ctx.tmux_ipc())
             .await
             .effect_err("copilot")?;
 
@@ -94,13 +97,15 @@ mod tests {
 
     #[test]
     fn test_copilot_handler_new() {
-        let handler = CopilotHandler;
+        let services = std::sync::Arc::new(crate::services::Services::test());
+        let handler = CopilotHandler::new(services);
         assert_eq!(handler.namespace(), "copilot");
     }
 
     #[test]
     fn test_copilot_handler_namespace() {
-        let handler = CopilotHandler;
+        let services = std::sync::Arc::new(crate::services::Services::test());
+        let handler = CopilotHandler::new(services);
         assert_eq!(handler.namespace(), "copilot");
     }
 }

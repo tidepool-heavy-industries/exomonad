@@ -13,7 +13,7 @@ use exomonad_proto::effects::file_pr::*;
 use std::sync::Arc;
 use tracing::instrument;
 
-use crate::services::{HasEventLog, HasGitHubClient, HasGitWorktreeService};
+use crate::services::{HasEventLog, HasGitHubClient, HasGitWorktreeService, HasTmuxIpc};
 
 /// File PR effect handler.
 ///
@@ -23,14 +23,14 @@ pub struct FilePRHandler<C> {
     ctx: Arc<C>,
 }
 
-impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static> FilePRHandler<C> {
+impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + HasTmuxIpc + 'static> FilePRHandler<C> {
     pub fn new(ctx: Arc<C>) -> Self {
         Self { ctx }
     }
 }
 
 #[async_trait]
-impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static> EffectHandler
+impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + HasTmuxIpc + 'static> EffectHandler
     for FilePRHandler<C>
 {
     fn namespace(&self) -> &str {
@@ -48,7 +48,7 @@ impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static> EffectH
 }
 
 #[async_trait]
-impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static> FilePrEffects
+impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + HasTmuxIpc + 'static> FilePrEffects
     for FilePRHandler<C>
 {
     #[instrument(skip_all, fields(agent_name = %ctx.agent_name, pr_title = %req.title))]
@@ -73,6 +73,7 @@ impl<C: HasGitHubClient + HasEventLog + HasGitWorktreeService + 'static> FilePrE
             &input,
             self.ctx.git_worktree_service().clone(),
             self.ctx.github_client().map(|arc| arc.as_ref()),
+            self.ctx.tmux_ipc(),
         )
         .await
         .effect_err("file_pr")?;

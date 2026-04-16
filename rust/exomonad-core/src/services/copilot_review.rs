@@ -204,6 +204,7 @@ async fn fetch_pr_reviews(
 /// Main wait_for_copilot_review implementation
 pub async fn wait_for_copilot_review(
     input: &WaitForCopilotReviewInput,
+    tmux_ipc: &crate::services::tmux_ipc::TmuxIpc,
 ) -> Result<CopilotReviewOutput> {
     info!(
         "[CopilotReview] Waiting for Copilot review on PR #{} (timeout: {}s, poll: {}s)",
@@ -224,27 +225,26 @@ pub async fn wait_for_copilot_review(
         if !comments.is_empty() {
             info!("[CopilotReview] Found {} Copilot comments", comments.len());
 
-            // Emit copilot:reviewed event (only if in tmux session)
-            if let Ok(session) = std::env::var("EXOMONAD_TMUX_SESSION") {
-                if let Ok(branch) = git::get_current_branch() {
-                    if let Some(agent_id_str) = git::extract_agent_id(branch.as_str()) {
-                        match crate::ui_protocol::AgentId::try_from(agent_id_str) {
-                            Ok(agent_id) => {
-                                let event = crate::ui_protocol::AgentEvent::CopilotReviewed {
-                                    agent_id,
-                                    comment_count: comments.len() as u32,
-                                    timestamp: tmux_events::now_iso8601(),
-                                };
-                                if let Err(e) = tmux_events::emit_event(&session, &event) {
-                                    warn!("Failed to emit copilot:reviewed event: {}", e);
-                                }
+            // Emit copilot:reviewed event
+            if let Ok(branch) = git::get_current_branch() {
+                if let Some(agent_id_str) = git::extract_agent_id(branch.as_str()) {
+                    match crate::ui_protocol::AgentId::try_from(agent_id_str) {
+                        Ok(agent_id) => {
+                            let event = crate::ui_protocol::AgentEvent::CopilotReviewed {
+                                agent_id,
+                                comment_count: comments.len() as u32,
+                                timestamp: tmux_events::now_iso8601(),
+                            };
+                            if let Err(e) = tmux_events::emit_event(tmux_ipc.session_name(), &event)
+                            {
+                                warn!("Failed to emit copilot:reviewed event: {}", e);
                             }
-                            Err(e) => {
-                                warn!(
-                                    "Invalid agent_id in branch '{}', skipping event: {}",
-                                    branch, e
-                                );
-                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                "Invalid agent_id in branch '{}', skipping event: {}",
+                                branch, e
+                            );
                         }
                     }
                 }
@@ -260,27 +260,26 @@ pub async fn wait_for_copilot_review(
         if fetch_pr_reviews(&owner, &repo, input.pr_number).await? {
             info!("[CopilotReview] Found Copilot review (no inline comments)");
 
-            // Emit copilot:reviewed event with 0 comments (only if in tmux session)
-            if let Ok(session) = std::env::var("EXOMONAD_TMUX_SESSION") {
-                if let Ok(branch) = git::get_current_branch() {
-                    if let Some(agent_id_str) = git::extract_agent_id(branch.as_str()) {
-                        match crate::ui_protocol::AgentId::try_from(agent_id_str) {
-                            Ok(agent_id) => {
-                                let event = crate::ui_protocol::AgentEvent::CopilotReviewed {
-                                    agent_id,
-                                    comment_count: 0,
-                                    timestamp: tmux_events::now_iso8601(),
-                                };
-                                if let Err(e) = tmux_events::emit_event(&session, &event) {
-                                    warn!("Failed to emit copilot:reviewed event: {}", e);
-                                }
+            // Emit copilot:reviewed event with 0 comments
+            if let Ok(branch) = git::get_current_branch() {
+                if let Some(agent_id_str) = git::extract_agent_id(branch.as_str()) {
+                    match crate::ui_protocol::AgentId::try_from(agent_id_str) {
+                        Ok(agent_id) => {
+                            let event = crate::ui_protocol::AgentEvent::CopilotReviewed {
+                                agent_id,
+                                comment_count: 0,
+                                timestamp: tmux_events::now_iso8601(),
+                            };
+                            if let Err(e) = tmux_events::emit_event(tmux_ipc.session_name(), &event)
+                            {
+                                warn!("Failed to emit copilot:reviewed event: {}", e);
                             }
-                            Err(e) => {
-                                warn!(
-                                    "Invalid agent_id in branch '{}', skipping event: {}",
-                                    branch, e
-                                );
-                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                "Invalid agent_id in branch '{}', skipping event: {}",
+                                branch, e
+                            );
                         }
                     }
                 }
