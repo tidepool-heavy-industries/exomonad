@@ -48,7 +48,7 @@ pub(crate) async fn ensure_branch_pushed(
     branch: &BranchName,
     project_dir: &Path,
 ) {
-    info!(branch = %branch, "Pushing parent branch to remote");
+    info!(branch = %branch, "Pushing branch to remote");
     let git_wt = git_wt.clone();
     let dir = project_dir.to_path_buf();
     let bookmark = branch.clone();
@@ -59,7 +59,7 @@ pub(crate) async fn ensure_branch_pushed(
             warn!(
                 branch = %branch,
                 error = %anyhow_err,
-                "Failed to push parent branch (non-fatal, PRs may not work)"
+                "Failed to push branch (non-fatal, remote operations may not work)"
             )
         }
         Err(e) => warn!(branch = %branch, error = %e, "Push task panicked (non-fatal)"),

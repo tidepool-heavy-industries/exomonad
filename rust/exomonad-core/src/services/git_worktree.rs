@@ -135,9 +135,9 @@ impl GitWorktreeService {
         Ok(())
     }
 
-    /// Push a branch to the remote.
+    /// Push a branch to the remote and set upstream tracking.
     ///
-    /// Equivalent to: `git push origin {branch}` (run in workspace_path)
+    /// Equivalent to: `git push -u origin {branch}` (run in workspace_path)
     pub fn push_bookmark(
         &self,
         workspace_path: &Path,
@@ -762,7 +762,14 @@ mod tests {
         run(&["config", "user.email", "test@example.com"]);
         run(&["config", "user.name", "Test User"]);
         run(&["commit", "--allow-empty", "-m", "Initial commit"]);
-        run(&["remote", "add", "origin", remote_path.to_str().unwrap()]);
+
+        let status = Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(remote_path)
+            .current_dir(local_path)
+            .status()
+            .expect("failed to run git remote add");
+        assert!(status.success(), "git command failed: remote add origin <path>");
 
         let service = GitWorktreeService::new(local_path.to_path_buf());
         let branch = BranchName::from("test-upstream-branch");

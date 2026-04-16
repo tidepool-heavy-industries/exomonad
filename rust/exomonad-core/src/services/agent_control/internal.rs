@@ -218,9 +218,35 @@ impl<
             ));
         }
 
-        // Set upstream tracking by pushing the branch to origin.
+        // Set upstream tracking by pushing the child branch to origin.
         // Non-fatal: supports offline use or repos without remotes.
-        ensure_branch_pushed(self.git_wt(), branch_name, worktree_path).await;
+        //
+        // Run this in the background so slow networks or auth prompts do not
+        // consume the main spawn timeout budget.
+        let git_wt = self.git_wt().clone();
+        let branch_push = branch_name.clone();
+        let wt_path = worktree_path.to_path_buf();
+        tokio::spawn(async move {
+            info!(
+                branch_name = %branch_push,
+                worktree_path = %wt_path.display(),
+                "Ensuring child branch upstream in background"
+            );
+
+            if tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                ensure_branch_pushed(&git_wt, &branch_push, &wt_path),
+            )
+            .await
+            .is_err()
+            {
+                warn!(
+                    branch_name = %branch_push,
+                    worktree_path = %wt_path.display(),
+                    "Timed out while ensuring child branch upstream (non-fatal)"
+                );
+            }
+        });
 
         Ok(())
     }
