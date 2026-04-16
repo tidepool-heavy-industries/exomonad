@@ -33,6 +33,96 @@ pub fn coerce_harness_value(value: Value, coerce_scalars: bool) -> Value {
     }
 }
 
+/// Coerce a value against an optional JSON Schema.
+///
+/// Walks `value` in parallel with `schema`. At each location, uses the schema
+/// type to decide whether to decode string-encoded JSON:
+/// - schema.type == "integer" | "number" → coerce strings matching Number shape
+/// - schema.type == "boolean" → coerce strings matching Bool shape
+/// - schema.type == "array" → coerce string → array, recurse with items schema
+/// - schema.type == "object" → coerce string → object, recurse with properties
+/// - schema.type == "string" (incl. type arrays containing "string") → never coerce
+/// - schema missing / malformed / anyOf / oneOf → preserve as-is
+///
+/// Extra fields not in schema.properties are preserved as-is (no heuristic recursion).
+pub fn coerce_harness_value_with_schema(value: Value, schema: Option<&Value>) -> Value {
+    match (value, schema) {
+        (v, None) => v,
+
+        (Value::String(s), Some(schema)) if schema_type_is(schema, "object") => {
+            match serde_json::from_str::<Value>(s.trim()) {
+                Ok(Value::Object(obj)) => coerce_object_fields(Value::Object(obj), schema),
+                _ => Value::String(s),
+            }
+        }
+
+        (Value::String(s), Some(schema)) if schema_type_is(schema, "array") => {
+            match serde_json::from_str::<Value>(s.trim()) {
+                Ok(Value::Array(arr)) => coerce_array_items(Value::Array(arr), schema),
+                _ => Value::String(s),
+            }
+        }
+
+        (Value::String(s), Some(schema))
+            if schema_type_is(schema, "integer") || schema_type_is(schema, "number") =>
+        {
+            match serde_json::from_str::<Value>(s.trim()) {
+                Ok(v @ Value::Number(_)) => v,
+                _ => Value::String(s),
+            }
+        }
+
+        (Value::String(s), Some(schema)) if schema_type_is(schema, "boolean") => {
+            match s.trim() {
+                "true" => Value::Bool(true),
+                "false" => Value::Bool(false),
+                _ => Value::String(s),
+            }
+        }
+
+        (Value::Object(obj), Some(schema)) => coerce_object_fields(Value::Object(obj), schema),
+
+        (Value::Array(arr), Some(schema)) => coerce_array_items(Value::Array(arr), schema),
+
+        (v, _) => v,
+    }
+}
+
+fn schema_type_is(schema: &Value, target: &str) -> bool {
+    match schema.get("type") {
+        Some(Value::String(t)) => t == target,
+        Some(Value::Array(types)) => types.iter().any(|t| t.as_str() == Some(target)),
+        _ => false,
+    }
+}
+
+fn coerce_object_fields(value: Value, schema: &Value) -> Value {
+    let Value::Object(obj) = value else {
+        return value;
+    };
+    let props = schema.get("properties");
+    Value::Object(
+        obj.into_iter()
+            .map(|(k, v)| {
+                let field_schema = props.and_then(|p| p.get(&k));
+                (k, coerce_harness_value_with_schema(v, field_schema))
+            })
+            .collect(),
+    )
+}
+
+fn coerce_array_items(value: Value, schema: &Value) -> Value {
+    let Value::Array(arr) = value else {
+        return value;
+    };
+    let items_schema = schema.get("items");
+    Value::Array(
+        arr.into_iter()
+            .map(|v| coerce_harness_value_with_schema(v, items_schema))
+            .collect(),
+    )
+}
+
 /// If `s` looks like a JSON-encoded non-string value (number, bool, array,
 /// object), parse it and return the decoded value recursively coerced.
 /// Returns `None` if the string doesn't match any encoded shape or if
@@ -468,5 +558,261 @@ mod tests {
             "children": [{"id": "123"}]
         });
         assert_eq!(coerce_harness_value(input, false), expected);
+    }
+
+    // ========================================================================
+    // Schema-directed coercion tests (coerce_harness_value_with_schema)
+    // ========================================================================
+
+    fn str_schema() -> Value {
+        json!({"type": "string"})
+    }
+    fn int_schema() -> Value {
+        json!({"type": "integer"})
+    }
+    fn bool_schema() -> Value {
+        json!({"type": "boolean"})
+    }
+    fn arr_of_str_schema() -> Value {
+        json!({"type": "array", "items": {"type": "string"}})
+    }
+    fn obj_schema(props: Value) -> Value {
+        json!({"type": "object", "properties": props})
+    }
+
+    #[test]
+    fn schema_string_field_never_coerced_even_when_all_digits() {
+        let schema = obj_schema(json!({"slug": str_schema()}));
+        let input = json!({"slug": "123"});
+        assert_eq!(
+            coerce_harness_value_with_schema(input.clone(), Some(&schema)),
+            input
+        );
+    }
+
+    #[test]
+    fn schema_string_field_never_coerced_even_when_looks_like_bool() {
+        let schema = obj_schema(json!({"task": str_schema()}));
+        let input = json!({"task": "true"});
+        assert_eq!(
+            coerce_harness_value_with_schema(input.clone(), Some(&schema)),
+            input
+        );
+    }
+
+    #[test]
+    fn schema_integer_field_coerces_string_digits() {
+        let schema = obj_schema(json!({"pr_number": int_schema()}));
+        let input = json!({"pr_number": "841"});
+        assert_eq!(
+            coerce_harness_value_with_schema(input, Some(&schema)),
+            json!({"pr_number": 841})
+        );
+    }
+
+    #[test]
+    fn schema_boolean_field_coerces_string_true_false() {
+        let schema = obj_schema(json!({"force": bool_schema()}));
+        let input = json!({"force": "true"});
+        assert_eq!(
+            coerce_harness_value_with_schema(input, Some(&schema)),
+            json!({"force": true})
+        );
+    }
+
+    #[test]
+    fn schema_array_field_coerces_string_to_array() {
+        let schema = obj_schema(json!({"steps": arr_of_str_schema()}));
+        let input = json!({"steps": "[\"a\", \"b\"]"});
+        assert_eq!(
+            coerce_harness_value_with_schema(input, Some(&schema)),
+            json!({"steps": ["a", "b"]})
+        );
+    }
+
+    #[test]
+    fn schema_array_items_preserve_strings_when_string_typed() {
+        let schema = obj_schema(json!({"ids": arr_of_str_schema()}));
+        let input = json!({"ids": ["123", "456"]});
+        assert_eq!(
+            coerce_harness_value_with_schema(input.clone(), Some(&schema)),
+            input
+        );
+    }
+
+    #[test]
+    fn schema_array_of_objects_recurses_into_item_properties() {
+        let schema = json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "n": {"type": "integer"},
+                    "name": {"type": "string"}
+                }
+            }
+        });
+        let input = json!([
+            {"n": "5", "name": "123"},
+            {"n": "6", "name": "456"}
+        ]);
+        let expected = json!([
+            {"n": 5, "name": "123"},
+            {"n": 6, "name": "456"}
+        ]);
+        assert_eq!(
+            coerce_harness_value_with_schema(input, Some(&schema)),
+            expected
+        );
+    }
+
+    #[test]
+    fn schema_array_string_encoded_recurses_into_items() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "children": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "slug": {"type": "string"},
+                            "task": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        });
+        let input = json!({
+            "children": "[{\"slug\":\"a\",\"task\":\"t1\"},{\"slug\":\"b\",\"task\":\"t2\"}]"
+        });
+        let expected = json!({
+            "children": [
+                {"slug": "a", "task": "t1"},
+                {"slug": "b", "task": "t2"}
+            ]
+        });
+        assert_eq!(
+            coerce_harness_value_with_schema(input, Some(&schema)),
+            expected
+        );
+    }
+
+    #[test]
+    fn schema_missing_property_preserves_extra_field() {
+        let schema = obj_schema(json!({"known": str_schema()}));
+        let input = json!({"known": "foo", "unknown": "123"});
+        assert_eq!(
+            coerce_harness_value_with_schema(input.clone(), Some(&schema)),
+            input
+        );
+    }
+
+    #[test]
+    fn schema_none_preserves_value() {
+        let input = json!({"pr_number": "841", "force": "true"});
+        assert_eq!(coerce_harness_value_with_schema(input.clone(), None), input);
+    }
+
+    #[test]
+    fn schema_malformed_preserves_value() {
+        let schema = json!({});
+        let input = json!("841");
+        assert_eq!(
+            coerce_harness_value_with_schema(input.clone(), Some(&schema)),
+            input
+        );
+    }
+
+    #[test]
+    fn schema_type_array_with_string_preserves_string() {
+        let schema = json!({"type": ["string", "null"]});
+        let input = json!("123");
+        assert_eq!(
+            coerce_harness_value_with_schema(input.clone(), Some(&schema)),
+            input
+        );
+    }
+
+    #[test]
+    fn schema_integer_failed_decode_preserves_string() {
+        let schema = int_schema();
+        let input = json!("not a number");
+        assert_eq!(
+            coerce_harness_value_with_schema(input.clone(), Some(&schema)),
+            input
+        );
+    }
+
+    #[test]
+    fn schema_array_failed_decode_preserves_string() {
+        let schema = arr_of_str_schema();
+        let input = json!("[incomplete");
+        assert_eq!(
+            coerce_harness_value_with_schema(input.clone(), Some(&schema)),
+            input
+        );
+    }
+
+    #[test]
+    fn schema_merge_pr_args_real_shape() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "pr_number": {"type": "integer"},
+                "force": {"type": "boolean"},
+                "strategy": {"type": "string"},
+                "working_dir": {"type": "string"}
+            }
+        });
+        let input = json!({
+            "pr_number": "841",
+            "force": "true",
+            "strategy": "squash",
+            "working_dir": "."
+        });
+        let expected = json!({
+            "pr_number": 841,
+            "force": true,
+            "strategy": "squash",
+            "working_dir": "."
+        });
+        assert_eq!(
+            coerce_harness_value_with_schema(input, Some(&schema)),
+            expected
+        );
+    }
+
+    #[test]
+    fn schema_preserves_plain_strings_across_the_board() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "slug": {"type": "string"},
+                "title": {"type": "string"},
+                "date": {"type": "string"}
+            }
+        });
+        let input = json!({
+            "slug": "123",
+            "title": "true",
+            "date": "2026-04-15"
+        });
+        assert_eq!(
+            coerce_harness_value_with_schema(input.clone(), Some(&schema)),
+            input
+        );
+    }
+
+    #[test]
+    fn schema_is_idempotent() {
+        let schema = json!({
+            "type": "object",
+            "properties": {"n": {"type": "integer"}}
+        });
+        let input = json!({"n": "5"});
+        let first = coerce_harness_value_with_schema(input, Some(&schema));
+        let second = coerce_harness_value_with_schema(first.clone(), Some(&schema));
+        assert_eq!(first, second);
     }
 }
