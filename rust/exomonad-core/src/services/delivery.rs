@@ -12,6 +12,7 @@ pub enum DeliveryResult {
     Acp,
     Uds,
     Tmux,
+    StaleRouting,
     Failed,
 }
 
@@ -101,6 +102,10 @@ impl DeliveryOutcome {
             DeliveryResult::Failed => DeliveryOutcome::Failed {
                 original: recipient.to_string(),
                 reason: "all delivery methods failed".to_string(),
+            },
+            DeliveryResult::StaleRouting => DeliveryOutcome::Failed {
+                original: recipient.to_string(),
+                reason: "stale routing.json (dead pane/window)".to_string(),
             },
             DeliveryResult::Teams => DeliveryOutcome::Delivered {
                 method: DeliveryMethod::TeamsInbox,
@@ -239,7 +244,9 @@ fn delivery_method_from_result(result: DeliveryResult) -> DeliveryMethod {
         DeliveryResult::Teams => DeliveryMethod::TeamsInbox,
         DeliveryResult::Acp => DeliveryMethod::Acp,
         DeliveryResult::Uds => DeliveryMethod::Uds,
-        DeliveryResult::Tmux | DeliveryResult::Failed => DeliveryMethod::Tmux,
+        DeliveryResult::Tmux | DeliveryResult::Failed | DeliveryResult::StaleRouting => {
+            DeliveryMethod::Tmux
+        }
     }
 }
 
@@ -618,6 +625,11 @@ pub async fn deliver_to_agent(
                     error = ?e,
                     "ACP prompt failed, falling back to tmux"
                 );
+                // Purge on connection-level errors (conservative check on Debug string)
+                let err_debug = format!("{:?}", e);
+                if err_debug.contains("ConnectionClosed") || err_debug.contains("BrokenPipe") {
+                    acp_registry.remove(agent_key).await;
+                }
                 tracing::info!(
                     otel.name = "message.delivery",
                     agent_id = %from,
@@ -686,9 +698,13 @@ pub async fn deliver_to_agent(
     let mut routing_target = None;
     let mut routing_parent_tab = None;
     let mut matched_dir_name = None;
+    let mut stale_candidates = Vec::new();
+
     for dir_name in routing_candidates {
         let path = agents_dir.join(&dir_name).join("routing.json");
+        debug!(candidate = %dir_name, path = %path.display(), "Checking routing candidate");
         if let Ok(content) = tokio::fs::read_to_string(&path).await {
+            debug!(path = %path.display(), "Found routing.json");
             if let Ok(routing) = serde_json::from_str::<serde_json::Value>(&content) {
                 // Prefer pane_id (workers), then window_id (subtrees/leaves), then parent_tab
                 let target = routing["pane_id"]
@@ -698,10 +714,23 @@ pub async fn deliver_to_agent(
                     .map(|s| s.to_string());
 
                 if let Some(t) = target {
-                    routing_target = Some(t);
-                    routing_parent_tab = routing["parent_tab"].as_str().map(|s| s.to_string());
-                    matched_dir_name = Some(dir_name.clone());
-                    break;
+                    // Liveness check: verify tmux target still exists before attempting injection
+                    if tmux_ipc.target_alive(&t).await {
+                        debug!(target = %t, "Routing target is alive");
+                        routing_target = Some(t);
+                        routing_parent_tab = routing["parent_tab"].as_str().map(|s| s.to_string());
+                        matched_dir_name = Some(dir_name.clone());
+                        break;
+                    } else {
+                        debug!(target = %t, "Routing target is dead");
+                        warn!(
+                            agent = %agent_key,
+                            target = %t,
+                            dir = %dir_name,
+                            "Routing target is dead, skipping candidate"
+                        );
+                        stale_candidates.push(dir_name.clone());
+                    }
                 }
             }
         }
@@ -749,6 +778,14 @@ pub async fn deliver_to_agent(
         return DeliveryResult::Tmux;
     }
 
+    // All routing candidates proved dead — prune the stale JSON files
+    if !stale_candidates.is_empty() {
+        for dir_name in stale_candidates {
+            prune_stale_routing(project_dir, &dir_name).await;
+        }
+        return DeliveryResult::StaleRouting;
+    }
+
     tracing::Span::current().record("delivery_method", "tmux");
     debug!(
         target = %tmux_target,
@@ -780,6 +817,25 @@ pub async fn deliver_to_agent(
         "[event] message.delivery"
     );
     DeliveryResult::Tmux
+}
+
+/// Prune a stale routing.json file for an agent.
+async fn prune_stale_routing(project_dir: &std::path::Path, agent_dir_name: &str) {
+    let path = project_dir
+        .join(".exo/agents")
+        .join(agent_dir_name)
+        .join("routing.json");
+    if path.exists() {
+        if let Err(e) = tokio::fs::remove_file(&path).await {
+            warn!(
+                path = %path.display(),
+                error = %e,
+                "Failed to prune stale routing.json"
+            );
+        } else {
+            warn!(path = %path.display(), "Pruned stale routing.json");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1085,5 +1141,108 @@ mod tests {
                 outcome
             ),
         }
+    }
+
+    #[tokio::test]
+    async fn test_routing_live_target_delivers() {
+        if !crate::services::tmux_ipc::IsolatedTmux::is_available().await {
+            return;
+        }
+        let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
+            .await
+            .expect("tmux unavailable");
+        let tmp = tempfile::tempdir().unwrap();
+        let services = crate::services::ServicesBuilder::new(
+            tmp.path().to_path_buf(),
+            tmp.path().join(".claude/tasks"),
+            Arc::new(crate::services::GitWorktreeService::new(
+                tmp.path().to_path_buf(),
+            )),
+            Arc::new(isolated.ipc.clone()),
+        )
+        .build();
+
+        let agent_key = "test-agent-live";
+        let agent_dir = tmp.path().join(".exo/agents").join(agent_key);
+        std::fs::create_dir_all(&agent_dir).unwrap();
+
+        // Create a real window in tmux to be "live"
+        let window_id = isolated
+            .ipc
+            .new_window("test-window", tmp.path(), "/bin/sh", "sleep 100")
+            .await
+            .unwrap();
+
+        let routing = serde_json::json!({
+            "window_id": window_id.as_str()
+        });
+        std::fs::write(
+            agent_dir.join("routing.json"),
+            serde_json::to_string(&routing).unwrap(),
+        )
+        .unwrap();
+
+        let result = deliver_to_agent(
+            &services,
+            agent_key,
+            "fallback",
+            &AgentName::from("sender"),
+            "msg",
+            "sum",
+        )
+        .await;
+
+        // Should use routing and return Tmux
+        assert_eq!(result, DeliveryResult::Tmux);
+        // routing.json should still exist
+        assert!(agent_dir.join("routing.json").exists());
+    }
+
+    #[tokio::test]
+    async fn test_routing_dead_target_skipped_and_pruned() {
+        let _ = tracing_subscriber::fmt::try_init();
+        if !crate::services::tmux_ipc::IsolatedTmux::is_available().await {
+            return;
+        }
+        let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
+            .await
+            .expect("tmux unavailable");
+        let tmp = tempfile::tempdir().unwrap();
+        let services = crate::services::ServicesBuilder::new(
+            tmp.path().to_path_buf(),
+            tmp.path().join(".claude/tasks"),
+            Arc::new(crate::services::GitWorktreeService::new(
+                tmp.path().to_path_buf(),
+            )),
+            Arc::new(isolated.ipc.clone()),
+        )
+        .build();
+
+        let agent_key = "test-agent-dead";
+        let agent_dir = tmp.path().join(".exo/agents").join(agent_key);
+        std::fs::create_dir_all(&agent_dir).unwrap();
+
+        let routing = serde_json::json!({
+            "window_id": "@9999" // Non-existent window
+        });
+        std::fs::write(
+            agent_dir.join("routing.json"),
+            serde_json::to_string(&routing).unwrap(),
+        )
+        .unwrap();
+
+        let result = deliver_to_agent(
+            &services,
+            agent_key,
+            "fallback",
+            &AgentName::from("sender"),
+            "msg",
+            "sum",
+        )
+        .await;
+
+        // Should return StaleRouting and prune the file
+        assert_eq!(result, DeliveryResult::StaleRouting);
+        assert!(!agent_dir.join("routing.json").exists());
     }
 }
