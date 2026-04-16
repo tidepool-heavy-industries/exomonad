@@ -52,7 +52,13 @@ impl<
                 Ok(routing) => {
                     let is_live = if let Some(wid) = &routing.window_id {
                         match self.tmux() {
-                            Ok(tmux) => tmux.window_exists(wid).await.unwrap_or(false),
+                            Ok(tmux) => match tmux.window_exists(wid).await {
+                                Ok(exists) => exists,
+                                Err(e) => {
+                                    warn!(path = %path.display(), error = %e, "Tmux liveness check failed, skipping agent");
+                                    true
+                                }
+                            }
                             Err(_) => {
                                 warn!(path = %path.display(), "Tmux session unavailable, skipping liveness check for agent");
                                 stats.kept_live += 1;
@@ -61,7 +67,13 @@ impl<
                         }
                     } else if let Some(pid) = &routing.pane_id {
                         match self.tmux() {
-                            Ok(tmux) => tmux.pane_exists(pid).await.unwrap_or(false),
+                            Ok(tmux) => match tmux.pane_exists(pid).await {
+                                Ok(exists) => exists,
+                                Err(e) => {
+                                    warn!(path = %path.display(), error = %e, "Tmux liveness check failed, skipping agent");
+                                    true
+                                }
+                            }
                             Err(_) => {
                                 warn!(path = %path.display(), "Tmux session unavailable, skipping liveness check for agent");
                                 stats.kept_live += 1;
