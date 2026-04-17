@@ -3,7 +3,7 @@ use crate::services::tmux_events;
 use agent_client_protocol::{Agent, PromptRequest};
 use claude_teams_bridge as teams_mailbox;
 use claude_teams_bridge::TeamRegistry;
-use exomonad_proto::effects::events::{event, AgentMessage, Event};
+use exomonad_proto::effects::events::{AgentMessage, Event, event};
 use tracing::{debug, info, instrument, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -246,7 +246,10 @@ pub enum DeliveryResultV2 {
     /// Channel handed off to an async verifier. Callers that need certainty
     /// can `.await` the receiver; fire-and-forget callers can treat this as
     /// success-pending.
-    QueuedUnverified(DeliveryChannel, tokio::sync::oneshot::Receiver<VerifyOutcome>),
+    QueuedUnverified(
+        DeliveryChannel,
+        tokio::sync::oneshot::Receiver<VerifyOutcome>,
+    ),
     /// Plan exhausted or empty.
     Failed(FailureReason),
 }
@@ -256,8 +259,19 @@ pub enum DeliveryResultV2 {
 /// may branch on agent type outside this function.
 ///
 /// Implementation lives in Wave 1 / leaf `delivery-plan-pure`.
-pub fn delivery_plan(_recipient: &RecipientMeta) -> Vec<DeliveryChannel> {
-    todo!("Wave 1 / leaf delivery-plan-pure")
+pub fn delivery_plan(recipient: &RecipientMeta) -> Vec<DeliveryChannel> {
+    use crate::services::agent_control::AgentType::*;
+    use BackendType::*;
+    use DeliveryChannel::*;
+    match (recipient.agent_type, recipient.backend_type) {
+        (Claude, Exomonad) => vec![Teams, Tmux],
+        (Claude, CcNative) => vec![Teams],
+        (Gemini, Exomonad) => vec![Acp, Tmux],
+        (Gemini, CcNative) => vec![],
+        (Shoal, Exomonad) => vec![Uds, Tmux],
+        (Shoal, CcNative) => vec![],
+        (Process, _) => vec![],
+    }
 }
 
 /// Inverse view of the policy: which channels this recipient is *capable* of
@@ -267,9 +281,33 @@ pub fn delivery_plan(_recipient: &RecipientMeta) -> Vec<DeliveryChannel> {
 ///
 /// Implementation lives in Wave 1 / leaf `delivery-plan-pure`.
 pub fn channels_recipient_can_receive(
-    _recipient: &RecipientMeta,
+    recipient: &RecipientMeta,
 ) -> std::collections::BTreeSet<DeliveryChannel> {
-    todo!("Wave 1 / leaf delivery-plan-pure")
+    use crate::services::agent_control::AgentType::*;
+    use BackendType::*;
+    use DeliveryChannel::*;
+    let mut set = std::collections::BTreeSet::new();
+    match (recipient.agent_type, recipient.backend_type) {
+        (Claude, Exomonad) => {
+            set.insert(Teams);
+            set.insert(Tmux);
+        }
+        (Claude, CcNative) => {
+            set.insert(Teams);
+        }
+        (Gemini, Exomonad) => {
+            set.insert(Acp);
+            set.insert(Tmux);
+        }
+        (Gemini, CcNative) => {}
+        (Shoal, Exomonad) => {
+            set.insert(Uds);
+            set.insert(Tmux);
+        }
+        (Shoal, CcNative) => {}
+        (Process, _) => {}
+    }
+    set
 }
 
 // ---------------------------------------------------------------------------
@@ -281,11 +319,13 @@ pub fn channels_recipient_can_receive(
 /// team lead from the TeamRegistry.
 #[instrument(skip_all, fields(address = %address, from = %from))]
 pub async fn route_message(
-    ctx: &(impl super::HasTeamRegistry
-          + super::HasAcpRegistry
-          + super::HasAgentResolver
-          + super::HasProjectDir
-          + super::HasTmuxIpc),
+    ctx: &(
+         impl super::HasTeamRegistry
+         + super::HasAcpRegistry
+         + super::HasAgentResolver
+         + super::HasProjectDir
+         + super::HasTmuxIpc
+     ),
     address: &Address,
     from: &crate::domain::AgentName,
     content: &str,
@@ -322,11 +362,13 @@ pub async fn route_message(
 /// Resolve team lead and deliver. Uses `config.json`'s `leadAgentId` to find
 /// the lead, falls back to first in-memory entry, then to "root".
 async fn resolve_and_deliver_to_lead(
-    ctx: &(impl super::HasTeamRegistry
-          + super::HasAcpRegistry
-          + super::HasAgentResolver
-          + super::HasProjectDir
-          + super::HasTmuxIpc),
+    ctx: &(
+         impl super::HasTeamRegistry
+         + super::HasAcpRegistry
+         + super::HasAgentResolver
+         + super::HasProjectDir
+         + super::HasTmuxIpc
+     ),
     team_name: &str,
     from: &crate::domain::AgentName,
     content: &str,
@@ -354,7 +396,10 @@ async fn resolve_and_deliver_to_lead(
     if result.is_failure() {
         DeliveryOutcome::Failed {
             original,
-            reason: format!("delivery to resolved lead '{}' failed ({:?})", lead_key, result),
+            reason: format!(
+                "delivery to resolved lead '{}' failed ({:?})",
+                lead_key, result
+            ),
         }
     } else {
         DeliveryOutcome::FallbackToLead {
@@ -417,12 +462,14 @@ pub fn resolve_tab_name_for_agent(
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, fields(agent_id = %agent_id, parent_session_id = %parent_session_id, status = %status))]
 pub async fn notify_parent_delivery(
-    ctx: &(impl super::HasTeamRegistry
-          + super::HasAcpRegistry
-          + super::HasEventLog
-          + super::HasEventQueue
-          + super::HasProjectDir
-          + super::HasTmuxIpc),
+    ctx: &(
+         impl super::HasTeamRegistry
+         + super::HasAcpRegistry
+         + super::HasEventLog
+         + super::HasEventQueue
+         + super::HasProjectDir
+         + super::HasTmuxIpc
+     ),
     agent_id: &crate::domain::AgentName,
     parent_session_id: &str,
     parent_tab_name: &str,
@@ -563,10 +610,9 @@ async fn deliver_via_uds(
 /// Falls back to tmux input injection if other delivery methods fail or are not available.
 #[instrument(skip_all, fields(agent_key = %agent_key, from = %from, delivery_method = tracing::field::Empty))]
 pub async fn deliver_to_agent(
-    ctx: &(impl super::HasTeamRegistry
-          + super::HasAcpRegistry
-          + super::HasProjectDir
-          + super::HasTmuxIpc),
+    ctx: &(
+         impl super::HasTeamRegistry + super::HasAcpRegistry + super::HasProjectDir + super::HasTmuxIpc
+     ),
     agent_key: &str,
     tmux_target: &str,
     from: &crate::domain::AgentName,
@@ -1457,5 +1503,124 @@ mod tests {
         assert_eq!(result, DeliveryResult::Tmux);
         // routing.json should still exist
         assert!(agent_dir.join("routing.json").exists());
+    }
+}
+
+#[cfg(test)]
+mod plan_tests {
+    use super::*;
+    use crate::services::agent_control::AgentType;
+
+    fn all_metas() -> Vec<RecipientMeta> {
+        let types = [
+            AgentType::Claude,
+            AgentType::Gemini,
+            AgentType::Shoal,
+            AgentType::Process,
+        ];
+        let backends = [BackendType::Exomonad, BackendType::CcNative];
+        let mut out = Vec::with_capacity(types.len() * backends.len());
+        for t in types {
+            for b in backends {
+                out.push(RecipientMeta {
+                    agent_type: t,
+                    backend_type: b,
+                });
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn plan_is_subset_of_receivable_channels() {
+        for meta in all_metas() {
+            let plan = delivery_plan(&meta);
+            let receivable = channels_recipient_can_receive(&meta);
+            for channel in &plan {
+                assert!(
+                    receivable.contains(channel),
+                    "plan for {:?} contains {:?} which is not in receivable set {:?}",
+                    meta,
+                    channel,
+                    receivable
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn plan_is_nonempty_iff_receivable_is_nonempty() {
+        for meta in all_metas() {
+            let plan_empty = delivery_plan(&meta).is_empty();
+            let recv_empty = channels_recipient_can_receive(&meta).is_empty();
+            assert_eq!(
+                plan_empty, recv_empty,
+                "plan/receivable emptiness mismatch for {:?}: plan_empty={}, recv_empty={}",
+                meta, plan_empty, recv_empty
+            );
+        }
+    }
+
+    #[test]
+    fn plan_has_no_duplicate_channels() {
+        for meta in all_metas() {
+            let plan = delivery_plan(&meta);
+            let mut dedup: std::collections::BTreeSet<DeliveryChannel> =
+                std::collections::BTreeSet::new();
+            for c in &plan {
+                assert!(
+                    dedup.insert(*c),
+                    "duplicate channel {:?} in plan for {:?}",
+                    c,
+                    meta
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn claude_exomonad_plan_matches_spec() {
+        let meta = RecipientMeta {
+            agent_type: AgentType::Claude,
+            backend_type: BackendType::Exomonad,
+        };
+        assert_eq!(
+            delivery_plan(&meta),
+            vec![DeliveryChannel::Teams, DeliveryChannel::Tmux]
+        );
+    }
+
+    #[test]
+    fn gemini_exomonad_plan_matches_spec() {
+        let meta = RecipientMeta {
+            agent_type: AgentType::Gemini,
+            backend_type: BackendType::Exomonad,
+        };
+        assert_eq!(
+            delivery_plan(&meta),
+            vec![DeliveryChannel::Acp, DeliveryChannel::Tmux]
+        );
+    }
+
+    #[test]
+    fn process_is_undeliverable_on_both_backends() {
+        for backend in [BackendType::Exomonad, BackendType::CcNative] {
+            let meta = RecipientMeta {
+                agent_type: AgentType::Process,
+                backend_type: backend,
+            };
+            assert!(delivery_plan(&meta).is_empty());
+            assert!(channels_recipient_can_receive(&meta).is_empty());
+        }
+    }
+
+    #[test]
+    fn gemini_ccnative_is_undeliverable() {
+        let meta = RecipientMeta {
+            agent_type: AgentType::Gemini,
+            backend_type: BackendType::CcNative,
+        };
+        assert!(delivery_plan(&meta).is_empty());
+        assert!(channels_recipient_can_receive(&meta).is_empty());
     }
 }
