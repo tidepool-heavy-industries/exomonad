@@ -246,7 +246,10 @@ pub enum DeliveryResultV2 {
     /// Channel handed off to an async verifier. Callers that need certainty
     /// can `.await` the receiver; fire-and-forget callers can treat this as
     /// success-pending.
-    QueuedUnverified(DeliveryChannel, tokio::sync::oneshot::Receiver<VerifyOutcome>),
+    QueuedUnverified(
+        DeliveryChannel,
+        tokio::sync::oneshot::Receiver<VerifyOutcome>,
+    ),
     /// Plan exhausted or empty.
     Failed(FailureReason),
 }
@@ -354,7 +357,10 @@ async fn resolve_and_deliver_to_lead(
     if result.is_failure() {
         DeliveryOutcome::Failed {
             original,
-            reason: format!("delivery to resolved lead '{}' failed ({:?})", lead_key, result),
+            reason: format!(
+                "delivery to resolved lead '{}' failed ({:?})",
+                lead_key, result
+            ),
         }
     } else {
         DeliveryOutcome::FallbackToLead {
@@ -980,6 +986,19 @@ fn is_acp_connection_error(e: &agent_client_protocol::Error) -> bool {
         }
     }
     false
+}
+
+pub(crate) async fn deliver_via_uds_for_testing(
+    socket_path: &std::path::Path,
+    from: &str,
+    message: &str,
+    summary: &str,
+) -> Result<(), String> {
+    deliver_via_uds(socket_path, from, message, summary).await
+}
+
+pub(crate) fn is_acp_connection_error_for_testing(e: &agent_client_protocol::Error) -> bool {
+    is_acp_connection_error(e)
 }
 
 #[cfg(test)]

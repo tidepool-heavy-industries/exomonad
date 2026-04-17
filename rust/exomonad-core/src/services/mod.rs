@@ -6,6 +6,7 @@ pub mod claude_session_registry;
 pub mod command;
 pub mod copilot_review;
 pub mod delivery;
+pub mod delivery_channels;
 pub mod event_log;
 pub mod event_queue;
 pub mod external;
