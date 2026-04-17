@@ -339,6 +339,7 @@ async fn resolve_tier2_e2e_inbox_delivery() {
                 inbox_name: "exo-worker".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -491,6 +492,7 @@ async fn live_team_resolve_and_deliver() {
                 inbox_name: "test-harness".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -594,6 +596,7 @@ async fn lead_deregistered_still_resolves_via_config() {
                 inbox_name: "team-lead".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -668,6 +671,7 @@ async fn lead_replaced_config_authoritative() {
                 inbox_name: "new-lead".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -742,6 +746,7 @@ async fn cross_team_name_collision() {
                 inbox_name: "sender".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -810,6 +815,7 @@ async fn orphaned_agent_returns_none() {
                 inbox_name: "lead".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -900,6 +906,7 @@ async fn resolve_lead_name_match_fallback() {
                 inbox_name: "fallback-agent".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -1036,7 +1043,7 @@ async fn supervisor_to_lead_routing_chain() {
         description: "Routing chain test".into(),
         created_at: 1711022400,
         lead_agent_id: "tl-uuid".into(),
-        lead_session_id: "session".into(),
+        lead_session_id: "session-1".into(),
         members: vec![
             TeamMember {
                 agent_id: "tl-uuid".into(),
@@ -1072,6 +1079,7 @@ async fn supervisor_to_lead_routing_chain() {
                 inbox_name: "team-lead".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -1256,6 +1264,7 @@ async fn live_teams_e2e() {
                 inbox_name: "e2e-test-runner".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -1598,6 +1607,7 @@ async fn test_register_member_moves_between_teams() {
                 inbox_name: "agent-x".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await
@@ -1618,6 +1628,7 @@ async fn test_register_member_moves_between_teams() {
                 inbox_name: "agent-x".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await
@@ -1669,6 +1680,7 @@ async fn test_alias_persistence_across_restart() {
         inbox_name: "agent-1".into(),
         agent_type: "exomonad-agent".into(),
         model: "gemini".into(),
+        backend_type: None,
     };
 
     // Register under 3 keys
