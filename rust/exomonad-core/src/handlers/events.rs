@@ -372,6 +372,7 @@ mod tests {
                     inbox_name: "lead".to_string(),
                     agent_type: "exomonad-agent".to_string(),
                     model: "gemini".to_string(),
+                    backend_type: None,
                 },
             )
             .await;

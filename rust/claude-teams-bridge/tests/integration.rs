@@ -605,6 +605,7 @@ async fn lead_deregistered_still_resolves_via_config() {
                 inbox_name: "worker-1".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -761,6 +762,7 @@ async fn cross_team_name_collision() {
                 inbox_name: "worker".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -991,6 +993,7 @@ async fn concurrent_register_resolve_no_panic() {
                     inbox_name: name.clone(),
                     agent_type: "exomonad-agent".into(),
                     model: "gemini".into(),
+                    backend_type: None,
                 },
             )
             .await;
@@ -1420,6 +1423,7 @@ async fn test_register_syncs_to_disk() {
                 inbox_name: "worker-1".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -1472,6 +1476,7 @@ async fn test_remove_member_persists_to_disk() {
                 inbox_name: "worker-1".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -1540,6 +1545,7 @@ async fn test_cc_native_members_preserved() {
                 inbox_name: "worker-1".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;

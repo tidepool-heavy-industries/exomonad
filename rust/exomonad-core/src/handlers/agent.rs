@@ -181,6 +181,7 @@ impl<
             inbox_name: child_agent_name.to_string(),
             agent_type: "exomonad-agent".to_string(),
             model: child_identity.agent_type().default_model().to_string(),
+            backend_type: None,
         };
 
         // Register under agent_name and slug — NOT birth_branch.
@@ -1104,6 +1105,7 @@ mod tests {
                     inbox_name: parent_inbox.to_string(),
                     agent_type: "exomonad-agent".to_string(),
                     model: "claude-3-5-sonnet-20241022".to_string(),
+                    backend_type: None,
                 },
             )
             .await;

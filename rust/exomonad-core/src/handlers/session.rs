@@ -135,6 +135,7 @@ impl<C: HasClaudeSessionRegistry + HasTeamRegistry + HasSupervisorRegistry + 'st
             inbox_name: req.inbox_name.clone(),
             agent_type: agent_type_str.to_string(),
             model,
+            backend_type: None,
         };
 
         self.ctx

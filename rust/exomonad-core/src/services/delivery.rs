@@ -653,10 +653,18 @@ fn recipient_meta_from_team_info(info: Option<&TeamInfo>, is_in_memory: bool) ->
         .unwrap_or(crate::services::agent_control::AgentType::Claude);
     let backend_type = if is_in_memory {
         BackendType::Exomonad
-    } else if info.is_some() {
-        BackendType::CcNative
     } else {
-        BackendType::Exomonad
+        match info.and_then(|i| i.backend_type.as_deref()) {
+            Some("exomonad") => BackendType::Exomonad,
+            Some(_) => BackendType::CcNative,
+            None => {
+                if info.is_some() {
+                    BackendType::CcNative
+                } else {
+                    BackendType::Exomonad
+                }
+            }
+        }
     };
     RecipientMeta {
         agent_type,
@@ -1441,5 +1449,37 @@ mod plan_tests {
         };
         assert!(delivery_plan(&meta).is_empty());
         assert!(channels_recipient_can_receive(&meta).is_empty());
+    }
+
+    #[test]
+    fn test_tier2_exomonad_synthetic_classified_as_exomonad() {
+        let info = TeamInfo {
+            team_name: "test-team".into(),
+            inbox_name: "gemini-leaf".into(),
+            agent_type: "gemini".into(),
+            model: "gemini-1.5-pro".into(),
+            backend_type: Some("exomonad".into()),
+        };
+        let meta = recipient_meta_from_team_info(Some(&info), false);
+        assert_eq!(meta.backend_type, BackendType::Exomonad);
+        assert_eq!(meta.agent_type, AgentType::Gemini);
+        assert_eq!(
+            delivery_plan(&meta),
+            vec![DeliveryChannel::Acp, DeliveryChannel::Tmux]
+        );
+    }
+
+    #[test]
+    fn test_tier2_ccnative_classified_as_ccnative() {
+        let info = TeamInfo {
+            team_name: "test-team".into(),
+            inbox_name: "gemini-native".into(),
+            agent_type: "gemini".into(),
+            model: "gemini-1.5-pro".into(),
+            backend_type: None,
+        };
+        let meta = recipient_meta_from_team_info(Some(&info), false);
+        assert_eq!(meta.backend_type, BackendType::CcNative);
+        assert!(delivery_plan(&meta).is_empty());
     }
 }

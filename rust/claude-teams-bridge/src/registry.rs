@@ -24,6 +24,7 @@ pub struct TeamInfo {
     pub inbox_name: String,
     pub agent_type: String,
     pub model: String,
+    pub backend_type: Option<String>,
 }
 
 /// Maps agent identity keys to Claude Teams info.
@@ -195,6 +196,7 @@ impl TeamRegistry {
             inbox_name: member.name.clone(),
             agent_type: member.agent_type.clone(),
             model: member.model.clone(),
+            backend_type: member.backend_type.clone(),
         })
     }
 
@@ -338,6 +340,7 @@ mod tests {
                 inbox_name: "root-inbox".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -356,6 +359,7 @@ mod tests {
                 inbox_name: "root-inbox".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -374,6 +378,7 @@ mod tests {
                 inbox_name: "inbox1".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -384,6 +389,7 @@ mod tests {
                 inbox_name: "inbox2".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -401,6 +407,7 @@ mod tests {
                 inbox_name: "inbox-1".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -411,6 +418,7 @@ mod tests {
                 inbox_name: "inbox-2".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -421,6 +429,7 @@ mod tests {
                 inbox_name: "inbox-3".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -458,6 +467,7 @@ mod tests {
                 inbox_name: "root-inbox".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -468,6 +478,7 @@ mod tests {
                 inbox_name: "agent-inbox".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -485,6 +496,7 @@ mod tests {
                 inbox_name: "a".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -549,6 +561,7 @@ mod tests {
                 inbox_name: "beta".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -567,6 +580,7 @@ mod tests {
                 inbox_name: "agent-1".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -593,6 +607,7 @@ mod tests {
                 inbox_name: "agent-1".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
@@ -679,6 +694,7 @@ mod tests {
                 inbox_name: "sender".into(),
                 agent_type: "exomonad-agent".into(),
                 model: "gemini".into(),
+                backend_type: None,
             },
         )
         .await;
