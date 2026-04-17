@@ -203,7 +203,7 @@ impl<
             };
 
             let status = crate::services::delivery::NotifyStatus::parse(&req.status);
-            crate::services::delivery::notify_parent_delivery(
+            let result = crate::services::delivery::notify_parent_delivery(
                 &*self.ctx,
                 &agent_id,
                 &parent_session_id,
@@ -214,6 +214,7 @@ impl<
                 "agent",
             )
             .await;
+            tracing::info!(?result, agent = %agent_id, "notify_parent delivery result");
             return Ok(NotifyParentResponse { ack: true });
         }
 
@@ -237,7 +238,7 @@ impl<
             );
 
             let status = crate::services::delivery::NotifyStatus::parse(&req.status);
-            crate::services::delivery::notify_parent_delivery(
+            let result = crate::services::delivery::notify_parent_delivery(
                 &*self.ctx,
                 &agent_id,
                 parent_session_id,
@@ -248,6 +249,7 @@ impl<
                 "agent",
             )
             .await;
+            tracing::info!(?result, agent = %agent_id, "notify_parent delivery result");
             return Ok(NotifyParentResponse { ack: true });
         }
 
@@ -275,7 +277,7 @@ impl<
         );
 
         let status = crate::services::delivery::NotifyStatus::parse(&req.status);
-        crate::services::delivery::notify_parent_delivery(
+        let result = crate::services::delivery::notify_parent_delivery(
             &*self.ctx,
             &agent_id,
             &parent_session_id,
@@ -286,6 +288,7 @@ impl<
             "agent",
         )
         .await;
+        tracing::info!(?result, agent = %agent_id, "notify_parent delivery result");
 
         Ok(NotifyParentResponse { ack: true })
     }
@@ -326,20 +329,19 @@ impl<
         )
         .await;
 
-        let method_string = outcome.method_string();
-        let success = outcome.is_success();
+        let (success, delivery_method) = outcome.outcome_to_response();
 
         tracing::info!(
             otel.name = "agent.message_sent",
             address = %address,
-            method = method_string,
+            method = delivery_method,
             success = success,
             "[event] agent.message_sent"
         );
 
         Ok(SendMessageResponse {
             success,
-            delivery_method: method_string.to_string(),
+            delivery_method,
         })
     }
 }
