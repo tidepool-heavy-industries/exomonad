@@ -3,7 +3,7 @@ use crate::services::tmux_events;
 use agent_client_protocol::{Agent, PromptRequest};
 use claude_teams_bridge as teams_mailbox;
 use claude_teams_bridge::TeamRegistry;
-use exomonad_proto::effects::events::{AgentMessage, Event, event};
+use exomonad_proto::effects::events::{event, AgentMessage, Event};
 use tracing::{debug, info, instrument, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -319,13 +319,11 @@ pub fn channels_recipient_can_receive(
 /// team lead from the TeamRegistry.
 #[instrument(skip_all, fields(address = %address, from = %from))]
 pub async fn route_message(
-    ctx: &(
-         impl super::HasTeamRegistry
-         + super::HasAcpRegistry
-         + super::HasAgentResolver
-         + super::HasProjectDir
-         + super::HasTmuxIpc
-     ),
+    ctx: &(impl super::HasTeamRegistry
+          + super::HasAcpRegistry
+          + super::HasAgentResolver
+          + super::HasProjectDir
+          + super::HasTmuxIpc),
     address: &Address,
     from: &crate::domain::AgentName,
     content: &str,
@@ -362,13 +360,11 @@ pub async fn route_message(
 /// Resolve team lead and deliver. Uses `config.json`'s `leadAgentId` to find
 /// the lead, falls back to first in-memory entry, then to "root".
 async fn resolve_and_deliver_to_lead(
-    ctx: &(
-         impl super::HasTeamRegistry
-         + super::HasAcpRegistry
-         + super::HasAgentResolver
-         + super::HasProjectDir
-         + super::HasTmuxIpc
-     ),
+    ctx: &(impl super::HasTeamRegistry
+          + super::HasAcpRegistry
+          + super::HasAgentResolver
+          + super::HasProjectDir
+          + super::HasTmuxIpc),
     team_name: &str,
     from: &crate::domain::AgentName,
     content: &str,
@@ -462,14 +458,12 @@ pub fn resolve_tab_name_for_agent(
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, fields(agent_id = %agent_id, parent_session_id = %parent_session_id, status = %status))]
 pub async fn notify_parent_delivery(
-    ctx: &(
-         impl super::HasTeamRegistry
-         + super::HasAcpRegistry
-         + super::HasEventLog
-         + super::HasEventQueue
-         + super::HasProjectDir
-         + super::HasTmuxIpc
-     ),
+    ctx: &(impl super::HasTeamRegistry
+          + super::HasAcpRegistry
+          + super::HasEventLog
+          + super::HasEventQueue
+          + super::HasProjectDir
+          + super::HasTmuxIpc),
     agent_id: &crate::domain::AgentName,
     parent_session_id: &str,
     parent_tab_name: &str,
@@ -610,9 +604,10 @@ async fn deliver_via_uds(
 /// Falls back to tmux input injection if other delivery methods fail or are not available.
 #[instrument(skip_all, fields(agent_key = %agent_key, from = %from, delivery_method = tracing::field::Empty))]
 pub async fn deliver_to_agent(
-    ctx: &(
-         impl super::HasTeamRegistry + super::HasAcpRegistry + super::HasProjectDir + super::HasTmuxIpc
-     ),
+    ctx: &(impl super::HasTeamRegistry
+          + super::HasAcpRegistry
+          + super::HasProjectDir
+          + super::HasTmuxIpc),
     agent_key: &str,
     tmux_target: &str,
     from: &crate::domain::AgentName,
@@ -1510,70 +1505,55 @@ mod tests {
 mod plan_tests {
     use super::*;
     use crate::services::agent_control::AgentType;
+    use proptest::prelude::*;
 
-    fn all_metas() -> Vec<RecipientMeta> {
-        let types = [
-            AgentType::Claude,
-            AgentType::Gemini,
-            AgentType::Shoal,
-            AgentType::Process,
-        ];
-        let backends = [BackendType::Exomonad, BackendType::CcNative];
-        let mut out = Vec::with_capacity(types.len() * backends.len());
-        for t in types {
-            for b in backends {
-                out.push(RecipientMeta {
-                    agent_type: t,
-                    backend_type: b,
-                });
-            }
-        }
-        out
+    fn arb_meta() -> impl Strategy<Value = RecipientMeta> {
+        (
+            prop_oneof![
+                Just(AgentType::Claude),
+                Just(AgentType::Gemini),
+                Just(AgentType::Shoal),
+                Just(AgentType::Process),
+            ],
+            prop_oneof![Just(BackendType::Exomonad), Just(BackendType::CcNative)],
+        )
+            .prop_map(|(agent_type, backend_type)| RecipientMeta {
+                agent_type,
+                backend_type,
+            })
     }
 
-    #[test]
-    fn plan_is_subset_of_receivable_channels() {
-        for meta in all_metas() {
+    proptest! {
+        #[test]
+        fn plan_is_subset_of_receivable_channels(meta in arb_meta()) {
             let plan = delivery_plan(&meta);
             let receivable = channels_recipient_can_receive(&meta);
             for channel in &plan {
-                assert!(
+                prop_assert!(
                     receivable.contains(channel),
                     "plan for {:?} contains {:?} which is not in receivable set {:?}",
-                    meta,
-                    channel,
-                    receivable
+                    meta, channel, receivable
                 );
             }
         }
-    }
 
-    #[test]
-    fn plan_is_nonempty_iff_receivable_is_nonempty() {
-        for meta in all_metas() {
+        #[test]
+        fn plan_is_nonempty_iff_receivable_is_nonempty(meta in arb_meta()) {
             let plan_empty = delivery_plan(&meta).is_empty();
             let recv_empty = channels_recipient_can_receive(&meta).is_empty();
-            assert_eq!(
+            prop_assert_eq!(
                 plan_empty, recv_empty,
                 "plan/receivable emptiness mismatch for {:?}: plan_empty={}, recv_empty={}",
                 meta, plan_empty, recv_empty
             );
         }
-    }
 
-    #[test]
-    fn plan_has_no_duplicate_channels() {
-        for meta in all_metas() {
+        #[test]
+        fn plan_has_no_duplicate_channels(meta in arb_meta()) {
             let plan = delivery_plan(&meta);
-            let mut dedup: std::collections::BTreeSet<DeliveryChannel> =
-                std::collections::BTreeSet::new();
+            let mut dedup: std::collections::BTreeSet<DeliveryChannel> = std::collections::BTreeSet::new();
             for c in &plan {
-                assert!(
-                    dedup.insert(*c),
-                    "duplicate channel {:?} in plan for {:?}",
-                    c,
-                    meta
-                );
+                prop_assert!(dedup.insert(*c), "duplicate channel {:?} in plan for {:?}", c, meta);
             }
         }
     }
