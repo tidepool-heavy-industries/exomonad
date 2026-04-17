@@ -599,7 +599,7 @@ impl<
                         let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
                         agent_type.tab_display_name(slug)
                     });
-                crate::services::delivery::deliver_to_agent(
+                let result = crate::services::delivery::deliver_to_agent(
                     &*self.ctx,
                     branch,
                     &tab_name,
@@ -608,6 +608,7 @@ impl<
                     &format!("Event handler action for PR #{}", pr_number),
                 )
                 .await;
+                tracing::info!(?result, branch, "InjectMessage delivery result");
             }
             EventActionResponse::NotifyParent {
                 message,
@@ -626,7 +627,7 @@ impl<
 
                 let summary = format!("Auto-notify: PR #{}", pr_num);
                 let agent_name = crate::domain::AgentName::from(agent_slug);
-                crate::services::delivery::notify_parent_delivery(
+                let result = crate::services::delivery::notify_parent_delivery(
                     &*self.ctx,
                     &agent_name,
                     &parent_session_id,
@@ -637,6 +638,7 @@ impl<
                     "event_handler",
                 )
                 .await;
+                tracing::info!(?result, branch, "NotifyParent delivery result");
             }
             EventActionResponse::NoAction => {}
         }

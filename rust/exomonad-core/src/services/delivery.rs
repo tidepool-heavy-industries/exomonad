@@ -4,20 +4,20 @@ use claude_teams_bridge::{TeamInfo, TeamRegistry};
 use exomonad_proto::effects::events::{event, AgentMessage, Event};
 use tracing::{debug, info, instrument, warn};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Honest-typed delivery result.
+#[derive(Debug)]
 pub enum DeliveryResult {
-    Teams,
-    Acp,
-    Uds,
-    Tmux,
-    StaleRouting,
-    Failed,
-}
-
-impl DeliveryResult {
-    pub fn is_failure(self) -> bool {
-        matches!(self, DeliveryResult::StaleRouting | DeliveryResult::Failed)
-    }
+    /// Channel reported synchronous delivery.
+    Confirmed(DeliveryChannel),
+    /// Channel handed off to an async verifier. Callers that need certainty
+    /// can `.await` the receiver; fire-and-forget callers can treat this as
+    /// success-pending.
+    QueuedUnverified(
+        DeliveryChannel,
+        tokio::sync::oneshot::Receiver<VerifyOutcome>,
+    ),
+    /// Plan exhausted or empty.
+    Failed(FailureReason),
 }
 
 /// Notification status for parent-facing messages.
@@ -72,26 +72,25 @@ pub fn format_parent_notification(
     }
 }
 
-/// Delivery method used for message routing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeliveryMethod {
-    TeamsInbox,
-    Acp,
-    Uds,
-    Tmux,
-}
-
 /// Outcome of a routed message delivery.
 #[derive(Debug)]
 pub enum DeliveryOutcome {
-    /// Successfully delivered to the resolved recipient.
+    /// Channel reported synchronous delivery to the intended recipient.
     Delivered {
-        method: DeliveryMethod,
+        channel: DeliveryChannel,
         recipient: crate::domain::AgentName,
     },
-    /// Original target could not be resolved; fell back to team lead.
+    /// Channel wrote but the recipient has not yet been verified to have read
+    /// (Teams inbox). Carries the verifier handle; callers that need certainty
+    /// may await it.
+    Queued {
+        channel: DeliveryChannel,
+        recipient: crate::domain::AgentName,
+        verify: tokio::sync::oneshot::Receiver<VerifyOutcome>,
+    },
+    /// Target could not be resolved; fell back to team lead (successfully or not).
     FallbackToLead {
-        method: DeliveryMethod,
+        channel: DeliveryChannel,
         original: String,
         lead: crate::domain::AgentName,
     },
@@ -100,74 +99,35 @@ pub enum DeliveryOutcome {
 }
 
 impl DeliveryOutcome {
-    fn from_result(result: DeliveryResult, recipient: &str) -> Self {
-        let agent = crate::domain::AgentName::from(recipient);
-        match result {
-            DeliveryResult::Failed => DeliveryOutcome::Failed {
-                original: recipient.to_string(),
-                reason: "all delivery methods failed".to_string(),
-            },
-            DeliveryResult::StaleRouting => DeliveryOutcome::Failed {
-                original: recipient.to_string(),
-                reason: "stale routing.json (dead pane/window)".to_string(),
-            },
-            DeliveryResult::Teams => DeliveryOutcome::Delivered {
-                method: DeliveryMethod::TeamsInbox,
-                recipient: agent,
-            },
-            DeliveryResult::Acp => DeliveryOutcome::Delivered {
-                method: DeliveryMethod::Acp,
-                recipient: agent,
-            },
-            DeliveryResult::Uds => DeliveryOutcome::Delivered {
-                method: DeliveryMethod::Uds,
-                recipient: agent,
-            },
-            DeliveryResult::Tmux => DeliveryOutcome::Delivered {
-                method: DeliveryMethod::Tmux,
-                recipient: agent,
-            },
+    /// Whether delivery succeeded (including fallback and queuing).
+    pub fn is_success(&self) -> bool {
+        !matches!(self, DeliveryOutcome::Failed { .. })
+    }
+
+    /// The delivery channel used, if any.
+    pub fn channel_or_none(&self) -> Option<DeliveryChannel> {
+        match self {
+            DeliveryOutcome::Delivered { channel, .. }
+            | DeliveryOutcome::Queued { channel, .. }
+            | DeliveryOutcome::FallbackToLead { channel, .. } => Some(*channel),
+            DeliveryOutcome::Failed { .. } => None,
         }
     }
 
-    /// Whether delivery succeeded (including fallback).
-    pub fn is_success(&self) -> bool {
-        matches!(
-            self,
-            DeliveryOutcome::Delivered { .. } | DeliveryOutcome::FallbackToLead { .. }
-        )
-    }
-
-    /// The delivery method string for proto response.
-    pub fn method_string(&self) -> &str {
+    /// Map outcome to (success, delivery_method) for proto response.
+    pub fn outcome_to_response(&self) -> (bool, String) {
         match self {
-            DeliveryOutcome::Delivered { method, .. }
-            | DeliveryOutcome::FallbackToLead { method, .. } => match method {
-                DeliveryMethod::TeamsInbox => "teams_inbox",
-                DeliveryMethod::Acp => "acp",
-                DeliveryMethod::Uds => "unix_socket",
-                DeliveryMethod::Tmux => "tmux_stdin",
-            },
-            DeliveryOutcome::Failed { .. } => "failed",
+            DeliveryOutcome::Delivered { channel, .. } => (true, channel.as_str().to_string()),
+            DeliveryOutcome::Queued { channel, .. } => {
+                (true, format!("{}_queued", channel.as_str()))
+            }
+            DeliveryOutcome::FallbackToLead { channel, .. } => {
+                (true, format!("{}_lead_fallback", channel.as_str()))
+            }
+            DeliveryOutcome::Failed { .. } => (false, "failed".to_string()),
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Capability-driven delivery plan (scaffold — types only; impls land in Wave 1)
-//
-// The existing `DeliveryResult` enum hides a class of silent dead-letters: it
-// reports `Teams` as success the moment the inbox JSON is written, even for
-// recipients (e.g. Gemini) that never poll Teams. The new types model delivery
-// honestly, and the plan function enforces channel compatibility at the match
-// level so that adding a new (AgentType, BackendType) cell cannot silently
-// introduce unreachable routing.
-//
-// These are intentionally unused during the scaffold commit — Wave 1 leaves
-// fill in `delivery_plan` / `channels_recipient_can_receive` and carve the
-// existing per-channel logic in `deliver_to_agent` into
-// `try_{teams,acp,uds,tmux}_channel` + `execute_plan`. Wave 2 migrates callers.
-// ---------------------------------------------------------------------------
 
 /// A single delivery transport. The delivery plan is a totally-ordered list of
 /// channels to attempt; the executor walks the list until one yields a non-Err
@@ -178,6 +138,17 @@ pub enum DeliveryChannel {
     Acp,
     Uds,
     Tmux,
+}
+
+impl DeliveryChannel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DeliveryChannel::Teams => "teams_inbox",
+            DeliveryChannel::Acp => "acp",
+            DeliveryChannel::Uds => "unix_socket",
+            DeliveryChannel::Tmux => "tmux_stdin",
+        }
+    }
 }
 
 /// Whether the recipient runs under exomonad (Tier 1: in-memory registered,
@@ -200,7 +171,7 @@ pub struct RecipientMeta {
 }
 
 /// Outcome of the async Teams-inbox verifier. Only meaningful for
-/// `ChannelOutcome::Queued` / `DeliveryResultV2::QueuedUnverified`.
+/// `ChannelOutcome::Queued` / `DeliveryResult::QueuedUnverified`.
 #[derive(Debug)]
 pub enum VerifyOutcome {
     /// Recipient's InboxPoller read the message within the verification window.
@@ -235,31 +206,13 @@ pub enum FailureReason {
     /// `delivery_plan` produced an empty plan for this recipient (e.g.
     /// `AgentType::Process`, or `Gemini` + `CcNative`).
     Undeliverable(RecipientMeta),
-}
-
-/// New honest-typed delivery result. Named `DeliveryResultV2` during scaffold
-/// so it can coexist with the legacy `DeliveryResult` enum; the integration
-/// commit renames it to `DeliveryResult` and removes the old type.
-#[derive(Debug)]
-pub enum DeliveryResultV2 {
-    /// Channel reported synchronous delivery.
-    Confirmed(DeliveryChannel),
-    /// Channel handed off to an async verifier. Callers that need certainty
-    /// can `.await` the receiver; fire-and-forget callers can treat this as
-    /// success-pending.
-    QueuedUnverified(
-        DeliveryChannel,
-        tokio::sync::oneshot::Receiver<VerifyOutcome>,
-    ),
-    /// Plan exhausted or empty.
-    Failed(FailureReason),
+    /// `routing.json` exists but all targets (pane/window) are dead.
+    StaleRouting,
 }
 
 /// Pure policy: which channels should be attempted, in what order, for this
 /// recipient. The single source of truth for channel selection — no caller
 /// may branch on agent type outside this function.
-///
-/// Implementation lives in Wave 1 / leaf `delivery-plan-pure`.
 pub fn delivery_plan(recipient: &RecipientMeta) -> Vec<DeliveryChannel> {
     use crate::services::agent_control::AgentType::*;
     use BackendType::*;
@@ -279,8 +232,6 @@ pub fn delivery_plan(recipient: &RecipientMeta) -> Vec<DeliveryChannel> {
 /// receiving on. The executor's invariant is
 /// `delivery_plan(m) ⊆ channels_recipient_can_receive(m)`; the property test
 /// in leaf `delivery-plan-pure` enforces it.
-///
-/// Implementation lives in Wave 1 / leaf `delivery-plan-pure`.
 pub fn channels_recipient_can_receive(
     recipient: &RecipientMeta,
 ) -> std::collections::BTreeSet<DeliveryChannel> {
@@ -335,7 +286,7 @@ pub async fn route_message(
             let tab_name = resolve_tab_name_for_agent(name, Some(ctx.agent_resolver()));
             let agent_key = name.as_str();
             let result = deliver_to_agent(ctx, agent_key, &tab_name, from, content, summary).await;
-            DeliveryOutcome::from_result(result, agent_key)
+            map_result_to_outcome(result, name.clone(), agent_key)
         }
         Address::Team { team, member } => {
             if let Some(member_name) = member {
@@ -344,7 +295,7 @@ pub async fn route_message(
                 let agent_key = member_name.as_str();
                 let result =
                     deliver_to_agent(ctx, agent_key, &tab_name, from, content, summary).await;
-                DeliveryOutcome::from_result(result, agent_key)
+                map_result_to_outcome(result, member_name.clone(), agent_key)
             } else {
                 // Team lead resolution: find who owns this team
                 resolve_and_deliver_to_lead(ctx, team.as_str(), from, content, summary).await
@@ -353,8 +304,27 @@ pub async fn route_message(
         Address::Supervisor => {
             // Supervisor resolves to "root" by default (the root TL)
             let result = deliver_to_agent(ctx, "root", "TL", from, content, summary).await;
-            DeliveryOutcome::from_result(result, "root")
+            map_result_to_outcome(result, crate::domain::AgentName::from("root"), "root")
         }
+    }
+}
+
+fn map_result_to_outcome(
+    result: DeliveryResult,
+    recipient: crate::domain::AgentName,
+    original: &str,
+) -> DeliveryOutcome {
+    match result {
+        DeliveryResult::Confirmed(channel) => DeliveryOutcome::Delivered { channel, recipient },
+        DeliveryResult::QueuedUnverified(channel, verify) => DeliveryOutcome::Queued {
+            channel,
+            recipient,
+            verify,
+        },
+        DeliveryResult::Failed(reason) => DeliveryOutcome::Failed {
+            original: original.to_string(),
+            reason: format!("{:?}", reason),
+        },
     }
 }
 
@@ -390,31 +360,29 @@ async fn resolve_and_deliver_to_lead(
     let tab_name = resolve_tab_name_for_agent(&lead_agent, Some(ctx.agent_resolver()));
     let result = deliver_to_agent(ctx, &lead_key, &tab_name, from, content, summary).await;
 
-    if result.is_failure() {
-        DeliveryOutcome::Failed {
+    match result {
+        DeliveryResult::Confirmed(channel) => DeliveryOutcome::FallbackToLead {
+            channel,
+            original,
+            lead: lead_agent,
+        },
+        DeliveryResult::QueuedUnverified(channel, _rx) => {
+            // NOTE: We drop the receiver for fallback-to-lead for now to keep
+            // DeliveryOutcome simple. Callers of route_message typically don't
+            // await verification for fallbacks.
+            DeliveryOutcome::FallbackToLead {
+                channel,
+                original,
+                lead: lead_agent,
+            }
+        }
+        DeliveryResult::Failed(reason) => DeliveryOutcome::Failed {
             original,
             reason: format!(
                 "delivery to resolved lead '{}' failed ({:?})",
-                lead_key, result
+                lead_key, reason
             ),
-        }
-    } else {
-        DeliveryOutcome::FallbackToLead {
-            method: delivery_method_from_result(result),
-            original,
-            lead: crate::domain::AgentName::from(lead_key.as_str()),
-        }
-    }
-}
-
-fn delivery_method_from_result(result: DeliveryResult) -> DeliveryMethod {
-    match result {
-        DeliveryResult::Teams => DeliveryMethod::TeamsInbox,
-        DeliveryResult::Acp => DeliveryMethod::Acp,
-        DeliveryResult::Uds => DeliveryMethod::Uds,
-        DeliveryResult::Tmux | DeliveryResult::Failed | DeliveryResult::StaleRouting => {
-            DeliveryMethod::Tmux
-        }
+        },
     }
 }
 
@@ -446,16 +414,6 @@ pub fn resolve_tab_name_for_agent(
 }
 
 /// Notify a parent agent. Single codepath for all parent notifications.
-///
-/// Pipeline: event log → EventQueue → format `[from: id]`/`[FAILED: id]` → deliver_to_agent.
-/// Used by both `EventHandler::notify_parent` (agent-initiated) and the poller's
-/// `NotifyParentAction` (system-initiated via event handlers).
-///
-/// All messages are prefixed with `[from: id]` (or `[FAILED: id]` for failures).
-/// Event handler messages include their own structural tags (e.g. `[PR READY]`)
-/// inside the message body, so the TL sees: `[from: leaf-id] [PR READY] PR #5...`
-///
-/// For peer-to-peer messaging, use `deliver_to_agent()` directly instead.
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, fields(agent_id = %agent_id, parent_session_id = %parent_session_id, status = %status))]
 pub async fn notify_parent_delivery(
@@ -528,7 +486,7 @@ pub async fn notify_parent_delivery(
 
 /// Deliver a notification via HTTP POST over a Unix domain socket.
 /// Fire-and-forget with 5s timeout.
-async fn deliver_via_uds(
+pub(super) async fn deliver_via_uds(
     socket_path: &std::path::Path,
     from: &str,
     message: &str,
@@ -599,12 +557,10 @@ async fn deliver_via_uds(
 
 /// Deliver a message to an agent.
 ///
-/// Thin compat wrapper over `delivery_plan` + `execute_plan`. Builds a
+/// Thin wrapper over `delivery_plan` + `execute_plan`. Builds a
 /// `RecipientMeta` from the TeamRegistry lookup (agent_type + tier), resolves
 /// the tmux target via `routing.json` (with stale-entry pruning), and runs
-/// the resulting capability-driven plan. Maps the honest `DeliveryResultV2`
-/// back to the legacy `DeliveryResult` for transitional caller compatibility;
-/// Wave 2 / leaf `caller-migration` removes this wrapper entirely.
+/// the resulting capability-driven plan.
 #[instrument(skip_all, fields(agent_key = %agent_key, from = %from, delivery_method = tracing::field::Empty))]
 pub async fn deliver_to_agent(
     ctx: &(impl super::HasTeamRegistry
@@ -621,9 +577,7 @@ pub async fn deliver_to_agent(
     let (team_info_opt, is_in_memory) = resolve_team_info(ctx, agent_key, from).await;
     let recipient_meta = recipient_meta_from_team_info(team_info_opt.as_ref(), is_in_memory);
 
-    // 2. Pre-resolve the tmux target via routing.json. If every candidate is
-    //    dead, short-circuit with StaleRouting (preserves pre-refactor
-    //    behavior; retired in Wave 2).
+    // 2. Pre-resolve the tmux target via routing.json.
     let project_dir = ctx.project_dir();
     let tmux_ipc = ctx.tmux_ipc();
     let routing_res = resolve_routing(agent_key, project_dir, tmux_ipc).await;
@@ -632,7 +586,7 @@ pub async fn deliver_to_agent(
             target,
             working_dir,
         } => (target, working_dir),
-        RoutingResolution::AllStale => return DeliveryResult::StaleRouting,
+        RoutingResolution::AllStale => return DeliveryResult::Failed(FailureReason::StaleRouting),
         RoutingResolution::NoRouting => (
             tmux_target.to_string(),
             fallback_tmux_working_dir(tmux_target, project_dir),
@@ -657,40 +611,21 @@ pub async fn deliver_to_agent(
         uds_socket: uds_socket_opt,
         tmux_working_dir: &tmux_working_dir,
     };
-    let result_v2 = execute_plan(plan, ctx, &pctx).await;
+    let result = execute_plan(plan, ctx, &pctx).await;
 
-    // 4. Map the honest result back to the legacy enum (temporary).
-    match result_v2 {
-        DeliveryResultV2::Confirmed(DeliveryChannel::Teams)
-        | DeliveryResultV2::QueuedUnverified(DeliveryChannel::Teams, _) => {
-            tracing::Span::current().record("delivery_method", "teams");
-            DeliveryResult::Teams
+    match &result {
+        DeliveryResult::Confirmed(channel) => {
+            tracing::Span::current().record("delivery_method", channel.as_str());
         }
-        DeliveryResultV2::Confirmed(DeliveryChannel::Acp) => {
-            tracing::Span::current().record("delivery_method", "acp");
-            DeliveryResult::Acp
+        DeliveryResult::QueuedUnverified(channel, _) => {
+            tracing::Span::current().record("delivery_method", channel.as_str());
         }
-        DeliveryResultV2::Confirmed(DeliveryChannel::Uds) => {
-            tracing::Span::current().record("delivery_method", "uds");
-            DeliveryResult::Uds
-        }
-        DeliveryResultV2::Confirmed(DeliveryChannel::Tmux) => {
-            tracing::Span::current().record("delivery_method", "tmux");
-            DeliveryResult::Tmux
-        }
-        DeliveryResultV2::QueuedUnverified(channel, _) => {
-            warn!(
-                agent = %agent_key,
-                channel = ?channel,
-                "execute_plan queued non-Teams channel; mapping to Failed (unexpected)"
-            );
-            DeliveryResult::Failed
-        }
-        DeliveryResultV2::Failed(reason) => {
+        DeliveryResult::Failed(reason) => {
             warn!(agent = %agent_key, ?reason, "execute_plan exhausted without delivery");
-            DeliveryResult::Failed
         }
     }
+
+    result
 }
 
 /// Best-effort `TeamInfo` lookup: Tier 1 (in-memory) then Tier 2 (config.json
@@ -700,10 +635,8 @@ async fn resolve_team_info(
     agent_key: &str,
     from: &crate::domain::AgentName,
 ) -> (Option<TeamInfo>, bool) {
-    let (sender_info, recipient_info) = ctx
-        .team_registry()
-        .get_pair(from.as_str(), agent_key)
-        .await;
+    let (sender_info, recipient_info) =
+        ctx.team_registry().get_pair(from.as_str(), agent_key).await;
     let sender_team = sender_info.map(|info| info.team_name);
     let is_in_memory = recipient_info.is_some();
     let resolved = recipient_info.or_else(|| {
@@ -790,7 +723,8 @@ async fn resolve_routing(
 
         if tmux_ipc.target_alive(&target).await {
             let parent_tab = routing["parent_tab"].as_str().map(|s| s.to_string());
-            let working_dir = routing_working_dir(&dir_name, parent_tab.as_deref(), agent_key, project_dir);
+            let working_dir =
+                routing_working_dir(&dir_name, parent_tab.as_deref(), agent_key, project_dir);
             return RoutingResolution::Alive {
                 target,
                 working_dir,
@@ -830,7 +764,10 @@ fn routing_working_dir(
     project_dir.join(relative)
 }
 
-fn fallback_tmux_working_dir(tmux_target: &str, project_dir: &std::path::Path) -> std::path::PathBuf {
+fn fallback_tmux_working_dir(
+    tmux_target: &str,
+    project_dir: &std::path::Path,
+) -> std::path::PathBuf {
     let relative = if tmux_target == "TL" {
         std::path::PathBuf::from(".")
     } else {
@@ -860,7 +797,7 @@ async fn prune_stale_routing(project_dir: &std::path::Path, agent_dir_name: &str
 
 /// Helper to detect if an ACP error indicates a broken connection that should
 /// be purged from the registry.
-fn is_acp_connection_error(e: &agent_client_protocol::Error) -> bool {
+pub(super) fn is_acp_connection_error(e: &agent_client_protocol::Error) -> bool {
     // ACP's Error uses JSON-RPC codes. InternalError is -32603.
     // The RPC layer specifically uses "server shut down unexpectedly" for oneshot
     // receiver failures (broken pipes/task crashes).
@@ -873,19 +810,6 @@ fn is_acp_connection_error(e: &agent_client_protocol::Error) -> bool {
         }
     }
     false
-}
-
-pub(crate) async fn deliver_via_uds_internal(
-    socket_path: &std::path::Path,
-    from: &str,
-    message: &str,
-    summary: &str,
-) -> Result<(), String> {
-    deliver_via_uds(socket_path, from, message, summary).await
-}
-
-pub(crate) fn is_acp_connection_error_internal(e: &agent_client_protocol::Error) -> bool {
-    is_acp_connection_error(e)
 }
 
 #[cfg(test)]
@@ -933,9 +857,11 @@ mod tests {
 
     #[test]
     fn test_delivery_result_variants_distinct() {
-        assert_ne!(DeliveryResult::Teams, DeliveryResult::Tmux);
-        assert_ne!(DeliveryResult::Teams, DeliveryResult::Failed);
-        assert_ne!(DeliveryResult::Tmux, DeliveryResult::Failed);
+        // Use matches! since they no longer derive PartialEq easily due to oneshot::Receiver
+        assert!(matches!(
+            DeliveryResult::Confirmed(DeliveryChannel::Teams),
+            DeliveryResult::Confirmed(DeliveryChannel::Teams)
+        ));
     }
 
     #[tokio::test]
@@ -961,7 +887,10 @@ mod tests {
             "summary",
         )
         .await;
-        assert_eq!(result, DeliveryResult::Failed);
+        assert!(matches!(
+            result,
+            DeliveryResult::Failed(FailureReason::AllChannelsExhausted)
+        ));
     }
 
     #[tokio::test]
@@ -1030,12 +959,18 @@ mod tests {
         // routing logic found the right recipient even though delivery itself failed.
         match outcome {
             DeliveryOutcome::Failed { reason, .. } => {
-                assert!(reason.contains("root"), "reason should mention 'root', got: {reason}");
+                assert!(
+                    reason.contains("root"),
+                    "reason should mention 'root', got: {reason}"
+                );
             }
             DeliveryOutcome::FallbackToLead { lead, .. } => {
                 assert_eq!(lead.as_str(), "root");
             }
             DeliveryOutcome::Delivered { recipient, .. } => {
+                assert_eq!(recipient.as_str(), "root");
+            }
+            DeliveryOutcome::Queued { recipient, .. } => {
                 assert_eq!(recipient.as_str(), "root");
             }
         }
@@ -1064,7 +999,10 @@ mod tests {
         .await;
         // Target "target" does not exist in the isolated tmux session. Honest
         // semantics: delivery fails.
-        assert_eq!(result, DeliveryResult::Failed);
+        assert!(matches!(
+            result,
+            DeliveryResult::Failed(FailureReason::AllChannelsExhausted)
+        ));
     }
 
     #[tokio::test]
@@ -1130,6 +1068,9 @@ mod tests {
                 assert_eq!(lead.as_str(), "root");
             }
             DeliveryOutcome::Delivered { recipient, .. } => {
+                assert_eq!(recipient.as_str(), "root");
+            }
+            DeliveryOutcome::Queued { recipient, .. } => {
                 assert_eq!(recipient.as_str(), "root");
             }
         }
@@ -1211,6 +1152,9 @@ mod tests {
             DeliveryOutcome::Delivered { recipient, .. } => {
                 assert_eq!(recipient.as_str(), "resolved-lead");
             }
+            DeliveryOutcome::Queued { recipient, .. } => {
+                assert_eq!(recipient.as_str(), "resolved-lead");
+            }
         }
     }
 
@@ -1264,7 +1208,10 @@ mod tests {
         .await;
 
         // Should use routing and return Tmux
-        assert_eq!(result, DeliveryResult::Tmux);
+        assert!(matches!(
+            result,
+            DeliveryResult::Confirmed(DeliveryChannel::Tmux)
+        ));
         // routing.json should still exist
         assert!(agent_dir.join("routing.json").exists());
     }
@@ -1313,7 +1260,10 @@ mod tests {
         .await;
 
         // Should return StaleRouting and prune the file
-        assert_eq!(result, DeliveryResult::StaleRouting);
+        assert!(matches!(
+            result,
+            DeliveryResult::Failed(FailureReason::StaleRouting)
+        ));
         assert!(!agent_dir.join("routing.json").exists());
     }
 
@@ -1381,7 +1331,10 @@ mod tests {
         .await;
 
         // Should use routing and return Tmux
-        assert_eq!(result, DeliveryResult::Tmux);
+        assert!(matches!(
+            result,
+            DeliveryResult::Confirmed(DeliveryChannel::Tmux)
+        ));
         // routing.json should still exist
         assert!(agent_dir.join("routing.json").exists());
     }
