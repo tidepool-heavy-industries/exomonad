@@ -117,7 +117,7 @@ pub async fn try_acp_channel<C: HasAcpRegistry>(
                 detail = ?e,
                 "[event] message.delivery"
             );
-            if super::delivery::is_acp_connection_error_for_testing(&e) {
+            if super::delivery::is_acp_connection_error_internal(&e) {
                 ctx.acp_registry().remove(agent_key).await;
             }
             Ok(ChannelOutcome::Failed(format!("acp prompt: {e:?}")))
@@ -138,7 +138,7 @@ pub async fn try_uds_channel(
             socket_path.display()
         )));
     }
-    match super::delivery::deliver_via_uds_for_testing(socket_path, from.as_str(), message, summary)
+    match super::delivery::deliver_via_uds_internal(socket_path, from.as_str(), message, summary)
         .await
     {
         Ok(()) => {
@@ -205,9 +205,9 @@ pub async fn try_tmux_channel<C: HasTmuxIpc>(
     }
 }
 
-/// Context carrying everything `execute_plan` may need to try any channel. Fields
-/// are optional so callers construct only what applies (e.g. no `team_info` ⇒
-/// Teams channel attempts report `Failed`).
+/// Context carrying everything `execute_plan` may need to try any channel.
+/// `team_info` and `uds_socket` are optional; if missing, attempts via those
+/// channels report `Failed`.
 pub struct PlanContext<'a> {
     pub agent_key: &'a str,
     pub tmux_target: &'a str,
@@ -228,17 +228,9 @@ where
     C: HasAcpRegistry + HasTmuxIpc + HasTeamRegistry + HasProjectDir,
 {
     if plan.is_empty() {
-        return DeliveryResultV2::Failed(FailureReason::Undeliverable(
-            // Undeliverable is constructed by the caller with the real RecipientMeta;
-            // use AllChannelsExhausted as a conservative default when the plan is empty
-            // but the RecipientMeta is unknown here.
-            // The higher-level wrapper (integration commit) calls delivery_plan first
-            // and short-circuits empty plans with the real meta.
-            crate::services::delivery::RecipientMeta {
-                agent_type: crate::services::agent_control::AgentType::Process,
-                backend_type: crate::services::delivery::BackendType::Exomonad,
-            },
-        ));
+        // RecipientMeta is not available here, so use the conservative default
+        // rather than fabricating metadata for Undeliverable.
+        return DeliveryResultV2::Failed(FailureReason::AllChannelsExhausted);
     }
 
     for channel in plan {
@@ -278,17 +270,12 @@ where
 mod tests {
     use super::*;
     use crate::domain::AgentName;
-    use crate::services::agent_control::AgentType;
-    use crate::services::delivery::BackendType;
     use crate::services::Services;
     use std::sync::Arc;
 
     #[tokio::test]
     async fn test_execute_plan_exhausted() {
-        let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
-            .await
-            .expect("tmux unavailable");
-        let services = Services::test_with_tmux(Arc::new(isolated.ipc.clone()));
+        let services = Services::test();
 
         let from = AgentName::from("sender");
         let pctx = PlanContext {
@@ -313,10 +300,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_plan_empty() {
-        let isolated = crate::services::tmux_ipc::IsolatedTmux::new()
-            .await
-            .expect("tmux unavailable");
-        let services = Services::test_with_tmux(Arc::new(isolated.ipc.clone()));
+        let services = Services::test();
 
         let from = AgentName::from("sender");
         let pctx = PlanContext {
@@ -334,11 +318,8 @@ mod tests {
         let result = execute_plan(plan, &services, &pctx).await;
 
         match result {
-            DeliveryResultV2::Failed(FailureReason::Undeliverable(meta)) => {
-                assert_eq!(meta.agent_type, AgentType::Process);
-                assert_eq!(meta.backend_type, BackendType::Exomonad);
-            }
-            _ => panic!("Expected Undeliverable, got {:?}", result),
+            DeliveryResultV2::Failed(FailureReason::AllChannelsExhausted) => {}
+            _ => panic!("Expected AllChannelsExhausted, got {:?}", result),
         }
     }
 
