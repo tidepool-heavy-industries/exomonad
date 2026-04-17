@@ -155,6 +155,125 @@ impl DeliveryOutcome {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Capability-driven delivery plan (scaffold — types only; impls land in Wave 1)
+//
+// The existing `DeliveryResult` enum hides a class of silent dead-letters: it
+// reports `Teams` as success the moment the inbox JSON is written, even for
+// recipients (e.g. Gemini) that never poll Teams. The new types model delivery
+// honestly, and the plan function enforces channel compatibility at the match
+// level so that adding a new (AgentType, BackendType) cell cannot silently
+// introduce unreachable routing.
+//
+// These are intentionally unused during the scaffold commit — Wave 1 leaves
+// fill in `delivery_plan` / `channels_recipient_can_receive` and carve the
+// existing per-channel logic in `deliver_to_agent` into
+// `try_{teams,acp,uds,tmux}_channel` + `execute_plan`. Wave 2 migrates callers.
+// ---------------------------------------------------------------------------
+
+/// A single delivery transport. The delivery plan is a totally-ordered list of
+/// channels to attempt; the executor walks the list until one yields a non-Err
+/// outcome or the list is exhausted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum DeliveryChannel {
+    Teams,
+    Acp,
+    Uds,
+    Tmux,
+}
+
+/// Whether the recipient runs under exomonad (Tier 1: in-memory registered,
+/// has a worktree + `routing.json` + tmux window) or is a CC-native teammate
+/// discovered only via `~/.claude/teams/{team}/config.json` (Tier 2: no
+/// exomonad-side infrastructure, so tmux fallback is not available).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendType {
+    Exomonad,
+    CcNative,
+}
+
+/// Everything `delivery_plan` needs to decide how to reach a recipient. By
+/// design narrow — widening this struct needs strong justification (see
+/// anti-patterns in `plans/post-fixup-wave-followups.md`).
+#[derive(Debug, Clone, Copy)]
+pub struct RecipientMeta {
+    pub agent_type: crate::services::agent_control::AgentType,
+    pub backend_type: BackendType,
+}
+
+/// Outcome of the async Teams-inbox verifier. Only meaningful for
+/// `ChannelOutcome::Queued` / `DeliveryResultV2::QueuedUnverified`.
+#[derive(Debug)]
+pub enum VerifyOutcome {
+    /// Recipient's InboxPoller read the message within the verification window.
+    Confirmed,
+    /// Recipient did not read; verifier successfully injected via tmux.
+    FellBackToTmux,
+    /// Recipient did not read and tmux fallback was either unavailable
+    /// (Tier 2 / CC-native) or failed.
+    VerificationFailed(String),
+}
+
+/// Honest outcome of a single channel attempt.
+#[derive(Debug)]
+pub enum ChannelOutcome {
+    /// Synchronous proof of receipt (ACP ack, UDS 2xx, tmux inject success).
+    Confirmed,
+    /// Handed off to an async verifier (Teams inbox). The receiver fires with
+    /// a `VerifyOutcome` when the verifier completes (up to ~30s).
+    Queued(tokio::sync::oneshot::Receiver<VerifyOutcome>),
+    /// Channel attempt failed; executor should continue to the next channel.
+    Failed(String),
+}
+
+/// Reasons the full plan failed to deliver.
+#[derive(Debug)]
+pub enum FailureReason {
+    /// Every channel in the plan returned `Failed`.
+    AllChannelsExhausted,
+    /// `delivery_plan` produced an empty plan for this recipient (e.g.
+    /// `AgentType::Process`, or `Gemini` + `CcNative`).
+    Undeliverable(RecipientMeta),
+}
+
+/// New honest-typed delivery result. Named `DeliveryResultV2` during scaffold
+/// so it can coexist with the legacy `DeliveryResult` enum; the integration
+/// commit renames it to `DeliveryResult` and removes the old type.
+#[derive(Debug)]
+pub enum DeliveryResultV2 {
+    /// Channel reported synchronous delivery.
+    Confirmed(DeliveryChannel),
+    /// Channel handed off to an async verifier. Callers that need certainty
+    /// can `.await` the receiver; fire-and-forget callers can treat this as
+    /// success-pending.
+    QueuedUnverified(DeliveryChannel, tokio::sync::oneshot::Receiver<VerifyOutcome>),
+    /// Plan exhausted or empty.
+    Failed(FailureReason),
+}
+
+/// Pure policy: which channels should be attempted, in what order, for this
+/// recipient. The single source of truth for channel selection — no caller
+/// may branch on agent type outside this function.
+///
+/// Implementation lives in Wave 1 / leaf `delivery-plan-pure`.
+pub fn delivery_plan(_recipient: &RecipientMeta) -> Vec<DeliveryChannel> {
+    todo!("Wave 1 / leaf delivery-plan-pure")
+}
+
+/// Inverse view of the policy: which channels this recipient is *capable* of
+/// receiving on. The executor's invariant is
+/// `delivery_plan(m) ⊆ channels_recipient_can_receive(m)`; the property test
+/// in leaf `delivery-plan-pure` enforces it.
+///
+/// Implementation lives in Wave 1 / leaf `delivery-plan-pure`.
+pub fn channels_recipient_can_receive(
+    _recipient: &RecipientMeta,
+) -> std::collections::BTreeSet<DeliveryChannel> {
+    todo!("Wave 1 / leaf delivery-plan-pure")
+}
+
+// ---------------------------------------------------------------------------
+
 /// Route a message to a typed Address.
 ///
 /// Resolves the Address to a concrete agent key and tab name, then delegates
