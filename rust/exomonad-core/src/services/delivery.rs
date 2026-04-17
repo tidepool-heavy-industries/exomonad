@@ -208,6 +208,9 @@ pub enum VerifyOutcome {
     /// Recipient's InboxPoller read the message within the verification window.
     Confirmed,
     /// Recipient did not read; verifier successfully injected via tmux.
+    ///
+    /// NOTE: Not implemented in the refactored `try_teams_channel` yet; only
+    /// produced by the legacy `deliver_to_agent` path.
     FellBackToTmux,
     /// Recipient did not read and tmux fallback was either unavailable
     /// (Tier 2 / CC-native) or failed.
@@ -1021,6 +1024,19 @@ fn is_acp_connection_error(e: &agent_client_protocol::Error) -> bool {
         }
     }
     false
+}
+
+pub(crate) async fn deliver_via_uds_internal(
+    socket_path: &std::path::Path,
+    from: &str,
+    message: &str,
+    summary: &str,
+) -> Result<(), String> {
+    deliver_via_uds(socket_path, from, message, summary).await
+}
+
+pub(crate) fn is_acp_connection_error_internal(e: &agent_client_protocol::Error) -> bool {
+    is_acp_connection_error(e)
 }
 
 #[cfg(test)]
