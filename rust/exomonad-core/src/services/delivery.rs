@@ -246,7 +246,10 @@ pub enum DeliveryResultV2 {
     /// Channel handed off to an async verifier. Callers that need certainty
     /// can `.await` the receiver; fire-and-forget callers can treat this as
     /// success-pending.
-    QueuedUnverified(DeliveryChannel, tokio::sync::oneshot::Receiver<VerifyOutcome>),
+    QueuedUnverified(
+        DeliveryChannel,
+        tokio::sync::oneshot::Receiver<VerifyOutcome>,
+    ),
     /// Plan exhausted or empty.
     Failed(FailureReason),
 }
@@ -256,8 +259,19 @@ pub enum DeliveryResultV2 {
 /// may branch on agent type outside this function.
 ///
 /// Implementation lives in Wave 1 / leaf `delivery-plan-pure`.
-pub fn delivery_plan(_recipient: &RecipientMeta) -> Vec<DeliveryChannel> {
-    todo!("Wave 1 / leaf delivery-plan-pure")
+pub fn delivery_plan(recipient: &RecipientMeta) -> Vec<DeliveryChannel> {
+    use crate::services::agent_control::AgentType::*;
+    use BackendType::*;
+    use DeliveryChannel::*;
+    match (recipient.agent_type, recipient.backend_type) {
+        (Claude, Exomonad) => vec![Teams, Tmux],
+        (Claude, CcNative) => vec![Teams],
+        (Gemini, Exomonad) => vec![Acp, Tmux],
+        (Gemini, CcNative) => vec![],
+        (Shoal, Exomonad) => vec![Uds, Tmux],
+        (Shoal, CcNative) => vec![],
+        (Process, _) => vec![],
+    }
 }
 
 /// Inverse view of the policy: which channels this recipient is *capable* of
@@ -267,9 +281,33 @@ pub fn delivery_plan(_recipient: &RecipientMeta) -> Vec<DeliveryChannel> {
 ///
 /// Implementation lives in Wave 1 / leaf `delivery-plan-pure`.
 pub fn channels_recipient_can_receive(
-    _recipient: &RecipientMeta,
+    recipient: &RecipientMeta,
 ) -> std::collections::BTreeSet<DeliveryChannel> {
-    todo!("Wave 1 / leaf delivery-plan-pure")
+    use crate::services::agent_control::AgentType::*;
+    use BackendType::*;
+    use DeliveryChannel::*;
+    let mut set = std::collections::BTreeSet::new();
+    match (recipient.agent_type, recipient.backend_type) {
+        (Claude, Exomonad) => {
+            set.insert(Teams);
+            set.insert(Tmux);
+        }
+        (Claude, CcNative) => {
+            set.insert(Teams);
+        }
+        (Gemini, Exomonad) => {
+            set.insert(Acp);
+            set.insert(Tmux);
+        }
+        (Gemini, CcNative) => {}
+        (Shoal, Exomonad) => {
+            set.insert(Uds);
+            set.insert(Tmux);
+        }
+        (Shoal, CcNative) => {}
+        (Process, _) => {}
+    }
+    set
 }
 
 // ---------------------------------------------------------------------------
@@ -354,7 +392,10 @@ async fn resolve_and_deliver_to_lead(
     if result.is_failure() {
         DeliveryOutcome::Failed {
             original,
-            reason: format!("delivery to resolved lead '{}' failed ({:?})", lead_key, result),
+            reason: format!(
+                "delivery to resolved lead '{}' failed ({:?})",
+                lead_key, result
+            ),
         }
     } else {
         DeliveryOutcome::FallbackToLead {
@@ -1457,5 +1498,109 @@ mod tests {
         assert_eq!(result, DeliveryResult::Tmux);
         // routing.json should still exist
         assert!(agent_dir.join("routing.json").exists());
+    }
+}
+
+#[cfg(test)]
+mod plan_tests {
+    use super::*;
+    use crate::services::agent_control::AgentType;
+    use proptest::prelude::*;
+
+    fn arb_meta() -> impl Strategy<Value = RecipientMeta> {
+        (
+            prop_oneof![
+                Just(AgentType::Claude),
+                Just(AgentType::Gemini),
+                Just(AgentType::Shoal),
+                Just(AgentType::Process),
+            ],
+            prop_oneof![Just(BackendType::Exomonad), Just(BackendType::CcNative)],
+        )
+            .prop_map(|(agent_type, backend_type)| RecipientMeta {
+                agent_type,
+                backend_type,
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn plan_is_subset_of_receivable_channels(meta in arb_meta()) {
+            let plan = delivery_plan(&meta);
+            let receivable = channels_recipient_can_receive(&meta);
+            for channel in &plan {
+                prop_assert!(
+                    receivable.contains(channel),
+                    "plan for {:?} contains {:?} which is not in receivable set {:?}",
+                    meta, channel, receivable
+                );
+            }
+        }
+
+        #[test]
+        fn plan_is_nonempty_iff_receivable_is_nonempty(meta in arb_meta()) {
+            let plan_empty = delivery_plan(&meta).is_empty();
+            let recv_empty = channels_recipient_can_receive(&meta).is_empty();
+            prop_assert_eq!(
+                plan_empty, recv_empty,
+                "plan/receivable emptiness mismatch for {:?}: plan_empty={}, recv_empty={}",
+                meta, plan_empty, recv_empty
+            );
+        }
+
+        #[test]
+        fn plan_has_no_duplicate_channels(meta in arb_meta()) {
+            let plan = delivery_plan(&meta);
+            let mut dedup: std::collections::BTreeSet<DeliveryChannel> = std::collections::BTreeSet::new();
+            for c in &plan {
+                prop_assert!(dedup.insert(*c), "duplicate channel {:?} in plan for {:?}", c, meta);
+            }
+        }
+    }
+
+    #[test]
+    fn claude_exomonad_plan_matches_spec() {
+        let meta = RecipientMeta {
+            agent_type: AgentType::Claude,
+            backend_type: BackendType::Exomonad,
+        };
+        assert_eq!(
+            delivery_plan(&meta),
+            vec![DeliveryChannel::Teams, DeliveryChannel::Tmux]
+        );
+    }
+
+    #[test]
+    fn gemini_exomonad_plan_matches_spec() {
+        let meta = RecipientMeta {
+            agent_type: AgentType::Gemini,
+            backend_type: BackendType::Exomonad,
+        };
+        assert_eq!(
+            delivery_plan(&meta),
+            vec![DeliveryChannel::Acp, DeliveryChannel::Tmux]
+        );
+    }
+
+    #[test]
+    fn process_is_undeliverable_on_both_backends() {
+        for backend in [BackendType::Exomonad, BackendType::CcNative] {
+            let meta = RecipientMeta {
+                agent_type: AgentType::Process,
+                backend_type: backend,
+            };
+            assert!(delivery_plan(&meta).is_empty());
+            assert!(channels_recipient_can_receive(&meta).is_empty());
+        }
+    }
+
+    #[test]
+    fn gemini_ccnative_is_undeliverable() {
+        let meta = RecipientMeta {
+            agent_type: AgentType::Gemini,
+            backend_type: BackendType::CcNative,
+        };
+        assert!(delivery_plan(&meta).is_empty());
+        assert!(channels_recipient_can_receive(&meta).is_empty());
     }
 }
