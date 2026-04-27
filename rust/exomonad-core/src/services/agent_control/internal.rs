@@ -410,11 +410,18 @@ impl<
             format!("{} {}", env_prefix, agent_command)
         };
 
-        // Wrap in nix develop shell if flake.nix exists in cwd
+        // Wrap in nix develop shell if flake.nix exists in cwd.
+        // --impure + DEVENV_ROOT are needed for devenv-based flakes, which read
+        // DEVENV_ROOT during nix evaluation (impossible in pure mode, and devenv
+        // can't auto-detect the project root from a git worktree path).
         if cwd.join("flake.nix").exists() {
             info!("Wrapping agent command in nix develop shell");
             let escaped = full_command.replace('\'', "'\\''");
-            format!("nix develop -c sh -c '{}'", escaped)
+            let cwd_str = shell_escape::escape(cwd.display().to_string().into());
+            format!(
+                "DEVENV_ROOT={} nix develop --impure -c sh -c '{}'",
+                cwd_str, escaped
+            )
         } else {
             full_command
         }
