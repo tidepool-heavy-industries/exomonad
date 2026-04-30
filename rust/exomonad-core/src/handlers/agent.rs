@@ -433,7 +433,11 @@ impl<
             ctx,
         )
         .await;
-        self.register_child_supervisor(&req.name, ctx).await;
+
+        // Register supervisor mapping using child's full birth_branch
+        // (not just req.name) so notify_parent can resolve the parent
+        let child_birth_branch = ctx.birth_branch.child(result.agent_name.as_str());
+        self.register_child_supervisor(child_birth_branch.as_str(), ctx).await;
 
         Ok(SpawnWorkerResponse {
             agent: Some(agent_info),
@@ -520,7 +524,10 @@ impl<
             );
         }
 
-        self.register_child_supervisor(&req.branch_name, ctx).await;
+        // Register supervisor mapping using child's full birth_branch
+        // (not just req.branch_name) so notify_parent can resolve the parent
+        let child_birth_branch = ctx.birth_branch.child(result.agent_name.as_str());
+        self.register_child_supervisor(child_birth_branch.as_str(), ctx).await;
 
         // Register sub-TL as synthetic member so it can receive Teams inbox messages
         let child_identity = crate::services::agent_control::AgentIdentity::new(
@@ -599,7 +606,11 @@ impl<
             ctx,
         )
         .await;
-        self.register_child_supervisor(&req.branch_name, ctx).await;
+
+        // Register supervisor mapping using child's full birth_branch
+        // (not just req.branch_name) so notify_parent can resolve the parent
+        let child_birth_branch = ctx.birth_branch.child(result.agent_name.as_str());
+        self.register_child_supervisor(child_birth_branch.as_str(), ctx).await;
 
         Ok(SpawnLeafSubtreeResponse {
             agent: Some(agent_info),

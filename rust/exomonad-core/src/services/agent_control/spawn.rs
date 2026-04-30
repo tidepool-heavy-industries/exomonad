@@ -332,19 +332,34 @@ impl<
                     .await?;
             rollback.set_prompt_file(prompt_path.clone());
 
-            let window_id = self
-                .new_tmux_window(
-                    &display_name,
-                    &worktree_path,
-                    options.agent_type,
-                    Some(prompt_path),
-                    env_vars,
-                )
-                .await?;
-            rollback.set_window(window_id.clone());
-
-            // Store window_id for message delivery and cleanup
-            let routing = RoutingInfo::window(window_id);
+            // Gemini agents get panes, Claude agents get windows
+            let routing = if options.agent_type == AgentType::Gemini {
+                let pane_id = self
+                    .new_tmux_pane(
+                        &display_name,
+                        &worktree_path,
+                        options.agent_type,
+                        Some(prompt_path),
+                        env_vars,
+                        None, // parent_window_name: None = use first window in session
+                        None, // claude_flags: not used for Gemini
+                    )
+                    .await?;
+                rollback.set_pane(pane_id.clone());
+                RoutingInfo::pane(pane_id, &display_name)
+            } else {
+                let window_id = self
+                    .new_tmux_window(
+                        &display_name,
+                        &worktree_path,
+                        options.agent_type,
+                        Some(prompt_path),
+                        env_vars,
+                    )
+                    .await?;
+                rollback.set_window(window_id.clone());
+                RoutingInfo::window(window_id)
+            };
             let effective_birth = self.effective_birth_branch(Some(caller_bb));
             let child_birth = effective_birth.child(agent_name.as_str());
             let identity_record = AgentIdentityRecord {
@@ -937,20 +952,35 @@ impl<
             let prompt_path = Self::write_prompt_file(self.project_dir(), agent_name.as_str(), &task).await?;
             rollback.set_prompt_file(prompt_path.clone());
 
-            // Open tmux window (not pane)
+            // Gemini agents get panes, Claude agents get windows
             // Task already includes leaf completion protocol — rendered by Haskell Prompt builder.
-            let window_id = self.new_tmux_window(
-                &display_name,
-                &worktree_path,
-                agent_type,
-                Some(prompt_path),
-                env_vars,
-            )
-            .await?;
-            rollback.set_window(window_id.clone());
-
-            // Store window_id for message delivery and cleanup
-            let routing = RoutingInfo::window(window_id);
+            let routing = if agent_type == AgentType::Gemini {
+                let pane_id = self
+                    .new_tmux_pane(
+                        &display_name,
+                        &worktree_path,
+                        agent_type,
+                        Some(prompt_path),
+                        env_vars,
+                        None, // parent_window_name: None = use first window in session
+                        None, // claude_flags: not used for Gemini
+                    )
+                    .await?;
+                rollback.set_pane(pane_id.clone());
+                RoutingInfo::pane(pane_id, &display_name)
+            } else {
+                let window_id = self
+                    .new_tmux_window(
+                        &display_name,
+                        &worktree_path,
+                        agent_type,
+                        Some(prompt_path),
+                        env_vars,
+                    )
+                    .await?;
+                rollback.set_window(window_id.clone());
+                RoutingInfo::window(window_id)
+            };
             let identity_record = AgentIdentityRecord {
                 agent_name: agent_name.clone(),
                 slug: Slug::from(identity.slug()),
