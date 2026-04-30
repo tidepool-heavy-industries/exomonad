@@ -24,7 +24,7 @@ import ExoMonad.Guest.Tools.Spawn
     spawnGeminiCore, spawnGeminiDescription, spawnGeminiSchema, SpawnGeminiArgs,
     spawnLeafRender,
     spawnWorkerToolCore, spawnWorkerToolDescription, spawnWorkerToolSchema, SpawnWorkerToolArgs,
-    spawnAcpCore, SpawnAcpArgs
+    spawnAcpCore, spawnAcpDescription, spawnAcpSchema, SpawnAcpArgs
   )
 import ExoMonad.Guest.Effects.AgentControl (SpawnResult (..))
 import ExoMonad.Guest.Types (StopDecision(..), StopHookOutput(..), blockStopResponse, allowStopResponse, allowResponse, BeforeModelOutput (..), AfterModelOutput (..))
@@ -127,6 +127,16 @@ instance MCPTool TLSpawnWorker where
   toolSchema = spawnWorkerToolSchema
   toolHandlerEff args = spawnWorkerToolCore args
 
+-- | TL-specific spawn_acp: ACP protocol agent, no state transition.
+data TLSpawnAcp
+
+instance MCPTool TLSpawnAcp where
+  type ToolArgs TLSpawnAcp = SpawnAcpArgs
+  toolName = "spawn_acp"
+  toolDescription = spawnAcpDescription
+  toolSchema = spawnAcpSchema
+  toolHandlerEff args = spawnAcpCore args
+
 -- | TL notify_parent: thin wrapper, no phase transitions.
 data TLNotifyParent
 
@@ -145,6 +155,7 @@ data Tools mode = Tools
   { forkWave :: mode :- TLForkWave,
     spawnGemini :: mode :- TLSpawnGemini,
     spawnWorker :: mode :- TLSpawnWorker,
+    spawnAcp :: mode :- TLSpawnAcp,
     pr :: mode :- TLFilePR,
     mergePr :: mode :- TLMergePR,
     notifyParent :: mode :- TLNotifyParent,
@@ -161,6 +172,7 @@ config =
           { forkWave = mkHandler @TLForkWave,
             spawnGemini = mkHandler @TLSpawnGemini,
             spawnWorker = mkHandler @TLSpawnWorker,
+            spawnAcp = mkHandler @TLSpawnAcp,
             pr = mkHandler @TLFilePR,
             mergePr = mkHandler @TLMergePR,
             notifyParent = mkHandler @TLNotifyParent,

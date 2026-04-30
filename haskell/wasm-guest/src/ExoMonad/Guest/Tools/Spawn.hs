@@ -48,6 +48,8 @@ module ExoMonad.Guest.Tools.Spawn
     spawnGeminiSchema,
     spawnWorkerToolDescription,
     spawnWorkerToolSchema,
+    spawnAcpDescription,
+    spawnAcpSchema,
 
     -- * Helpers (re-exported for role code)
     spawnErrorMessage,
@@ -604,6 +606,21 @@ instance FromJSON SpawnAcpArgs where
       <*> v .:? "permission_mode"
       <*> v .:? "allowed_tools"
       <*> v .:? "disallowed_tools"
+
+-- | Description for spawn_acp tool.
+spawnAcpDescription :: Text
+spawnAcpDescription = "Spawn a Gemini agent using ACP (Agent Client Protocol). ACP uses a structured JSON protocol over stdin/stdout instead of tmux injection. More reliable than tmux but requires gemini --acp support. Runs in the caller's directory with no git isolation."
+
+-- | Schema for spawn_acp tool.
+spawnAcpSchema :: Aeson.Object
+spawnAcpSchema =
+  genericToolSchemaWith @SpawnAcpArgs
+    [ ("name", "Agent name (messaging identity)"),
+      ("prompt", "The full prompt. Everything the agent needs in one string"),
+      ("permission_mode", "Optional permission mode (e.g., 'default')"),
+      ("allowed_tools", "Optional list of allowed tools"),
+      ("disallowed_tools", "Optional list of disallowed tools")
+    ]
 
 -- | Core spawn_acp I/O.
 spawnAcpCore :: SpawnAcpArgs -> Eff Effects MCPCallOutput
