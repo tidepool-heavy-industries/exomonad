@@ -109,6 +109,14 @@ pub struct RawConfig {
 
     /// GitHub poller interval in seconds (default: 60).
     pub poll_interval: Option<u64>,
+
+    /// Override the binary used when spawning Claude agents (default: "claude").
+    /// May include args (e.g., "claude --model opus").
+    pub claude_command: Option<String>,
+
+    /// Override the binary used when spawning Gemini agents (default: "gemini").
+    /// May include args (e.g., "gemini --model gemini-2.0-flash").
+    pub gemini_command: Option<String>,
 }
 
 /// Final resolved configuration.
@@ -148,6 +156,12 @@ pub struct Config {
 
     /// GitHub poller interval in seconds (default: 60).
     pub poll_interval: Option<u64>,
+
+    /// Override the binary used when spawning Claude agents (default: "claude").
+    pub claude_command: Option<String>,
+
+    /// Override the binary used when spawning Gemini agents (default: "gemini").
+    pub gemini_command: Option<String>,
 }
 
 impl Config {
@@ -282,6 +296,10 @@ impl Config {
         // Resolve poll_interval: local > global
         let poll_interval = local_raw.poll_interval.or(global_raw.poll_interval);
 
+        // Resolve claude_command / gemini_command: local > global
+        let claude_command = local_raw.claude_command.or(global_raw.claude_command);
+        let gemini_command = local_raw.gemini_command.or(global_raw.gemini_command);
+
         Ok(Self {
             project_dir,
             role,
@@ -300,6 +318,8 @@ impl Config {
             otlp_endpoint,
             model,
             poll_interval,
+            claude_command,
+            gemini_command,
         })
     }
 
@@ -335,6 +355,8 @@ impl Default for Config {
             otlp_endpoint: None,
             model: None,
             poll_interval: None,
+            claude_command: None,
+            gemini_command: None,
         }
     }
 }

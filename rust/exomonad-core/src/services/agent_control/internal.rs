@@ -331,6 +331,7 @@ impl<
     /// with arbitrary prompt content (apostrophes, backticks, $(), etc.).
     pub(crate) fn build_agent_command(
         agent_type: AgentType,
+        cmd: &str,
         prompt_file: Option<&Path>,
         fork_session_id: Option<&str>,
         env_vars: &HashMap<String, String>,
@@ -338,7 +339,6 @@ impl<
         claude_flags: Option<&ClaudeSpawnFlags>,
         yolo: bool,
     ) -> String {
-        let cmd = agent_type.command();
 
         // Build permission flags for Claude agents
         let perms_flags = match agent_type {
@@ -466,6 +466,7 @@ impl<
 
         let full_command = Self::build_agent_command(
             agent_type,
+            self.command_for(agent_type),
             prompt_file.as_deref(),
             fork_session_id,
             &env_vars,
@@ -569,6 +570,7 @@ impl<
 
         let full_command = Self::build_agent_command(
             agent_type,
+            self.command_for(agent_type),
             prompt_file.as_deref(),
             None,
             &env_vars,

@@ -7,9 +7,11 @@
     ghc-wasm-meta.url = "gitlab:haskell-wasm/ghc-wasm-meta?host=gitlab.haskell.org";
     rust-overlay.url = "github:oxalica/rust-overlay";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    crane.url = "github:ipetkov/crane";
+    crane.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, flake-utils, ghc-wasm-meta, rust-overlay }:
+  outputs = { self, nixpkgs, flake-utils, ghc-wasm-meta, rust-overlay, crane }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -45,6 +47,9 @@
           pkg-config
         ];
 
+        # Crane for incremental Rust builds
+        craneLib = crane.mkLib pkgs;
+
         # Rust toolchain (latest stable for edition 2024 support)
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" ];
@@ -58,32 +63,37 @@
           jujutsu  # jj
         ];
 
-        # Exomonad Rust binary
-        exomonad = pkgs.rustPlatform.buildRustPackage {
-          pname = "exomonad";
-          version = "0.1.0";
-          src = pkgs.lib.cleanSourceWith {
-            src = ./.;
-            filter = path: type:
-              let
-                baseName = builtins.baseNameOf path;
-                relPath = pkgs.lib.removePrefix (toString ./.) (toString path);
-              in
-              # Include Rust workspace files
-              baseName == "Cargo.toml" || baseName == "Cargo.lock"
-              || pkgs.lib.hasPrefix "/rust" relPath
-              # Include proto files (needed by prost-build)
-              || pkgs.lib.hasPrefix "/proto" relPath
-              # Include vendored ACP SDK (path dependency)
-              || pkgs.lib.hasPrefix "/vendor/acp-rust-sdk" relPath
-              # Allow directories to be traversed
-              || type == "directory";
-          };
+        # Source with proto files included
+        # Note: crane's buildDepsOnly applies cleanCargoSource which removes non-Cargo files.
+        # We work around this by including proto files as a separate derivation.
+        exomonadSource = builtins.path {
+          path = ./.;
+          name = "exomonad-source";
+          filter = path: type:
+            let
+              baseName = builtins.baseNameOf path;
+              relPath = pkgs.lib.removePrefix (toString ./.) (toString path);
+            in
+            baseName == "Cargo.toml" || baseName == "Cargo.lock"
+            || pkgs.lib.hasPrefix "/rust" relPath
+            || pkgs.lib.hasPrefix "/proto" relPath
+            || pkgs.lib.hasPrefix "/vendor/acp-rust-sdk" relPath
+            || type == "directory";
+        };
 
-          cargoHash = "sha256-UeHbNtTYzto+pGt/8lfBisKk+S8CPtZhwPDukwdmLRE=";
+        # Proto files as a separate derivation (to copy into build)
+        protoFiles = builtins.path {
+          path = ./proto;
+          name = "exomonad-proto";
+        };
+
+        # Common crane configuration
+        commonCraneArgs = {
+          src = exomonadSource;
+          cargoLock = ./Cargo.lock;
 
           nativeBuildInputs = with pkgs; [
-            protobuf  # protoc for prost-build
+            protobuf
             pkg-config
           ];
 
@@ -94,17 +104,21 @@
             SystemConfiguration
           ]);
 
-          # Only build the exomonad binary
+          preBuild = ''
+            # Copy proto files from separate derivation (crane removes them from src)
+            echo "Copying proto files from ${protoFiles}..."
+            mkdir -p rust/exomonad-proto/proto
+            cp -r ${protoFiles}/exomonad rust/exomonad-proto/proto/exomonad
+            cp -r ${protoFiles}/effects rust/exomonad-proto/proto/effects
+          '';
+        };
+
+        # Exomonad Rust binary (built with crane)
+        # Using buildPackage directly provides incremental compilation
+        exomonad = craneLib.buildPackage (commonCraneArgs // {
+          pname = "exomonad";
           cargoBuildFlags = [ "-p" "exomonad" ];
           cargoTestFlags = [ "-p" "exomonad" ];
-
-          # Proto symlinks need to be resolved for the nix sandbox
-          preBuild = ''
-            # Replace proto symlinks with actual directories
-            rm -rf rust/exomonad-proto/proto/exomonad rust/exomonad-proto/proto/effects
-            cp -r proto/exomonad rust/exomonad-proto/proto/exomonad
-            cp -r proto/effects rust/exomonad-proto/proto/effects
-          '';
 
           meta = with pkgs.lib; {
             description = "Type-safe LLM agent orchestration";
@@ -112,7 +126,7 @@
             license = licenses.bsd3;
             mainProgram = "exomonad";
           };
-        };
+        });
 
         # NotebookLM MCP server (vendored, optional)
         notebooklm-mcp = pkgs.buildNpmPackage {

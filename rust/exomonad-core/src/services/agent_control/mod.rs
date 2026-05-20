@@ -537,6 +537,10 @@ pub struct AgentControlService<C> {
     pub(crate) wasm_name: String,
     /// Pre-serialized extra MCP servers to include in spawned agent configs.
     pub(crate) extra_mcp_servers: HashMap<String, serde_json::Value>,
+    /// Override for the Claude binary (default: "claude"). May include args.
+    pub(crate) claude_command: Option<String>,
+    /// Override for the Gemini binary (default: "gemini"). May include args.
+    pub(crate) gemini_command: Option<String>,
 }
 
 impl<
@@ -561,6 +565,8 @@ impl<
             yolo: false,
             wasm_name: "devswarm".to_string(),
             extra_mcp_servers: HashMap::new(),
+            claude_command: None,
+            gemini_command: None,
         }
     }
 
@@ -598,6 +604,33 @@ impl<
     pub fn with_extra_mcp_servers(mut self, servers: HashMap<String, serde_json::Value>) -> Self {
         self.extra_mcp_servers = servers;
         self
+    }
+
+    /// Override the binary used when spawning Claude agents.
+    pub fn with_claude_command(mut self, cmd: Option<String>) -> Self {
+        self.claude_command = cmd;
+        self
+    }
+
+    /// Override the binary used when spawning Gemini agents.
+    pub fn with_gemini_command(mut self, cmd: Option<String>) -> Self {
+        self.gemini_command = cmd;
+        self
+    }
+
+    /// Resolve the binary command for a given agent type, applying overrides.
+    pub(crate) fn command_for(&self, agent_type: AgentType) -> &str {
+        match agent_type {
+            AgentType::Claude => self
+                .claude_command
+                .as_deref()
+                .unwrap_or_else(|| agent_type.command()),
+            AgentType::Gemini => self
+                .gemini_command
+                .as_deref()
+                .unwrap_or_else(|| agent_type.command()),
+            _ => agent_type.command(),
+        }
     }
 
     /// Project root directory (from capability context).

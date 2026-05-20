@@ -997,6 +997,8 @@ Run `exomonad recompile` first to build it.",
         agent_control.with_birth_branch(resolve_agent_birth_branch(&worktree_base, "root").await?);
     agent_control = agent_control.with_tmux_session(config.tmux_session.clone());
     agent_control = agent_control.with_yolo(config.yolo);
+    agent_control = agent_control.with_claude_command(config.claude_command.clone());
+    agent_control = agent_control.with_gemini_command(config.gemini_command.clone());
     agent_control = agent_control
         .with_extra_mcp_servers(serialize_extra_mcp_servers(&config.extra_mcp_servers));
     let event_session_id = uuid::Uuid::new_v4().to_string();
