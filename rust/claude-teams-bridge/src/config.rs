@@ -35,8 +35,13 @@ pub struct TeamMember {
 
 /// Read team config from `~/.claude/teams/{team}/config.json`.
 pub fn read_team_config(team: &str) -> io::Result<TeamConfig> {
-    let path = paths::config_path(team)
+    let base = dirs::home_dir()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME directory not found"))?;
+    read_team_config_at_base(&base, team)
+}
+
+pub(crate) fn read_team_config_at_base(base: &Path, team: &str) -> io::Result<TeamConfig> {
+    let path = paths::config_path_at(base, team);
     let content = std::fs::read_to_string(&path)?;
     serde_json::from_str(&content)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
@@ -44,8 +49,17 @@ pub fn read_team_config(team: &str) -> io::Result<TeamConfig> {
 
 /// Write team config atomically.
 pub fn write_team_config(team: &str, config: &TeamConfig) -> io::Result<()> {
-    let path = paths::config_path(team)
+    let base = dirs::home_dir()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME directory not found"))?;
+    write_team_config_at_base(&base, team, config)
+}
+
+pub(crate) fn write_team_config_at_base(
+    base: &Path,
+    team: &str,
+    config: &TeamConfig,
+) -> io::Result<()> {
+    let path = paths::config_path_at(base, team);
     write_team_config_at(&path, config)
 }
 

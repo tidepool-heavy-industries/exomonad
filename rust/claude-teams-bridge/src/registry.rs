@@ -13,6 +13,7 @@
 //! that already know the team name).
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, info};
@@ -111,8 +112,17 @@ impl TeamRegistry {
     /// a member name. Falls back to the first in-memory entry if config.json
     /// is unavailable or the lead is not a member.
     pub async fn resolve_lead(&self, team_name: &str) -> Option<String> {
+        let base = dirs::home_dir()?;
+        self.resolve_lead_at_base(&base, team_name).await
+    }
+
+    pub(crate) async fn resolve_lead_at_base(
+        &self,
+        base: &Path,
+        team_name: &str,
+    ) -> Option<String> {
         // Primary: read config.json's leadAgentId and map to member name
-        if let Ok(config) = crate::config::read_team_config(team_name) {
+        if let Ok(config) = crate::config::read_team_config_at_base(base, team_name) {
             if let Some(member) = config
                 .members
                 .iter()
@@ -181,7 +191,16 @@ impl TeamRegistry {
     /// as inbox key. Useful for callers that already know the team name and want
     /// to skip the in-memory check.
     pub fn resolve_from_config(team_name: &str, recipient: &str) -> Option<TeamInfo> {
-        let config = crate::config::read_team_config(team_name).ok()?;
+        let base = dirs::home_dir()?;
+        Self::resolve_from_config_at_base(&base, team_name, recipient)
+    }
+
+    pub(crate) fn resolve_from_config_at_base(
+        base: &Path,
+        team_name: &str,
+        recipient: &str,
+    ) -> Option<TeamInfo> {
+        let config = crate::config::read_team_config_at_base(base, team_name).ok()?;
         let member = config
             .members
             .iter()
@@ -507,6 +526,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_lead_from_config() {
+        let tmp = tempfile::tempdir().unwrap();
         let team_name = "test-resolve-lead";
         let config = crate::config::TeamConfig {
             name: team_name.into(),
@@ -537,18 +557,13 @@ mod tests {
                 },
             ],
         };
-        crate::config::write_team_config(team_name, &config).unwrap();
+        crate::config::write_team_config_at_base(tmp.path(), team_name, &config).unwrap();
 
         let reg = TeamRegistry::new();
         // Without config.json, alphabetical "alpha-worker" would have been picked.
         // With resolve_lead, "team-lead" is picked via leadAgentId.
-        let lead = reg.resolve_lead(team_name).await;
+        let lead = reg.resolve_lead_at_base(tmp.path(), team_name).await;
         assert_eq!(lead, Some("team-lead".to_string()));
-
-        // Cleanup
-        if let Some(dir) = crate::paths::teams_base_dir() {
-            let _ = std::fs::remove_dir_all(dir.join(team_name));
-        }
     }
 
     #[tokio::test]
@@ -624,7 +639,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_tier2_from_config() {
-        // Create a real team config on disk
+        let tmp = tempfile::tempdir().unwrap();
         let team_name = "test-resolve-tier2";
         let config = crate::config::TeamConfig {
             name: team_name.into(),
@@ -643,25 +658,24 @@ mod tests {
                 aliases: Vec::new(),
             }],
         };
-        crate::config::write_team_config(team_name, &config).unwrap();
+        crate::config::write_team_config_at_base(tmp.path(), team_name, &config).unwrap();
 
         // Resolve via Tier 2
-        let result = TeamRegistry::resolve_from_config(team_name, "supervisor").unwrap();
+        let result =
+            TeamRegistry::resolve_from_config_at_base(tmp.path(), team_name, "supervisor").unwrap();
         assert_eq!(result.team_name, team_name);
         assert_eq!(result.inbox_name, "supervisor");
 
         // Non-member returns None
-        assert!(TeamRegistry::resolve_from_config(team_name, "nonexistent").is_none());
-
-        // Cleanup
-        if let Some(dir) = crate::paths::teams_base_dir() {
-            let _ = std::fs::remove_dir_all(dir.join(team_name));
-        }
+        assert!(
+            TeamRegistry::resolve_from_config_at_base(tmp.path(), team_name, "nonexistent")
+                .is_none()
+        );
     }
 
     #[tokio::test]
     async fn test_resolve_tier2_scoped_by_sender_team() {
-        // Create two teams with same member name
+        let tmp = tempfile::tempdir().unwrap();
         let team_a = "test-resolve-scope-a";
         let team_b = "test-resolve-scope-b";
         for (team, cwd) in [(team_a, "/tmp/a"), (team_b, "/tmp/b")] {
@@ -682,33 +696,16 @@ mod tests {
                     aliases: Vec::new(),
                 }],
             };
-            crate::config::write_team_config(team, &config).unwrap();
+            crate::config::write_team_config_at_base(tmp.path(), team, &config).unwrap();
         }
 
-        let reg = TeamRegistry::new();
-        // Sender is in team_a → resolve "team-lead" picks team_a's config
-        reg.register(
-            "sender",
-            TeamInfo {
-                team_name: team_a.into(),
-                inbox_name: "sender".into(),
-                agent_type: "exomonad-agent".into(),
-                model: "gemini".into(),
-                backend_type: None,
-            },
-        )
-        .await;
-
-        let result = reg.resolve("team-lead", Some(team_a)).await.unwrap();
+        // Sender is in team_a → resolve "team-lead" via team_a's config
+        let result =
+            TeamRegistry::resolve_from_config_at_base(tmp.path(), team_a, "team-lead").unwrap();
         assert_eq!(result.team_name, team_a);
 
-        let result_b = reg.resolve("team-lead", Some(team_b)).await.unwrap();
+        let result_b =
+            TeamRegistry::resolve_from_config_at_base(tmp.path(), team_b, "team-lead").unwrap();
         assert_eq!(result_b.team_name, team_b);
-
-        // Cleanup
-        if let Some(dir) = crate::paths::teams_base_dir() {
-            let _ = std::fs::remove_dir_all(dir.join(team_a));
-            let _ = std::fs::remove_dir_all(dir.join(team_b));
-        }
     }
 }
