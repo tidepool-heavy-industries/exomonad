@@ -113,12 +113,18 @@
           '';
         };
 
+        # Cache workspace-wide dep compilation once, reused below.
+        cargoArtifacts = craneLib.buildDepsOnly commonCraneArgs;
+
         # Exomonad Rust binary (built with crane)
-        # Using buildPackage directly provides incremental compilation
+        # Crane attribute names: cargoBuildExtraArgs / cargoTestExtraArgs
+        # (strings). The legacy *Flags names are silently dropped, which
+        # otherwise causes `cargo test` to run workspace-wide.
         exomonad = craneLib.buildPackage (commonCraneArgs // {
           pname = "exomonad";
-          cargoBuildFlags = [ "-p" "exomonad" ];
-          cargoTestFlags = [ "-p" "exomonad" ];
+          inherit cargoArtifacts;
+          cargoBuildExtraArgs = "-p exomonad";
+          cargoTestExtraArgs = "-p exomonad";
 
           meta = with pkgs.lib; {
             description = "Type-safe LLM agent orchestration";
