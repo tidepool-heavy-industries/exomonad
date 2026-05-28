@@ -39,7 +39,6 @@ pub(crate) use super::tmux_ipc;
 pub(crate) use claude_teams_bridge::TeamRegistry;
 pub(crate) use std::sync::Arc;
 
-pub(crate) const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) const TMUX_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Push the parent branch to the remote so child PRs can reference it as
@@ -259,14 +258,6 @@ impl AgentType {
     /// Emoji for display in tmux windows.
     pub fn emoji(&self) -> &'static str {
         self.metadata().emoji
-    }
-
-    /// Generate a display name for tmux windows.
-    ///
-    /// Format: "{emoji} gh-{issue_id}-{short_slug}"
-    /// The slug is truncated to 20 chars for readability.
-    pub(crate) fn display_name(&self, issue_id: &str, slug: &str) -> String {
-        format!("{} gh-{}-{}", self.emoji(), issue_id, slug)
     }
 
     /// tmux window display name for an agent with this type and slug.
@@ -972,28 +963,6 @@ mod tests {
     fn test_agent_type_emoji() {
         assert_eq!(AgentType::Claude.emoji(), "🤖");
         assert_eq!(AgentType::Gemini.emoji(), "💎");
-    }
-
-    #[test]
-    fn test_agent_type_display_name() {
-        assert_eq!(
-            AgentType::Claude.display_name("473", "refactor-polish"),
-            "🤖 gh-473-refactor-polish"
-        );
-        assert_eq!(
-            AgentType::Gemini.display_name("123", "fix-bug"),
-            "💎 gh-123-fix-bug"
-        );
-    }
-
-    #[test]
-    fn test_agent_type_display_name_no_truncation() {
-        let long_slug = "this-is-a-very-long-slug-that-should-be-truncated";
-        let display = AgentType::Claude.display_name("123", long_slug);
-        assert_eq!(
-            display,
-            "🤖 gh-123-this-is-a-very-long-slug-that-should-be-truncated"
-        );
     }
 
     #[test]
