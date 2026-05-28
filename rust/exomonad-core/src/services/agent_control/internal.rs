@@ -14,7 +14,7 @@ pub(crate) struct SpawnRollback {
     agent_config_dir: Option<PathBuf>,
     tmux: super::tmux_ipc::TmuxIpc,
     git_wt: Arc<GitWorktreeService>,
-    armed: bool,
+    committed: bool,
 }
 
 impl SpawnRollback {
@@ -27,7 +27,7 @@ impl SpawnRollback {
             agent_config_dir: None,
             tmux,
             git_wt,
-            armed: true,
+            committed: false,
         }
     }
 
@@ -51,14 +51,15 @@ impl SpawnRollback {
         self.agent_config_dir = Some(path);
     }
 
-    pub fn disarm(&mut self) {
-        self.armed = false;
+    /// Commit the changes, preventing rollback on drop.
+    pub fn commit(mut self) {
+        self.committed = true;
     }
 }
 
 impl Drop for SpawnRollback {
     fn drop(&mut self) {
-        if !self.armed {
+        if self.committed {
             return;
         }
 
@@ -1249,14 +1250,14 @@ mod tests {
         {
             let mut rollback = SpawnRollback::new(isolated.ipc.clone(), git_wt);
             rollback.set_worktree(wt_path.clone());
-            rollback.disarm();
-            // Drop while disarmed
+            rollback.commit();
+            // Drop while committed
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         assert!(
             wt_path.exists(),
-            "Worktree should NOT have been removed when disarmed"
+            "Worktree should NOT have been removed when committed"
         );
     }
 }
