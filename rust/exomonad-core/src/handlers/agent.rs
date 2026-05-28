@@ -766,7 +766,7 @@ impl<
         req: CleanupRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<CleanupResponse> {
-        match self.service.cleanup_agent(&req.issue).await {
+        match self.service.cleanup_agent(&req.issue, true).await {
             Ok(_) => Ok(CleanupResponse {
                 success: true,
                 error: String::new(),
@@ -951,6 +951,67 @@ impl<
             success: closed,
             error: String::new(),
         })
+    }
+
+    async fn shutdown_by_branch(
+        &self,
+        req: ShutdownByBranchRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<ShutdownByBranchResponse> {
+        let branch = BirthBranch::from(req.branch_name.as_str());
+        let resolver = self.ctx.agent_resolver();
+
+        let record = if let Some(r) = resolver.find_by_birth_branch(&branch).await {
+            r
+        } else {
+            return Ok(ShutdownByBranchResponse { agent_found: false });
+        };
+
+        let agent_name = record.agent_name;
+        let agent_dir = self
+            .ctx
+            .project_dir()
+            .join(".exo/agents")
+            .join(agent_name.as_str());
+
+        // 2. Read the agent's routing.json to get the tmux target.
+        if let Ok(routing) = crate::domain::RoutingInfo::read_from_dir(&agent_dir).await {
+            if let Ok(tmux) = self.service.tmux() {
+                let target = routing
+                    .pane_id
+                    .map(|pid| pid.as_str().to_string())
+                    .or_else(|| routing.window_id.map(|wid| wid.as_str().to_string()));
+
+                if let Some(target_str) = target {
+                    // 3. Send Ctrl-D (\x04) to the pane to request graceful exit
+                    info!(agent = %agent_name, target = %target_str, "Sending Ctrl-D for graceful shutdown");
+                    let _ = tmux.inject_input(&target_str, "\x04").await;
+
+                    // Wait up to 3 seconds for the process to terminate.
+                    let start = std::time::Instant::now();
+                    let mut terminated = false;
+                    while start.elapsed() < std::time::Duration::from_secs(3) {
+                        if !tmux.target_alive(&target_str).await {
+                            terminated = true;
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    }
+
+                    if !terminated {
+                        info!(agent = %agent_name, "Agent did not exit gracefully, will be hard-killed by cleanup_agent");
+                    }
+                }
+            }
+        }
+
+        // 4. Call the existing cleanup path
+        self.service
+            .cleanup_agent(agent_name.as_str(), req.remove_worktree)
+            .await
+            .effect_err("agent")?;
+
+        Ok(ShutdownByBranchResponse { agent_found: true })
     }
 }
 
@@ -1189,5 +1250,62 @@ mod tests {
             "Inbox name must match child agent name, not parent inbox"
         );
         assert_ne!(child_info.inbox_name, parent_inbox);
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_by_branch_not_found() {
+        let handler = test_handler();
+        let ctx = crate::effects::EffectContext {
+            agent_name: AgentName::from("test-agent"),
+            birth_branch: crate::domain::BirthBranch::from("main"),
+            working_dir: std::path::PathBuf::from("."),
+        };
+
+        let req = ShutdownByBranchRequest {
+            branch_name: "nonexistent.branch".to_string(),
+            remove_worktree: true,
+        };
+
+        let resp = handler.shutdown_by_branch(req, &ctx).await.unwrap();
+        assert!(!resp.agent_found);
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_by_branch_found() {
+        let handler = test_handler();
+        let resolver = handler.ctx.agent_resolver();
+        let birth_branch = BirthBranch::from("main.feature-x");
+        let agent_name = AgentName::from("feature-x-gemini");
+
+        let record = crate::services::AgentIdentityRecord {
+            agent_name: agent_name.clone(),
+            slug: crate::domain::Slug::from("feature-x"),
+            agent_type: crate::services::agent_control::AgentType::Gemini,
+            birth_branch: birth_branch.clone(),
+            parent_branch: BirthBranch::from("main"),
+            working_dir: std::path::PathBuf::from("."),
+            display_name: "feature-x".to_string(),
+            topology: crate::services::agent_control::Topology::WorktreePerAgent,
+            claude_session_uuid: None,
+            supervisor: None,
+        };
+        resolver.register(record).await.unwrap();
+
+        let ctx = crate::effects::EffectContext {
+            agent_name: AgentName::from("test-agent"),
+            birth_branch: crate::domain::BirthBranch::from("main"),
+            working_dir: std::path::PathBuf::from("."),
+        };
+
+        let req = ShutdownByBranchRequest {
+            branch_name: "main.feature-x".to_string(),
+            remove_worktree: false,
+        };
+
+        let resp = handler.shutdown_by_branch(req, &ctx).await.unwrap();
+        assert!(resp.agent_found);
+
+        // Verify it was deregistered from resolver
+        assert!(resolver.get(&agent_name).await.is_none());
     }
 }
