@@ -21,6 +21,7 @@ pub fn register_synthetic_member(
     member_name: &AgentName,
     agent_type: AgentType,
     kind: &str,
+    tmux_target: &str,
 ) -> Result<()> {
     let config_path = team_config_path(team_name)?;
     register_synthetic_member_at_path(
@@ -29,6 +30,7 @@ pub fn register_synthetic_member(
         member_name.as_str(),
         agent_type,
         kind,
+        tmux_target,
     )
 }
 
@@ -38,6 +40,7 @@ fn register_synthetic_member_at_path(
     member_name: &str,
     agent_type: AgentType,
     kind: &str,
+    tmux_target: &str,
 ) -> Result<()> {
     // Read existing config
     let _lock = FileLock::acquire(config_path, Duration::from_secs(30)).with_context(|| {
@@ -76,7 +79,7 @@ fn register_synthetic_member_at_path(
         "color": "green",
         "planModeRequired": false,
         "joinedAt": now,
-        "tmuxPaneId": "synthetic",
+        "tmuxPaneId": if tmux_target.is_empty() { "synthetic" } else { tmux_target },
         "cwd": std::env::current_dir().unwrap_or_default(),
         "subscriptions": [],
         "backendType": "exomonad"
@@ -259,6 +262,7 @@ mod tests {
             "gemini-1",
             AgentType::Gemini,
             "gemini-worker",
+            "%42",
         )?;
 
         let content = fs::read_to_string(&config_path)?;
@@ -272,6 +276,7 @@ mod tests {
             .expect("gemini-1 entry present");
         assert_eq!(new_entry["model"], "gemini");
         assert_eq!(new_entry["agentType"], "gemini-worker");
+        assert_eq!(new_entry["tmuxPaneId"], "%42");
 
         // Idempotent registration
         register_synthetic_member_at_path(
@@ -280,6 +285,7 @@ mod tests {
             "gemini-1",
             AgentType::Gemini,
             "gemini-worker",
+            "%42",
         )?;
         let content = fs::read_to_string(&config_path)?;
         let config: Value = serde_json::from_str(&content)?;
@@ -315,6 +321,7 @@ mod tests {
             "sub-tl",
             AgentType::Claude,
             "claude-subtree",
+            "@7",
         )?;
 
         let config: Value = serde_json::from_str(&fs::read_to_string(&config_path)?)?;

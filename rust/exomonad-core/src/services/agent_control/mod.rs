@@ -426,6 +426,15 @@ pub struct SpawnResult {
     pub issue_title: String,
     /// Agent type
     pub agent_type: AgentType,
+    /// Full git branch the agent was created on (e.g., `main.feature-a-claude`).
+    /// `None` for workers (share parent's branch) and idempotent returns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_name: Option<BranchName>,
+    /// tmux pane_id (workers) or window_id (subtrees/leaves) — Some on fresh
+    /// spawn, None on idempotent returns (registration already done) and ACP
+    /// (no tmux surface).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tmux_target: Option<String>,
 }
 
 impl FFIBoundary for SpawnResult {}

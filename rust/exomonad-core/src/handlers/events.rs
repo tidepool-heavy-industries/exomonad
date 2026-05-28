@@ -215,7 +215,8 @@ impl<
             )
             .await;
             tracing::info!(?result, agent = %agent_id, "notify_parent delivery result");
-            return Ok(NotifyParentResponse { ack: true });
+            let ack = !matches!(result, crate::services::delivery::DeliveryResult::Failed(_));
+            return Ok(NotifyParentResponse { ack });
         }
 
         // Check SupervisorRegistry for this agent's birth-branch
@@ -250,18 +251,17 @@ impl<
             )
             .await;
             tracing::info!(?result, agent = %agent_id, "notify_parent delivery result");
-            return Ok(NotifyParentResponse { ack: true });
+            let ack = !matches!(result, crate::services::delivery::DeliveryResult::Failed(_));
+            return Ok(NotifyParentResponse { ack });
         }
 
-        // Structural fallback: birth-branch parent
-        let parent_session_id = if agent_name.is_gemini_worker() {
-            birth_branch.to_string()
-        } else {
-            birth_branch
-                .parent()
-                .map(|p| p.to_string())
-                .unwrap_or_else(|| "root".to_string())
-        };
+        // Structural fallback: birth-branch parent.
+        // Leaves/subtrees have dotted branches (e.g. `main.foo-gemini`) → strip last segment.
+        // Workers share their parent's branch (no dot) → notify the agent on that branch.
+        let parent_session_id = birth_branch
+            .parent()
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| birth_branch.to_string());
 
         tracing::info!(
             birth_branch = %birth_branch,
@@ -289,8 +289,8 @@ impl<
         )
         .await;
         tracing::info!(?result, agent = %agent_id, "notify_parent delivery result");
-
-        Ok(NotifyParentResponse { ack: true })
+        let ack = !matches!(result, crate::services::delivery::DeliveryResult::Failed(_));
+        Ok(NotifyParentResponse { ack })
     }
 
     async fn send_message(

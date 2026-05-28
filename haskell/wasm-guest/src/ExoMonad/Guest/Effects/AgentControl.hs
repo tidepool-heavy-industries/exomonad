@@ -78,7 +78,11 @@ data SpawnResult = SpawnResult
     branchName :: Text,
     tabName :: Text,
     issueTitle :: Text,
-    agentTypeResult :: Text
+    agentTypeResult :: Text,
+    -- | Resolved internal name (e.g. "feature-a-gemini"). This is the
+    -- addressable identifier callers use for SendMessage and filesystem
+    -- lookups under @.exo/agents/@.
+    agentName :: Text
   }
   deriving (Show, Eq, Generic)
 
@@ -90,15 +94,17 @@ instance FromJSON SpawnResult where
       <*> v .: "tab_name"
       <*> v .: "issue_title"
       <*> v .: "agent_type"
+      <*> v .: "agent_name"
 
 instance ToJSON SpawnResult where
-  toJSON (SpawnResult w b t i a) =
+  toJSON (SpawnResult w b t i a n) =
     object
       [ "worktree_path" .= w,
         "branch_name" .= b,
         "tab_name" .= t,
         "issue_title" .= i,
-        "agent_type" .= a
+        "agent_type" .= a,
+        "agent_name" .= n
       ]
 
 -- ============================================================================
@@ -288,5 +294,6 @@ protoAgentInfoToSpawnResult info =
         Enumerated (Right PA.AgentTypeAGENT_TYPE_CLAUDE) -> "claude"
         Enumerated (Right PA.AgentTypeAGENT_TYPE_GEMINI) -> "gemini"
         Enumerated (Right PA.AgentTypeAGENT_TYPE_SHOAL) -> "shoal"
-        _ -> "unknown"
+        _ -> "unknown",
+      agentName = toText (PA.agentInfoId info)
     }

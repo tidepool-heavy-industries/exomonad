@@ -41,6 +41,7 @@ pub use self::event_queue::EventQueue;
 pub use self::filesystem::FileSystemService;
 pub use self::git_worktree::GitWorktreeService;
 pub use self::github::GitHubClient;
+pub use self::inbox_watcher::InboxWatcher;
 pub use self::mutex_registry::MutexRegistry;
 pub use self::secrets::Secrets;
 pub use self::supervisor_registry::SupervisorRegistry;
@@ -92,6 +93,10 @@ pub trait HasTasksDir: Send + Sync {
 pub trait HasTmuxIpc: Send + Sync {
     fn tmux_ipc(&self) -> &self::tmux_ipc::TmuxIpc;
 }
+pub trait HasInboxWatcher: Send + Sync {
+    fn inbox_watcher(&self) -> &Arc<InboxWatcher>;
+    fn tmux_ipc_arc(&self) -> &Arc<self::tmux_ipc::TmuxIpc>;
+}
 
 // ============================================================================
 // Services — the concrete type that implements all traits
@@ -117,6 +122,7 @@ pub struct Services {
     mutex_registry: Arc<MutexRegistry>,
     git_wt: Arc<GitWorktreeService>,
     tmux_ipc: Arc<self::tmux_ipc::TmuxIpc>,
+    inbox_watcher: Arc<InboxWatcher>,
 }
 
 /// Builder for [`Services`]. All required fields are passed to `new()`; optional
@@ -223,6 +229,7 @@ impl ServicesBuilder {
             mutex_registry: self.mutex_registry,
             git_wt: self.git_wt,
             tmux_ipc: self.tmux_ipc,
+            inbox_watcher: Arc::new(InboxWatcher::new()),
         }
     }
 }
@@ -289,6 +296,14 @@ impl HasTasksDir for Services {
 }
 impl HasTmuxIpc for Services {
     fn tmux_ipc(&self) -> &self::tmux_ipc::TmuxIpc {
+        &self.tmux_ipc
+    }
+}
+impl HasInboxWatcher for Services {
+    fn inbox_watcher(&self) -> &Arc<InboxWatcher> {
+        &self.inbox_watcher
+    }
+    fn tmux_ipc_arc(&self) -> &Arc<self::tmux_ipc::TmuxIpc> {
         &self.tmux_ipc
     }
 }

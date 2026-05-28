@@ -24,7 +24,8 @@ use tracing::{info, warn};
 
 use crate::services::{
     HasAcpRegistry, HasAgentResolver, HasClaudeSessionRegistry, HasEventLog, HasGitHubClient,
-    HasGitWorktreeService, HasProjectDir, HasSupervisorRegistry, HasTeamRegistry, HasTmuxIpc,
+    HasGitWorktreeService, HasInboxWatcher, HasProjectDir, HasSupervisorRegistry, HasTeamRegistry,
+    HasTmuxIpc,
 };
 
 /// Agent effect handler.
@@ -47,6 +48,7 @@ impl<
             + HasClaudeSessionRegistry
             + HasEventLog
             + HasTmuxIpc
+            + HasInboxWatcher
             + 'static,
     > AgentHandler<C>
 {
@@ -104,6 +106,7 @@ impl<
         member_name: &AgentName,
         agent_type: crate::services::agent_control::AgentType,
         kind: &str,
+        tmux_target: Option<&str>,
         ctx: &crate::effects::EffectContext,
     ) {
         let team_reg = self.ctx.team_registry();
@@ -124,6 +127,7 @@ impl<
             member_name,
             agent_type,
             kind,
+            tmux_target.unwrap_or(""),
         ) {
             warn!(
                 member = %member_name,
@@ -131,6 +135,28 @@ impl<
                 error = %e,
                 "Failed to register synthetic team member (non-fatal)"
             );
+        }
+
+        // Non-Claude agents don't run a Teams InboxPoller themselves — they can
+        // send via the bus (notify_parent writes to parent's inbox) but never
+        // poll their own inbox. Wire an InboxWatcher to forward inbound messages
+        // to the agent's tmux pane so SendMessage from a Claude teammate lands.
+        //
+        // `tmux_target = None` happens for: ACP (no tmux surface) and idempotent
+        // spawn returns (a watcher from the original spawn is still running).
+        if !matches!(agent_type, crate::services::agent_control::AgentType::Claude) {
+            if let Some(target) = tmux_target {
+                self.ctx
+                    .inbox_watcher()
+                    .watch_inbox(
+                        team_name.as_str().to_string(),
+                        member_name.as_str().to_string(),
+                        target.to_string(),
+                        self.ctx.tmux_ipc_arc().clone(),
+                        self.ctx.project_dir().to_path_buf(),
+                    )
+                    .await;
+            }
         }
     }
 
@@ -212,6 +238,7 @@ impl<
             + HasClaudeSessionRegistry
             + HasEventLog
             + HasTmuxIpc
+            + HasInboxWatcher
             + 'static,
     > EffectHandler for AgentHandler<C>
 {
@@ -288,6 +315,7 @@ impl<
             + HasClaudeSessionRegistry
             + HasEventLog
             + HasTmuxIpc
+            + HasInboxWatcher
             + 'static,
     > AgentEffects for AgentHandler<C>
 {
@@ -430,6 +458,7 @@ impl<
             &identity.internal_name(),
             crate::services::agent_control::AgentType::Gemini,
             "gemini-worker",
+            result.tmux_target.as_deref(),
             ctx,
         )
         .await;
@@ -531,6 +560,7 @@ impl<
             &child_identity.internal_name(),
             crate::services::agent_control::AgentType::Claude,
             "claude-subtree",
+            result.tmux_target.as_deref(),
             ctx,
         )
         .await;
@@ -596,6 +626,7 @@ impl<
             &leaf_identity.internal_name(),
             crate::services::agent_control::AgentType::Gemini,
             "gemini-leaf",
+            result.tmux_target.as_deref(),
             ctx,
         )
         .await;
@@ -666,11 +697,14 @@ impl<
 
         registry.register(conn).await;
 
-        // Register as synthetic team member (uses TL's actual team, not hardcoded exo-{branch})
+        // Register as synthetic team member (uses TL's actual team, not hardcoded exo-{branch}).
+        // ACP has no tmux pane — pass None so InboxWatcher is skipped and the
+        // synthetic registration uses "synthetic" for tmuxPaneId.
         self.register_synthetic_member(
             &agent_name,
             crate::services::agent_control::AgentType::Gemini,
             "gemini-acp",
+            None,
             ctx,
         )
         .await;
@@ -978,20 +1012,25 @@ fn worker_result_to_proto(
 }
 
 fn subtree_result_to_proto(
-    branch_name: &str,
+    request_slug: &str,
     result: &crate::services::agent_control::SpawnResult,
 ) -> exomonad_proto::effects::agent::AgentInfo {
     use crate::services::agent_control::Topology;
 
+    let full_branch = result
+        .branch_name
+        .as_ref()
+        .map(|b| b.to_string())
+        .unwrap_or_else(|| request_slug.to_string());
     exomonad_proto::effects::agent::AgentInfo {
         id: result.agent_name.to_string(),
         issue: String::new(),
         worktree_path: result.agent_dir.display().to_string(),
-        branch_name: branch_name.to_string(),
+        branch_name: full_branch,
         agent_type: service_agent_type_to_proto(result.agent_type),
         role: 0,
         alive: true,
-        mux_window: result.agent_type.tab_display_name(branch_name),
+        mux_window: result.agent_type.tab_display_name(request_slug),
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),
@@ -1000,20 +1039,25 @@ fn subtree_result_to_proto(
 }
 
 fn leaf_subtree_result_to_proto(
-    branch_name: &str,
+    request_slug: &str,
     result: &crate::services::agent_control::SpawnResult,
 ) -> exomonad_proto::effects::agent::AgentInfo {
     use crate::services::agent_control::Topology;
 
+    let full_branch = result
+        .branch_name
+        .as_ref()
+        .map(|b| b.to_string())
+        .unwrap_or_else(|| request_slug.to_string());
     exomonad_proto::effects::agent::AgentInfo {
         id: result.agent_name.to_string(),
         issue: String::new(),
         worktree_path: result.agent_dir.display().to_string(),
-        branch_name: branch_name.to_string(),
+        branch_name: full_branch,
         agent_type: service_agent_type_to_proto(result.agent_type),
         role: 0,
         alive: true,
-        mux_window: result.agent_type.tab_display_name(branch_name),
+        mux_window: result.agent_type.tab_display_name(request_slug),
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),

@@ -23,6 +23,7 @@ impl<
             + super::super::HasProjectDir
             + super::super::HasGitWorktreeService
             + super::super::HasTmuxIpc
+            + super::super::HasInboxWatcher
             + 'static,
     > AgentControlService<C>
 {
@@ -303,6 +304,12 @@ impl<
 
         // Purge AcpRegistry entry
         self.ctx.acp_registry().remove(internal_name.as_str()).await;
+
+        // Stop the InboxWatcher task (no-op if agent never had one).
+        self.ctx
+            .inbox_watcher()
+            .stop_watching(internal_name.as_str())
+            .await;
 
         // Emit agent:stopped event
         if let Some(ref session) = self.tmux_session {

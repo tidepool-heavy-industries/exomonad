@@ -67,6 +67,8 @@ impl<
                     agent_name,
                     issue_title: issue.title,
                     agent_type: options.agent_type,
+                    branch_name: None,
+                    tmux_target: None,
                 });
             }
 
@@ -155,7 +157,7 @@ impl<
             rollback.set_window(window_id.clone());
 
             // Store window_id for message delivery and cleanup
-            let routing = RoutingInfo::window(window_id);
+            let routing = RoutingInfo::window(window_id.clone());
             let effective_birth = self.effective_birth_branch(Some(caller_bb));
             let identity_record = AgentIdentityRecord {
                 agent_name: agent_name.clone(),
@@ -183,6 +185,8 @@ impl<
                 agent_name,
                 issue_title: issue.title,
                 agent_type: options.agent_type,
+                branch_name: Some(branch_name),
+                tmux_target: Some(window_id.to_string()),
             })
         })
         .await
@@ -274,6 +278,8 @@ impl<
                     agent_name,
                     issue_title: options.name.to_string(),
                     agent_type: options.agent_type,
+                    branch_name: None,
+                    tmux_target: None,
                 });
             }
 
@@ -344,7 +350,7 @@ impl<
             rollback.set_window(window_id.clone());
 
             // Store window_id for message delivery and cleanup
-            let routing = RoutingInfo::window(window_id);
+            let routing = RoutingInfo::window(window_id.clone());
             let effective_birth = self.effective_birth_branch(Some(caller_bb));
             let child_birth = effective_birth.child(agent_name.as_str());
             let identity_record = AgentIdentityRecord {
@@ -373,6 +379,8 @@ impl<
                 agent_name,
                 issue_title: options.name.to_string(),
                 agent_type: options.agent_type,
+                branch_name: Some(branch_name),
+                tmux_target: Some(window_id.to_string()),
             })
         })
         .await
@@ -516,6 +524,8 @@ impl<
                         agent_name,
                         issue_title: options.name.to_string(),
                         agent_type: AgentType::Gemini,
+                        branch_name: None,
+                        tmux_target: None,
                     });
                 }
                 // Stale: pane is dead but config dir remains. Clean up and respawn.
@@ -585,7 +595,7 @@ impl<
             rollback.set_pane(pane_id.clone());
 
             // Store pane_id for message delivery and cleanup
-            let routing = RoutingInfo::pane(pane_id, &caller_tab);
+            let routing = RoutingInfo::pane(pane_id.clone(), &caller_tab);
             let parent_bb = self.effective_birth_branch(Some(&ctx.birth_branch));
             let identity_record = AgentIdentityRecord {
                 agent_name: agent_name.clone(),
@@ -611,6 +621,8 @@ impl<
                 agent_name,
                 issue_title: options.name.to_string(),
                 agent_type: AgentType::Gemini,
+                branch_name: None,
+                tmux_target: Some(pane_id.to_string()),
             })
         })
         .await
@@ -664,6 +676,8 @@ impl<
                     agent_name,
                     issue_title: options.branch_name.clone(),
                     agent_type,
+                    branch_name: None,
+                    tmux_target: None,
                 });
             }
 
@@ -676,6 +690,7 @@ impl<
             // Branch: {current_branch}.{agent_name} (suffixed for unified namespace)
             let child_birth = effective_birth.child(agent_name.as_str());
             let branch_name = child_birth.to_string();
+            let full_branch = BranchName::from(branch_name.as_str());
 
             // Path resolution: working_dir overrides the default worktree location.
             // standalone_repo: git init (fresh .git boundary) instead of git worktree add.
@@ -817,7 +832,7 @@ impl<
             rollback.set_window(window_id.clone());
 
             // Store window_id for message delivery and cleanup
-            let routing = RoutingInfo::window(window_id);
+            let routing = RoutingInfo::window(window_id.clone());
             let identity_record = AgentIdentityRecord {
                 agent_name: agent_name.clone(),
                 slug: Slug::from(identity.slug()),
@@ -841,6 +856,8 @@ impl<
                 agent_name,
                 issue_title: options.branch_name.clone(),
                 agent_type,
+                branch_name: Some(full_branch),
+                tmux_target: Some(window_id.to_string()),
             })
         })
         .await
@@ -891,6 +908,8 @@ impl<
                     agent_name,
                     issue_title: options.branch_name.clone(),
                     agent_type,
+                    branch_name: None,
+                    tmux_target: None,
                 });
             }
 
@@ -950,7 +969,7 @@ impl<
             rollback.set_window(window_id.clone());
 
             // Store window_id for message delivery and cleanup
-            let routing = RoutingInfo::window(window_id);
+            let routing = RoutingInfo::window(window_id.clone());
             let identity_record = AgentIdentityRecord {
                 agent_name: agent_name.clone(),
                 slug: Slug::from(identity.slug()),
@@ -974,6 +993,8 @@ impl<
                 agent_name,
                 issue_title: options.branch_name.clone(),
                 agent_type,
+                branch_name: Some(branch_name),
+                tmux_target: Some(window_id.to_string()),
             })
         })
         .await
