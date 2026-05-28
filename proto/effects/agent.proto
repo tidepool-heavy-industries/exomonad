@@ -347,6 +347,23 @@ message CloseSelfResponse {
 }
 
 // ============================================================================
+// ShutdownByBranch - terminate a spawned agent identified by its birth branch
+// ============================================================================
+
+message ShutdownByBranchRequest {
+  // Birth branch of the agent to shut down (e.g., "main.feature-a-gemini").
+  string branch_name = 1;
+  // If true, also `git worktree remove` and clean the agent's worktree.
+  bool remove_worktree = 2;
+}
+
+message ShutdownByBranchResponse {
+  // True if an agent matching the branch was found and cleanup ran.
+  // False if no matching agent (idempotent no-op).
+  bool agent_found = 1;
+}
+
+// ============================================================================
 // Service definition
 // ============================================================================
 
@@ -363,4 +380,5 @@ service AgentEffects {
   rpc CleanupMerged(CleanupMergedRequest) returns (CleanupMergedResponse);
   rpc List(ListRequest) returns (ListResponse);
   rpc CloseSelf(CloseSelfRequest) returns (CloseSelfResponse);
+  rpc ShutdownByBranch(ShutdownByBranchRequest) returns (ShutdownByBranchResponse);
 }

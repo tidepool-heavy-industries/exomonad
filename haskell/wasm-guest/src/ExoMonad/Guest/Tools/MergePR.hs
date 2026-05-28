@@ -37,7 +37,7 @@ import Effects.Github qualified as GH
 import Effects.Log qualified as Log
 import Effects.MergePr qualified as MP
 import Effects.Process qualified as Proc
-import ExoMonad.Effects.Agent (AgentCleanup)
+import ExoMonad.Effects.Agent (AgentCleanup, AgentShutdownByBranch)
 import ExoMonad.Effects.Git (GitGetBranch, GitGetRepoInfo)
 import ExoMonad.Effects.GitHub (GitHubGetPullRequest)
 import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
@@ -55,7 +55,8 @@ data MergePRArgs = MergePRArgs
   { mprPrNumber :: Int,
     mprStrategy :: Maybe Text,
     mprWorkingDir :: Maybe Text,
-    mprForce :: Maybe Bool
+    mprForce :: Maybe Bool,
+    mprKeepAgent :: Maybe Bool
   }
   deriving (Show, Eq, Generic)
 
@@ -65,7 +66,8 @@ instance FromJSON MergePRArgs where
     strategy <- v .:? "strategy"
     workingDir <- v .:? "working_dir"
     force <- v .:? "force"
-    pure (MergePRArgs prNumber strategy workingDir force)
+    keepAgent <- v .:? "keep_agent"
+    pure (MergePRArgs prNumber strategy workingDir force keepAgent)
 
 data MergePROutput = MergePROutput
   { mpoMerged :: Bool,        -- ^ The GitHub PR was successfully merged.
@@ -99,7 +101,8 @@ mergePRSchema =
     [ ("pr_number", "PR number to merge"),
       ("strategy", "Merge strategy: squash (default), merge, or rebase"),
       ("working_dir", "Working directory for git operations"),
-      ("force", "Skip Copilot review check and merge immediately (use after [REVIEW TIMEOUT])")
+      ("force", "Skip Copilot review check and merge immediately (use after [REVIEW TIMEOUT])"),
+      ("keep_agent", "If true, do not shut down the agent after merge (default: false)")
     ]
 
 -- | Core merge_pr I/O: self-merge guard + readiness check + merge + cleanup + git pull.
@@ -321,35 +324,36 @@ doMerge args = do
                     else pure (False, Just (TL.toStrict (Proc.runResponseStderr pullResp)))
 
             -- Auto-cleanup: close agent tab, remove worktree, unregister
-            cleanOk <- case extractAgentName branchName of
-              Just slug -> do
-                let cleanupReq =
-                      Agent.CleanupRequest
-                        { Agent.cleanupRequestIssue = TL.fromStrict slug,
-                          Agent.cleanupRequestForce = True,
-                          Agent.cleanupRequestSubrepo = ""
-                        }
-                cleanupResult <- suspendEffect @AgentCleanup cleanupReq
-                case cleanupResult of
-                  Left cleanupErr -> do
-                    void $
-                      suspendEffect_ @LogInfo
-                        ( Log.InfoRequest
-                            { Log.infoRequestMessage = TL.fromStrict ("MergePR: cleanup failed (non-fatal): " <> T.pack (show cleanupErr)),
-                              Log.infoRequestFields = ""
-                            }
-                        )
-                    pure False
-                  Right _ -> do
-                    void $
-                      suspendEffect_ @LogInfo
-                        ( Log.InfoRequest
-                            { Log.infoRequestMessage = TL.fromStrict ("MergePR: cleaned up agent " <> slug),
-                              Log.infoRequestFields = ""
-                            }
-                        )
-                    pure True
-              Nothing -> pure True
+            cleanOk <-
+              if fromMaybe False (mprKeepAgent args)
+                then pure True
+                else do
+                  let shutdownReq =
+                        Agent.ShutdownByBranchRequest
+                          { Agent.shutdownByBranchRequestBranchName = TL.fromStrict branchName,
+                            Agent.shutdownByBranchRequestRemoveWorktree = True
+                          }
+                  shutdownResult <- suspendEffect @AgentShutdownByBranch shutdownReq
+                  case shutdownResult of
+                    Left shutdownErr -> do
+                      void $
+                        suspendEffect_ @LogInfo
+                          ( Log.InfoRequest
+                              { Log.infoRequestMessage = TL.fromStrict ("MergePR: shutdown failed (non-fatal): " <> T.pack (show shutdownErr)),
+                                Log.infoRequestFields = ""
+                              }
+                          )
+                      pure False
+                    Right resp -> do
+                      let found = Agent.shutdownByBranchResponseAgentFound resp
+                      void $
+                        suspendEffect_ @LogInfo
+                          ( Log.InfoRequest
+                              { Log.infoRequestMessage = TL.fromStrict ("MergePR: shutdown agent for branch " <> branchName <> if found then " succeeded" else " (not found)"),
+                                Log.infoRequestFields = ""
+                              }
+                          )
+                      pure True
 
             pure (syncOk, syncErr, cleanOk)
           else pure (False, Nothing, True)

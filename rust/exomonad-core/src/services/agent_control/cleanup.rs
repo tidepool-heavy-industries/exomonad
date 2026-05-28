@@ -24,6 +24,7 @@ impl<
             + super::super::HasGitWorktreeService
             + super::super::HasTmuxIpc
             + super::super::HasInboxWatcher
+            + super::super::HasSupervisorRegistry
             + 'static,
     > AgentControlService<C>
 {
@@ -150,7 +151,7 @@ impl<
     /// Kills the tmux window, unregisters from Teams config.json,
     /// and removes per-agent config directory (`.exo/agents/{name}/`).
     #[tracing::instrument(skip(self))]
-    pub async fn cleanup_agent(&self, identifier: &str) -> Result<()> {
+    pub async fn cleanup_agent(&self, identifier: &str, remove_worktree: bool) -> Result<()> {
         // Try to find agent in list (for metadata and window matching).
         // Failure here is non-fatal to allow cleaning up worker panes (invisible to list_agents).
         let agents = self.list_agents().await.unwrap_or_default();
@@ -166,14 +167,17 @@ impl<
 
         // Parse identifier into AgentIdentity to get consistent slug/internal_name/display_name.
         // Try resolver first for authoritative identity, then fall back to derivation.
-        let identity = {
+        let (identity, record) = {
             let resolver = self.agent_resolver();
             let agent_name_key = AgentName::from(identifier);
             if let Some(record) = resolver.get(&agent_name_key).await {
                 let slug = record.slug.as_str().to_string();
-                AgentIdentity::new(slug, record.agent_type)
+                (
+                    AgentIdentity::new(slug, record.agent_type),
+                    Some(record.clone()),
+                )
             } else {
-                AgentIdentity::from_internal_name(identifier)
+                (AgentIdentity::from_internal_name(identifier), None)
             }
         };
 
@@ -203,6 +207,14 @@ impl<
             }
         }
 
+        // Deregister from SupervisorRegistry if we have a birth branch
+        if let Some(record) = &record {
+            self.ctx
+                .supervisor_registry()
+                .deregister(&[record.birth_branch.to_string()])
+                .await;
+        }
+
         let internal_name = identity.internal_name();
         let display_name = Some(identity.display_name());
 
@@ -213,25 +225,35 @@ impl<
             .join("agents")
             .join(internal_name.as_str());
 
-        // Try direct cleanup via stored window_id (O(1), no listing needed)
-        let mut window_closed = false;
+        // Try direct cleanup via stored window_id or pane_id (O(1), no listing needed)
+        let mut target_closed = false;
         if let Ok(routing) = RoutingInfo::read_from_dir(&agent_config_dir).await {
+            let tmux = self.tmux()?;
             if let Some(wid) = routing.window_id {
-                let tmux = self.tmux()?;
                 match tmux.kill_window(&wid).await {
                     Ok(()) => {
                         info!(identifier, "Closed tmux window via stored window_id");
-                        window_closed = true;
+                        target_closed = true;
                     }
                     Err(e) => {
                         warn!(identifier, error = %e, "kill_window by stored ID failed, falling back to name match");
+                    }
+                }
+            } else if let Some(pid) = routing.pane_id {
+                match tmux.kill_pane(&pid).await {
+                    Ok(()) => {
+                        info!(identifier, "Closed tmux pane via stored pane_id");
+                        target_closed = true;
+                    }
+                    Err(e) => {
+                        warn!(identifier, error = %e, "kill_pane by stored ID failed");
                     }
                 }
             }
         }
 
         // Close tmux window if found in list
-        if !window_closed {
+        if !target_closed {
             if let Some(target_window) = display_name {
                 let windows = self.get_tmux_windows().await.unwrap_or_default();
                 for window in &windows {
@@ -257,39 +279,41 @@ impl<
             }
         }
 
-        // Remove git worktree if it exists.
+        // Remove git worktree if requested and it exists.
         // spawn_subtree/spawn_leaf_subtree use bare slug as dir name,
         // spawn_agent/spawn_gemini_teammate use internal_name ({id}-{type}).
-        let worktree_path = {
-            let slug_path = self.worktree_base.join(identity.slug());
-            if slug_path.exists() {
-                slug_path
-            } else {
-                self.worktree_base.join(internal_name.as_str())
-            }
-        };
-        if worktree_path.exists() {
-            let git_wt = self.git_wt().clone();
-            let path = worktree_path.clone();
-            let join_result =
-                tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
-            match join_result {
-                Ok(Ok(())) => {
-                    // Successfully removed workspace
+        if remove_worktree {
+            let worktree_path = {
+                let slug_path = self.worktree_base.join(identity.slug());
+                if slug_path.exists() {
+                    slug_path
+                } else {
+                    self.worktree_base.join(internal_name.as_str())
                 }
-                Ok(Err(e)) => {
-                    warn!(
-                        path = %worktree_path.display(),
-                        error = %e,
-                        "Failed to remove git worktree (non-fatal)"
-                    );
-                }
-                Err(join_err) => {
-                    warn!(
-                        path = %worktree_path.display(),
-                        error = %join_err,
-                        "Blocking task for git worktree removal panicked or was cancelled (non-fatal)"
-                    );
+            };
+            if worktree_path.exists() {
+                let git_wt = self.git_wt().clone();
+                let path = worktree_path.clone();
+                let join_result =
+                    tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
+                match join_result {
+                    Ok(Ok(())) => {
+                        // Successfully removed workspace
+                    }
+                    Ok(Err(e)) => {
+                        warn!(
+                            path = %worktree_path.display(),
+                            error = %e,
+                            "Failed to remove git worktree (non-fatal)"
+                        );
+                    }
+                    Err(join_err) => {
+                        warn!(
+                            path = %worktree_path.display(),
+                            error = %join_err,
+                            "Blocking task for git worktree removal panicked or was cancelled (non-fatal)"
+                        );
+                    }
                 }
             }
         }
@@ -340,7 +364,7 @@ impl<
         };
 
         for issue_id in issue_ids {
-            match self.cleanup_agent(issue_id).await {
+            match self.cleanup_agent(issue_id, true).await {
                 Ok(()) => result.cleaned.push(issue_id.clone()),
                 Err(e) => {
                     warn!(issue_id, error = %e, "Failed to cleanup agent");
