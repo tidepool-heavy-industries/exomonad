@@ -178,7 +178,7 @@ impl<
 
             self.emit_agent_started(&agent_name)?;
 
-            rollback.disarm();
+            rollback.commit();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: agent_dir.clone(),
@@ -372,7 +372,7 @@ impl<
 
             self.emit_agent_started(&agent_name)?;
 
-            rollback.disarm();
+            rollback.commit();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: PathBuf::new(),
@@ -614,7 +614,7 @@ impl<
 
             self.emit_agent_started(&agent_name)?;
 
-            rollback.disarm();
+            rollback.commit();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: PathBuf::new(),
@@ -849,7 +849,7 @@ impl<
                 .await?;
             rollback.set_agent_config_dir(agent_config_dir);
 
-            rollback.disarm();
+            rollback.commit();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: worktree_path.clone(),
@@ -986,7 +986,7 @@ impl<
                 .await?;
             rollback.set_agent_config_dir(agent_config_dir);
 
-            rollback.disarm();
+            rollback.commit();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: worktree_path.clone(),
