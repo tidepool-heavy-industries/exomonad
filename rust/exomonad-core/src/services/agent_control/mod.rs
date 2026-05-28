@@ -134,6 +134,36 @@ impl AgentIdentity {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SpawnableAgentType {
+    Claude,
+    Gemini,
+    Shoal,
+}
+
+impl TryFrom<AgentType> for SpawnableAgentType {
+    type Error = AgentType;
+    fn try_from(t: AgentType) -> Result<Self, AgentType> {
+        match t {
+            AgentType::Claude => Ok(Self::Claude),
+            AgentType::Gemini => Ok(Self::Gemini),
+            AgentType::Shoal => Ok(Self::Shoal),
+            AgentType::Process => Err(t),
+        }
+    }
+}
+
+impl From<SpawnableAgentType> for AgentType {
+    fn from(t: SpawnableAgentType) -> Self {
+        match t {
+            SpawnableAgentType::Claude => Self::Claude,
+            SpawnableAgentType::Gemini => Self::Gemini,
+            SpawnableAgentType::Shoal => Self::Shoal,
+        }
+    }
+}
+
 /// Agent type for spawned agents.
 ///
 /// Determines which CLI tool to use when spawning an agent in a tmux window.
@@ -322,13 +352,17 @@ pub struct SpawnOptions {
     /// GitHub repository name
     pub repo: GithubRepo,
     /// Agent type (Claude or Gemini)
-    #[serde(default)]
-    pub agent_type: AgentType,
+    #[serde(default = "default_spawnable_agent_type")]
+    pub agent_type: SpawnableAgentType,
     /// Sub-repository path relative to project_dir (e.g., "urchin/").
     /// When set, the agent's project context targets this directory instead of project_dir.
     pub subrepo: Option<PathBuf>,
     /// Base branch to branch off of (default: "main").
     pub base_branch: Option<BirthBranch>,
+}
+
+fn default_spawnable_agent_type() -> SpawnableAgentType {
+    SpawnableAgentType::Gemini
 }
 
 /// Options for spawning a named teammate (no GitHub issue required).
@@ -339,8 +373,8 @@ pub struct SpawnGeminiTeammateOptions {
     /// Initial prompt/instructions
     pub prompt: String,
     /// Agent type (Claude or Gemini)
-    #[serde(default)]
-    pub agent_type: AgentType,
+    #[serde(default = "default_spawnable_agent_type")]
+    pub agent_type: SpawnableAgentType,
     /// Sub-repository path relative to project_dir
     pub subrepo: Option<PathBuf>,
     /// Base branch to branch off of (defaults to current branch).
@@ -382,7 +416,7 @@ pub struct SpawnSubtreeOptions {
     /// Optional role override.
     pub role: Option<crate::domain::Role>,
     /// Agent type (claude or gemini). Required — no default.
-    pub agent_type: AgentType,
+    pub agent_type: SpawnableAgentType,
     /// Claude-specific permission flags (ignored for Gemini).
     #[serde(default)]
     pub claude_flags: ClaudeSpawnFlags,
@@ -406,7 +440,7 @@ pub struct SpawnLeafOptions {
     /// Optional role override.
     pub role: Option<crate::domain::Role>,
     /// Agent type (claude or gemini). Required — no default.
-    pub agent_type: AgentType,
+    pub agent_type: SpawnableAgentType,
     /// Claude-specific permission flags (ignored for Gemini).
     #[serde(default)]
     pub claude_flags: ClaudeSpawnFlags,
