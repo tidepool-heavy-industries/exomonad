@@ -1,6 +1,35 @@
 use super::*;
 use super::error::SpawnError;
 
+const SPAWN_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Run a spawn closure with the global SPAWN_TIMEOUT, mapping the timeout error
+/// to a structured SpawnError. The closure receives a fresh `SpawnRollback` it
+/// must `.commit()` on success (Drop runs cleanup on early return).
+async fn spawn_with_timeout<F, T>(label: &'static str, work: F) -> Result<T, SpawnError>
+where
+    F: std::future::Future<Output = Result<T, SpawnError>>,
+{
+    tokio::time::timeout(SPAWN_TIMEOUT, work).await.map_err(|_| {
+        warn!(label, "spawn timed out");
+        SpawnError::Timeout {
+            seconds: SPAWN_TIMEOUT.as_secs(),
+        }
+    })?
+}
+
+/// Compute identity + display_name + agent_name in one shot. Centralizes the
+/// `slugify → AgentIdentity::new → internal_name → display_name` pattern.
+fn compute_identity(
+    raw_name: &str,
+    agent_type: SpawnableAgentType,
+) -> (AgentIdentity, AgentName, String) {
+    let identity = AgentIdentity::new(slugify(raw_name), agent_type.into());
+    let agent_name = identity.internal_name();
+    let display_name = identity.display_name();
+    (identity, agent_name, display_name)
+}
+
 impl<
         C: super::super::HasGitHubClient
             + super::super::HasAcpRegistry
@@ -29,7 +58,7 @@ impl<
         let issue_id_log = issue_number.as_u64().to_string();
         info!(issue_id = %issue_id_log, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_agent");
 
-        let result = timeout(SPAWN_TIMEOUT, async {
+        let result = spawn_with_timeout("spawn_agent", async {
             // Validate we're in tmux
             self.resolve_tmux_session()?;
 
@@ -55,10 +84,7 @@ impl<
 
             // Generate slug and agent identity
             let slug = slugify(&issue.title);
-            let identity =
-                AgentIdentity::new(format!("gh-{}-{}", issue_id, slug), options.agent_type.into());
-            let agent_name = identity.internal_name();
-            let display_name = AgentType::from(options.agent_type).display_name(&issue_id, &slug);
+            let (identity, agent_name, display_name) = compute_identity(&format!("gh-{}-{}", issue_id, slug), options.agent_type);
 
             // Idempotency check: if tmux window is alive, return existing info
             if self.is_tmux_window_alive(&display_name).await {
@@ -180,7 +206,7 @@ impl<
 
             rollback.commit();
 
-            Ok::<SpawnResult, SpawnError>(SpawnResult {
+            Ok(SpawnResult {
                 agent_dir: Some(agent_dir.clone()),
                 agent_name,
                 issue_title: issue.title,
@@ -188,12 +214,7 @@ impl<
                 branch_name: Some(branch_name),
                 tmux_target: Some(TmuxTarget::Window(window_id.clone())),
             })
-        })
-        .await
-        .map_err(|_| {
-            warn!(issue_id = %issue_id_log, timeout_sec = SPAWN_TIMEOUT.as_secs(), "spawn_agent timed out");
-            SpawnError::Timeout { seconds: SPAWN_TIMEOUT.as_secs() }
-        })??;
+        }).await?;
 
         info!(issue_id = %issue_id_log, "spawn_agent completed successfully");
         Ok(result)
@@ -248,7 +269,7 @@ impl<
     ) -> Result<SpawnResult, SpawnError> {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_gemini_teammate");
 
-        let result = timeout(SPAWN_TIMEOUT, async {
+        let result = spawn_with_timeout("spawn_gemini_teammate", async {
             self.resolve_tmux_session()?;
 
             let mut rollback = SpawnRollback::new(self.tmux()?, self.git_wt().clone());
@@ -256,9 +277,7 @@ impl<
             let effective_project_dir = self.effective_project_dir(options.subrepo.as_deref())?;
 
             // Sanitize name and construct typed identity
-            let identity = AgentIdentity::new(slugify(options.name.as_str()), options.agent_type.into());
-            let agent_name = identity.internal_name();
-            let display_name = identity.display_name();
+            let (identity, agent_name, display_name) = compute_identity(options.name.as_str(), options.agent_type);
 
             // Idempotency check: if tmux window is alive, return existing info
             let tab_alive = self.is_tmux_window_alive(&display_name).await;
@@ -373,7 +392,7 @@ impl<
 
             rollback.commit();
 
-            Ok::<SpawnResult, SpawnError>(SpawnResult {
+            Ok(SpawnResult {
                 agent_dir: None,
                 agent_name,
                 issue_title: options.name.to_string(),
@@ -381,12 +400,7 @@ impl<
                 branch_name: Some(branch_name),
                 tmux_target: Some(TmuxTarget::Window(window_id.clone())),
             })
-        })
-        .await
-        .map_err(|_| {
-            warn!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "spawn_gemini_teammate timed out");
-            SpawnError::Timeout { seconds: SPAWN_TIMEOUT.as_secs() }
-        })??;
+        }).await?;
 
         info!(name = %options.name, "spawn_gemini_teammate completed successfully");
         Ok(result)
@@ -487,15 +501,13 @@ impl<
     ) -> Result<SpawnResult, SpawnError> {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_worker");
 
-        let result = timeout(SPAWN_TIMEOUT, async {
+        let result = spawn_with_timeout("spawn_worker", async {
             self.resolve_tmux_session()?;
 
             let mut rollback = SpawnRollback::new(self.tmux()?, self.git_wt().clone());
 
             // Sanitize name and construct typed identity
-            let identity = AgentIdentity::new(slugify(options.name.as_str()), AgentType::Gemini);
-            let agent_name = identity.internal_name();
-            let display_name = identity.display_name();
+            let (identity, agent_name, display_name) = compute_identity(options.name.as_str(), SpawnableAgentType::Gemini);
 
             // Idempotency: check if agent config dir already exists (workers are panes, not tabs)
             let agent_config_dir = self.project_dir()
@@ -610,7 +622,7 @@ impl<
 
             rollback.commit();
 
-            Ok::<SpawnResult, SpawnError>(SpawnResult {
+            Ok(SpawnResult {
                 agent_dir: None,
                 agent_name,
                 issue_title: options.name.to_string(),
@@ -618,12 +630,7 @@ impl<
                 branch_name: None,
                 tmux_target: Some(TmuxTarget::Pane(pane_id.clone())),
             })
-        })
-        .await
-        .map_err(|_| {
-            warn!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "spawn_worker timed out");
-            SpawnError::Timeout { seconds: SPAWN_TIMEOUT.as_secs() }
-        })??;
+        }).await?;
 
         info!(name = %options.name, "spawn_worker completed successfully");
         Ok(result)
@@ -638,7 +645,7 @@ impl<
     ) -> Result<SpawnResult, SpawnError> {
         info!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_subtree");
 
-        let result = timeout(SPAWN_TIMEOUT, async {
+        let result = spawn_with_timeout("spawn_subtree", async {
             self.resolve_tmux_session()?;
 
             let mut rollback = SpawnRollback::new(self.tmux()?, self.git_wt().clone());
@@ -656,9 +663,7 @@ impl<
 
             // Sanitize branch name and construct typed identity
             let agent_type = options.agent_type;
-            let identity = AgentIdentity::new(slugify(&options.branch_name), agent_type.into());
-            let agent_name = identity.internal_name();
-            let display_name = identity.display_name();
+            let (identity, agent_name, display_name) = compute_identity(&options.branch_name, agent_type);
 
             // Idempotency check: if tmux window is alive, return existing info
             let tab_alive = self.is_tmux_window_alive(&display_name).await;
@@ -828,7 +833,7 @@ impl<
 
             rollback.commit();
 
-            Ok::<SpawnResult, SpawnError>(SpawnResult {
+            Ok(SpawnResult {
                 agent_dir: Some(worktree_path.clone()),
                 agent_name,
                 issue_title: options.branch_name.clone(),
@@ -836,12 +841,7 @@ impl<
                 branch_name: Some(full_branch),
                 tmux_target: Some(TmuxTarget::Window(window_id.clone())),
             })
-        })
-        .await
-        .map_err(|_| {
-            warn!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "spawn_subtree timed out");
-            SpawnError::Timeout { seconds: SPAWN_TIMEOUT.as_secs() }
-        })??;
+        }).await?;
 
         info!(branch_name = %options.branch_name, "spawn_subtree completed successfully");
         Ok(result)
@@ -856,7 +856,7 @@ impl<
     ) -> Result<SpawnResult, SpawnError> {
         info!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_leaf_subtree");
 
-        let result = timeout(SPAWN_TIMEOUT, async {
+        let result = spawn_with_timeout("spawn_leaf_subtree", async {
             self.resolve_tmux_session()?;
 
             let mut rollback = SpawnRollback::new(self.tmux()?, self.git_wt().clone());
@@ -871,9 +871,7 @@ impl<
 
             // Sanitize branch name and construct typed identity
             let agent_type = options.agent_type;
-            let identity = AgentIdentity::new(slugify(&options.branch_name), agent_type.into());
-            let agent_name = identity.internal_name();
-            let display_name = identity.display_name();
+            let (identity, agent_name, display_name) = compute_identity(&options.branch_name, agent_type);
 
             // Idempotency check
             let tab_alive = self.is_tmux_window_alive(&display_name).await;
@@ -969,7 +967,7 @@ impl<
 
             rollback.commit();
 
-            Ok::<SpawnResult, SpawnError>(SpawnResult {
+            Ok(SpawnResult {
                 agent_dir: Some(worktree_path.clone()),
                 agent_name,
                 issue_title: options.branch_name.clone(),
@@ -977,12 +975,7 @@ impl<
                 branch_name: Some(branch_name),
                 tmux_target: Some(TmuxTarget::Window(window_id.clone())),
             })
-        })
-        .await
-        .map_err(|_| {
-            warn!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "spawn_leaf_subtree timed out");
-            SpawnError::Timeout { seconds: SPAWN_TIMEOUT.as_secs() }
-        })??;
+        }).await?;
 
         info!(branch_name = %options.branch_name, "spawn_leaf_subtree completed successfully");
         Ok(result)
