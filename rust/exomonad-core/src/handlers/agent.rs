@@ -11,7 +11,7 @@ use super::non_empty;
 use crate::services::agent_control::{
     AgentControlService, AgentInfo, AgentType as ServiceAgentType, ClaudeSpawnFlags,
     SpawnGeminiTeammateOptions, SpawnLeafOptions, SpawnOptions, SpawnSubtreeOptions,
-    SpawnWorkerOptions, TmuxTarget,
+    SpawnableAgentType, SpawnWorkerOptions, TmuxTarget,
 };
 use crate::services::supervisor_registry::SupervisorEntry;
 use crate::{GithubOwner, GithubRepo, IssueNumber};
@@ -287,6 +287,16 @@ fn convert_agent_type(t: AgentType) -> EffectResult<ServiceAgentType> {
     }
 }
 
+fn convert_spawnable_agent_type(t: AgentType) -> EffectResult<SpawnableAgentType> {
+    let agent_type = convert_agent_type(t)?;
+    SpawnableAgentType::try_from(agent_type).map_err(|_| {
+        EffectError::custom(
+            "agent.not_spawnable",
+            "Process agents cannot be spawned via effects",
+        )
+    })
+}
+
 fn parse_issue_number(issue: &str) -> EffectResult<IssueNumber> {
     let n: u64 = issue
         .parse()
@@ -327,7 +337,7 @@ impl<
         let options = SpawnOptions {
             owner: parse_owner(&req.owner)?,
             repo: parse_repo(&req.repo)?,
-            agent_type: convert_agent_type(req.agent_type())?,
+            agent_type: convert_spawnable_agent_type(req.agent_type())?,
             subrepo: non_empty(req.subrepo).map(PathBuf::from),
             base_branch: non_empty(req.base_branch).map(|s| BirthBranch::from(s.as_str())),
         };
@@ -348,7 +358,7 @@ impl<
         req: SpawnBatchRequest,
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<SpawnBatchResponse> {
-        let agent_type = convert_agent_type(req.agent_type())?;
+        let agent_type = convert_spawnable_agent_type(req.agent_type())?;
         let mut agents = Vec::new();
         let mut errors = Vec::new();
 
@@ -389,7 +399,7 @@ impl<
         let options = SpawnGeminiTeammateOptions {
             name: AgentName::from(req.name.as_str()),
             prompt: req.prompt.clone(),
-            agent_type: convert_agent_type(req.agent_type())?,
+            agent_type: convert_spawnable_agent_type(req.agent_type())?,
             subrepo: non_empty(req.subrepo).map(PathBuf::from),
             base_branch: non_empty(req.base_branch).map(|s| BirthBranch::from(s.as_str())),
         };
@@ -505,7 +515,7 @@ impl<
             branch_name: req.branch_name.clone(),
             parent_session_id,
             role: non_empty(req.role.clone()).map(crate::domain::Role::new),
-            agent_type: convert_agent_type(req.agent_type())?,
+            agent_type: convert_spawnable_agent_type(req.agent_type())?,
             claude_flags: claude_spawn_flags(
                 req.permission_mode.clone(),
                 req.allowed_tools.clone(),
@@ -582,7 +592,7 @@ impl<
             task: req.task.clone(),
             branch_name: req.branch_name.clone(),
             role: non_empty(req.role.clone()).map(crate::domain::Role::new),
-            agent_type: convert_agent_type(req.agent_type())?,
+            agent_type: convert_spawnable_agent_type(req.agent_type())?,
             claude_flags: claude_spawn_flags(
                 req.permission_mode.clone(),
                 req.allowed_tools.clone(),

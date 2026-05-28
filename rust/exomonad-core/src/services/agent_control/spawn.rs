@@ -56,9 +56,9 @@ impl<
             // Generate slug and agent identity
             let slug = slugify(&issue.title);
             let identity =
-                AgentIdentity::new(format!("gh-{}-{}", issue_id, slug), options.agent_type);
+                AgentIdentity::new(format!("gh-{}-{}", issue_id, slug), options.agent_type.into());
             let agent_name = identity.internal_name();
-            let display_name = options.agent_type.display_name(&issue_id, &slug);
+            let display_name = AgentType::from(options.agent_type).display_name(&issue_id, &slug);
 
             // Idempotency check: if tmux window is alive, return existing info
             if self.is_tmux_window_alive(&display_name).await {
@@ -67,7 +67,7 @@ impl<
                     agent_dir: Some(self.worktree_base.join(agent_name.as_str())),
                     agent_name,
                     issue_title: issue.title,
-                    agent_type: options.agent_type,
+                    agent_type: options.agent_type.into(),
                     branch_name: None,
                     tmux_target: None,
                 });
@@ -80,7 +80,7 @@ impl<
                 .as_ref()
                 .map(|b| b.as_str().to_string())
                 .unwrap_or(default_base);
-            let agent_suffix = options.agent_type.suffix();
+            let agent_suffix = AgentType::from(options.agent_type).suffix();
             let branch_name = BranchName::from(
                 if self.birth_branch.depth() == 0 {
                     format!("gh-{}/{}-{}", issue_id, slug, agent_suffix)
@@ -103,15 +103,14 @@ impl<
 
             // Write .mcp.json for the agent
             let role = match options.agent_type {
-                AgentType::Claude => crate::domain::Role::tl(),
-                AgentType::Gemini => crate::domain::Role::dev(),
-                AgentType::Shoal => crate::domain::Role::shoal(),
-                AgentType::Process => unreachable!("Process agents are not spawned via effects"),
+                SpawnableAgentType::Claude => crate::domain::Role::tl(),
+                SpawnableAgentType::Gemini => crate::domain::Role::dev(),
+                SpawnableAgentType::Shoal => crate::domain::Role::shoal(),
             };
             self.write_agent_mcp_config(
                 &effective_project_dir,
                 &agent_dir,
-                options.agent_type,
+                options.agent_type.into(),
                 &role,
             )
             .await?;
@@ -150,7 +149,7 @@ impl<
                 .new_tmux_window(
                     &display_name,
                     &agent_dir,
-                    options.agent_type,
+                    options.agent_type.into(),
                     Some(prompt_path),
                     env_vars,
                 )
@@ -163,7 +162,7 @@ impl<
             let identity_record = AgentIdentityRecord {
                 agent_name: agent_name.clone(),
                 slug: Slug::from(identity.slug()),
-                agent_type: options.agent_type,
+                agent_type: options.agent_type.into(),
                 birth_branch: BirthBranch::from(branch_name.as_str()),
                 parent_branch: effective_birth,
                 working_dir: agent_dir.clone(),
@@ -185,7 +184,7 @@ impl<
                 agent_dir: Some(agent_dir.clone()),
                 agent_name,
                 issue_title: issue.title,
-                agent_type: options.agent_type,
+                agent_type: options.agent_type.into(),
                 branch_name: Some(branch_name),
                 tmux_target: Some(TmuxTarget::Window(window_id.clone())),
             })
@@ -257,7 +256,7 @@ impl<
             let effective_project_dir = self.effective_project_dir(options.subrepo.as_deref())?;
 
             // Sanitize name and construct typed identity
-            let identity = AgentIdentity::new(slugify(options.name.as_str()), options.agent_type);
+            let identity = AgentIdentity::new(slugify(options.name.as_str()), options.agent_type.into());
             let agent_name = identity.internal_name();
             let display_name = identity.display_name();
 
@@ -277,7 +276,7 @@ impl<
                     agent_dir: None,
                     agent_name,
                     issue_title: options.name.to_string(),
-                    agent_type: options.agent_type,
+                    agent_type: options.agent_type.into(),
                     branch_name: None,
                     tmux_target: None,
                 });
@@ -317,13 +316,13 @@ impl<
             self.write_agent_mcp_config(
                 &effective_project_dir,
                 &worktree_path,
-                options.agent_type,
+                options.agent_type.into(),
                 &role,
             )
             .await?;
 
             // For Gemini agents, point at worktree settings via env var and pre-trust folder
-            if options.agent_type == AgentType::Gemini {
+            if options.agent_type == SpawnableAgentType::Gemini {
                 let settings_path = worktree_path.join(".gemini").join("settings.json");
                 env_vars.insert(
                     "GEMINI_CLI_SYSTEM_SETTINGS_PATH".to_string(),
@@ -342,7 +341,7 @@ impl<
                 .new_tmux_window(
                     &display_name,
                     &worktree_path,
-                    options.agent_type,
+                    options.agent_type.into(),
                     Some(prompt_path),
                     env_vars,
                 )
@@ -356,7 +355,7 @@ impl<
             let identity_record = AgentIdentityRecord {
                 agent_name: agent_name.clone(),
                 slug: Slug::from(identity.slug()),
-                agent_type: options.agent_type,
+                agent_type: options.agent_type.into(),
                 birth_branch: child_birth,
                 parent_branch: effective_birth,
                 working_dir: worktree_path.clone(),
@@ -378,7 +377,7 @@ impl<
                 agent_dir: None,
                 agent_name,
                 issue_title: options.name.to_string(),
-                agent_type: options.agent_type,
+                agent_type: options.agent_type.into(),
                 branch_name: Some(branch_name),
                 tmux_target: Some(TmuxTarget::Window(window_id.clone())),
             })
@@ -657,7 +656,7 @@ impl<
 
             // Sanitize branch name and construct typed identity
             let agent_type = options.agent_type;
-            let identity = AgentIdentity::new(slugify(&options.branch_name), agent_type);
+            let identity = AgentIdentity::new(slugify(&options.branch_name), agent_type.into());
             let agent_name = identity.internal_name();
             let display_name = identity.display_name();
 
@@ -669,7 +668,7 @@ impl<
                     agent_dir: Some(self.worktree_base.join(agent_name.as_str())),
                     agent_name,
                     issue_title: options.branch_name.clone(),
-                    agent_type,
+                    agent_type: agent_type.into(),
                     branch_name: None,
                     tmux_target: None,
                 });
@@ -734,8 +733,13 @@ impl<
                 "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".to_string(),
                 "1".to_string(),
             );
-            self.write_agent_mcp_config(effective_project_dir, &worktree_path, agent_type, role)
-                .await?;
+            self.write_agent_mcp_config(
+                effective_project_dir,
+                &worktree_path,
+                agent_type.into(),
+                role,
+            )
+            .await?;
 
 
             // Write .claude/settings.local.json with hooks (SessionStart registers UUID for --fork-session)
@@ -795,7 +799,7 @@ impl<
             let window_id = self.new_tmux_window_inner(
                 &display_name,
                 &worktree_path,
-                agent_type,
+                agent_type.into(),
                 Some(prompt_path),
                 env_vars,
                 fork_id,
@@ -809,7 +813,7 @@ impl<
             let identity_record = AgentIdentityRecord {
                 agent_name: agent_name.clone(),
                 slug: Slug::from(identity.slug()),
-                agent_type,
+                agent_type: agent_type.into(),
                 birth_branch: child_birth,
                 parent_branch: effective_birth,
                 working_dir: worktree_path.clone(),
@@ -828,7 +832,7 @@ impl<
                 agent_dir: Some(worktree_path.clone()),
                 agent_name,
                 issue_title: options.branch_name.clone(),
-                agent_type,
+                agent_type: agent_type.into(),
                 branch_name: Some(full_branch),
                 tmux_target: Some(TmuxTarget::Window(window_id.clone())),
             })
@@ -867,7 +871,7 @@ impl<
 
             // Sanitize branch name and construct typed identity
             let agent_type = options.agent_type;
-            let identity = AgentIdentity::new(slugify(&options.branch_name), agent_type);
+            let identity = AgentIdentity::new(slugify(&options.branch_name), agent_type.into());
             let agent_name = identity.internal_name();
             let display_name = identity.display_name();
 
@@ -879,7 +883,7 @@ impl<
                     agent_dir: Some(self.worktree_base.join(agent_name.as_str())),
                     agent_name,
                     issue_title: options.branch_name.clone(),
-                    agent_type,
+                    agent_type: agent_type.into(),
                     branch_name: None,
                     tmux_target: None,
                 });
@@ -908,8 +912,13 @@ impl<
             let default_dev = crate::domain::Role::dev();
             let role = options.role.as_ref().unwrap_or(&default_dev);
             let mut env_vars = self.common_spawn_env(&agent_name, &branch_name, role);
-            self.write_agent_mcp_config(effective_project_dir, &worktree_path, agent_type, role)
-                .await?;
+            self.write_agent_mcp_config(
+                effective_project_dir,
+                &worktree_path,
+                agent_type.into(),
+                role,
+            )
+            .await?;
 
             // Set GEMINI_CLI_SYSTEM_SETTINGS_PATH and pre-trust folder
             let settings_path = worktree_path.join(".gemini").join("settings.json");
@@ -933,7 +942,7 @@ impl<
             let window_id = self.new_tmux_window(
                 &display_name,
                 &worktree_path,
-                agent_type,
+                agent_type.into(),
                 Some(prompt_path),
                 env_vars,
             )
@@ -945,7 +954,7 @@ impl<
             let identity_record = AgentIdentityRecord {
                 agent_name: agent_name.clone(),
                 slug: Slug::from(identity.slug()),
-                agent_type,
+                agent_type: agent_type.into(),
                 birth_branch: child_birth,
                 parent_branch: effective_birth,
                 working_dir: worktree_path.clone(),
@@ -964,7 +973,7 @@ impl<
                 agent_dir: Some(worktree_path.clone()),
                 agent_name,
                 issue_title: options.branch_name.clone(),
-                agent_type,
+                agent_type: agent_type.into(),
                 branch_name: Some(branch_name),
                 tmux_target: Some(TmuxTarget::Window(window_id.clone())),
             })
@@ -985,23 +994,23 @@ impl<
     /// and cause Claude Code to discover parent context files.
     async fn copy_role_context_into_worktree(
         &self,
-        agent_type: AgentType,
+        agent_type: SpawnableAgentType,
         role: &crate::domain::Role,
         worktree_path: &Path,
         src: &Path,
         wasm_name: &str,
     ) -> Result<(), std::io::Error> {
         let (dest_dir, dest_file) = match agent_type {
-            AgentType::Claude => (
+            SpawnableAgentType::Claude => (
                 worktree_path.join(".claude/rules"),
                 worktree_path.join(".claude/rules/exomonad_role.md"),
             ),
-            AgentType::Gemini => {
+            SpawnableAgentType::Gemini => {
                 let d = worktree_path.join(format!(".exo/roles/{}/context", wasm_name));
                 let f = d.join(format!("{}.md", role));
                 (d, f)
             }
-            AgentType::Shoal | AgentType::Process => return Ok(()),
+            SpawnableAgentType::Shoal => return Ok(()),
         };
 
         fs::create_dir_all(&dest_dir).await?;
