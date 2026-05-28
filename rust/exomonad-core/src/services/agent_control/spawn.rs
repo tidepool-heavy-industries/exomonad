@@ -63,7 +63,7 @@ impl<
             if self.is_tmux_window_alive(&display_name).await {
                 info!(issue_id, "Agent already running, returning existing");
                 return Ok(SpawnResult {
-                    agent_dir: self.worktree_base.join(agent_name.as_str()),
+                    agent_dir: Some(self.worktree_base.join(agent_name.as_str())),
                     agent_name,
                     issue_title: issue.title,
                     agent_type: options.agent_type,
@@ -181,12 +181,12 @@ impl<
             rollback.disarm();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: agent_dir.clone(),
+                agent_dir: Some(agent_dir.clone()),
                 agent_name,
                 issue_title: issue.title,
                 agent_type: options.agent_type,
                 branch_name: Some(branch_name),
-                tmux_target: Some(window_id.to_string()),
+                tmux_target: Some(TmuxTarget::Window(window_id.clone())),
             })
         })
         .await
@@ -274,7 +274,7 @@ impl<
             if tab_alive {
                 info!(name = %options.name, "Teammate already running, returning existing");
                 return Ok(SpawnResult {
-                    agent_dir: PathBuf::new(),
+                    agent_dir: None,
                     agent_name,
                     issue_title: options.name.to_string(),
                     agent_type: options.agent_type,
@@ -375,12 +375,12 @@ impl<
             rollback.disarm();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: PathBuf::new(),
+                agent_dir: None,
                 agent_name,
                 issue_title: options.name.to_string(),
                 agent_type: options.agent_type,
                 branch_name: Some(branch_name),
-                tmux_target: Some(window_id.to_string()),
+                tmux_target: Some(TmuxTarget::Window(window_id.clone())),
             })
         })
         .await
@@ -520,7 +520,7 @@ impl<
                 if pane_alive {
                     info!(name = %options.name, "Worker pane still alive, returning existing");
                     return Ok(SpawnResult {
-                        agent_dir: PathBuf::new(),
+                        agent_dir: None,
                         agent_name,
                         issue_title: options.name.to_string(),
                         agent_type: AgentType::Gemini,
@@ -617,12 +617,12 @@ impl<
             rollback.disarm();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: PathBuf::new(),
+                agent_dir: None,
                 agent_name,
                 issue_title: options.name.to_string(),
                 agent_type: AgentType::Gemini,
                 branch_name: None,
-                tmux_target: Some(pane_id.to_string()),
+                tmux_target: Some(TmuxTarget::Pane(pane_id.clone())),
             })
         })
         .await
@@ -672,7 +672,7 @@ impl<
             if tab_alive {
                 info!(slug = %identity.slug(), "Subtree already running, returning existing");
                 return Ok(SpawnResult {
-                    agent_dir: self.worktree_base.join(agent_name.as_str()),
+                    agent_dir: Some(self.worktree_base.join(agent_name.as_str())),
                     agent_name,
                     issue_title: options.branch_name.clone(),
                     agent_type,
@@ -852,12 +852,12 @@ impl<
             rollback.disarm();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: worktree_path.clone(),
+                agent_dir: Some(worktree_path.clone()),
                 agent_name,
                 issue_title: options.branch_name.clone(),
                 agent_type,
                 branch_name: Some(full_branch),
-                tmux_target: Some(window_id.to_string()),
+                tmux_target: Some(TmuxTarget::Window(window_id.clone())),
             })
         })
         .await
@@ -904,7 +904,7 @@ impl<
             if tab_alive {
                 info!(slug = %identity.slug(), "Leaf subtree already running, returning existing");
                 return Ok(SpawnResult {
-                    agent_dir: self.worktree_base.join(agent_name.as_str()),
+                    agent_dir: Some(self.worktree_base.join(agent_name.as_str())),
                     agent_name,
                     issue_title: options.branch_name.clone(),
                     agent_type,
@@ -989,12 +989,12 @@ impl<
             rollback.disarm();
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: worktree_path.clone(),
+                agent_dir: Some(worktree_path.clone()),
                 agent_name,
                 issue_title: options.branch_name.clone(),
                 agent_type,
                 branch_name: Some(branch_name),
-                tmux_target: Some(window_id.to_string()),
+                tmux_target: Some(TmuxTarget::Window(window_id.clone())),
             })
         })
         .await
