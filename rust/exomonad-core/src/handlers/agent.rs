@@ -12,7 +12,7 @@ use super::non_empty;
 use crate::services::agent_control::{
     AgentControlService, AgentInfo, AgentType as ServiceAgentType, ClaudeSpawnFlags,
     SpawnGeminiTeammateOptions, SpawnLeafOptions, SpawnOptions, SpawnSubtreeOptions,
-    SpawnWorkerOptions,
+    SpawnWorkerOptions, TmuxTarget,
 };
 use crate::services::supervisor_registry::SupervisorEntry;
 use crate::{GithubOwner, GithubRepo, IssueNumber};
@@ -106,7 +106,7 @@ impl<
         member_name: &AgentName,
         agent_type: crate::services::agent_control::AgentType,
         kind: &str,
-        tmux_target: Option<&str>,
+        tmux_target: Option<&TmuxTarget>,
         ctx: &crate::effects::EffectContext,
     ) {
         let team_reg = self.ctx.team_registry();
@@ -127,7 +127,7 @@ impl<
             member_name,
             agent_type,
             kind,
-            tmux_target.unwrap_or(""),
+            tmux_target.map(|t| t.as_str()).unwrap_or(""),
         ) {
             warn!(
                 member = %member_name,
@@ -151,7 +151,7 @@ impl<
                     .watch_inbox(
                         team_name.as_str().to_string(),
                         member_name.as_str().to_string(),
-                        target.to_string(),
+                        target.as_str().to_string(),
                         self.ctx.tmux_ipc_arc().clone(),
                         self.ctx.project_dir().to_path_buf(),
                     )
@@ -458,7 +458,7 @@ impl<
             &identity.internal_name(),
             crate::services::agent_control::AgentType::Gemini,
             "gemini-worker",
-            result.tmux_target.as_deref(),
+            result.tmux_target.as_ref(),
             ctx,
         )
         .await;
@@ -560,7 +560,7 @@ impl<
             &child_identity.internal_name(),
             crate::services::agent_control::AgentType::Claude,
             "claude-subtree",
-            result.tmux_target.as_deref(),
+            result.tmux_target.as_ref(),
             ctx,
         )
         .await;
@@ -626,7 +626,7 @@ impl<
             &leaf_identity.internal_name(),
             crate::services::agent_control::AgentType::Gemini,
             "gemini-leaf",
-            result.tmux_target.as_deref(),
+            result.tmux_target.as_ref(),
             ctx,
         )
         .await;
@@ -954,7 +954,7 @@ fn spawn_result_to_proto(
     exomonad_proto::effects::agent::AgentInfo {
         id: format!("{}-{}", issue, result.agent_type.suffix()),
         issue: issue.to_string(),
-        worktree_path: result.agent_dir.display().to_string(),
+        worktree_path: result.agent_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
         branch_name: String::new(),
         agent_type: service_agent_type_to_proto(result.agent_type),
         role: 0,
@@ -976,7 +976,7 @@ fn teammate_result_to_proto(
     exomonad_proto::effects::agent::AgentInfo {
         id: result.agent_name.to_string(),
         issue: String::new(),
-        worktree_path: String::new(),
+        worktree_path: result.agent_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
         branch_name: String::new(),
         agent_type: service_agent_type_to_proto(result.agent_type),
         role: 0,
@@ -998,7 +998,7 @@ fn worker_result_to_proto(
     exomonad_proto::effects::agent::AgentInfo {
         id: result.agent_name.to_string(),
         issue: String::new(),
-        worktree_path: String::new(),
+        worktree_path: result.agent_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
         branch_name: String::new(),
         agent_type: AgentType::Gemini as i32,
         role: 0,
@@ -1025,7 +1025,7 @@ fn subtree_result_to_proto(
     exomonad_proto::effects::agent::AgentInfo {
         id: result.agent_name.to_string(),
         issue: String::new(),
-        worktree_path: result.agent_dir.display().to_string(),
+        worktree_path: result.agent_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
         branch_name: full_branch,
         agent_type: service_agent_type_to_proto(result.agent_type),
         role: 0,
@@ -1052,7 +1052,7 @@ fn leaf_subtree_result_to_proto(
     exomonad_proto::effects::agent::AgentInfo {
         id: result.agent_name.to_string(),
         issue: String::new(),
-        worktree_path: result.agent_dir.display().to_string(),
+        worktree_path: result.agent_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
         branch_name: full_branch,
         agent_type: service_agent_type_to_proto(result.agent_type),
         role: 0,

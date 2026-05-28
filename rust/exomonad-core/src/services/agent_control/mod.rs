@@ -414,11 +414,36 @@ pub struct SpawnLeafOptions {
     pub allowed_dirs: Vec<String>,
 }
 
+/// Target tmux surface for an agent.
+///
+/// We use a tagged enum here to preserve the distinction between panes and windows,
+/// which matches the underlying tmux object types while remaining serializable
+/// to a JSON shape similar to RoutingInfo.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum TmuxTarget {
+    /// Worker pane (%N format).
+    Pane(tmux_ipc::PaneId),
+    /// Subtree/leaf window (@N format).
+    Window(tmux_ipc::WindowId),
+}
+
+impl TmuxTarget {
+    /// Get the raw tmux identifier string.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Pane(id) => id.as_str(),
+            Self::Window(id) => id.as_str(),
+        }
+    }
+}
+
 /// Result of spawning an agent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SpawnResult {
-    /// Path to the agent directory (.exo/agents/{agent_id}/)
-    pub agent_dir: PathBuf,
+    /// Path to the agent directory (.exo/agents/{agent_id}/).
+    /// None for spawn variants that don't use a per-agent worktree (workers).
+    pub agent_dir: Option<PathBuf>,
     /// Agent's internal name (suffixed, e.g., "feature-a-claude").
     /// Typed as `AgentName` to prevent confusion with bare slugs.
     pub agent_name: AgentName,
@@ -434,7 +459,7 @@ pub struct SpawnResult {
     /// spawn, None on idempotent returns (registration already done) and ACP
     /// (no tmux surface).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tmux_target: Option<String>,
+    pub tmux_target: Option<TmuxTarget>,
 }
 
 impl FFIBoundary for SpawnResult {}
