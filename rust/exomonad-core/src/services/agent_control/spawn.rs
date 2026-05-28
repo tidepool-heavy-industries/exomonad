@@ -547,7 +547,6 @@ impl<
             // Legacy .birth_branch file for serve.rs fallback resolution.
             // identity.json (written via finalize_spawn) is the canonical source,
             // but keep this for backward compatibility with older server instances.
-            let parent_bb = self.effective_birth_branch(Some(&ctx.birth_branch));
             fs::write(agent_config_dir.join(".birth_branch"), parent_bb.as_str()).await?;
             let context_path = self.resolve_role_context(&role);
             let settings = Self::generate_gemini_worker_settings(agent_name.as_str(), context_path.as_deref(), &self.extra_mcp_servers);
@@ -718,33 +717,18 @@ impl<
             let role = options.role.as_ref().unwrap_or(&default_tl);
 
             // Copy role context into worktree.
-            // Must be a copy, not a symlink — symlinks escape the worktree boundary
-            // and cause Claude Code to discover parent context files.
             if let Some(context_src) = self.resolve_role_context(role) {
-                match agent_type {
-                    AgentType::Claude => {
-                        // Claude: .claude/rules/exomonad_role.md (loaded as rules file)
-                        let rules_dir = worktree_path.join(".claude/rules");
-                        let _ = fs::create_dir_all(&rules_dir).await;
-                        let dest = rules_dir.join("exomonad_role.md");
-                        let _ = fs::remove_file(&dest).await;
-                        match fs::copy(&context_src, &dest).await {
-                            Ok(_) => info!(role = %role, src = %context_src.display(), dest = %dest.display(), "Copied role context into worktree"),
-                            Err(e) => warn!(role = %role, error = %e, "Failed to copy role context (non-fatal)"),
-                        }
-                    }
-                    AgentType::Gemini => {
-                        // Gemini: .exo/roles/{wasm}/context/{role}.md (matched by context.fileName in settings)
-                        let dest_dir = worktree_path.join(format!(".exo/roles/{}/context", self.wasm_name));
-                        let _ = fs::create_dir_all(&dest_dir).await;
-                        let dest = dest_dir.join(format!("{}.md", role));
-                        let _ = fs::remove_file(&dest).await;
-                        match fs::copy(&context_src, &dest).await {
-                            Ok(_) => info!(role = %role, src = %context_src.display(), dest = %dest.display(), "Copied role context into Gemini worktree"),
-                            Err(e) => warn!(role = %role, error = %e, "Failed to copy Gemini role context (non-fatal)"),
-                        }
-                    }
-                    AgentType::Shoal | AgentType::Process => {}
+                if let Err(e) = self
+                    .copy_role_context_into_worktree(
+                        agent_type,
+                        role,
+                        &worktree_path,
+                        &context_src,
+                        &self.wasm_name,
+                    )
+                    .await
+                {
+                    warn!(role = %role, error = %e, "Failed to copy role context (non-fatal)");
                 }
             }
 
@@ -770,18 +754,12 @@ impl<
             // Without this symlink, --resume --fork-session fails with "no conversation ID found".
             {
                 let claude_projects_dir = dirs::home_dir()
-                    .unwrap_or_default()
+                    .ok_or_else(|| anyhow!("$HOME not set — cannot resolve Claude project dir for --fork-session"))?
                     .join(".claude")
                     .join("projects");
-                let encode_path = |p: &Path| -> String {
-                    p.to_string_lossy()
-                        .chars()
-                        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-                        .collect()
-                };
                 let canonical_project_dir = self.project_dir().canonicalize().unwrap_or_else(|_| self.project_dir().to_path_buf());
-                let parent_encoded = encode_path(&canonical_project_dir);
-                let worktree_encoded = encode_path(&worktree_path);
+                let parent_encoded = encode_claude_project_dir(&canonical_project_dir);
+                let worktree_encoded = encode_claude_project_dir(&worktree_path);
                 let parent_project = claude_projects_dir.join(&parent_encoded);
                 let child_project = claude_projects_dir.join(&worktree_encoded);
                 if parent_project.exists() && !child_project.exists() {
@@ -1007,6 +985,54 @@ impl<
         info!(branch_name = %options.branch_name, "spawn_leaf_subtree completed successfully");
         Ok(result)
     }
+
+    /// Copy role context into the agent's worktree.
+    ///
+    /// Must be a copy, not a symlink — symlinks escape the worktree boundary
+    /// and cause Claude Code to discover parent context files.
+    async fn copy_role_context_into_worktree(
+        &self,
+        agent_type: AgentType,
+        role: &crate::domain::Role,
+        worktree_path: &Path,
+        src: &Path,
+        wasm_name: &str,
+    ) -> Result<(), std::io::Error> {
+        let (dest_dir, dest_file) = match agent_type {
+            AgentType::Claude => (
+                worktree_path.join(".claude/rules"),
+                worktree_path.join(".claude/rules/exomonad_role.md"),
+            ),
+            AgentType::Gemini => {
+                let d = worktree_path.join(format!(".exo/roles/{}/context", wasm_name));
+                let f = d.join(format!("{}.md", role));
+                (d, f)
+            }
+            AgentType::Shoal | AgentType::Process => return Ok(()),
+        };
+
+        fs::create_dir_all(&dest_dir).await?;
+
+        if let Err(e) = fs::remove_file(&dest_file).await {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                warn!(role = %role, dest = %dest_file.display(), error = %e, "Failed to remove existing role context file (continuing)");
+            }
+        }
+
+        fs::copy(src, &dest_file).await?;
+        info!(role = %role, agent_type = ?agent_type, src = %src.display(), dest = %dest_file.display(), "Copied role context into worktree");
+
+        Ok(())
+    }
+}
+
+/// Encode a filesystem path the way Claude Code stores it in ~/.claude/projects/.
+/// Non-alphanumeric ASCII becomes '-'.
+fn encode_claude_project_dir(p: &Path) -> String {
+    p.to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1056,35 +1082,30 @@ mod tests {
     fn test_claude_project_path_encoding() {
         // Claude Code encodes paths via [^a-zA-Z0-9] → '-'
         // Verified against actual ~/.claude/projects/ directory names.
-        let encode = |s: &str| -> String {
-            s.chars()
-                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-                .collect()
-        };
 
         // Basic path
         assert_eq!(
-            encode("/home/inanna/dev/exomonad"),
+            encode_claude_project_dir(Path::new("/home/inanna/dev/exomonad")),
             "-home-inanna-dev-exomonad"
         );
         // Worktree path (dots and hyphens in segments)
         assert_eq!(
-            encode("/home/inanna/dev/exomonad/.exo/worktrees/fork-session"),
+            encode_claude_project_dir(Path::new("/home/inanna/dev/exomonad/.exo/worktrees/fork-session")),
             "-home-inanna-dev-exomonad--exo-worktrees-fork-session"
         );
         // Hidden dir (leading dot → double dash after parent separator)
         assert_eq!(
-            encode("/home/inanna/.config/home-manager"),
+            encode_claude_project_dir(Path::new("/home/inanna/.config/home-manager")),
             "-home-inanna--config-home-manager"
         );
         // Deep nested path with hyphens
         assert_eq!(
-            encode("/home/inanna/dev/aegis-binder-diagnostic-framework"),
+            encode_claude_project_dir(Path::new("/home/inanna/dev/aegis-binder-diagnostic-framework")),
             "-home-inanna-dev-aegis-binder-diagnostic-framework"
         );
         // Path with spaces
         assert_eq!(
-            encode("/home/user/My Projects/app"),
+            encode_claude_project_dir(Path::new("/home/user/My Projects/app")),
             "-home-user-My-Projects-app"
         );
     }
