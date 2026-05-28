@@ -1,4 +1,5 @@
 use super::*;
+use super::error::SpawnError;
 
 impl<
         C: super::super::HasGitHubClient
@@ -24,7 +25,7 @@ impl<
         issue_number: IssueNumber,
         options: &SpawnOptions,
         caller_bb: &BirthBranch,
-    ) -> Result<SpawnResult> {
+    ) -> Result<SpawnResult, SpawnError> {
         let issue_id_log = issue_number.as_u64().to_string();
         info!(issue_id = %issue_id_log, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_agent");
 
@@ -180,7 +181,7 @@ impl<
 
             rollback.commit();
 
-            Ok::<SpawnResult, anyhow::Error>(SpawnResult {
+            Ok::<SpawnResult, SpawnError>(SpawnResult {
                 agent_dir: Some(agent_dir.clone()),
                 agent_name,
                 issue_title: issue.title,
@@ -191,9 +192,8 @@ impl<
         })
         .await
         .map_err(|_| {
-            let msg = format!("spawn_agent timed out after {}s", SPAWN_TIMEOUT.as_secs());
-            warn!(issue_id = %issue_id_log, error = %msg, "spawn_agent timed out");
-            anyhow::Error::new(TimeoutError { message: msg })
+            warn!(issue_id = %issue_id_log, timeout_sec = SPAWN_TIMEOUT.as_secs(), "spawn_agent timed out");
+            SpawnError::Timeout { seconds: SPAWN_TIMEOUT.as_secs() }
         })??;
 
         info!(issue_id = %issue_id_log, "spawn_agent completed successfully");
@@ -246,7 +246,7 @@ impl<
         &self,
         options: &SpawnGeminiTeammateOptions,
         caller_bb: &BirthBranch,
-    ) -> Result<SpawnResult> {
+    ) -> Result<SpawnResult, SpawnError> {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_gemini_teammate");
 
         let result = timeout(SPAWN_TIMEOUT, async {
@@ -374,7 +374,7 @@ impl<
 
             rollback.commit();
 
-            Ok::<SpawnResult, anyhow::Error>(SpawnResult {
+            Ok::<SpawnResult, SpawnError>(SpawnResult {
                 agent_dir: None,
                 agent_name,
                 issue_title: options.name.to_string(),
@@ -385,12 +385,8 @@ impl<
         })
         .await
         .map_err(|_| {
-            let msg = format!(
-                "spawn_gemini_teammate timed out after {}s",
-                SPAWN_TIMEOUT.as_secs()
-            );
-            warn!(name = %options.name, error = %msg, "spawn_gemini_teammate timed out");
-            anyhow::Error::new(TimeoutError { message: msg })
+            warn!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "spawn_gemini_teammate timed out");
+            SpawnError::Timeout { seconds: SPAWN_TIMEOUT.as_secs() }
         })??;
 
         info!(name = %options.name, "spawn_gemini_teammate completed successfully");
@@ -489,7 +485,7 @@ impl<
         &self,
         options: &SpawnWorkerOptions,
         ctx: &crate::effects::EffectContext,
-    ) -> Result<SpawnResult> {
+    ) -> Result<SpawnResult, SpawnError> {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_worker");
 
         let result = timeout(SPAWN_TIMEOUT, async {
@@ -615,7 +611,7 @@ impl<
 
             rollback.commit();
 
-            Ok::<SpawnResult, anyhow::Error>(SpawnResult {
+            Ok::<SpawnResult, SpawnError>(SpawnResult {
                 agent_dir: None,
                 agent_name,
                 issue_title: options.name.to_string(),
@@ -626,9 +622,8 @@ impl<
         })
         .await
         .map_err(|_| {
-            let msg = format!("spawn_worker timed out after {}s", SPAWN_TIMEOUT.as_secs());
-            warn!(name = %options.name, error = %msg, "spawn_worker timed out");
-            anyhow::Error::new(TimeoutError { message: msg })
+            warn!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "spawn_worker timed out");
+            SpawnError::Timeout { seconds: SPAWN_TIMEOUT.as_secs() }
         })??;
 
         info!(name = %options.name, "spawn_worker completed successfully");
@@ -641,7 +636,7 @@ impl<
         &self,
         options: &SpawnSubtreeOptions,
         caller_bb: &BirthBranch,
-    ) -> Result<SpawnResult> {
+    ) -> Result<SpawnResult, SpawnError> {
         info!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_subtree");
 
         let result = timeout(SPAWN_TIMEOUT, async {
@@ -655,7 +650,7 @@ impl<
             let depth = effective_birth.depth();
 
             if depth >= 3 {
-                return Err(anyhow!("Subtree depth limit reached (max 3). Current birth-branch: {}, depth: {}", effective_birth, depth));
+                return Err(SpawnError::DepthLimit { max: 3, current: depth as u32 });
             }
 
             let effective_project_dir = self.project_dir();
@@ -829,7 +824,7 @@ impl<
 
             rollback.commit();
 
-            Ok::<SpawnResult, anyhow::Error>(SpawnResult {
+            Ok::<SpawnResult, SpawnError>(SpawnResult {
                 agent_dir: Some(worktree_path.clone()),
                 agent_name,
                 issue_title: options.branch_name.clone(),
@@ -840,9 +835,8 @@ impl<
         })
         .await
         .map_err(|_| {
-            let msg = format!("spawn_subtree timed out after {}s", SPAWN_TIMEOUT.as_secs());
-            warn!(branch_name = %options.branch_name, error = %msg, "spawn_subtree timed out");
-            anyhow::Error::new(TimeoutError { message: msg })
+            warn!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "spawn_subtree timed out");
+            SpawnError::Timeout { seconds: SPAWN_TIMEOUT.as_secs() }
         })??;
 
         info!(branch_name = %options.branch_name, "spawn_subtree completed successfully");
@@ -855,7 +849,7 @@ impl<
         &self,
         options: &SpawnLeafOptions,
         caller_bb: &BirthBranch,
-    ) -> Result<SpawnResult> {
+    ) -> Result<SpawnResult, SpawnError> {
         info!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_leaf_subtree");
 
         let result = timeout(SPAWN_TIMEOUT, async {
@@ -966,7 +960,7 @@ impl<
 
             rollback.commit();
 
-            Ok::<SpawnResult, anyhow::Error>(SpawnResult {
+            Ok::<SpawnResult, SpawnError>(SpawnResult {
                 agent_dir: Some(worktree_path.clone()),
                 agent_name,
                 issue_title: options.branch_name.clone(),
@@ -977,9 +971,8 @@ impl<
         })
         .await
         .map_err(|_| {
-            let msg = format!("spawn_leaf_subtree timed out after {}s", SPAWN_TIMEOUT.as_secs());
-            warn!(branch_name = %options.branch_name, error = %msg, "spawn_leaf_subtree timed out");
-            anyhow::Error::new(TimeoutError { message: msg })
+            warn!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "spawn_leaf_subtree timed out");
+            SpawnError::Timeout { seconds: SPAWN_TIMEOUT.as_secs() }
         })??;
 
         info!(branch_name = %options.branch_name, "spawn_leaf_subtree completed successfully");

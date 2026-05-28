@@ -6,10 +6,12 @@
 //! - ListAgents: Discover from tmux windows (source of truth for running agents)
 
 mod cleanup;
+pub mod error;
 mod internal;
 mod spawn;
 
 pub use cleanup::GcStats;
+pub use error::SpawnError;
 pub(crate) use internal::SpawnRollback;
 
 pub(crate) use crate::common::TimeoutError;
