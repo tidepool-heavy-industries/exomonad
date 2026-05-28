@@ -109,6 +109,7 @@ library wasm-guest-internal
         -- Types
         ExoMonad.Guest.Types
         ExoMonad.Guest.Types.Permissions
+        ExoMonad.Guest.Types.Slug
         ExoMonad.Types
         -- Permissions
         ExoMonad.Permissions

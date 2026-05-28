@@ -75,6 +75,7 @@ import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), errorResult, successResult
 import ExoMonad.Guest.Tool.Schema (JsonSchema (..), genericToolSchemaWith)
 import ExoMonad.Guest.Tool.SuspendEffect (suspendEffect, suspendEffect_)
 import ExoMonad.Guest.Types (Effects)
+import ExoMonad.Guest.Types.Slug (Slug, mkSlug, unSlug)
 import GHC.Generics (Generic)
 
 -- ============================================================================
@@ -109,7 +110,7 @@ hasCustomCode _ _ = False
 data ForkWave
 
 data ForkWaveChild = ForkWaveChild
-  { fwcSlug :: Text,
+  { fwcSlug :: Slug,
     fwcTask :: Text,
     fwcForkSession :: Maybe Bool
   }
@@ -185,7 +186,7 @@ forkWaveCore args = do
             let cfg =
                   AC.SpawnSubtreeConfig
                     { AC.stcTask = fwcTask child,
-                      AC.stcBranchName = fwcSlug child,
+                      AC.stcBranchName = unSlug (fwcSlug child),
                       AC.stcForkSession = fromMaybe True (fwcForkSession child),
                       AC.stcRole = Nothing,
                       AC.stcAgentType = AC.Claude,
@@ -198,18 +199,21 @@ forkWaveCore args = do
             result <- AC.spawnSubtree cfg
             case result of
               Left err | hasCustomCode "worktree.branch_exists" err -> do
-                let retrySlug = fwcSlug child <> "-2"
-                let cfg' = cfg {AC.stcBranchName = retrySlug}
-                result' <- AC.spawnSubtree cfg'
-                case result' of
-                  Left err' -> pure (Left (spawnErrorMessage err'))
-                  Right spawnResult -> do
-                    emitSpawnEvent retrySlug "claude" (fwcTask child)
-                    pure (Right (retrySlug, spawnResult))
+                let retrySlugText = unSlug (fwcSlug child) <> "-2"
+                case mkSlug retrySlugText of
+                  Right retrySlug -> do
+                    let cfg' = cfg {AC.stcBranchName = unSlug retrySlug}
+                    result' <- AC.spawnSubtree cfg'
+                    case result' of
+                      Left err' -> pure (Left (spawnErrorMessage err'))
+                      Right spawnResult -> do
+                        emitSpawnEvent (unSlug retrySlug) "claude" (fwcTask child)
+                        pure (Right (unSlug retrySlug, spawnResult))
+                  Left errSlug -> pure (Left ("Invalid retry slug: " <> errSlug))
               Left err -> pure (Left (spawnErrorMessage err))
               Right spawnResult -> do
-                emitSpawnEvent (fwcSlug child) "claude" (fwcTask child)
-                pure (Right (fwcSlug child, spawnResult))
+                emitSpawnEvent (unSlug (fwcSlug child)) "claude" (fwcTask child)
+                pure (Right (unSlug (fwcSlug child), spawnResult))
 
           let (errs, successes) = partitionEithers results
           pure $
@@ -236,7 +240,7 @@ data SpawnLeafSubtree
 
 data SpawnLeafSubtreeArgs = SpawnLeafSubtreeArgs
   { slsTask :: Text,
-    slsBranchName :: Text,
+    slsBranchName :: Slug,
     slsPermissionMode :: Maybe Text,
     slsAllowedTools :: Maybe [Text],
     slsDisallowedTools :: Maybe [Text],
@@ -288,7 +292,7 @@ spawnLeafSubtreeCore args = do
       cfg =
         AC.SpawnLeafSubtreeConfig
           { AC.slcTask = renderedTask,
-            AC.slcBranchName = slsBranchName args,
+            AC.slcBranchName = unSlug (slsBranchName args),
             AC.slcRole = Nothing,
             AC.slcAgentType = AC.Gemini,
             AC.slcPerms = perms,
@@ -298,18 +302,21 @@ spawnLeafSubtreeCore args = do
   result <- AC.spawnLeafSubtree cfg
   case result of
     Left err | hasCustomCode "worktree.branch_exists" err -> do
-      let retrySlug = slsBranchName args <> "-2"
-      let cfg' = cfg {AC.slcBranchName = retrySlug}
-      result' <- AC.spawnLeafSubtree cfg'
-      case result' of
-        Left err' -> pure $ Left (spawnErrorMessage err')
-        Right spawnResult -> do
-          emitSpawnEvent retrySlug "gemini" (slsTask args)
-          pure $ Right (retrySlug, spawnResult)
+      let retrySlugText = unSlug (slsBranchName args) <> "-2"
+      case mkSlug retrySlugText of
+        Right retrySlug -> do
+          let cfg' = cfg {AC.slcBranchName = unSlug retrySlug}
+          result' <- AC.spawnLeafSubtree cfg'
+          case result' of
+            Left err' -> pure $ Left (spawnErrorMessage err')
+            Right spawnResult -> do
+              emitSpawnEvent (unSlug retrySlug) "gemini" (slsTask args)
+              pure $ Right (unSlug retrySlug, spawnResult)
+        Left errSlug -> pure $ Left ("Invalid retry slug: " <> errSlug)
     Left err -> pure $ Left (spawnErrorMessage err)
     Right spawnResult -> do
-      emitSpawnEvent (slsBranchName args) "gemini" (slsTask args)
-      pure $ Right (slsBranchName args, spawnResult)
+      emitSpawnEvent (unSlug (slsBranchName args)) "gemini" (slsTask args)
+      pure $ Right (unSlug (slsBranchName args), spawnResult)
 
 -- | Render a spawn leaf result to MCPCallOutput.
 spawnLeafRender :: Either Text (Text, AC.SpawnResult) -> MCPCallOutput
@@ -335,7 +342,7 @@ instance FromJSON WorkerType where
     t -> fail $ "Unknown worker type: " <> T.unpack t
 
 data WorkerSpec = WorkerSpec
-  { wsName :: Text,
+  { wsName :: Slug,
     wsTask :: Text,
     wsReadFirst :: Maybe [Text],
     wsSteps :: Maybe [Text],
@@ -434,13 +441,13 @@ spawnWorkersCore args = do
             }
         cfg =
           AC.SpawnWorkerConfig
-            { AC.swcName = wsName spec,
+            { AC.swcName = unSlug (wsName spec),
               AC.swcPrompt = prompt,
               AC.swcPerms = perms
             }
     r <- AC.spawnWorker cfg
     case r of
-      Right _ -> emitSpawnEvent (wsName spec) "gemini-worker" (wsTask spec)
+      Right _ -> emitSpawnEvent (unSlug (wsName spec)) "gemini-worker" (wsTask spec)
       Left _ -> pure ()
     pure r
   let (errs, successes) = partitionEithers results
@@ -458,7 +465,7 @@ spawnWorkersCore args = do
 data SpawnGemini
 
 data SpawnGeminiArgs = SpawnGeminiArgs
-  { sgName :: Text,
+  { sgName :: Slug,
     sgTask :: Text,
     sgReadFirst :: Maybe [Text],
     sgSteps :: Maybe [Text],
@@ -538,7 +545,7 @@ buildGeminiTask args =
 data SpawnWorkerTool
 
 data SpawnWorkerToolArgs = SpawnWorkerToolArgs
-  { swtName :: Text,
+  { swtName :: Slug,
     swtTask :: Text
   }
   deriving (Show, Eq, Generic)
@@ -589,7 +596,7 @@ spawnWorkerToolCore args = do
 data SpawnAcp
 
 data SpawnAcpArgs = SpawnAcpArgs
-  { saName :: Text,
+  { saName :: Slug,
     saPrompt :: Text,
     saPermissionMode :: Maybe Text,
     saAllowedTools :: Maybe [Text],
@@ -618,7 +625,7 @@ spawnAcpCore args = do
           }
       cfg =
         AC.SpawnAcpConfig
-          { AC.sacName = saName args,
+          { AC.sacName = unSlug (saName args),
             AC.sacPrompt = renderedPrompt,
             AC.sacPerms = perms
           }
@@ -626,7 +633,7 @@ spawnAcpCore args = do
   case result of
     Left err -> pure $ errorResult (spawnErrorMessage err)
     Right spawnResult -> do
-      emitSpawnEvent (saName args) "gemini-acp" (saName args)
+      emitSpawnEvent (unSlug (saName args)) "gemini-acp" (unSlug (saName args))
       pure $ successResult $ Aeson.toJSON spawnResult
 
 -- | Helper to emit 'agent.spawned' event to the host.
