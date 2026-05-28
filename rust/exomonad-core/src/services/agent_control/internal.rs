@@ -107,6 +107,8 @@ impl Drop for SpawnRollback {
     }
 }
 
+use super::error::SpawnError;
+
 impl<
         C: super::super::HasGitHubClient
             + super::super::HasAcpRegistry
@@ -118,24 +120,24 @@ impl<
             + 'static,
     > AgentControlService<C>
 {
-    pub(crate) fn resolve_tmux_session(&self) -> Result<String> {
+    pub(crate) fn resolve_tmux_session(&self) -> Result<String, SpawnError> {
         self.tmux_session
             .clone()
-            .ok_or_else(|| anyhow!("No tmux session configured (call with_tmux_session)"))
+            .ok_or(SpawnError::TmuxNotInSession)
     }
 
     /// Get the direct tmux IPC client from context.
-    pub(crate) fn tmux(&self) -> Result<super::tmux_ipc::TmuxIpc> {
+    pub(crate) fn tmux(&self) -> Result<super::tmux_ipc::TmuxIpc, SpawnError> {
         let tmux = self.ctx.tmux_ipc().clone();
         let configured_session = self.resolve_tmux_session()?;
         let ctx_session = tmux.session_name();
 
         if configured_session != ctx_session {
-            anyhow::bail!(
+            return Err(anyhow!(
                 "Configured tmux session '{}' does not match context tmux session '{}'",
                 configured_session,
                 ctx_session
-            );
+            ).into());
         }
 
         Ok(tmux)
@@ -150,7 +152,7 @@ impl<
         worktree_path: &Path,
         branch_name: &BranchName,
         base_branch: &BranchName,
-    ) -> Result<()> {
+    ) -> Result<(), SpawnError> {
         if worktree_path.exists() {
             info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
             let git_wt = self.git_wt().clone();
@@ -188,8 +190,22 @@ impl<
         match result {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
-                return Err(anyhow::Error::from(EffectError::from(e)))
-                    .context("Failed to create git worktree")
+                match e {
+                    crate::services::git_worktree::WorktreeError::BranchExists { branch } => {
+                        return Err(SpawnError::BranchExists(branch));
+                    }
+                    crate::services::git_worktree::WorktreeError::LockFileConflict { .. } => {
+                        return Err(SpawnError::LockConflict);
+                    }
+                    crate::services::git_worktree::WorktreeError::PushRejected { .. } => {
+                        return Err(SpawnError::PushRejected);
+                    }
+                    _ => {
+                        return Err(anyhow::Error::from(EffectError::from(e)))
+                            .context("Failed to create git worktree")
+                            .map_err(SpawnError::Other);
+                    }
+                }
             }
             Err(panic_val) => {
                 let msg = panic_val
@@ -197,7 +213,7 @@ impl<
                     .map(|s| s.as_str())
                     .or_else(|| panic_val.downcast_ref::<&str>().copied())
                     .unwrap_or("unknown panic");
-                return Err(anyhow!("git worktree creation panicked: {}", msg));
+                return Err(anyhow!("git worktree creation panicked: {}", msg).into());
             }
         }
 
@@ -216,7 +232,7 @@ impl<
                 "Worktree branch mismatch: expected '{}', got {:?}",
                 expected,
                 actual
-            ));
+            ).into());
         }
 
         // Set upstream tracking by pushing the child branch to origin.

@@ -82,6 +82,7 @@ import GHC.Generics (Generic)
 -- ============================================================================
 
 -- | Helper to convert EffectError to a human-readable message.
+-- Error codes are defined in Rust: SpawnError::code().
 spawnErrorMessage :: EffectError -> Text
 spawnErrorMessage (EffectError kind) = case kind of
   Just (EffectErrorKindCustom c) -> case customCode c of

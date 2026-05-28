@@ -5,7 +5,6 @@
 use crate::domain::{AgentName, AgentPermissions, BirthBranch, ClaudeSessionUuid, TeamName};
 use crate::effects::{
     dispatch_agent_effect, AgentEffects, EffectError, EffectHandler, EffectResult, ResultExt,
-    ResultExtPreserve,
 };
 
 use super::non_empty;
@@ -337,7 +336,7 @@ impl<
             .service
             .spawn_agent(issue_number, &options, &ctx.birth_branch)
             .await
-            .effect_err_preserve("agent")?;
+            .map_err(|e| EffectError::custom(e.code(), e.to_string()))?;
 
         Ok(SpawnResponse {
             agent: Some(spawn_result_to_proto(&req.issue, &result)),
@@ -375,7 +374,7 @@ impl<
                 .await
             {
                 Ok(result) => agents.push(spawn_result_to_proto(issue, &result)),
-                Err(e) => errors.push(format!("Issue {}: {}", issue, e)),
+                Err(e) => errors.push(format!("Issue {}: [{}] {}", issue, e.code(), e)),
             }
         }
 
@@ -399,7 +398,7 @@ impl<
             .service
             .spawn_gemini_teammate(&options, &ctx.birth_branch)
             .await
-            .effect_err_preserve("agent")?;
+            .map_err(|e| EffectError::custom(e.code(), e.to_string()))?;
 
         Ok(SpawnGeminiTeammateResponse {
             agent: Some(teammate_result_to_proto(&req.name, &result)),
@@ -425,7 +424,7 @@ impl<
             .service
             .spawn_worker(&options, ctx)
             .await
-            .effect_err_preserve("agent")?;
+            .map_err(|e| EffectError::custom(e.code(), e.to_string()))?;
 
         let agent_info = worker_result_to_proto(&req.name, &result);
 
@@ -526,7 +525,7 @@ impl<
             .service
             .spawn_subtree(&options, &ctx.birth_branch)
             .await
-            .effect_err_preserve("agent")?;
+            .map_err(|e| EffectError::custom(e.code(), e.to_string()))?;
 
         let agent_info = subtree_result_to_proto(&req.branch_name, &result);
 
@@ -597,7 +596,7 @@ impl<
             .service
             .spawn_leaf_subtree(&options, &ctx.birth_branch)
             .await
-            .effect_err_preserve("agent")?;
+            .map_err(|e| EffectError::custom(e.code(), e.to_string()))?;
 
         let agent_info = leaf_subtree_result_to_proto(&req.branch_name, &result);
 
