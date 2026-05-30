@@ -6,6 +6,7 @@ members = [
     "rust/exomonad-core",
     "rust/exomonad",
     "rust/exo-scry",
+    "rust/teams-mcp",
 ]
 
 [workspace.dependencies]

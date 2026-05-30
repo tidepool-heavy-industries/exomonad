@@ -29,8 +29,11 @@ impl std::fmt::Display for TeamName {
 /// the evidence trail (which process, which on-disk dir) for debuggability.
 #[derive(Debug, Clone, Serialize)]
 pub struct ActiveTeam {
-    /// The Claude Code process this team belongs to.
-    pub claude_pid: Pid,
+    /// The Claude Code process this team belongs to. `Some` for process-based
+    /// resolution (the inotify path); `None` for UUID-based resolution, which
+    /// identifies the team without a process handle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_pid: Option<Pid>,
     /// The team name (= watched `tasks/{team}` dir name).
     pub team: TeamName,
     /// The team's task-list directory that produced the signal.
@@ -39,4 +42,8 @@ pub struct ActiveTeam {
     pub lead_inbox: Option<String>,
     /// CC-assigned lead session UUID — the globally-unique team handle.
     pub lead_session_id: Option<String>,
+    /// The caller's own member entry, when resolved by tmux pane (i.e. the
+    /// caller is a teammate). `None` for watch/UUID resolution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub me: Option<crate::teams::Teammate>,
 }

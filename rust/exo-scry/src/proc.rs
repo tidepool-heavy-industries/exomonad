@@ -45,7 +45,8 @@ fn read_proc(pid: i32) -> Result<ProcInfo> {
 /// Used for `--self` and `--pid` (a tool/shell's owning session is its ancestor).
 pub fn find_claude_ancestor(start: i32) -> Result<Pid> {
     let mut pid = start;
-    for hops in 0..MAX_WALK {
+    let mut walked = 0;
+    while walked < MAX_WALK {
         let info = match read_proc(pid) {
             Ok(i) => i,
             // The chain raced out from under us mid-walk — report progress.
@@ -53,14 +54,16 @@ pub fn find_claude_ancestor(start: i32) -> Result<Pid> {
                 return Err(ScryError::NoClaudeProcess {
                     start,
                     direction: "ancestry",
-                    walked: hops,
+                    walked,
                 })
             }
             Err(e) => return Err(e),
         };
+        walked += 1;
         if is_claude(&info.comm, &info.cmdline) {
             return Ok(Pid(pid));
         }
+        // Reached init (ppid 0/1) or a self-parenting root without a hit.
         if info.ppid <= 1 || info.ppid == pid {
             break;
         }
@@ -69,7 +72,7 @@ pub fn find_claude_ancestor(start: i32) -> Result<Pid> {
     Err(ScryError::NoClaudeProcess {
         start,
         direction: "ancestry",
-        walked: MAX_WALK,
+        walked,
     })
 }
 
@@ -113,6 +116,57 @@ pub fn find_claude_descendant(root: i32) -> Result<Pid> {
 /// The current process id.
 pub fn self_pid() -> i32 {
     std::process::id() as i32
+}
+
+/// Ground-truth liveness for a tmux-backed member: does its pane still exist and
+/// run a Claude process? This is observed, not claimed — the config's `isActive`
+/// flag goes stale (it stays `true` when a pane is killed without a clean
+/// shutdown). A vanished pane, or a pane with no Claude in it (e.g. a spawn whose
+/// launch command was corrupted), both read as not-live.
+pub fn pane_has_live_claude(pane: &str) -> bool {
+    if pane.is_empty() {
+        return false;
+    }
+    match crate::tmux::pane_pid(pane) {
+        Ok(pid) => find_claude_descendant(pid).is_ok(),
+        Err(_) => false,
+    }
+}
+
+/// The working directory of a process (`/proc/{pid}/cwd`). On macOS the portable
+/// equivalent is `proc_pidinfo(PROC_PIDVNODEPATHINFO)`.
+pub fn process_cwd(pid: i32) -> Result<std::path::PathBuf> {
+    match std::fs::read_link(format!("/proc/{pid}/cwd")) {
+        Ok(p) => Ok(p),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(ScryError::ProcessGone(pid)),
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            Err(ScryError::PermissionDenied(pid))
+        }
+        Err(e) => Err(ScryError::Io(e)),
+    }
+}
+
+/// Every live Claude Code process whose cwd equals `cwd`. More than one means
+/// the transcript signal can't map a cwd to a single session (the caller should
+/// fall back to the per-process inotify path on Linux).
+pub fn claude_pids_with_cwd(cwd: &std::path::Path) -> Result<Vec<i32>> {
+    let all = procfs::process::all_processes()
+        .map_err(|e| ScryError::ProcUnavailable(format!("enumerating processes: {e}")))?;
+    let mut pids = Vec::new();
+    for pr in all {
+        let Ok(pr) = pr else { continue };
+        let pid = pr.pid;
+        let Ok(stat) = pr.stat() else { continue };
+        let cmdline = pr.cmdline().unwrap_or_default();
+        if !is_claude(&stat.comm, &cmdline) {
+            continue;
+        }
+        // cwd reads race against exit; a vanished/forbidden proc just isn't a match.
+        if process_cwd(pid).is_ok_and(|c| c == cwd) {
+            pids.push(pid);
+        }
+    }
+    Ok(pids)
 }
 
 #[cfg(test)]

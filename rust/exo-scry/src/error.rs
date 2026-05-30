@@ -33,6 +33,13 @@ pub enum ScryError {
     #[error("tmux query failed: {0}")]
     Tmux(String),
 
+    /// More than one live Claude session shares this working directory, so the
+    /// transcript signal cannot map the process to a single session. On Linux,
+    /// resolve by pid via the inotify path instead (each session's watch is its
+    /// own); on macOS this is unresolvable from OS state alone.
+    #[error("ambiguous: {} live Claude sessions share cwd {} (pids: {pids:?})", pids.len(), cwd.display())]
+    AmbiguousCwd { cwd: PathBuf, pids: Vec<i32> },
+
     /// `$HOME` could not be resolved, so `~/.claude` is unknown.
     #[error("cannot resolve $HOME to locate ~/.claude")]
     HomeUnknown,
@@ -44,6 +51,13 @@ pub enum ScryError {
     /// A team's `config.json` was malformed.
     #[error("malformed team config {}: {source}", path.display())]
     TeamConfigParse {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
+
+    /// A JSON file under `~/.claude` (e.g. an inbox) could not be parsed.
+    #[error("malformed JSON {}: {source}", path.display())]
+    Json {
         path: PathBuf,
         source: serde_json::Error,
     },

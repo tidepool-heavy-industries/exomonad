@@ -16,7 +16,12 @@ pub fn pane_pid(pane: &str) -> Result<i32> {
         )));
     }
     let s = String::from_utf8_lossy(&out.stdout);
-    s.trim()
+    let trimmed = s.trim();
+    // tmux exits 0 with empty stdout when the pane id doesn't resolve.
+    if trimmed.is_empty() {
+        return Err(ScryError::Tmux(format!("pane {pane} not found")));
+    }
+    trimmed
         .parse::<i32>()
-        .map_err(|_| ScryError::Tmux(format!("unexpected pane_pid output: {:?}", s.trim())))
+        .map_err(|_| ScryError::Tmux(format!("unexpected pane_pid output: {trimmed:?}")))
 }

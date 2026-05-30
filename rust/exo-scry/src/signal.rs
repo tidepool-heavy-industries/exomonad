@@ -1,8 +1,12 @@
-//! The one genuinely unportable bit: "which `tasks/{team}` dir is this Claude
-//! session actively bound to." On Linux we read it for free from the kernel's
-//! inotify bookkeeping. Other platforms need a different `ActiveTeamSignal`
-//! impl (e.g. matching the session UUID against team configs) — this trait is
-//! that seam.
+//! The process-based signal: "which `tasks/{team}` dir is the Claude session at
+//! this pid actively bound to." On Linux we read it from the kernel's inotify
+//! bookkeeping. This trait abstracts over watch-reading strategies; it is the
+//! only way to resolve a *third party's* team, since another process's session
+//! UUID is not observable from outside on Linux.
+//!
+//! The portable path for self/known-UUID contexts does not go through this
+//! trait — it scans team configs by `leadSessionId` (see
+//! [`crate::resolve_by_session`]) and needs no pid at all.
 
 use crate::error::Result;
 use crate::identity::Pid;
