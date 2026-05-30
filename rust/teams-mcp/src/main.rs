@@ -66,6 +66,17 @@ fn not_in_team() -> CallToolResult {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SendMessageArgs {
+    /// Teammate to send to, by member name.
+    to: String,
+    /// The message body.
+    text: String,
+    /// Optional short preview/summary.
+    #[serde(default)]
+    summary: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ReadInboxArgs {
     /// Inbox to read, by member name. Defaults to the team lead's inbox.
     #[serde(default)]
@@ -137,6 +148,44 @@ impl TeamsServer {
         Ok(CallToolResult::success(vec![Content::json(members)?]))
     }
 
+    /// Send a message to a teammate's inbox.
+    #[tool(
+        description = "Send a message to a teammate in this session's team. It lands in their inbox and Claude Code delivers it to them as a <teammate-message>. `from` is set automatically to your own identity (your member name, or the lead)."
+    )]
+    async fn send_message(
+        &self,
+        Parameters(args): Parameters<SendMessageArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let Some(t) = active()? else {
+            return Ok(not_in_team());
+        };
+        // Validate the recipient is a real member — don't create orphan inboxes.
+        let team = exo_scry::teams::load_team(&t.team.0).map_err(to_mcp)?;
+        if team.member(&args.to).is_none() {
+            let names: Vec<&str> = team.members.iter().map(|m| m.name.as_str()).collect();
+            return Ok(CallToolResult::error(vec![Content::text(format!(
+                "No teammate named {:?} in team {:?}. Members: {:?}",
+                args.to, t.team.0, names
+            ))]));
+        }
+        // `from` = my own identity: member name if pane-resolved, else the lead.
+        let from = t
+            .me
+            .as_ref()
+            .map(|m| m.name.clone())
+            .or_else(|| t.lead_inbox.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+        let summary = args.summary.unwrap_or_default();
+        let msg = exo_scry::inbox::send_message(&t.team.0, &args.to, &from, &args.text, &summary)
+            .map_err(to_mcp)?;
+        let body = serde_json::json!({
+            "delivered_to": args.to,
+            "from": from,
+            "timestamp": msg.timestamp,
+        });
+        Ok(CallToolResult::success(vec![Content::json(body)?]))
+    }
+
     /// Read messages from an inbox in the caller's team.
     #[tool(
         description = "Read messages from an inbox in this session's team. Defaults to the team lead's inbox; pass `member` to read another's. Set `unread_only` to filter."
@@ -175,7 +224,7 @@ impl ServerHandler for TeamsServer {
         info.instructions = Some(
             "Swiss-army-knife for Claude Teams. Self-identifies this session's active \
              team from live OS state (no registration). Tools: team_status, \
-             list_teammates, read_inbox."
+             list_teammates, read_inbox, send_message."
                 .into(),
         );
         info
