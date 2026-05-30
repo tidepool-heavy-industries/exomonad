@@ -32,7 +32,6 @@ fn compute_identity(
 
 impl<
         C: super::super::HasGitHubClient
-            + super::super::HasAcpRegistry
             + super::super::HasTeamRegistry
             + super::super::HasAgentResolver
             + super::super::HasProjectDir

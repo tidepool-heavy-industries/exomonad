@@ -15,7 +15,7 @@ use tracing::{info, warn};
 /// `agent_type` is the runtime type (Claude/Gemini/Shoal/Process) and populates
 /// the `model` field honestly — not hardcoded "gemini". `kind` is the semantic
 /// role label written to the `agentType` field (e.g. "claude-subtree",
-/// "gemini-leaf", "gemini-worker", "gemini-acp").
+/// "gemini-leaf", "gemini-worker").
 pub fn register_synthetic_member(
     team_name: &TeamName,
     member_name: &AgentName,

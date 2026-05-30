@@ -483,8 +483,7 @@ pub struct SpawnResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch_name: Option<BranchName>,
     /// tmux pane_id (workers) or window_id (subtrees/leaves) — Some on fresh
-    /// spawn, None on idempotent returns (registration already done) and ACP
-    /// (no tmux surface).
+    /// spawn, None on idempotent returns (registration already done).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tmux_target: Option<TmuxTarget>,
 }
@@ -602,7 +601,6 @@ pub struct AgentControlService<C> {
 
 impl<
         C: super::HasGitHubClient
-            + super::HasAcpRegistry
             + super::HasTeamRegistry
             + super::HasAgentResolver
             + super::HasProjectDir

@@ -42,10 +42,6 @@ runtime = [
     "dep:hyper-util",
     "dep:http-body-util",
     "dep:futures-util",
-    "dep:agent-client-protocol",
-    "dep:agent-client-protocol-schema",
-    "dep:tokio-util",
-    "dep:futures",
     "dep:claude-teams-bridge",
     "dep:opentelemetry",
     "dep:tracing-opentelemetry",
@@ -73,12 +69,6 @@ tracing-subscriber = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 opentelemetry = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
-
-# Runtime feature: ACP (Agent Client Protocol)
-agent-client-protocol = { path = "../../vendor/acp-rust-sdk/src/agent-client-protocol", optional = true }
-agent-client-protocol-schema = { version = "=0.10.8", optional = true }
-tokio-util = { version = "0.7", features = ["compat"], optional = true }
-futures = { version = "0.3.31", optional = true }
 
 # Runtime feature: core framework
 extism = { version = "1.13", optional = true }

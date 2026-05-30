@@ -1,5 +1,3 @@
-pub mod acp_client;
-pub mod acp_registry;
 pub mod agent_control;
 pub mod agent_resolver;
 pub mod claude_session_registry;
@@ -29,7 +27,6 @@ pub mod synthetic_members;
 pub mod tmux_events;
 pub mod tmux_ipc;
 
-pub use self::acp_registry::AcpRegistry;
 pub use self::agent_control::{
     resolve_role_context_path, resolve_working_dir, resolve_worktree_from_tab, AgentControlService,
     AgentInfo, AgentType, BatchCleanupResult, BatchSpawnResult, SpawnOptions, SpawnResult,
@@ -56,9 +53,6 @@ use thiserror::Error;
 
 pub trait HasTeamRegistry: Send + Sync {
     fn team_registry(&self) -> &TeamRegistry;
-}
-pub trait HasAcpRegistry: Send + Sync {
-    fn acp_registry(&self) -> &AcpRegistry;
 }
 pub trait HasAgentResolver: Send + Sync {
     fn agent_resolver(&self) -> &AgentResolver;
@@ -114,7 +108,6 @@ pub struct Services {
     github_client: Option<Arc<GitHubClient>>,
     event_log: Option<Arc<EventLog>>,
     team_registry: Arc<TeamRegistry>,
-    acp_registry: Arc<AcpRegistry>,
     supervisor_registry: Arc<SupervisorRegistry>,
     claude_session_registry: Arc<ClaudeSessionRegistry>,
     agent_resolver: Arc<AgentResolver>,
@@ -136,7 +129,6 @@ pub struct ServicesBuilder {
     github_client: Option<Arc<GitHubClient>>,
     event_log: Option<Arc<EventLog>>,
     team_registry: Arc<TeamRegistry>,
-    acp_registry: Arc<AcpRegistry>,
     supervisor_registry: Arc<SupervisorRegistry>,
     claude_session_registry: Arc<ClaudeSessionRegistry>,
     agent_resolver: Arc<AgentResolver>,
@@ -160,7 +152,6 @@ impl ServicesBuilder {
             github_client: None,
             event_log: None,
             team_registry: Arc::new(TeamRegistry::new()),
-            acp_registry: Arc::new(AcpRegistry::new()),
             supervisor_registry: Arc::new(SupervisorRegistry::new(agent_resolver.clone())),
             claude_session_registry: Arc::new(ClaudeSessionRegistry::new(agent_resolver.clone())),
             agent_resolver,
@@ -187,10 +178,6 @@ impl ServicesBuilder {
     }
     pub fn team_registry(mut self, r: Arc<TeamRegistry>) -> Self {
         self.team_registry = r;
-        self
-    }
-    pub fn acp_registry(mut self, r: Arc<AcpRegistry>) -> Self {
-        self.acp_registry = r;
         self
     }
     pub fn supervisor_registry(mut self, r: Arc<SupervisorRegistry>) -> Self {
@@ -221,7 +208,6 @@ impl ServicesBuilder {
             github_client: self.github_client,
             event_log: self.event_log,
             team_registry: self.team_registry,
-            acp_registry: self.acp_registry,
             supervisor_registry: self.supervisor_registry,
             claude_session_registry: self.claude_session_registry,
             agent_resolver: self.agent_resolver,
@@ -237,11 +223,6 @@ impl ServicesBuilder {
 impl HasTeamRegistry for Services {
     fn team_registry(&self) -> &TeamRegistry {
         &self.team_registry
-    }
-}
-impl HasAcpRegistry for Services {
-    fn acp_registry(&self) -> &AcpRegistry {
-        &self.acp_registry
     }
 }
 impl HasAgentResolver for Services {

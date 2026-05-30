@@ -22,7 +22,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::services::{
-    HasAcpRegistry, HasAgentResolver, HasClaudeSessionRegistry, HasEventLog, HasGitHubClient,
+    HasAgentResolver, HasClaudeSessionRegistry, HasEventLog, HasGitHubClient,
     HasGitWorktreeService, HasInboxWatcher, HasProjectDir, HasSupervisorRegistry, HasTeamRegistry,
     HasTmuxIpc,
 };
@@ -38,7 +38,6 @@ pub struct AgentHandler<C> {
 
 impl<
         C: HasTeamRegistry
-            + HasAcpRegistry
             + HasAgentResolver
             + HasGitHubClient
             + HasProjectDir
@@ -99,7 +98,7 @@ impl<
     /// `agent_type` populates the `model` field honestly (claude/gemini/shoal/process)
     /// so CC's routing doesn't treat every synthetic member as "gemini". `kind` is
     /// the semantic role label written to `agentType` (e.g. "claude-subtree",
-    /// "gemini-leaf", "gemini-worker", "gemini-acp").
+    /// "gemini-leaf", "gemini-worker").
     async fn register_synthetic_member(
         &self,
         member_name: &AgentName,
@@ -141,8 +140,8 @@ impl<
         // poll their own inbox. Wire an InboxWatcher to forward inbound messages
         // to the agent's tmux pane so SendMessage from a Claude teammate lands.
         //
-        // `tmux_target = None` happens for: ACP (no tmux surface) and idempotent
-        // spawn returns (a watcher from the original spawn is still running).
+        // `tmux_target = None` happens for idempotent spawn returns (a watcher
+        // from the original spawn is still running).
         if !matches!(agent_type, crate::services::agent_control::AgentType::Claude) {
             if let Some(target) = tmux_target {
                 self.ctx
@@ -228,7 +227,6 @@ impl<
 #[async_trait]
 impl<
         C: HasTeamRegistry
-            + HasAcpRegistry
             + HasAgentResolver
             + HasGitHubClient
             + HasProjectDir
@@ -315,7 +313,6 @@ fn parse_repo(repo: &str) -> EffectResult<GithubRepo> {
 #[async_trait]
 impl<
         C: HasTeamRegistry
-            + HasAcpRegistry
             + HasAgentResolver
             + HasGitHubClient
             + HasProjectDir
@@ -648,117 +645,10 @@ impl<
 
     async fn spawn_acp(
         &self,
-        req: SpawnAcpRequest,
-        ctx: &crate::effects::EffectContext,
+        _req: SpawnAcpRequest,
+        _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<SpawnAcpResponse> {
-        let registry = self.ctx.acp_registry();
-
-        // Resolve working directory from context
-        let working_dir = ctx.working_dir.clone();
-
-        // Generate MCP settings for the agent using stdio transport
-        let agent_name = AgentName::try_from(req.name.clone()).effect_err("agent")?;
-        let context_path = self
-            .service
-            .resolve_role_context(&crate::domain::Role::worker());
-        let settings_json = AgentControlService::<C>::generate_gemini_worker_settings(
-            agent_name.as_str(),
-            context_path.as_deref(),
-            &self.service.extra_mcp_servers,
-        );
-
-        // Write settings to agent config dir
-        let agent_dir = working_dir.join(format!(".exo/agents/{}", agent_name));
-        tokio::fs::create_dir_all(&agent_dir)
-            .await
-            .effect_err("agent")?;
-        let settings_path = agent_dir.join("settings.json");
-        tokio::fs::write(
-            &settings_path,
-            serde_json::to_string_pretty(&settings_json).effect_err("agent")?,
-        )
-        .await
-        .effect_err("agent")?;
-
-        info!(
-            agent = %agent_name,
-            settings = %settings_path.display(),
-            "Wrote ACP agent settings"
-        );
-
-        let env_vars = vec![
-            (
-                "GEMINI_CLI_SYSTEM_SETTINGS_PATH".into(),
-                settings_path.to_string_lossy().into_owned(),
-            ),
-            ("EXOMONAD_AGENT_ID".into(), agent_name.to_string()),
-        ];
-
-        let conn = crate::services::acp_registry::connect_and_prompt(
-            agent_name.clone(),
-            "gemini",
-            &working_dir,
-            &req.prompt,
-            env_vars,
-        )
-        .await
-        .effect_err("agent")?;
-
-        registry.register(conn).await;
-
-        // Register as synthetic team member (uses TL's actual team, not hardcoded exo-{branch}).
-        // ACP has no tmux pane — pass None so InboxWatcher is skipped and the
-        // synthetic registration uses "synthetic" for tmuxPaneId.
-        self.register_synthetic_member(
-            &agent_name,
-            crate::services::agent_control::AgentType::Gemini,
-            "gemini-acp",
-            None,
-            ctx,
-        )
-        .await;
-
-        info!(agent = %agent_name, "ACP agent spawned and registered");
-
-        let agent_info = exomonad_proto::effects::agent::AgentInfo {
-            id: agent_name.to_string(),
-            issue: String::new(),
-            worktree_path: String::new(),
-            branch_name: String::new(),
-            agent_type: AgentType::Gemini as i32,
-            role: 0,
-            alive: true,
-            mux_window: String::new(),
-            error: String::new(),
-            pr_number: 0,
-            pr_url: String::new(),
-            topology: exomonad_proto::effects::agent::WorkspaceTopology::SharedDir as i32,
-        };
-
-        tracing::info!(
-            otel.name = "agent.spawned",
-            child_agent = %agent_info.id,
-            agent_type = %AgentType::try_from(agent_info.agent_type).map(|t| format!("{:?}", t)).unwrap_or_else(|_| "unknown".to_string()),
-            branch = %agent_info.branch_name,
-            spawn_type = "acp",
-            "[event] agent.spawned"
-        );
-        if let Some(log) = self.ctx.event_log() {
-            let _ = log.append(
-                "agent.spawned",
-                ctx.agent_name.as_ref(),
-                &serde_json::json!({
-                    "child_agent": agent_info.id, "agent_type": "gemini", "spawn_type": "acp",
-                    "branch": agent_info.branch_name,
-                }),
-            );
-        }
-
-        self.register_child_supervisor(&req.name, ctx).await;
-
-        Ok(SpawnAcpResponse {
-            agent: Some(agent_info),
-        })
+        Err(crate::effects::EffectError::not_found("spawn_acp (removed)"))
     }
 
     async fn cleanup(
@@ -901,9 +791,6 @@ impl<
         } else {
             warn!(agent = %ctx.agent_name, "Could not read routing.json (tried {agent_key} and suffixed variants)");
         }
-
-        // Purge AcpRegistry entry
-        self.ctx.acp_registry().remove(resolved_internal_name.as_str()).await;
 
         // Remove synthetic team member registration after closing.
         // AgentResolver is the canonical source for agent identity.
