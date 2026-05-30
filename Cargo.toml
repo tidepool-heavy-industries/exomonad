@@ -5,6 +5,7 @@ members = [
     "rust/claude-teams-bridge",
     "rust/exomonad-core",
     "rust/exomonad",
+    "rust/exo-scry",
 ]
 
 [workspace.dependencies]
