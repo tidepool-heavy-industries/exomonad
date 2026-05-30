@@ -220,31 +220,12 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
         std::fs::create_dir_all(&gemini_dir)?;
         let settings_path = gemini_dir.join("settings.json");
 
-        let mut mcp_servers = serde_json::Map::new();
-        mcp_servers.insert(
-            "exomonad".to_string(),
-            serde_json::json!({
-                "type": "stdio",
-                "command": "exomonad",
-                "args": ["mcp-stdio", "--role", "root", "--name", "root"]
-            }),
-        );
-        for (name, server) in &config.extra_mcp_servers {
-            let entry = match server {
-                exomonad::config::McpServerConfig::Http { url, .. } => {
-                    serde_json::json!({ "httpUrl": url })
-                }
-                exomonad::config::McpServerConfig::Stdio { command, args } => {
-                    serde_json::json!({"type": "stdio", "command": command, "args": args})
-                }
-            };
-            mcp_servers.insert(name.clone(), entry);
-        }
+        let mut settings = build_mcp_config_json("root", "root", &config.extra_mcp_servers)?;
+        settings
+            .as_object_mut()
+            .unwrap()
+            .insert("hooks".to_string(), gemini_hooks());
 
-        let settings = serde_json::json!({
-            "mcpServers": mcp_servers,
-            "hooks": gemini_hooks()
-        });
         std::fs::write(&settings_path, serde_json::to_string_pretty(&settings)?)?;
         info!("Gemini MCP configuration written to .gemini/settings.json");
 
@@ -322,39 +303,15 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     info!(session = %session, "Creating session");
 
     // 1. Write .mcp.json
-    let mut mcp_servers = serde_json::Map::new();
-    mcp_servers.insert(
-        "exomonad".to_string(),
-        serde_json::json!({
-            "type": "stdio",
-            "command": "exomonad",
-            "args": ["mcp-stdio", "--role", "root", "--name", "root"]
-        }),
-    );
-
-    // Add extra MCP servers from config
-    for (name, server) in &config.extra_mcp_servers {
-        let entry = match server {
-            exomonad::config::McpServerConfig::Http { url, headers } => {
-                let mut e = serde_json::json!({"type": "http", "url": url});
-                if !headers.is_empty() {
-                    e["headers"] = serde_json::to_value(headers)?;
-                }
-                e
-            }
-            exomonad::config::McpServerConfig::Stdio { command, args } => {
-                serde_json::json!({"type": "stdio", "command": command, "args": args})
-            }
-        };
-        mcp_servers.insert(name.clone(), entry);
-    }
-
-    let mcp_json = serde_json::json!({ "mcpServers": mcp_servers });
+    let mcp_json = build_mcp_config_json("root", "root", &config.extra_mcp_servers)?;
     std::fs::write(
         cwd.join(".mcp.json"),
         serde_json::to_string_pretty(&mcp_json)?,
     )?;
-    info!("Wrote .mcp.json with {} MCP server(s)", mcp_servers.len());
+    info!(
+        "Wrote .mcp.json with {} MCP server(s)",
+        mcp_json["mcpServers"].as_object().map(|o| o.len()).unwrap_or(0)
+    );
 
     // 2. Create session in background
     let server_window_id = TmuxIpc::new_session(&session, &cwd, None).await?;
@@ -599,32 +556,8 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
             }
 
             // Write .mcp.json to worktree root — Claude discovers via CWD
-            let mut companion_mcp_servers = serde_json::Map::new();
-            companion_mcp_servers.insert(
-                "exomonad".to_string(),
-                serde_json::json!({
-                    "type": "stdio",
-                    "command": "exomonad",
-                    "args": ["mcp-stdio", "--role", &companion.role, "--name", &companion.name]
-                }),
-            );
-            // Include extra MCP servers from config
-            for (name, server) in &config.extra_mcp_servers {
-                let entry = match server {
-                    exomonad::config::McpServerConfig::Http { url, headers } => {
-                        let mut e = serde_json::json!({"type": "http", "url": url});
-                        if !headers.is_empty() {
-                            e["headers"] = serde_json::to_value(headers)?;
-                        }
-                        e
-                    }
-                    exomonad::config::McpServerConfig::Stdio { command, args } => {
-                        serde_json::json!({"type": "stdio", "command": command, "args": args})
-                    }
-                };
-                companion_mcp_servers.insert(name.clone(), entry);
-            }
-            let companion_mcp_json = serde_json::json!({ "mcpServers": companion_mcp_servers });
+            let companion_mcp_json =
+                build_mcp_config_json(&companion.role, &companion.name, &config.extra_mcp_servers)?;
             std::fs::write(
                 worktree_path.join(".mcp.json"),
                 serde_json::to_string_pretty(&companion_mcp_json)?,
@@ -677,22 +610,16 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
             worktree_path
         } else {
             // Gemini/Shoal companions use project root CWD
-            let companion_mcp = serde_json::json!({
-                "mcpServers": {
-                    "exomonad": {
-                        "type": "stdio",
-                        "command": "exomonad",
-                        "args": ["mcp-stdio", "--role", &companion.role, "--name", &companion.name]
-                    }
-                }
-            });
+            let companion_mcp =
+                build_mcp_config_json(&companion.role, &companion.name, &config.extra_mcp_servers)?;
 
             match agent_type {
                 AgentType::Gemini => {
-                    let settings = serde_json::json!({
-                        "mcpServers": companion_mcp["mcpServers"],
-                        "hooks": gemini_hooks()
-                    });
+                    let mut settings = companion_mcp;
+                    settings
+                        .as_object_mut()
+                        .unwrap()
+                        .insert("hooks".to_string(), gemini_hooks());
                     std::fs::write(
                         agent_dir.join("settings.json"),
                         serde_json::to_string_pretty(&settings)?,
@@ -901,4 +828,47 @@ fn gemini_hooks() -> serde_json::Value {
             }
         ]
     })
+}
+
+fn build_mcp_config_json(
+    role: &str,
+    name: &str,
+    extra: &std::collections::HashMap<String, exomonad::config::McpServerConfig>,
+) -> Result<serde_json::Value> {
+    let mut mcp_servers = serde_json::Map::new();
+    mcp_servers.insert(
+        "exomonad".to_string(),
+        serde_json::json!({
+            "type": "stdio",
+            "command": "exomonad",
+            "args": ["mcp-stdio", "--role", role, "--name", name]
+        }),
+    );
+
+    for (name, server) in extra {
+        let entry = match server {
+            exomonad::config::McpServerConfig::Http { url, headers } => {
+                let mut e = serde_json::json!({
+                    "type": "http",
+                    "url": url
+                });
+                if !headers.is_empty() {
+                    e["headers"] = serde_json::to_value(headers)?;
+                }
+                e
+            }
+            exomonad::config::McpServerConfig::Stdio { command, args } => {
+                serde_json::json!({
+                    "type": "stdio",
+                    "command": command,
+                    "args": args
+                })
+            }
+        };
+        mcp_servers.insert(name.clone(), entry);
+    }
+
+    Ok(serde_json::json!({
+        "mcpServers": mcp_servers
+    }))
 }

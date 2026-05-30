@@ -1151,19 +1151,6 @@ impl<
         msg
     }
 
-    #[allow(dead_code)]
-    async fn emit_event(
-        &self,
-        branch: &str,
-        status: &str,
-        message: &str,
-        agent_type: AgentType,
-        pr_number: Option<PRNumber>,
-    ) {
-        self.emit_event_with_reviews(branch, status, message, agent_type, pr_number, None, None)
-            .await;
-    }
-
     #[allow(clippy::too_many_arguments)]
     async fn emit_event_with_reviews(
         &self,
