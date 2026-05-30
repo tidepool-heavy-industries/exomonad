@@ -312,27 +312,6 @@ message SpawnLeafSubtreeResponse {
 }
 
 // ============================================================================
-// SpawnAcp - Spawn a Gemini agent via ACP (headless, no tmux window)
-// ============================================================================
-
-message SpawnAcpRequest {
-  // Human-readable name for the agent.
-  string name = 1;
-  // Initial prompt/instructions for the agent.
-  string prompt = 2;
-  // Permission mode for the agent. Empty = --dangerously-skip-permissions.
-  string permission_mode = 3;
-  // Tool patterns to allow. Empty = no restriction.
-  repeated string allowed_tools = 4;
-  // Tool patterns to disallow. Empty = no restriction.
-  repeated string disallowed_tools = 5;
-}
-
-message SpawnAcpResponse {
-  AgentInfo agent = 1;
-}
-
-// ============================================================================
 // CloseSelf - Close the calling agent's own pane
 // ============================================================================
 
@@ -374,7 +353,6 @@ service AgentEffects {
   rpc SpawnWorker(SpawnWorkerRequest) returns (SpawnWorkerResponse);
   rpc SpawnSubtree(SpawnSubtreeRequest) returns (SpawnSubtreeResponse);
   rpc SpawnLeafSubtree(SpawnLeafSubtreeRequest) returns (SpawnLeafSubtreeResponse);
-  rpc SpawnAcp(SpawnAcpRequest) returns (SpawnAcpResponse);
   rpc Cleanup(CleanupRequest) returns (CleanupResponse);
   rpc CleanupBatch(CleanupBatchRequest) returns (CleanupBatchResponse);
   rpc CleanupMerged(CleanupMergedRequest) returns (CleanupMergedResponse);

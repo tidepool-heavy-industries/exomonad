@@ -643,14 +643,6 @@ impl<
         })
     }
 
-    async fn spawn_acp(
-        &self,
-        _req: SpawnAcpRequest,
-        _ctx: &crate::effects::EffectContext,
-    ) -> EffectResult<SpawnAcpResponse> {
-        Err(crate::effects::EffectError::not_found("spawn_acp (removed)"))
-    }
-
     async fn cleanup(
         &self,
         req: CleanupRequest,
