@@ -727,7 +727,7 @@ impl<
     /// Initialize a standalone git repo at the given path.
     /// Creates the directory and runs `git init`, providing a .git boundary
     /// that prevents Claude's project discovery from traversing into the parent.
-    pub(crate) async fn init_standalone_repo(&self, path: &Path) -> Result<()> {
+    pub(crate) async fn init_standalone_repo(&self, path: &Path) -> Result<(), SpawnError> {
         tokio::fs::create_dir_all(path).await?;
         let output = tokio::process::Command::new("git")
             .args(["init"])
@@ -735,11 +735,10 @@ impl<
             .output()
             .await?;
         if !output.status.success() {
-            return Err(anyhow!(
-                "git init failed at {}: {}",
-                path.display(),
-                String::from_utf8_lossy(&output.stderr)
-            ));
+            return Err(SpawnError::GitInitFailed {
+                path: path.display().to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            });
         }
         tracing::info!("Initialized standalone repo at {}", path.display());
         Ok(())
@@ -748,21 +747,19 @@ impl<
     /// Resolve effective project dir for git operations.
     /// When subrepo is set, git operations target project_dir/subrepo instead.
     /// Validates that subrepo is relative and does not escape project_dir.
-    pub(crate) fn effective_project_dir(&self, subrepo: Option<&Path>) -> Result<PathBuf> {
+    pub(crate) fn effective_project_dir(&self, subrepo: Option<&Path>) -> Result<PathBuf, SpawnError> {
         match subrepo {
             Some(sub_path) => {
                 if sub_path.is_absolute() {
-                    return Err(anyhow!(
-                        "subrepo path must be relative: {}",
-                        sub_path.display()
-                    ));
+                    return Err(SpawnError::InvalidSubrepoPath {
+                        reason: format!("subrepo path must be relative: {}", sub_path.display()),
+                    });
                 }
                 for component in sub_path.components() {
                     if matches!(component, std::path::Component::ParentDir) {
-                        return Err(anyhow!(
-                            "subrepo path cannot contain '..': {}",
-                            sub_path.display()
-                        ));
+                        return Err(SpawnError::PathTraversal {
+                            path: sub_path.display().to_string(),
+                        });
                     }
                 }
                 let dir = self.project_dir().join(sub_path);

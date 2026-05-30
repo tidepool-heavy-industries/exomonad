@@ -69,7 +69,7 @@ impl<
             // Get GitHub client
             let github_client = self
                 .github()
-                .ok_or_else(|| anyhow!("GitHub service not available (GITHUB_TOKEN not set)"))?;
+                .ok_or(SpawnError::GitHubUnavailable)?;
             let github = GitHubService::new(github_client.clone());
 
             // Fetch issue from GitHub
@@ -749,7 +749,7 @@ impl<
             // Write .claude/settings.local.json with hooks (SessionStart registers UUID for --fork-session)
             let binary_path = crate::util::find_exomonad_binary();
             crate::hooks::HookConfig::write_persistent(&worktree_path, &binary_path, options.permissions.as_ref(), Some(self.project_dir()))
-                .map_err(|e| anyhow!("Failed to write hook config in worktree: {}", e))?;
+                .map_err(|e| SpawnError::HookConfigFailed { reason: e.to_string() })?;
             info!(worktree = %worktree_path.display(), "Wrote hook configuration for spawned Claude agent");
 
             // Symlink Claude project dir so child can discover parent's sessions for --fork-session.
@@ -757,7 +757,7 @@ impl<
             // Without this symlink, --resume --fork-session fails with "no conversation ID found".
             {
                 let claude_projects_dir = dirs::home_dir()
-                    .ok_or_else(|| anyhow!("$HOME not set — cannot resolve Claude project dir for --fork-session"))?
+                    .ok_or(SpawnError::HomeDirNotSet)?
                     .join(".claude")
                     .join("projects");
                 let canonical_project_dir = self.project_dir().canonicalize().unwrap_or_else(|_| self.project_dir().to_path_buf());
