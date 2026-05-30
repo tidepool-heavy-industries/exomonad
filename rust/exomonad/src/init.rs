@@ -145,17 +145,18 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     // Write root agent birth branch so fork_wave resolves the correct parent prefix.
     // Without this, BirthBranch::root() falls back to `git branch --show-current` in the
     // server process CWD, which may differ from the TL's actual branch.
+    let current_branch = std::process::Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(&cwd)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "main".to_string());
+
     {
         let root_agent_dir = cwd.join(".exo/agents/root");
         std::fs::create_dir_all(&root_agent_dir)?;
-        let current_branch = std::process::Command::new("git")
-            .args(["branch", "--show-current"])
-            .current_dir(&cwd)
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_else(|| "main".to_string());
         std::fs::write(root_agent_dir.join(".birth_branch"), &current_branch)?;
         info!(branch = %current_branch, "Wrote root agent birth branch");
     }
@@ -254,6 +255,7 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     }
 
     // Validate tmux is available
+    // Pre-flight: validate tmux is installed.
     let tmux_check = std::process::Command::new("tmux").arg("-V").output();
     match tmux_check {
         Ok(output) if output.status.success() => {
@@ -365,6 +367,7 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     }
 
     // Set EXOMONAD_TMUX_SESSION
+    // One-time session bootstrap: set-environment/set-option/send-keys are not wrapped by TmuxIpc by design.
     let env_output = std::process::Command::new("tmux")
         .args([
             "set-environment",
@@ -483,16 +486,16 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     wait_for_server_socket(&cwd).await?;
 
     // GC stale agents before spawning companions
+    let git_wt = std::sync::Arc::new(exomonad_core::services::GitWorktreeService::new(cwd.clone()));
     {
         use exomonad_core::services::agent_control::AgentControlService;
-        use exomonad_core::services::{GitWorktreeService, ServicesBuilder};
+        use exomonad_core::services::ServicesBuilder;
         use std::sync::Arc;
 
-        let git_wt = Arc::new(GitWorktreeService::new(cwd.clone()));
         let services = ServicesBuilder::new(
             cwd.clone(),
             cwd.join(".exo/tasks"),
-            git_wt,
+            git_wt.clone(),
             Arc::new(ipc.clone()),
         )
         .build();
@@ -566,6 +569,7 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
                     .unwrap_or(false);
 
                 if !head_valid {
+                    // Bootstrap: ensure HEAD exists so worktree creation has a base commit.
                     info!("No commits in repo, creating initial commit for worktree support");
                     let _ = std::process::Command::new("git")
                         .args(["commit", "--allow-empty", "-m", "initial commit"])
@@ -573,56 +577,18 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
                         .output();
                 }
 
-                // Create worktree (reuse branch if it already exists)
-                let branch_exists = std::process::Command::new("git")
-                    .args(["rev-parse", "--verify", &branch_name])
-                    .current_dir(&cwd)
-                    .output()
-                    .map(|o| o.status.success())
-                    .unwrap_or(false);
-
                 std::fs::create_dir_all(cwd.join(".exo/companions"))?;
 
-                let worktree_result = if branch_exists {
-                    std::process::Command::new("git")
-                        .args(["worktree", "add"])
-                        .arg(&worktree_path)
-                        .arg(&branch_name)
-                        .current_dir(&cwd)
-                        .output()
-                } else {
-                    std::process::Command::new("git")
-                        .args(["worktree", "add", "-b", &branch_name])
-                        .arg(&worktree_path)
-                        .arg("HEAD")
-                        .current_dir(&cwd)
-                        .output()
-                };
-
-                match worktree_result {
-                    Ok(output) if output.status.success() => {
-                        info!(
-                            name = %companion.name,
-                            path = %worktree_path.display(),
-                            branch = %branch_name,
-                            "Created companion worktree"
-                        );
-                    }
-                    Ok(output) => {
-                        anyhow::bail!(
-                            "Failed to create worktree for companion '{}': {}",
-                            companion.name,
-                            String::from_utf8_lossy(&output.stderr)
-                        );
-                    }
-                    Err(e) => {
-                        anyhow::bail!(
-                            "Failed to run git worktree add for companion '{}': {}",
-                            companion.name,
-                            e
-                        );
-                    }
-                }
+                git_wt
+                    .reuse_or_create_workspace(
+                        &worktree_path,
+                        &exomonad_core::domain::BranchName::from(branch_name.as_str()),
+                        &exomonad_core::domain::BranchName::from(current_branch.as_str()),
+                    )
+                    .context(format!(
+                        "Failed to create worktree for companion '{}'",
+                        companion.name
+                    ))?;
             } else {
                 info!(
                     name = %companion.name,

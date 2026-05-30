@@ -99,6 +99,39 @@ impl GitWorktreeService {
         Ok(())
     }
 
+    /// Create a worktree, or attach to the branch if it already exists (idempotent reuse).
+    /// Used by `init` where companion branches persist across --recreate.
+    pub fn reuse_or_create_workspace(
+        &self,
+        path: &Path,
+        branch: &BranchName,
+        base: &BranchName,
+    ) -> Result<(), WorktreeError> {
+        match self.create_workspace(path, branch, base) {
+            Ok(()) => Ok(()),
+            Err(WorktreeError::BranchExists { .. }) => {
+                info!(path = %path.display(), branch = %branch, "Branch exists, attaching existing branch to worktree");
+                let output = std::process::Command::new("git")
+                    .args(["worktree", "add", &path.to_string_lossy(), branch.as_str()])
+                    .current_dir(&self.project_dir)
+                    .output()
+                    .map_err(|e| WorktreeError::GitError {
+                        message: format!("Failed to run git worktree add (reuse): {}", e),
+                    })?;
+
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    error!(stderr = %stderr, "git worktree add (reuse) failed");
+                    return Err(self.parse_git_stderr(&stderr));
+                }
+
+                info!(path = %path.display(), branch = %branch, "Worktree attached successfully");
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Remove a git worktree.
     ///
     /// Equivalent to: `git worktree remove --force {path}`
@@ -593,6 +626,39 @@ mod tests {
 
         let actual = service.get_workspace_bookmark(&worktree_path).unwrap();
         assert_eq!(actual, Some(branch_name));
+    }
+
+    #[test]
+    fn test_reuse_or_create_workspace_idempotency() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+        let worktree_path = temp.path().join("wt-reuse");
+        let branch = BranchName::from("reuse-branch");
+        let base = BranchName::from(default_branch.as_str());
+
+        // First call creates it
+        service
+            .reuse_or_create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+        assert!(worktree_path.exists());
+        assert_eq!(
+            service.get_workspace_bookmark(&worktree_path).unwrap(),
+            Some("reuse-branch".to_string())
+        );
+
+        // Remove worktree but keep branch
+        service.remove_workspace(&worktree_path).unwrap();
+        assert!(!worktree_path.exists());
+
+        // Second call should reuse existing branch
+        service
+            .reuse_or_create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+        assert!(worktree_path.exists());
+        assert_eq!(
+            service.get_workspace_bookmark(&worktree_path).unwrap(),
+            Some("reuse-branch".to_string())
+        );
     }
 
     /// Resolution chain with agent-suffixed branch.
