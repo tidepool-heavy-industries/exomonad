@@ -163,8 +163,8 @@ All tools are defined in Haskell WASM and executed via host functions.
 | `spawn_gemini` | root, tl | Spawn Gemini agent (worktree, inline, or standalone isolation) |
 | `file_pr` | tl, dev | Create/update PR for current branch (auto-detects base branch from naming) |
 | `merge_pr` | tl | Merge child PR (gh pr merge + git fetch) |
-| `notify_parent` | all | Send message to parent agent (auto-routed via Teams inbox, ACP, or tmux) |
-| `send_message` | all | Send message to another exomonad-spawned agent (routes via Teams inbox, ACP, UDS, or tmux) |
+| `notify_parent` | all | Send message to parent agent (auto-routed via Teams inbox or tmux) |
+| `send_message` | all | Send message to another exomonad-spawned agent (routes via Teams inbox, UDS, or tmux) |
 
 ## Effect System
 

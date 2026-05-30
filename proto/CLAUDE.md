@@ -125,7 +125,7 @@ Claude Code hooks:
 Agent management:
 - `AgentType` (enum): Claude/Gemini/Shoal
 - `AgentInfo`: Agent metadata with `alive` bool (tmux liveness)
-- Spawn messages: `SpawnRequest`, `SpawnBatchRequest`, `SpawnGeminiTeammateRequest`, `SpawnSubtreeRequest`, `SpawnLeafSubtreeRequest`, `SpawnWorkerRequest`, `SpawnAcpRequest`
+- Spawn messages: `SpawnRequest`, `SpawnBatchRequest`, `SpawnGeminiTeammateRequest`, `SpawnSubtreeRequest`, `SpawnLeafSubtreeRequest`, `SpawnWorkerRequest`
 - Cleanup messages: `CleanupRequest`, `CleanupBatchRequest`, `CleanupMergedRequest`
 - `ListRequest/Response`: Active agent listing
 

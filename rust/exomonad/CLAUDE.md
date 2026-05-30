@@ -101,7 +101,7 @@ Register manually in `.mcp.json`:
 | `file_pr` | tl, dev | Create/update PR for current branch |
 | `merge_pr` | root, tl | Merge child PR (gh merge + git fetch) |
 | `notify_parent` | tl, dev, worker | Send message to parent agent |
-| `send_message` | all | Send message to another agent (routes via Teams inbox / ACP / UDS / tmux fallback) |
+| `send_message` | all | Send message to another agent (routes via Teams inbox / UDS / tmux fallback) |
 | `task_list` | dev, worker | List tasks from shared task list |
 | `task_get` | dev, worker | Get task by ID |
 | `task_update` | dev, worker | Update task status/owner/activeForm |
