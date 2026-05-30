@@ -19,7 +19,6 @@ module ExoMonad.Guest.Effects.AgentControl
     spawnSubtree,
     spawnLeafSubtree,
     spawnWorker,
-    spawnAcp,
 
     -- * Interpreters
     runAgentControlSuspend,
@@ -32,7 +31,6 @@ module ExoMonad.Guest.Effects.AgentControl
     SpawnSubtreeConfig (..),
     SpawnLeafSubtreeConfig (..),
     SpawnWorkerConfig (..),
-    SpawnAcpConfig (..),
   )
 where
 
@@ -158,14 +156,6 @@ data SpawnWorkerConfig = SpawnWorkerConfig
   }
   deriving (Show, Eq, Generic)
 
--- | Configuration for spawning an ACP agent.
-data SpawnAcpConfig = SpawnAcpConfig
-  { sacName :: Text,
-    sacPrompt :: Text,
-    sacPerms :: PermissionFlags
-  }
-  deriving (Show, Eq, Generic)
-
 -- | Configuration for shutting down an agent by branch.
 data ShutdownByBranchConfig = ShutdownByBranchConfig
   { sbcBranchName :: Text,
@@ -184,7 +174,6 @@ data AgentControl a where
   SpawnSubtreeC :: SpawnSubtreeConfig -> AgentControl (Either EffectError SpawnResult)
   SpawnLeafSubtreeC :: SpawnLeafSubtreeConfig -> AgentControl (Either EffectError SpawnResult)
   SpawnWorkerC :: SpawnWorkerConfig -> AgentControl (Either EffectError SpawnResult)
-  SpawnAcpC :: SpawnAcpConfig -> AgentControl (Either EffectError SpawnResult)
   ShutdownByBranchC :: ShutdownByBranchConfig -> AgentControl (Either EffectError ShutdownByBranchResult)
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
@@ -196,9 +185,6 @@ spawnLeafSubtree cfg = send (SpawnLeafSubtreeC cfg)
 
 spawnWorker :: (Member AgentControl r) => SpawnWorkerConfig -> Eff r (Either EffectError SpawnResult)
 spawnWorker cfg = send (SpawnWorkerC cfg)
-
-spawnAcp :: (Member AgentControl r) => SpawnAcpConfig -> Eff r (Either EffectError SpawnResult)
-spawnAcp cfg = send (SpawnAcpC cfg)
 
 shutdownByBranch :: (Member AgentControl r) => ShutdownByBranchConfig -> Eff r (Either EffectError ShutdownByBranchResult)
 shutdownByBranch cfg = send (ShutdownByBranchC cfg)
@@ -267,21 +253,6 @@ runAgentControlSuspend = interpret $ \case
       Left err -> Left err
       Right resp -> case PA.spawnWorkerResponseAgent resp of
         Nothing -> Left (EffectError (Just (EffectErrorKindInvalidInput (InvalidInput "SpawnWorker succeeded but no agent info returned"))))
-        Just info -> Right (protoAgentInfoToSpawnResult info)
-  SpawnAcpC cfg -> do
-    let req =
-          PA.SpawnAcpRequest
-            { PA.spawnAcpRequestName = fromText (sacName cfg),
-              PA.spawnAcpRequestPrompt = fromText (sacPrompt cfg),
-              PA.spawnAcpRequestPermissionMode = fromText (fromMaybe "" (permMode (sacPerms cfg))),
-              PA.spawnAcpRequestAllowedTools = V.fromList (map fromText (allowedTools (sacPerms cfg))),
-              PA.spawnAcpRequestDisallowedTools = V.fromList (map fromText (disallowedTools (sacPerms cfg)))
-            }
-    result <- suspendEffect @Agent.AgentSpawnAcp req
-    pure $ case result of
-      Left err -> Left err
-      Right resp -> case PA.spawnAcpResponseAgent resp of
-        Nothing -> Left (EffectError (Just (EffectErrorKindInvalidInput (InvalidInput "SpawnAcp succeeded but no agent info returned"))))
         Just info -> Right (protoAgentInfoToSpawnResult info)
   ShutdownByBranchC cfg -> do
     let req =

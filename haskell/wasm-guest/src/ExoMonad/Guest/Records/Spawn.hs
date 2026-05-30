@@ -23,10 +23,6 @@ module ExoMonad.Guest.Records.Spawn
     spawnWorkersCore,
     spawnWorkersDescription,
     spawnWorkersSchema,
-
-    -- * SpawnAcp
-    SpawnAcpArgs (..),
-    spawnAcpCore,
   )
 where
 
