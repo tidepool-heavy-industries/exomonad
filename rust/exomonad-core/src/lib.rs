@@ -120,9 +120,9 @@ pub use handlers::{
 };
 #[cfg(feature = "runtime")]
 pub use services::{
-    validate_gh_cli, validate_git, HasAcpRegistry, HasAgentResolver, HasClaudeSessionRegistry,
-    HasEventLog, HasEventQueue, HasGitHubClient, HasGitWorktreeService, HasMutexRegistry,
-    HasProjectDir, HasSupervisorRegistry, HasTeamRegistry,
+    validate_gh_cli, validate_git, HasAgentResolver, HasClaudeSessionRegistry, HasEventLog,
+    HasEventQueue, HasGitHubClient, HasGitWorktreeService, HasMutexRegistry, HasProjectDir,
+    HasSupervisorRegistry, HasTeamRegistry,
 };
 
 /// Prelude module for convenient imports.

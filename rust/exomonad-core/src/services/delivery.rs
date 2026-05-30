@@ -135,7 +135,6 @@ impl DeliveryOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DeliveryChannel {
     Teams,
-    Acp,
     Uds,
     Tmux,
 }
@@ -144,7 +143,6 @@ impl DeliveryChannel {
     pub fn as_str(&self) -> &'static str {
         match self {
             DeliveryChannel::Teams => "teams_inbox",
-            DeliveryChannel::Acp => "acp",
             DeliveryChannel::Uds => "unix_socket",
             DeliveryChannel::Tmux => "tmux_stdin",
         }
@@ -189,7 +187,7 @@ pub enum VerifyOutcome {
 /// Honest outcome of a single channel attempt.
 #[derive(Debug)]
 pub enum ChannelOutcome {
-    /// Synchronous proof of receipt (ACP ack, UDS 2xx, tmux inject success).
+    /// Synchronous proof of receipt (UDS 2xx, tmux inject success).
     Confirmed,
     /// Handed off to an async verifier (Teams inbox). The receiver fires with
     /// a `VerifyOutcome` when the verifier completes (up to ~30s).
@@ -220,7 +218,7 @@ pub fn delivery_plan(recipient: &RecipientMeta) -> Vec<DeliveryChannel> {
     match (recipient.agent_type, recipient.backend_type) {
         (Claude, Exomonad) => vec![Teams, Tmux],
         (Claude, CcNative) => vec![Teams],
-        (Gemini, Exomonad) => vec![Acp, Tmux],
+        (Gemini, Exomonad) => vec![Tmux],
         (Gemini, CcNative) => vec![],
         (Shoal, Exomonad) => vec![Uds, Tmux],
         (Shoal, CcNative) => vec![],
@@ -248,7 +246,6 @@ pub fn channels_recipient_can_receive(
             set.insert(Teams);
         }
         (Gemini, Exomonad) => {
-            set.insert(Acp);
             set.insert(Tmux);
         }
         (Gemini, CcNative) => {}
@@ -272,7 +269,6 @@ pub fn channels_recipient_can_receive(
 #[instrument(skip_all, fields(address = %address, from = %from))]
 pub async fn route_message(
     ctx: &(impl super::HasTeamRegistry
-          + super::HasAcpRegistry
           + super::HasAgentResolver
           + super::HasProjectDir
           + super::HasTmuxIpc),
@@ -332,7 +328,6 @@ fn map_result_to_outcome(
 /// the lead, falls back to first in-memory entry, then to "root".
 async fn resolve_and_deliver_to_lead(
     ctx: &(impl super::HasTeamRegistry
-          + super::HasAcpRegistry
           + super::HasAgentResolver
           + super::HasProjectDir
           + super::HasTmuxIpc),
@@ -418,7 +413,6 @@ pub fn resolve_tab_name_for_agent(
 #[instrument(skip_all, fields(agent_id = %agent_id, parent_session_id = %parent_session_id, status = %status))]
 pub async fn notify_parent_delivery(
     ctx: &(impl super::HasTeamRegistry
-          + super::HasAcpRegistry
           + super::HasEventLog
           + super::HasEventQueue
           + super::HasProjectDir
@@ -564,7 +558,6 @@ pub(super) async fn deliver_via_uds(
 #[instrument(skip_all, fields(agent_key = %agent_key, from = %from, delivery_method = tracing::field::Empty))]
 pub async fn deliver_to_agent(
     ctx: &(impl super::HasTeamRegistry
-          + super::HasAcpRegistry
           + super::HasProjectDir
           + super::HasTmuxIpc),
     agent_key: &str,
@@ -801,23 +794,6 @@ async fn prune_stale_routing(project_dir: &std::path::Path, agent_dir_name: &str
             warn!(path = %path.display(), "Pruned stale routing.json");
         }
     }
-}
-
-/// Helper to detect if an ACP error indicates a broken connection that should
-/// be purged from the registry.
-pub(super) fn is_acp_connection_error(e: &agent_client_protocol::Error) -> bool {
-    // ACP's Error uses JSON-RPC codes. InternalError is -32603.
-    // The RPC layer specifically uses "server shut down unexpectedly" for oneshot
-    // receiver failures (broken pipes/task crashes).
-    if matches!(e.code, agent_client_protocol::ErrorCode::InternalError) {
-        if let Some(data) = &e.data {
-            let s = data.to_string();
-            return s.contains("server shut down unexpectedly")
-                || s.contains("BrokenPipe")
-                || s.contains("ConnectionClosed");
-        }
-    }
-    false
 }
 
 #[cfg(test)]
@@ -1425,7 +1401,7 @@ mod plan_tests {
         };
         assert_eq!(
             delivery_plan(&meta),
-            vec![DeliveryChannel::Acp, DeliveryChannel::Tmux]
+            vec![DeliveryChannel::Tmux]
         );
     }
 
@@ -1465,7 +1441,7 @@ mod plan_tests {
         assert_eq!(meta.agent_type, AgentType::Gemini);
         assert_eq!(
             delivery_plan(&meta),
-            vec![DeliveryChannel::Acp, DeliveryChannel::Tmux]
+            vec![DeliveryChannel::Tmux]
         );
     }
 

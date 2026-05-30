@@ -9,11 +9,10 @@
 use crate::services::delivery::{
     ChannelOutcome, DeliveryChannel, DeliveryResult, FailureReason, VerifyOutcome,
 };
-use crate::services::{HasAcpRegistry, HasProjectDir, HasTeamRegistry, HasTmuxIpc};
-use agent_client_protocol::{Agent, PromptRequest};
+use crate::services::{HasProjectDir, HasTeamRegistry, HasTmuxIpc};
 use claude_teams_bridge::TeamInfo;
 use tokio::sync::oneshot;
-use tracing::{info, instrument, warn};
+use tracing::{instrument, warn};
 
 #[instrument(skip_all, fields(team = %team_info.team_name, inbox = %team_info.inbox_name))]
 pub async fn try_teams_channel(
@@ -74,57 +73,6 @@ pub async fn try_teams_channel(
     });
 
     Ok(ChannelOutcome::Queued(rx))
-}
-
-#[instrument(skip_all, fields(agent_key = %agent_key))]
-pub async fn try_acp_channel<C: HasAcpRegistry>(
-    ctx: &C,
-    agent_key: &str,
-    from: &crate::domain::AgentName,
-    message: &str,
-) -> Result<ChannelOutcome, String> {
-    let Some(conn) = ctx.acp_registry().get(agent_key).await else {
-        return Ok(ChannelOutcome::Failed(
-            "no ACP connection registered".into(),
-        ));
-    };
-    match conn
-        .conn
-        .prompt(PromptRequest::new(
-            conn.session_id.clone(),
-            vec![message.into()],
-        ))
-        .await
-    {
-        Ok(_) => {
-            info!(agent = %agent_key, "Delivered message via ACP prompt");
-            tracing::info!(
-                otel.name = "message.delivery",
-                agent_id = %from,
-                recipient = %agent_key,
-                method = "acp",
-                outcome = "success",
-                "[event] message.delivery"
-            );
-            Ok(ChannelOutcome::Confirmed)
-        }
-        Err(e) => {
-            warn!(agent = %agent_key, error = ?e, "ACP prompt failed");
-            tracing::info!(
-                otel.name = "message.delivery",
-                agent_id = %from,
-                recipient = %agent_key,
-                method = "acp",
-                outcome = "failed",
-                detail = ?e,
-                "[event] message.delivery"
-            );
-            if super::delivery::is_acp_connection_error(&e) {
-                ctx.acp_registry().remove(agent_key).await;
-            }
-            Ok(ChannelOutcome::Failed(format!("acp prompt: {e:?}")))
-        }
-    }
 }
 
 #[instrument(skip_all, fields(socket = %socket_path.display()))]
@@ -225,7 +173,7 @@ pub async fn execute_plan<C>(
     pctx: &PlanContext<'_>,
 ) -> DeliveryResult
 where
-    C: HasAcpRegistry + HasTmuxIpc + HasTeamRegistry + HasProjectDir,
+    C: HasTmuxIpc + HasTeamRegistry + HasProjectDir,
 {
     if plan.is_empty() {
         // RecipientMeta is not available here, so use the conservative default
@@ -239,9 +187,6 @@ where
                 Some(info) => try_teams_channel(info, pctx.from, pctx.message, pctx.summary).await,
                 None => Ok(ChannelOutcome::Failed("no team_info available".into())),
             },
-            DeliveryChannel::Acp => {
-                try_acp_channel(ctx, pctx.agent_key, pctx.from, pctx.message).await
-            }
             DeliveryChannel::Uds => match pctx.uds_socket {
                 Some(path) => try_uds_channel(path, pctx.from, pctx.message, pctx.summary).await,
                 None => Ok(ChannelOutcome::Failed("no uds socket available".into())),

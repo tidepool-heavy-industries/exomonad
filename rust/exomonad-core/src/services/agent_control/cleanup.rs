@@ -17,7 +17,6 @@ pub struct GcStats {
 
 impl<
         C: super::super::HasGitHubClient
-            + super::super::HasAcpRegistry
             + super::super::HasTeamRegistry
             + super::super::HasAgentResolver
             + super::super::HasProjectDir
@@ -325,9 +324,6 @@ impl<
                 warn!(agent = %internal_name, error = %e, "Failed to deregister agent identity (non-fatal)");
             }
         }
-
-        // Purge AcpRegistry entry
-        self.ctx.acp_registry().remove(internal_name.as_str()).await;
 
         // Stop the InboxWatcher task (no-op if agent never had one).
         self.ctx
