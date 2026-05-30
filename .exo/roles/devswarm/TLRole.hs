@@ -23,8 +23,7 @@ import ExoMonad.Guest.Tools.Spawn
   ( forkWaveCore, forkWaveDescription, forkWaveSchema, forkWaveRender, ForkWaveArgs (..), ForkWaveResult (..),
     spawnGeminiCore, spawnGeminiDescription, spawnGeminiSchema, SpawnGeminiArgs,
     spawnLeafRender,
-    spawnWorkerToolCore, spawnWorkerToolDescription, spawnWorkerToolSchema, SpawnWorkerToolArgs,
-    spawnAcpCore, SpawnAcpArgs
+    spawnWorkerToolCore, spawnWorkerToolDescription, spawnWorkerToolSchema, SpawnWorkerToolArgs
   )
 import ExoMonad.Guest.Effects.AgentControl (SpawnResult (..))
 import ExoMonad.Guest.Types (StopDecision(..), StopHookOutput(..), blockStopResponse, allowStopResponse, allowResponse, BeforeModelOutput (..), AfterModelOutput (..))

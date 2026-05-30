@@ -9,7 +9,6 @@ module ExoMonad.Guest.Tools.Spawn
     SpawnWorkers,
     SpawnGemini,
     SpawnWorkerTool,
-    SpawnAcp,
 
     -- * Args types
     ForkWaveArgs (..),
@@ -20,7 +19,6 @@ module ExoMonad.Guest.Tools.Spawn
     SpawnWorkerToolArgs (..),
     WorkerSpec (..),
     WorkerType (..),
-    SpawnAcpArgs (..),
 
     -- * Core functions (role wrappers call these)
     forkWaveCore,
@@ -28,7 +26,6 @@ module ExoMonad.Guest.Tools.Spawn
     spawnWorkersCore,
     spawnGeminiCore,
     spawnWorkerToolCore,
-    spawnAcpCore,
 
     -- * Result types
     ForkWaveResult (..),
@@ -588,53 +585,6 @@ spawnWorkerToolCore args = do
             wsDisallowedTools = Nothing
           }
   spawnWorkersCore (SpawnWorkersArgs [spec])
-
--- ============================================================================
--- SpawnAcp (single ACP agent)
--- ============================================================================
-
-data SpawnAcp
-
-data SpawnAcpArgs = SpawnAcpArgs
-  { saName :: Slug,
-    saPrompt :: Text,
-    saPermissionMode :: Maybe Text,
-    saAllowedTools :: Maybe [Text],
-    saDisallowedTools :: Maybe [Text]
-  }
-  deriving (Show, Eq, Generic)
-
-instance FromJSON SpawnAcpArgs where
-  parseJSON = withObject "SpawnAcpArgs" $ \v ->
-    SpawnAcpArgs
-      <$> v .: "name"
-      <*> v .: "prompt"
-      <*> v .:? "permission_mode"
-      <*> v .:? "allowed_tools"
-      <*> v .:? "disallowed_tools"
-
--- | Core spawn_acp I/O.
-spawnAcpCore :: SpawnAcpArgs -> Eff Effects MCPCallOutput
-spawnAcpCore args = do
-  let renderedPrompt = saPrompt args <> "\n\n" <> workerProfileText
-      perms =
-        AC.PermissionFlags
-          { AC.permMode = saPermissionMode args,
-            AC.allowedTools = fromMaybe [] (saAllowedTools args),
-            AC.disallowedTools = fromMaybe [] (saDisallowedTools args)
-          }
-      cfg =
-        AC.SpawnAcpConfig
-          { AC.sacName = unSlug (saName args),
-            AC.sacPrompt = renderedPrompt,
-            AC.sacPerms = perms
-          }
-  result <- AC.spawnAcp cfg
-  case result of
-    Left err -> pure $ errorResult (spawnErrorMessage err)
-    Right spawnResult -> do
-      emitSpawnEvent (unSlug (saName args)) "gemini-acp" (unSlug (saName args))
-      pure $ successResult $ Aeson.toJSON spawnResult
 
 -- | Helper to emit 'agent.spawned' event to the host.
 emitSpawnEvent :: Text -> Text -> Text -> Eff Effects ()
