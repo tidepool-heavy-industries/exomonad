@@ -152,6 +152,7 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "main".to_string());
 
     {

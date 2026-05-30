@@ -101,12 +101,28 @@ impl GitWorktreeService {
 
     /// Create a worktree, or attach to the branch if it already exists (idempotent reuse).
     /// Used by `init` where companion branches persist across --recreate.
+    ///
+    /// If the path already exists, this method returns `Ok(())` if it is already
+    /// attached to the requested branch, otherwise it returns `WorktreeError::PathExists`.
     pub fn reuse_or_create_workspace(
         &self,
         path: &Path,
         branch: &BranchName,
         base: &BranchName,
     ) -> Result<(), WorktreeError> {
+        // If path exists, check if it's already the correct branch
+        if path.exists() {
+            if let Ok(Some(current)) = self.get_workspace_bookmark(path) {
+                if current == branch.as_str() {
+                    info!(path = %path.display(), branch = %branch, "Worktree path already exists and is on the correct branch");
+                    return Ok(());
+                }
+            }
+            return Err(WorktreeError::PathExists {
+                path: path.to_string_lossy().to_string(),
+            });
+        }
+
         match self.create_workspace(path, branch, base) {
             Ok(()) => Ok(()),
             Err(WorktreeError::BranchExists { .. }) => {
@@ -308,20 +324,35 @@ impl GitWorktreeService {
     fn parse_git_stderr(&self, stderr: &str) -> WorktreeError {
         if stderr.contains("already exists") {
             if stderr.contains("branch named") {
-                let branch = stderr.split('\'').nth(1).unwrap_or("unknown").to_string();
+                let branch = stderr
+                    .split('\'')
+                    .nth(1)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
                 WorktreeError::BranchExists { branch }
             } else {
-                let path = stderr
-                    .trim_start_matches("fatal: ")
-                    .trim_end_matches(" already exists")
-                    .to_string();
+                // Extracts '/path' from "... fatal: '/path' already exists"
+                let path = if let Some(pos) = stderr.rfind("fatal: '") {
+                    let start = pos + 8;
+                    if let Some(end) = stderr[start..].find('\'') {
+                        stderr[start..start + end].to_string()
+                    } else {
+                        stderr.trim().to_string()
+                    }
+                } else {
+                    stderr.trim().to_string()
+                };
                 WorktreeError::PathExists { path }
             }
         } else if stderr.contains("not a valid object")
             || stderr.contains("not a commit")
             || stderr.contains("invalid reference")
         {
-            let branch = stderr.split('\'').nth(1).unwrap_or("unknown").to_string();
+            let branch = stderr
+                .split('\'')
+                .nth(1)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
             WorktreeError::BaseBranchNotFound { branch }
         } else if stderr.contains(".lock") {
             WorktreeError::LockFileConflict {
@@ -659,6 +690,30 @@ mod tests {
             service.get_workspace_bookmark(&worktree_path).unwrap(),
             Some("reuse-branch".to_string())
         );
+    }
+
+    #[test]
+    fn test_reuse_or_create_workspace_path_exists_idempotency() {
+        let (temp, service) = init_test_repo();
+        let default_branch = get_default_branch(temp.path());
+        let worktree_path = temp.path().join("wt-path-exists");
+        let branch = BranchName::from("reuse-branch");
+        let base = BranchName::from(default_branch.as_str());
+
+        // First call creates it
+        service
+            .reuse_or_create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+
+        // Second call with same path should succeed (idempotent)
+        service
+            .reuse_or_create_workspace(&worktree_path, &branch, &base)
+            .unwrap();
+
+        // Third call with different branch should fail with PathExists
+        let other_branch = BranchName::from("other-branch");
+        let result = service.reuse_or_create_workspace(&worktree_path, &other_branch, &base);
+        assert!(matches!(result, Err(WorktreeError::PathExists { .. })));
     }
 
     /// Resolution chain with agent-suffixed branch.
