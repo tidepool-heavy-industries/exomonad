@@ -229,13 +229,7 @@ checkCopilotReadinessFromPR prNum resp =
                           <> T.pack (show prNum)
                           <> ". Wait for the agent to push fixes ([FIXES PUSHED]) or use force=true."
                 Protobuf.Enumerated (Right GH.ReviewStateREVIEW_STATE_COMMENTED) ->
-                  if headSha /= reviewSha && not (T.null headSha) && not (T.null reviewSha)
-                    then Ready
-                    else
-                      NotReady $
-                        "Copilot commented on PR #"
-                          <> T.pack (show prNum)
-                          <> ". Wait for the agent to address comments ([FIXES PUSHED]) or use force=true."
+                  Ready
                 _ -> Ready
 
 -- | Check if a review is from Copilot (author login contains "copilot").
