@@ -843,6 +843,16 @@ impl<
         let record = if let Some(r) = resolver.find_by_birth_branch(&branch).await {
             r
         } else {
+            // Fallback for resolver miss: derive agent name from branch and attempt best-effort cleanup.
+            // Branch naming: {parent}.{slug}-{type} -> last segment is internal_name.
+            let agent_name = req.branch_name.split('.').last().unwrap_or(&req.branch_name);
+            info!(branch = %req.branch_name, derived_name = %agent_name, "Agent not found in resolver — falling back to name-derived cleanup");
+            
+            self.service
+                .cleanup_agent(agent_name, req.remove_worktree)
+                .await
+                .effect_err("agent")?;
+
             return Ok(ShutdownByBranchResponse { agent_found: false });
         };
 
@@ -1186,5 +1196,35 @@ mod tests {
 
         // Verify it was deregistered from resolver
         assert!(resolver.get(&agent_name).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_by_branch_fallback_cleanup() {
+        let handler = test_handler();
+        let project_dir = handler.ctx.project_dir();
+
+        // Setup an agent directory that isn't in the resolver
+        let branch_name = "main.orphan-gemini";
+        let agent_name = "orphan-gemini";
+        let agent_dir = project_dir.join(".exo/agents").join(agent_name);
+        tokio::fs::create_dir_all(&agent_dir).await.unwrap();
+        assert!(agent_dir.exists());
+
+        let ctx = crate::effects::EffectContext {
+            agent_name: AgentName::from("test-agent"),
+            birth_branch: crate::domain::BirthBranch::from("main"),
+            working_dir: std::path::PathBuf::from("."),
+        };
+
+        let req = ShutdownByBranchRequest {
+            branch_name: branch_name.to_string(),
+            remove_worktree: false,
+        };
+
+        let resp = handler.shutdown_by_branch(req, &ctx).await.unwrap();
+        assert!(!resp.agent_found);
+
+        // Verify the directory was removed by the fallback cleanup
+        assert!(!agent_dir.exists());
     }
 }

@@ -83,15 +83,10 @@ impl Drop for SpawnRollback {
 
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                if let Some(id) = window_id {
-                    let _ = tmux.kill_window(&id).await;
-                }
-                if let Some(id) = pane_id {
-                    let _ = tmux.kill_pane(&id).await;
-                }
+                kill_tmux_target(&tmux, window_id.as_ref(), pane_id.as_ref()).await;
+
                 if let Some(path) = wt_path {
-                    let _ =
-                        tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
+                    remove_worktree_best_effort(&git_wt, &path).await;
                 }
                 if let Some(p) = prompt {
                     let _ = tokio::fs::remove_file(p).await;
@@ -103,6 +98,64 @@ impl Drop for SpawnRollback {
             });
         } else {
             tracing::error!("SpawnRollback: no tokio runtime available for cleanup");
+        }
+    }
+}
+
+/// Kill a tmux window or pane by ID.
+pub(crate) async fn kill_tmux_target(
+    tmux: &super::tmux_ipc::TmuxIpc,
+    window_id: Option<&super::tmux_ipc::WindowId>,
+    pane_id: Option<&super::tmux_ipc::PaneId>,
+) -> bool {
+    if let Some(wid) = window_id {
+        match tmux.kill_window(wid).await {
+            Ok(()) => true,
+            Err(e) => {
+                warn!(error = %e, "kill_window by stored ID failed");
+                false
+            }
+        }
+    } else if let Some(pid) = pane_id {
+        match tmux.kill_pane(pid).await {
+            Ok(()) => true,
+            Err(e) => {
+                warn!(error = %e, "kill_pane by stored ID failed");
+                false
+            }
+        }
+    } else {
+        false
+    }
+}
+
+/// Remove a git worktree, logging any errors but continuing (best effort).
+pub(crate) async fn remove_worktree_best_effort(
+    git_wt: &std::sync::Arc<GitWorktreeService>,
+    path: &std::path::Path,
+) {
+    let path_buf = path.to_path_buf();
+    let git_wt = git_wt.clone();
+    let path_for_blocking = path_buf.clone();
+    let join_result =
+        tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path_for_blocking)).await;
+    match join_result {
+        Ok(Ok(())) => {
+            // Successfully removed workspace
+        }
+        Ok(Err(e)) => {
+            warn!(
+                path = %path_buf.display(),
+                error = %e,
+                "Failed to remove git worktree (non-fatal)"
+            );
+        }
+        Err(join_err) => {
+            warn!(
+                path = %path_buf.display(),
+                error = %join_err,
+                "Blocking task for git worktree removal panicked or was cancelled (non-fatal)"
+            );
         }
     }
 }
@@ -155,16 +208,7 @@ impl<
         if worktree_path.exists() {
             info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
             let git_wt = self.git_wt().clone();
-            let path = worktree_path.to_path_buf();
-            match tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await {
-                Err(join_err) => {
-                    warn!(error = %join_err, "Join error while removing existing workspace (non-fatal)");
-                }
-                Ok(Err(e)) => {
-                    warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
-                }
-                Ok(Ok(_)) => {}
-            }
+            remove_worktree_best_effort(&git_wt, worktree_path).await;
         }
 
         info!(

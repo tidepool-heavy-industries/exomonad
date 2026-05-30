@@ -1,5 +1,8 @@
 use super::*;
 
+/// Orphan agent dirs with no routing.json older than this are pruned.
+const ORPHAN_GC_THRESHOLD: Duration = Duration::from_secs(3600);
+
 /// Statistics for stale agent garbage collection.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct GcStats {
@@ -109,7 +112,7 @@ impl<
                             match meta.modified() {
                                 Ok(mtime) => {
                                     let elapsed = mtime.elapsed().unwrap_or(Duration::ZERO);
-                                    if elapsed >= Duration::from_secs(3600) {
+                                    if elapsed >= ORPHAN_GC_THRESHOLD {
                                         info!(path = %path.display(), age = ?elapsed, reason = "orphan (no routing.json) and old", "Pruning orphan agent directory");
                                         if let Err(e) = fs::remove_dir_all(&path).await {
                                             warn!(path = %path.display(), error = %e, "Failed to prune orphan agent directory");
@@ -228,26 +231,11 @@ impl<
         let mut target_closed = false;
         if let Ok(routing) = RoutingInfo::read_from_dir(&agent_config_dir).await {
             let tmux = self.tmux()?;
-            if let Some(wid) = routing.window_id {
-                match tmux.kill_window(&wid).await {
-                    Ok(()) => {
-                        info!(identifier, "Closed tmux window via stored window_id");
-                        target_closed = true;
-                    }
-                    Err(e) => {
-                        warn!(identifier, error = %e, "kill_window by stored ID failed, falling back to name match");
-                    }
-                }
-            } else if let Some(pid) = routing.pane_id {
-                match tmux.kill_pane(&pid).await {
-                    Ok(()) => {
-                        info!(identifier, "Closed tmux pane via stored pane_id");
-                        target_closed = true;
-                    }
-                    Err(e) => {
-                        warn!(identifier, error = %e, "kill_pane by stored ID failed");
-                    }
-                }
+            target_closed =
+                internal::kill_tmux_target(&tmux, routing.window_id.as_ref(), routing.pane_id.as_ref())
+                    .await;
+            if target_closed {
+                info!(identifier, "Closed tmux target via stored ID");
             }
         }
 
@@ -292,28 +280,7 @@ impl<
             };
             if worktree_path.exists() {
                 let git_wt = self.git_wt().clone();
-                let path = worktree_path.clone();
-                let join_result =
-                    tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
-                match join_result {
-                    Ok(Ok(())) => {
-                        // Successfully removed workspace
-                    }
-                    Ok(Err(e)) => {
-                        warn!(
-                            path = %worktree_path.display(),
-                            error = %e,
-                            "Failed to remove git worktree (non-fatal)"
-                        );
-                    }
-                    Err(join_err) => {
-                        warn!(
-                            path = %worktree_path.display(),
-                            error = %join_err,
-                            "Blocking task for git worktree removal panicked or was cancelled (non-fatal)"
-                        );
-                    }
-                }
+                internal::remove_worktree_best_effort(&git_wt, &worktree_path).await;
             }
         }
 
