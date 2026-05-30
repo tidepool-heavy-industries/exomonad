@@ -610,22 +610,16 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
             worktree_path
         } else {
             // Gemini/Shoal companions use project root CWD
-            let companion_mcp = serde_json::json!({
-                "mcpServers": {
-                    "exomonad": {
-                        "type": "stdio",
-                        "command": "exomonad",
-                        "args": ["mcp-stdio", "--role", &companion.role, "--name", &companion.name]
-                    }
-                }
-            });
+            let companion_mcp =
+                build_mcp_config_json(&companion.role, &companion.name, &config.extra_mcp_servers)?;
 
             match agent_type {
                 AgentType::Gemini => {
-                    let settings = serde_json::json!({
-                        "mcpServers": companion_mcp["mcpServers"],
-                        "hooks": gemini_hooks()
-                    });
+                    let mut settings = companion_mcp;
+                    settings
+                        .as_object_mut()
+                        .unwrap()
+                        .insert("hooks".to_string(), gemini_hooks());
                     std::fs::write(
                         agent_dir.join("settings.json"),
                         serde_json::to_string_pretty(&settings)?,
