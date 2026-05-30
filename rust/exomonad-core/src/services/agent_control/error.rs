@@ -55,12 +55,12 @@ impl SpawnError {
             Self::TmuxNotInSession => "tmux.not_in_session",
             Self::Timeout { .. } => "spawn.timeout",
             Self::DepthLimit { .. } => "spawn.depth_limit",
-            Self::GitHubUnavailable => "github_unavailable",
-            Self::HookConfigFailed { .. } => "hook_config_failed",
-            Self::HomeDirNotSet => "home_dir_not_set",
-            Self::GitInitFailed { .. } => "git_init_failed",
-            Self::InvalidSubrepoPath { .. } => "invalid_subrepo_path",
-            Self::PathTraversal { .. } => "path_traversal",
+            Self::GitHubUnavailable => "github.unavailable",
+            Self::HookConfigFailed { .. } => "spawn.hook_config_failed",
+            Self::HomeDirNotSet => "spawn.home_dir_not_set",
+            Self::GitInitFailed { .. } => "spawn.git_init_failed",
+            Self::InvalidSubrepoPath { .. } => "spawn.invalid_subrepo_path",
+            Self::PathTraversal { .. } => "spawn.path_traversal",
             Self::Other(_) => "spawn.other",
         }
     }
