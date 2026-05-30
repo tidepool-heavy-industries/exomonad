@@ -480,8 +480,6 @@ impl GitHubService {
     }
 
     /// Execute a GitHub API call with automatic success/failure tracking.
-    ///
-    /// For retried calls, use `tracked_retry` instead.
     async fn tracked<T, F, Fut>(&self, f: F) -> Result<T>
     where
         F: FnOnce(Octocrab) -> Fut,
@@ -489,26 +487,6 @@ impl GitHubService {
     {
         let client = self.github.get().await?;
         let result = f(client).await;
-        match &result {
-            Ok(_) => self.github.report_success(),
-            Err(_) => self.github.report_failure().await,
-        }
-        result
-    }
-
-    /// Execute a GitHub API call with retry and automatic success/failure tracking.
-    #[allow(dead_code)]
-    async fn tracked_retry<T, F, Fut>(
-        &self,
-        policy: &super::resilience::RetryPolicy,
-        f: F,
-    ) -> Result<T>
-    where
-        F: Fn(Octocrab) -> Fut,
-        Fut: std::future::Future<Output = Result<T>>,
-    {
-        let client = self.github.get().await?;
-        let result = super::resilience::retry(policy, || f(client.clone())).await;
         match &result {
             Ok(_) => self.github.report_success(),
             Err(_) => self.github.report_failure().await,

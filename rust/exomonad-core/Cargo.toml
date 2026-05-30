@@ -14,7 +14,6 @@ default = ["runtime"]
 runtime = [
     "dep:async-trait",
     "dep:anyhow",
-    "dep:libc",
     "dep:clap",
     "dep:duct",
     "dep:prost",
@@ -56,7 +55,6 @@ tempfile = { workspace = true }
 # Runtime feature: workspace deps
 async-trait = { workspace = true, optional = true }
 anyhow = { workspace = true, optional = true }
-libc = { version = "0.2", optional = true }
 clap = { workspace = true, optional = true }
 duct = { workspace = true, optional = true }
 futures-util = { workspace = true, optional = true }
