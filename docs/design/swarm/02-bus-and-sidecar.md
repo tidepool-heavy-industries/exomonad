@@ -148,9 +148,12 @@ replaced. The bus must be built solid at the systems level:
 - **A line is *invariantly* ≤ `PIPE_BUF`.** Atomicity of `O_APPEND` only holds up to
   `PIPE_BUF` (4 KiB on Linux); a larger write **interleaves under concurrent
   appenders and corrupts the jsonl**. So the spill threshold is tied to the **line
-  size (PIPE_BUF)**, *not* the `MessageBody` cap (1 MiB): any entry whose serialized
-  line would exceed PIPE_BUF spills its body to a side file (written temp+rename
-  **before** the small pointer line is appended) and the line carries a pointer. With
+  size (PIPE_BUF)**: any entry whose serialized line would exceed PIPE_BUF spills its
+  body to a side file (written temp+rename **before** the small pointer line is
+  appended) and the line carries a pointer. `MessageBody` is itself capped at **64 KiB**
+  (message-sized, not a document — bulk content references a file/PR, it isn't inlined),
+  so the spill only ever covers the PIPE_BUF…64 KiB band; the common message is one
+  atomic line and never spills. With
   this invariant every line is one atomic `write(2)` — no interleaving, no lock, and
   no torn lines (a single atomic append is all-or-nothing, so "read to last `\n`" only
   ever discards a *missing* final line, never a garbage one). Assumes a **local fs**

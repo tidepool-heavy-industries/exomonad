@@ -210,8 +210,11 @@ impl TryFrom<String> for SyntheticName {
 pub struct MessageBody(String);
 
 impl MessageBody {
-    /// 1 MiB — generous for an agent message, a guard against a runaway body.
-    pub const MAX_LEN: usize = 1 << 20;
+    /// 64 KiB — sized for a *message*, not a document. A body that won't fit a single
+    /// `≤ PIPE_BUF` inbox line spills to a side file at the bus layer (the tmp-file
+    /// path); content larger than this cap is a design smell — reference a file / PR /
+    /// path instead of inlining bulk into a message.
+    pub const MAX_LEN: usize = 64 * 1024;
 
     pub fn new(s: String) -> CapResult<Self> {
         if s.len() > Self::MAX_LEN {
@@ -250,7 +253,8 @@ impl TryFrom<String> for MessageBody {
 pub struct Summary(String);
 
 impl Summary {
-    pub const MAX_LEN: usize = 4096;
+    /// 256 bytes — it's a one-line preview, not a second body.
+    pub const MAX_LEN: usize = 256;
 
     pub fn new(s: String) -> CapResult<Self> {
         if s.len() > Self::MAX_LEN {
