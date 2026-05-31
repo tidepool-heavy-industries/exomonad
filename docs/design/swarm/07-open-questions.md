@@ -22,9 +22,11 @@
 > event-policy home are now **settled** in [02](02-bus-and-sidecar.md) — removed from
 > this list. What remains:
 
-- **`exo-caps` exact signatures** — `Git`/`GitHub`/`Tmux`/`Fs`/`Process`/`Log`/
-  `Clock`/`Kv` method bodies (mechanical; `Bus`/`Addressee`/`Spawner`/newtypes are
-  pinned). ([03](03-capabilities.md))
+- **`exo-caps` exact signatures** — `Git`/`GitHub`/`Tmux`/`Fs`/`Process`/`Log`/`Kv`
+  method bodies (mechanical; `Bus`/`Addressee`/`Spawner`/newtypes are pinned). Also:
+  **which of `Tmux`/`Fs`/`Process`/`Log` survive** — they're provisional caps with no
+  confirmed policy consumer (a cap must be demanded by a tool/hook; `Tmux`'s real users
+  are runtime-internal). Cut any that no Wave-3 tool needs. ([03](03-capabilities.md))
 - **Per-role toolsets, hooks, events** — the Bucket-C *content*, filled in
   incrementally as each Haskell tool ports (no phases). ([04](04-policy.md))
 - **Readability index** for pane-keyed inboxes (a `{name} → pane` map/symlink, so a
@@ -33,8 +35,7 @@
 
 ## Mechanical TODO (build-time, not design)
 
-- `Git` / `GitHub` / `Tmux` / `Clock` / `Kv` cap signatures — adapt from
-  exomonad-core services.
+- `Git` / `GitHub` / `Tmux` / `Kv` cap signatures — adapt from exomonad-core services.
 - `Spawner` — **decided: per-op methods** (`spawn_worker`/`spawn_gemini`/`fork_wave`),
   each fixing its `(role, agent_type, kind)`, sharing a private `birth(BirthCore)`
   tail. Remaining mechanical bit: port the narrow per-op spec field lists from the
@@ -305,6 +306,18 @@ Validated as correct (recorded so we don't relitigate): deferring compaction (an
 the most bug-prone part of Redis AOF; run-id namespacing also bounds per-run growth);
 JSON over binary for `tail`-ability; single-task cursor needs no lock (Ryhl); at-least-once
 makes the `select!` loop cancellation-tolerant; tail recovery mirrors AOF `aof-load-truncated`.
+
+**Honest weighting of this round (it drifted).** Real yield was two findings — the
+PIPE_BUF/`MessageBody` contradiction and the executor-blocking hazard. The rest is
+competent-but-generic systems checklist about *Wave-1 code that doesn't exist yet*
+(temp+rename, manage your task, async reactor), useful as leaf-spec notes but not
+insight that needed summoning a persona. **And one confirmation was wrong:** antirez
+"confirmed `Clock`-as-trait earns its place (mock time)" — but the call graph shows
+**no policy consumer reads time** (`ts` is runtime-stamped), so `Clock` was an unused
+cap and is now **cut**. Lesson: a metacog persona produces plausible idiom-flavored
+*rationalizations*; its confirmations must be checked against the actual call graph,
+not accepted at face value. Generalized: the cap set was coverage-driven; it should be
+**demand-driven** — `Tmux`/`Fs`/`Process`/`Log` are provisional until a tool needs them.
 
 ## Review-process note
 

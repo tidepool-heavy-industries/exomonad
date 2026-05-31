@@ -33,7 +33,7 @@ so non-overlapping files matter:
 
 ```
 exo-caps/src/     bus.rs  spawner.rs  git.rs  github.rs  tmux.rs  fs.rs
-                  process.rs  log.rs  clock.rs  kv.rs        — one cap trait per file
+                  process.rs  log.rs  kv.rs                  — one cap trait per file
                   types.rs                                   — domain newtypes + NodeKind/Persona/…
 exo-policy/src/   tools/{file_pr,merge_pr,spawn,messaging,tasks}.rs  — one tool (type+Args+adapter) per file
                   hooks.rs   — pre_tool_use / stop / session_start (shared fns roles point at)

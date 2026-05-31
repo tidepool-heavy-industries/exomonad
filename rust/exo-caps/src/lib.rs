@@ -23,7 +23,6 @@ pub mod tmux;
 pub mod fs;
 pub mod process;
 pub mod log;
-pub mod clock;
 pub mod kv;
 
 pub use error::{CapError, CapResult};
@@ -40,5 +39,4 @@ pub use tmux::{Tmux, TmuxError};
 pub use fs::{Fs, FsError};
 pub use process::{Process, ProcessError};
 pub use log::Log;
-pub use clock::Clock;
 pub use kv::{Kv, KvError};

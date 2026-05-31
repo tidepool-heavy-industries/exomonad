@@ -149,9 +149,14 @@ exactly the cap traits it uses, so least-privilege is enforced by the compiler:
 ```rust
 async fn file_pr<C: Git + GitHub>(ctx: &C, args: FilePrArgs) -> Result<ToolOutput>;
 ```
-The concrete **runtime type `R`** implements the individual cap traits it provides
-(`Git`, `GitHub`, `Tmux`, `Fs`, `Process`, `Log`, `Bus`, `Spawner`, `Clock`, `Kv` —
-`Fs`/`Process`/`Log` added per the caps-coverage review). A role's dispatch is built
+The concrete **runtime type `R`** implements the individual cap traits it provides.
+**Demand-driven, not coverage-driven:** a trait belongs in `exo-caps` only when a
+*policy* tool/hook is generic over it. Confirmed by a consumer: `Git`, `GitHub`, `Bus`,
+`Spawner`, `Kv` (hook allowlists). **Provisional** (no policy consumer yet — keep the
+trait, but it's runtime-internal unless a Wave-3 tool proves it): `Tmux` (delivery /
+pane creation are the *runtime's* job), `Fs`, `Process`, `Log`. (`Clock` was **cut** —
+`ts` is stamped by the runtime's Bus impl via `Utc::now()`; policy never reads time, so
+it was never a capability. See [07](07-open-questions.md).) A role's dispatch is built
 by **monomorphizing** its tools at `R`; the MCP edge erases *arguments* to JSON but
 **never erases the caps**. Shaping (decided — see [04](04-policy.md)): each tool is a
 **type** with a generic-over-caps `run` + a hand-written `Tool<R>` adapter (no macro);
@@ -160,7 +165,7 @@ generic-over-caps, per-tool bounds, no `dyn Caps`.
 
 ## Still TBD
 
-- `Git` / `GitHub` / `Tmux` / `Fs` / `Process` / `Log` / `Clock` / `Kv` method
+- `Git` / `GitHub` / `Tmux` / `Fs` / `Process` / `Log` / `Kv` method
   signatures (mechanical; adapt from exomonad-core services).
 - `Spawner` narrow per-op spec field lists (`WorkerSpec`/`GeminiSpec`/`ForkSpec`,
   ported from the Haskell) + teardown method names (`reclaim_worktree` parent-side;

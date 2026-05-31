@@ -55,7 +55,7 @@ Root TL (Claude, human-facing) ── scaffolds the frozen contract, converges e
 │  ├─ Runtime TL (Claude) ─ exo-runtime cap impls
 │  │   ├─ Gemini: Git + GitHub                  (adapt services — simple)
 │  │   ├─ Gemini: Tmux                          (adapt TmuxIpc — simple)
-│  │   ├─ Gemini: Fs+Process+Log+Kv+Clock       (trivial batch)
+│  │   ├─ Gemini: Fs+Process+Log+Kv             (trivial batch; ts stamped via Utc::now(), no Clock cap)
 │  │   ├─ Bus TL (Claude) ─── COMPLEX → its own level:        4 small Geminis
 │  │   │     append-primitive · cursor · inotify-watch · Addressee→path resolve
 │  │   └─ Spawner TL (Claude) ─ COMPLEX → its own level:      3 small Geminis
@@ -126,7 +126,7 @@ sub-TLs (below) — that's the extra level of granularity.
 |---|---|---|
 | R1 | `Git` + `GitHub` | adapt `GitService`/`GitHubService` |
 | R2 | `Tmux` | adapt `TmuxIpc`; the tmux-paste last-hop |
-| R3 | `Fs` + `Process` + `Log` + `Kv` + `Clock` | trivial (std fs/process, file kv, system clock, file-at-worktree-root log) |
+| R3 | `Fs` + `Process` + `Log` + `Kv` | trivial (std fs/process, file kv, file-at-worktree-root log). `ts` is stamped by the Bus impl via `Utc::now()` — no `Clock` cap |
 
 > **Async hazard (all of R1–R3): do NOT block the executor.** The services being
 > adapted use synchronous `std::process::Command`; calling `.output()` inside an
