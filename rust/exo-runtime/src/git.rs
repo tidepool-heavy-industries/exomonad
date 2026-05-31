@@ -8,22 +8,52 @@ use crate::runtime::Runtime;
 use async_trait::async_trait;
 use exo_caps::{Branch, Git, GitError};
 use std::path::Path;
+use tokio::process::Command;
 
 #[async_trait]
 impl Git for Runtime {
     async fn current_branch(&self) -> Result<Branch, GitError> {
-        todo!("R1: git rev-parse --abbrev-ref HEAD in self.working_dir; parse to Branch")
+        let output = self.git(&["rev-parse", "--abbrev-ref", "HEAD"]).await?;
+        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Branch::new(s).map_err(|e| GitError::Failed {
+            op: "current_branch",
+            detail: e.to_string(),
+        })
     }
 
     async fn is_clean(&self) -> Result<bool, GitError> {
-        todo!("R1: git status --porcelain; empty output => clean")
+        let output = self.git(&["status", "--porcelain"]).await?;
+        Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())
     }
 
-    async fn worktree_add(&self, _branch: &Branch, _at: &Path) -> Result<(), GitError> {
-        todo!("R1: git worktree add -b <branch> <at>")
+    async fn worktree_add(&self, branch: &Branch, at: &Path) -> Result<(), GitError> {
+        self.git(&["worktree", "add", "-b", branch.as_str(), &at.to_string_lossy()])
+            .await?;
+        Ok(())
     }
 
-    async fn worktree_remove(&self, _at: &Path) -> Result<(), GitError> {
-        todo!("R1: git worktree remove <at>")
+    async fn worktree_remove(&self, at: &Path) -> Result<(), GitError> {
+        self.git(&["worktree", "remove", &at.to_string_lossy()])
+            .await?;
+        Ok(())
+    }
+}
+
+impl Runtime {
+    async fn git(&self, args: &[&str]) -> Result<std::process::Output, GitError> {
+        let output = Command::new("git")
+            .current_dir(self.working_dir())
+            .args(args)
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            return Err(GitError::Failed {
+                op: "git",
+                detail: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            });
+        }
+
+        Ok(output)
     }
 }
