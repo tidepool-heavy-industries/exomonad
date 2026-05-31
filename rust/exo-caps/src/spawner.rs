@@ -7,11 +7,13 @@
 use crate::error::CapResult;
 use crate::types::AgentName;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 /// How a child relates to its parent's worktree. **Set by the spawn op, never a free
 /// caller field** — drives papers-location + teardown. `Standalone` (own fresh repo) is
 /// a `Worktree` flavor; revisit if needed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ChildKind {
     Inline,
     Worktree,
