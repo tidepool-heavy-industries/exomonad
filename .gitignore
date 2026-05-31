@@ -101,3 +101,10 @@ vendor/notebooklm-mcp/node_modules/
 vendor/notebooklm-mcp/dist/
 vendor/notebooklm-mcp/.env
 vendor/notebooklm-mcp/.exo/
+
+# Agent artifacts from design sessions + stray local scratch
+/cabal_modules.txt
+/hs_files.txt
+docs/design/swarm/.exo/
+docs/design/swarm/reviews/
+/plans/cut-reactive-github-layer.md
