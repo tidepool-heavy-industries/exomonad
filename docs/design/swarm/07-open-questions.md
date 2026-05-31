@@ -1,378 +1,122 @@
-# Open Questions
+# Open Questions & Decision Ledger
 
-> **Status: living.** Empirical unknowns and undecided design points. Some are
-> cheap experiments; note them here so they're not lost.
+> **Status: living.** What's still open (needs a test, a decision, or build work), plus a
+> one-line ledger of settled decisions pointing to where each lives. Spec detail belongs
+> in 01–06; this file is the index of what's *not yet* pinned and a guard against
+> relitigating what is.
 
-## Empirical (testable now)
+## Open — needs a test (empirical)
 
-- **CC multi-team membership.** → **Assigned to the Wave-0 spike** (Leaf S0) in
-  [06](06-migration.md), with method + decision rule. Can one CC session be in two
-  teams at once, and **which inbox does InboxPoller watch**? Decides solo-team-per-
-  session vs. join-spawner's-team — *the generic-ingestion layer is robust to
-  either*, so this only sets the CC last-hop wiring, not the architecture.
-- **Pane id reuse.** tmux `%N` ids are monotonic per server; confirm they're not
-  reused within a server lifetime (a server restart kills all panes/agents anyway,
-  so stale pane-keyed inboxes refer to dead nodes — acceptable, but verify).
-- **tmux-paste delivery into CC.** Confirm pasting into a CC pane (the no-team
-  fallback) lands usefully in the conversation, not just the input box.
+- **CC multi-team membership** → the Wave-0 spike (Leaf S0, [06](06-migration.md)). Can
+  one CC session be in two teams at once, and which inbox does InboxPoller watch? Sets
+  the CC last-hop wiring (solo-team-per-session vs. join-spawner's-team); the
+  generic-ingestion layer is robust to either, so this doesn't touch the architecture.
+- **tmux-paste into a *CC* conversation** — the gemini-paste path is proven; pasting into
+  an un-teamed *Claude* pane (the no-team fallback) is untested.
+- **`send_message` mid-tool-call** — round-trips when the recipient is idle; unverified
+  whether CC queues or drops a `<teammate-message>` that arrives mid-tool-call.
+- **Pane-id reuse** — `%N` ids are monotonic per tmux server; confirm no reuse within a
+  server's life (a server restart kills all agents, so stale inboxes refer to dead nodes
+  — acceptable, but verify).
 
-## Design (undecided)
+## Open — needs a decision
 
-> Message format, cursor, inbox root path (`~/.claude/exo/inboxes/{run-id}/`), and
-> event-policy home are now **settled** in [02](02-bus-and-sidecar.md) — removed from
-> this list. What remains:
+- **Provisional caps: `Tmux` / `Fs` / `Process` / `Log`.** A cap belongs in `exo-caps`
+  only when a *policy* tool/hook is generic over it. These have no confirmed policy
+  consumer yet (`Tmux`'s real users are runtime-internal). Keep during build; **cut any
+  that no Wave-3 tool needs.** Confirmed caps: `Git`, `GitHub`, `Bus`, `Spawner`, `Kv`.
+- **Crate names** — `exo-caps` / `exo-policy` / `exo-runtime` provisional.
+- **Readability index** (optional) — a `{name} → pane` map/symlink so a human can tell
+  which `pane-NNN.jsonl` is whom.
 
-- **`exo-caps` exact signatures** — `Git`/`GitHub`/`Tmux`/`Fs`/`Process`/`Log`/`Kv`
-  method bodies (mechanical; `Bus`/`Addressee`/`Spawner`/newtypes are pinned). Also:
-  **which of `Tmux`/`Fs`/`Process`/`Log` survive** — they're provisional caps with no
-  confirmed policy consumer (a cap must be demanded by a tool/hook; `Tmux`'s real users
-  are runtime-internal). Cut any that no Wave-3 tool needs. ([03](03-capabilities.md))
-- **Per-role toolsets, hooks, events** — the Bucket-C *content*, filled in
-  incrementally as each Haskell tool ports (no phases). ([04](04-policy.md))
-- **Readability index** for pane-keyed inboxes (a `{name} → pane` map/symlink, so a
-  human can tell which `pane-NNN.jsonl` is whom). Optional.
-- **Crate names** — `exo-caps`/`exo-policy`/`exo-runtime` provisional.
+## Open — build work (mechanical, not design)
 
-## Mechanical TODO (build-time, not design)
+- **`exo-caps` method bodies** — `Git`/`GitHub`/`Tmux`/`Fs`/`Process`/`Log`/`Kv` signatures
+  (adapt from exomonad-core services). `Bus`/`Addressee`/`Spawner`/newtypes are pinned.
+- **Per-op spawn spec fields** — port the `WorkerSpec`/`GeminiSpec`/`ForkSpec` field lists
+  from the Haskell `WorkerSpec`/`SpawnSpec`.
+- **Per-role toolset content** ([04](04-policy.md)) — the Bucket-C tools/hooks/events,
+  ported one at a time as each Haskell twin retires.
+- **Sidecar concurrency** — the three stimuli (outbound MCP, inbound watch, self-poll) as
+  tokio tasks in one process; `R: Send + Sync + 'static` at the dispatch boundary.
+- **`exomonad hook` mode wiring** — CC payload → `pre_tool_use`/`stop`/`session_start`.
 
-- `Git` / `GitHub` / `Tmux` / `Kv` cap signatures — adapt from exomonad-core services.
-- `Spawner` — **decided: per-op methods** (`spawn_worker`/`spawn_gemini`/`fork_wave`),
-  each fixing its `(role, agent_type, kind)`, sharing a private `birth(BirthCore)`
-  tail. Remaining mechanical bit: port the narrow per-op spec field lists from the
-  Haskell `WorkerSpec`/`SpawnSpec`.
-- Sidecar concurrency: the three stimuli (outbound MCP, inbound inbox-watch,
-  self-poll) as tokio tasks in one process.
-- `exomonad hook` mode wiring (CC payload → `pre_tool_use`/`stop`/`session_start`).
+## Open — known missing feature
 
-## Resolved (recorded so we don't relitigate)
+- **Idle / presence notifications.** Native teammates emit `idle_notification` on
+  turn-end; we don't. **Required for convergence** — a sub-TL waiting on a wave can't
+  detect completion without it (it would deadlock). The sidecar emits when its agent goes
+  quiet. Not yet built; a Wave-2 prerequisite, not an optional nicety.
 
-- **No phases / state machine** — dropped. The stop-gate is a live query
-  (`stop(ctx)` asks GitHub "open PR with unaddressed changes?"), not a persisted phase.
-- **Policy form:** `Tool` trait (impl per tool) + pure fns for hooks/events + a
-  `RoleDef` struct + hand-written `role_def(role)` table. No DSL, no macros, no HList.
-- **Message:** plain-text body + `kind` tag (`Chat`/`Event`/`Control`); `id`+`ts`
-  stamped at append.
-- **Addressee:** `Parent` + `InlineChild(name)` + `WorktreeChild(name)` (tree-edges
-  only; the two child variants share delivery, differ in spawn/papers/reap by
-  `ChildKind`); `Pane` is internal resolution only.
-- **Polling:** per-sidecar self-poll of own PR; parent owns sibling-merge.
+## Settled (ledger — don't relitigate)
 
-- Singletons: **none required.** Poller decomposes to per-agent self-poll + parent
-  owns sibling-merge; mutex → FS lock; GC → lazy liveness; OTel → per-session. The
-  `.git`-dir root is an *optional* distinguished node, not needed.
-- Parent pointer: a **path to the parent's ingestion inbox** (not a name to resolve,
-  not the CC Teams inbox).
-- Inbox key: **pane**, not `(team, member)` — team-free, collision-proof for
-  co-located CC-spawned agents.
-- Identity: **assigned-at-birth papers** (immutable) for the tree; **pane** for the
-  universal key; `exo-scry` for root-bootstrap + CC-membership + probing.
-- No central server, no HList, no macros, IO escape hatch (not a sandbox).
+Each points to where the detail lives. Recorded so these don't get reopened.
 
-## Resolved by the adversarial review (7 angles, folded in)
+**Architecture & identity**
+- No central server, no singletons, no registry that drifts — per-node local action +
+  filesystem primitives. ([README](README.md))
+- Pane is the universal key (team-free, collision-proof for co-located agents); identity
+  is assigned-at-birth immutable papers; `exo-scry` for root-bootstrap + CC-membership.
+  ([01](01-identity.md))
+- Inboxes + inline-worker papers namespaced by `swarm-run-id` (isolates across tmux-server
+  restarts; pane-keying is stable within a run). ([01](01-identity.md)/[02](02-bus-and-sidecar.md))
+- Messaging is tree-edges-only (parent ↔ own children); routing is O(1) (parent pointer +
+  child ledger), no global scan, no sibling/cross-tree channel. ([02](02-bus-and-sidecar.md))
 
-- **Bus = build-not-validated.** What was validated is the CC *last-hop*, not a
-  durable bus. Implement it properly: O_APPEND jsonl (<PIPE_BUF, atomic, no lock),
-  `flock` only for compaction (no stale-lock deadlock), persisted ulid cursor (no
-  count-snapshot → no restart message-loss), inotify (no poll). Current
-  `inbox.rs`/`inbox_watcher.rs` are jank to replace.
-- **Polling stays decentralized, with discipline:** every 3 min, only while an open
-  PR exists; ~15-min review-timeout nudge resetting per Copilot round; sibling-merge
-  owned by the parent. Sparse load → no polling singleton (reuses `github_poller`).
-- **Child tracking = parent-local append-only birth ledger** (`children.jsonl`);
-  status never written back, computed live. (Replaces the dropped `TLPhase` map.)
-- **Reuse over rewrite** (tmux injection, CC delivery, exomonad-core services).
-- **Type system fully used:** `Persona`/`WorldEvent`/`AgentName` enums + validated
-  newtypes, `TypedTool` wrapper, no `pub` fields, illegal states unrepresentable.
-- **Honest port scope:** ~4.5k LOC of dense domain logic, not "hundreds."
-- **Build-plan fixes:** pre-scaffold all deps (Cargo.toml), gate Wave 3 on
-  signature-freeze, route `Bus`/`Spawner` leaves to higher-capability + test harnesses.
+**The bus**
+- A jsonl file: append + read-from-cursor + `notify`-watch. No queue abstraction, no
+  `exo-mailbox` crate. ([02](02-bus-and-sidecar.md))
+- Line invariantly ≤ PIPE_BUF (no spill); cursor is a byte-offset advanced via temp+rename;
+  at-least-once, dedup is the sink's job; no fsync (survives crash, not power-loss; no
+  message-id — ordering is append order). ([02](02-bus-and-sidecar.md))
+- Bulk content = a sender-written file referenced by path, never inlined. `MessageBody`
+  ≤ 4 KiB, `Summary` ≤ 256 B. ([02](02-bus-and-sidecar.md)/[03](03-capabilities.md))
 
-## Still genuinely open (need a test, not a decision)
+**Types & caps**
+- Generic-over-caps, no `dyn Caps` god-trait; demand-driven cap set. ([03](03-capabilities.md))
+- `NodeKind { Root, Tl, Dev, Worker }` is the one identity enum; `agent_type` derives;
+  `AgentType` is delivery-routing only. ([03](03-capabilities.md))
+- Per-op spawn fixes `(role, agent_type, kind)` → illegal combos unnameable. ([03](03-capabilities.md))
+- `Message` (policy) vs `IngestionEntry` (wire): runtime stamps `from`/`ts`/`v` →
+  spoofing structurally impossible. Validated newtypes (serde via `try_from`). Per-cap
+  error enums `#[from]` `CapError` (source chain preserved). ([03](03-capabilities.md))
+- Teardown is two steps: process (pane-kill, graceful self-kill or forceful) + worktree
+  reclamation (parent-side at convergence). ([03](03-capabilities.md)/[04](04-policy.md))
+- Time is not a capability — `Utc::now()` in the runtime. No `MessageId`. No `Clock` cap.
 
-- **tmux-paste into a *CC* conversation** — the gemini-paste path is proven & reused,
-  but pasting into an un-teamed *Claude* pane (the no-team fallback) is untested.
-- **CC multi-team / which inbox InboxPoller watches** (Wave-0 spike).
-- **`send_message` delivered *mid-tool-call*** — `teams-mcp.send_message` round-trips
-  when the recipient is idle (proven); does CC handle a `<teammate-message>` that
-  arrives while the recipient is mid-tool-call (queue & deliver after, or drop)?
-  Deferred edge case — test later.
+**Policy**
+- No phases / state machine — the stop-gate is a live GitHub query. ([04](04-policy.md))
+- Tool = a type (`Args` + generic `run` + hand-written `Tool<R>` adapter, no macros); a
+  role is a list of tool types + 3 hook fns. ([04](04-policy.md))
+- Child tracking = parent-local append-only `children.jsonl` (`AgentSpawned`/`AgentStarted`
+  records), folded to state; status computed live; reap predicate `Spawned ∧ ¬Started ∧
+  ¬pane-alive`. ([04](04-policy.md))
+- Polling decentralized: per-sidecar self-poll of own PR (3 min, only while a PR is open,
+  tracked `AbortHandle`); parent owns sibling-merge. ([04](04-policy.md))
 
-## Parity gaps (vs native Claude Teams teammates)
+**Build**
+- Reuse over rewrite (tmux injection, CC delivery, exomonad-core git/gh/tmux services);
+  the cap impls must not block the executor (`tokio::process`/`spawn_blocking`). ([06](06-migration.md))
+- Honest port scope: ~4.5k LOC of dense domain logic. ([06](06-migration.md))
 
-Messaging + lifecycle reach parity. After triage, **one real gap remains:**
+## Dismissed (threat model / scope)
 
-- **Idle / presence notifications (the lone TODO).** Native teammates emit
-  `idle_notification` on turn-end. We don't yet — needed mainly for a **sub-TL
-  waiting on its children** (converge). Addable later (sidecar emits when its agent
-  goes quiet). *Known missing.*
-
-Triaged as non-gaps / out-of-scope:
-- **Receive** — *fine, not a ceiling.* The input box **is** the receive channel for
-  non-CC runtimes; a `[from: X, kind: Y]` header on the paste is all it takes for the
-  agent to read it as a message.
-- **Roster / UI** — the worker has a tmux window; that's its visibility.
-- **Peer-DM visibility** — N/A: **messaging *is* the tree structure** (parent ↔ own
-  children only; no out-of-band / cross-tree / sibling messaging), so the lead is
-  always on the path. Consequence: routing needs **no global worktree scan** — only
-  up (parent pointer) or down (child ledger), both O(1). This resolves the
-  architecture review's scan-latency / partial-papers-race concern.
-- **Plan-approval**, **task-workflow** — out of scope (messaging + lifecycle only).
-
-Where we *exceed* native: ground-truth liveness (vs stale `isActive`/phantoms),
-cross-runtime teaming, no drifting registry.
-
-## Round-2 review outcome (folded / dismissed)
-
-Folded (real gaps):
-- **Capability set widened** — `Fs`, `Process`, `Log` added to the cap set; `Spawner`
-  gains `reap(child)` (parent-side worktree removal); `pre_tool_use` is generic over
-  `Kv` (data-dependent guards). Copilot-review = the self-poll's job, not a cap. ([03](03-capabilities.md))
-- **Idle/presence is REQUIRED, not optional** — a parent waiting on a wave
-  *deadlocks* without it (convergence). Elevate from "lone TODO" to converge
-  prerequisite (sidecar emits a heartbeat/idle when its agent goes quiet).
-- **Logging** — drop OTel (broken OTLP export); log to a file at the **git
-  worktree-root** (the one dir not removed with worktrees), via the `Log` cap.
-- **Spawn atomicity** — write the birth-ledger entry before/atomically with pane
-  creation + a startup recovery scan, so a crash mid-spawn can't leave an invisible
-  ghost node. Orphaned subtrees / dead-parent black holes are accepted for now
-  (human-driven box — the human reaps panes); revisit if it bites.
-
-Dismissed (threat model / scope):
-- **Security (file injection, unauth shutdown, persona spoofing)** — non-issue:
-  same trust model as Claude Code's own file-based inboxes, single-user personal dev
-  box. No crypto/auth.
-- **Force-kill / emergency-stop, swarm dashboard / new UI mode** — out of scope;
-  human-driven (the human kills panes directly).
+- **Security** (file injection, unauth shutdown, persona spoofing) — non-issue: same trust
+  model as CC's own file-based inboxes, single-user dev box. No crypto/auth.
+- **Force-kill / dashboard / new UI mode** — out of scope; human-driven (the human kills
+  panes).
 - **Pane identity across reboot** — accepted limitation (reboot kills agents anyway).
+- **SQLite vs jsonl** — jsonl chosen for inspectability/`tail`-ability; the bus is a `>>`,
+  not a database.
+- **Plan-approval, task-workflow parity** — out of scope (messaging + lifecycle only).
 
-Flagged for decision:
-- **SQLite (WAL) vs hand-rolled jsonl bus** — a reviewer argues SQLite gives the same
-  serverless durability with far less bespoke systems code. Tension with the
-  chosen append-only-jsonl direction (simplicity/inspectability/`tail`-ability). Open.
+## Principles (process)
 
-## Deep-review pass — type-shape hygiene (folded)
-
-Two ultrathink passes hunting the unused-type / illegal-combo / parallel-enum /
-conflation class. Fixed in place across passes: the `id`-vs-byte-offset cursor
-contradiction ([02](02-bus-and-sidecar.md)/[03](03-capabilities.md)), the papers
-self-ID chicken-and-egg (told via launch flag, not guessed — [01](01-identity.md)),
-the `reap` conflation (split into process-teardown vs parent-side worktree-reclamation
-— [03](03-capabilities.md)/[04](04-policy.md)), and the "event log" mislabel
-(→ "record log"). The type-shape findings, all now **folded**:
-
-- **`NodeRef` cut** (unused; its fields didn't even match the one job it could do —
-  missing `kind` for teardown, carrying `agent_type` the sender never needs since the
-  *recipient* picks its own last-hop). The parent's child-handle is just the folded
-  `AgentSpawned` record. A future probe/`list_agents` surface can add a purpose-built
-  node-view *then* — no speculative floating type now. ([03](03-capabilities.md))
-- **`SpawnSpec { role, agent_type, kind }` → per-op narrow specs.** The unified struct
-  admitted illegal combos (`(Inline, Tl, Claude)`) and was a *regression* vs the
-  ported Haskell, where `SpawnSpec` is task-content-only and the triple is fixed by
-  which core you call. Now: `spawn_worker`/`spawn_gemini`/`fork_wave` each fix their
-  own `(role, agent_type, kind)`; the spec carries only task content; a shared private
-  `birth(BirthCore)` is the common tail. Illegal combos are *unnameable*. ([03](03-capabilities.md))
-- **`EventType` cut — duplicated `WorldEvent`.** Two enums with identical variant
-  lists (`PrReview`/`SiblingMerged`/`CiStatus`/`ReviewTimeout`), one as the message
-  tag, one as the handler input — guaranteed to drift. Single source of truth:
-  `WorldEvent` (04) is the typed enum; `MessageKind::Event` is a bare tag and the
-  event detail rides the plain-text body (parsed into `WorldEvent` at the handler),
-  preserving the plain-text-body / CC-last-hop principle. ([03](03-capabilities.md)/[04](04-policy.md))
-- **`MessageBody` defined** — was referenced by `Message.text` but absent from the
-  newtype block (same gap `SyntheticName` had). Now a validated newtype.
-
-Still-open minor flags (low stakes; decide at impl):
-
-- **`AgentSpawned` record — derivable fields resolve by a *rule*, not uniformly.**
-  Two of `{ child, kind, pane, path, inbox }` are recomputable, but for *different*
-  reasons, so they go opposite ways:
-  - **`path` → drop.** Its derivation (`parent.path ++ child`) is **scheme-stable**
-    (tree composition never evolves) and the child's identity has a **canonical home
-    elsewhere** (the child's own papers). Re-storing it in the parent's record only
-    creates a second home that can disagree.
-  - **`inbox` → keep (store).** Its derivation (`pane + run-id`) is **scheme-coupled**:
-    deriving it couples every reader to the inbox-path layout, and under a
-    mixed-version swarm (which the `v` field anticipates) a reader on a *new* layout
-    computes the *wrong* path for an *old* child. Stored, it's a birth-time snapshot —
-    self-describing, `tail`-able, correct-per-child across layout evolution — the same
-    reasoning that stores `parent_inbox` in papers.
-
-  **Rule: store a derivable field iff its derivation is scheme-coupled *or* it has no
-  canonical home in the reader's reach; otherwise derive.** Minimal record →
-  `{ child, kind, pane, inbox }`.
-- **`Role` ↔ `ChildKind` correlate** (`Worker`⟺`Inline`; `Tl`/`Dev`⟺`Worktree`). Both
-  are parent-written (papers / record), never free user fields, so no construction
-  hazard — but don't ever re-introduce a free `kind` field beside `role`. (Note: `kind`
-  is a property of the *spawn relationship*, recorded in the parent's ledger — not in
-  the child's own papers, which is already correct.)
-
-## Type-system idiom assessment
-
-Does the design make good expressive use of the type system? **Largely yes** — and
-the gaps are now closed or are conscious boundary tradeoffs, not oversights.
-
-**Strong (keep):**
-- **Generic-over-caps, no `dyn Caps`** — per-tool bounds (`fn file_pr<C: Git + GitHub>`)
-  make least-privilege a *compiler-checked* property. The best type-system use here.
-- **`Addressee` encodes the tree topology** — `Parent`/`InlineChild`/`WorktreeChild`
-  makes sibling/cross-tree messaging *unrepresentable*; the constraint is in the type,
-  not a runtime check.
-- **`Persona` (anti-spoof), per-op spawn (illegal triples unnameable), `WorldEvent`
-  single-source, validated newtypes** (`PaneId %N`, `NodePath` non-empty, …).
-- **Errors-as-data** — `ScryError` is the bar: every failure a distinct inspectable
-  variant, `#[from]` source-chaining, no stringly soup. The new caps' `Result<_>`
-  error types are TBD — **specify them to the `ScryError` standard** (per-cap or a
-  shared `CapError`), not `anyhow`.
-
-**Principled *non*-use of the type system (correct call):**
-- **Phases/typestate dropped.** rust.md says "express state transitions in types," but
-  agent lifecycle is driven by *external* events (Copilot review, CI) not knowable at
-  compile time. Typestate would fight reality; "the state lives in the world, observe
-  it" is the right model. A deliberate, defensible *omission*, not a gap.
-
-**Conscious boundary tradeoffs (name them, don't fix):**
-- **Event payload is text-on-bus, parsed to `WorldEvent` at the handler** — chosen for
-  the plain-text body / CC-last-hop. The parse is the boundary (parse-don't-validate
-  *at* the edge), but an unparseable `kind=event` body is representable — handle it.
-- **`HookDecision::Modify(serde_json::Value)` + MCP arg-erasure + `dyn Tool<R>`** — the
-  inherently-dynamic MCP/JSON edge and Rust's lack of existentials over varying bounds.
-  Erase *arguments*, never *caps*; the `TypedTool` wrapper confines it. Correct.
-
-**`role` + `agent_type` correlation — RESOLVED: collapsed to `NodeKind`.** They were
-two independent fields though only ~4 pairs are legal (Root→Claude, Tl→Claude,
-Dev→Gemini, Worker→Gemini). The per-op-spawn fix had already closed the *construction*
-hazard (the spawn op is the only writer and fixes legal pairs), so this collapse is
-*representational* — self-documenting, `(Root, Gemini)`/`(Worker, Claude)` unnameable.
-`enum NodeKind { Root, Tl, Dev, Worker }` is now the single stored identity enum;
-`role` (the `role_def` key) is the variant, `agent_type` derives via `NodeKind::
-agent_type()`. **`AgentType` survives only as a delivery-routing concern** (the
-last-hop's Claude/Gemini/Shoal switch), fed by `node_kind.agent_type()` for tree
-nodes. The Shoal worry dissolved on inspection: **Shoal is a companion/external-rmcp
-participant, not a per-op spawn archetype**, so it never needed a free `agent_type`
-on a tree node — it lives in the delivery `AgentType` only. ([01](01-identity.md)/[03](03-capabilities.md)/[04](04-policy.md))
-
-## Full review vs the goal (expressive sidecar · clean tool modules · lightweight role specs · one binary)
-
-Reviewed end-to-end against the stated goal. **Sidecar (facet 1)** and **one binary
-(facet 4)** are strong and settled. The thin part was the **tool/role layer** (facets
-2–3, the goal's heart) — now pinned:
-
-- **Tool shape — DECIDED: a type per tool + a hand-written `Tool<R>` adapter, no
-  macros** ([04](04-policy.md)). The free-fn sketch hid an object-safety wall:
-  `dyn Tool<R>` needs a non-generic method while `run` is generic over its caps, and
-  Rust has no blanket impl across that — so each tool carries a ~6-line mechanical
-  adapter. Chosen over a `tool!` macro (would keep the no-macros rule) and over
-  free-fn+closures (would push schema/closure noise *into* the role table, hurting the
-  "lightweight role specs" goal). A role is a clean list of tool types + 3 hook fns.
-- **Schema derives from `Args`** (`#[derive(JsonSchema)]`) — single source; the author
-  writes only `Args` + `run`.
-- **Module layout pinned** ([05](05-crates-and-binary.md)) — one cap-trait/file, one
-  tool/file, `hooks.rs`/`events.rs`/`roles.rs`; `Runtime`'s cap impls one-per-file.
-- **Caps seam ⇒ tools are unit-testable with mock caps, zero IO** — named as a
-  first-class payoff (every tool ships mock-cap tests); the WASM guest couldn't.
-- **Cap error types: hold to the `ScryError` bar** (distinct inspectable variants,
-  `#[from]` chaining), not `anyhow`. Still TBD in signatures.
-- **Idle/presence reaffirmed as a Wave-2 prerequisite** (a parent can't detect wave
-  convergence without it) — not a post-hoc nicety.
-
-## Behavioral review (metacog round 2 — crash-consistency / async / AOF)
-
-After the type trio (jonhoo/dtolnay/niko) hardened the *types*, three authorities who've
-*built* this class of system reviewed *runtime behavior* (aphyr / Alice Ryhl / antirez).
-Two design bugs, three impl hazards, one simplification — all folded:
-
-- **Cursor must be temp+rename, not "tiny ⇒ atomic"** (aphyr). A small in-place
-  overwrite is not crash-atomic → a garbage offset → silent skip/data-loss. The one
-  real loss window; fixed in [02](02-bus-and-sidecar.md).
-- **An inbox line is invariantly ≤ PIPE_BUF** (aphyr). `O_APPEND` atomicity only holds
-  to PIPE_BUF, but `MessageBody` allows 1 MiB → medium bodies corrupt the log under
-  concurrent append. Spill threshold tied to the *line* size (PIPE_BUF), not the body
-  cap; once it holds, torn lines can't occur. [02](02-bus-and-sidecar.md).
-- **`MessageId` dropped** (aphyr + antirez converged). Ordering = append order (free);
-  dedup is the *sink's* job (a sidecar dedup record has the cursor's crash window), and
-  the id was even dropped at the CC hop — vestigial. Removed from the contract +
-  `Clock::new_id`. At-least-once duplicates are benign (agent re-reads one line).
-- **Cap impls must not block the executor** (Ryhl) — the adapted `std::process`
-  services must become `tokio::process`/`spawn_blocking`. The plan's biggest async
-  footgun; written into every Runtime-TL leaf ([06](06-migration.md)).
-- **inotify via the async reactor**, not blocking reads (Ryhl) — Bus-TL B3.
-- **Self-poll needs a tracked `AbortHandle`** (Ryhl) — abort on PR-close, dedup on
-  re-`file_pr`; a bare `tokio::spawn` leaks. Node-TL N3.
-- **Ghost-spawn reap = `Spawned ∧ ¬Started ∧ ¬pane-alive`** (aphyr) — check pane
-  liveness, don't reap a slow boot. [04](04-policy.md).
-- **Durability stated: no fsync, no fsync-policy knob** (aphyr + antirez) — survives
-  crash/`kill -9` (bytes in page cache), not power-loss (which kills the swarm anyway).
-
-Validated as correct (recorded so we don't relitigate): deferring compaction (antirez —
-the most bug-prone part of Redis AOF; run-id namespacing also bounds per-run growth);
-JSON over binary for `tail`-ability; single-task cursor needs no lock (Ryhl); at-least-once
-makes the `select!` loop cancellation-tolerant; tail recovery mirrors AOF `aof-load-truncated`.
-
-**Honest weighting of this round (it drifted).** Real yield was two findings — the
-PIPE_BUF/`MessageBody` contradiction and the executor-blocking hazard. The rest is
-competent-but-generic systems checklist about *Wave-1 code that doesn't exist yet*
-(temp+rename, manage your task, async reactor), useful as leaf-spec notes but not
-insight that needed summoning a persona. **And one confirmation was wrong:** antirez
-"confirmed `Clock`-as-trait earns its place (mock time)" — but the call graph shows
-**no policy consumer reads time** (`ts` is runtime-stamped), so `Clock` was an unused
-cap and is now **cut**. Lesson: a metacog persona produces plausible idiom-flavored
-*rationalizations*; its confirmations must be checked against the actual call graph,
-not accepted at face value. Generalized: the cap set was coverage-driven; it should be
-**demand-driven** — `Tmux`/`Fs`/`Process`/`Log` are provisional until a tool needs them.
-
-## Simplicity audit (epicycle sweep)
-
-Ran a skeptical pass for unnecessary machinery after the prune rounds. Most prior
-epicycles were already cut (Clock, MessageId, the 1 MiB body cap, the coverage-driven cap
-set) — **but the sweep plus a design question found one more structural one: the bus
-spill subsystem (cut, below).** What the sweep found, and the verdicts:
-
-- **Per-cap error enums: keep — they earn it.** 5 of 8 (`Bus`/`Fs`/`Process`/`Spawn`/`Kv`)
-  carry genuinely cap-specific variants; the source chain is preserved via each enum's
-  `Io(#[from])`. Not the boilerplate it looked like. (`Git`/`GitHub`/`Tmux` are identical
-  *for now* — Wave-1 differentiates them, or they share; low-stakes.)
-- **`WorkerSpec`/`GeminiSpec`/`ForkSpec` identical today** — *intentional* stubs for the
-  Wave-3 divergence (the Haskell `WorkerSpec` has ~16 fields; the others differ). Keep
-  separate (the per-op decision); if Wave-3 *doesn't* diverge them, collapse then.
-- **The real epicycle, cut: the bus spill subsystem.** The side-file/pointer-line/
-  reconstruction machinery (option B) existed to carry oversized bodies. Replaced by
-  **option A**: the bus carries only small (`≤ PIPE_BUF`) atomic lines, `MessageBody` is
-  capped at **4 KiB** (a message is ~a paragraph), and bulk content is a **sender-written
-  file referenced by path** — the sender writes it *first* (so it exists before the
-  reference is delivered; no read-races-write), the receiver reads it with its file
-  tools. No spill, no pointer lines, no attachment type — the bus stays dumb. (Driven by
-  the question "who writes the temp file?" — answer: the sender, before the send.)
-- **Fixed:** `SpawnError.child` `Option<String>` → `Option<AgentName>` (last stringly slip).
-- **Carried forward (not new):** provisional caps `Tmux`/`Fs`/`Process`/`Log` earn-or-cut
-  in Wave-3; `InboxPath` stays a plain newtype (the run-id/pane → path *scheme* is the
-  runtime's job, not a contract constructor).
-
-With the spill cut, the contract + bus are at their floor for what Wave-1 needs.
-
-## Review-process note
-
-Adversarial reviewers must get a **viewpoint/category only** ("systems-level review
-from a security / types / rust-idioms lens — read the code, report findings"), never
-pre-baked conclusions/concerns — leading prompts produce confirmation bias + scope
-creep. Independent discovery is the whole value.
-
-## Conflation/complection pass (decisions)
-
-- **`dyn Caps` cut** — policy is generic over the caps it needs (per-tool bounds,
-  compiler-enforced least-privilege); no god-trait. ([03](03-capabilities.md))
-- **"Event" disambiguated** — `MessageKind::Event` = world events (messages); the
-  lifecycle log holds **records** (`AgentSpawned`/`AgentStarted`).
-- **exo-scry resolvers + `ActiveTeamSignal`: KEEP all** (possible future portability),
-  but **mark** the ones the swarm model doesn't use (transcript / session-uuid / the
-  trait) as unused-with-rationale in the code — don't delete.
-- **Inline-vs-worktree child disambiguated** — not one monolithic "child." A
-  `ChildKind { Inline, Worktree }` rides the birth record and the `InlineChild` /
-  `WorktreeChild` address variants: **shared** delivery (name → pane → inbox),
-  **distinct** spawn, papers location ([01](01-identity.md)), and reap. Messaging
-  stays uniform (both have a pane → pane-keyed inbox); the split lives only where
-  behavior actually diverges. (Not called "isolation" — it's a *kind*.)
-- **Pane-as-inbox-key complection dissolved** — the worry was a fresh swarm reusing a
-  pane `%N` and colliding with a dead swarm's leftover `pane-N.jsonl` across a tmux
-  **server** restart. Fix: **namespace inboxes (and inline-worker papers) by
-  `swarm-run-id`** (`~/.claude/exo/inboxes/{run-id}/…`). Pane-keying is rock-solid
-  *within* a run (ids are monotonic for a server's life); run-ids isolate *across*
-  runs. Pane stays the key; run-id removes the only cross-restart hazard. ([02](02-bus-and-sidecar.md))
+- **Prefer well-understood primitives** over bespoke machinery — stdlib + a mature crate
+  (`notify`, `serde_json`, `octocrab`) before hand-rolling. When a piece starts to look
+  like a subsystem, check whether it's one line of stdlib or one dep first. Don't fear
+  complexity; do avoid reinventing it.
+- **Demand-driven, not coverage-driven** — add a type/cap/field when a consumer needs it,
+  not because it might be useful. (This guards against the unused-type class.)
+- **Adversarial review = viewpoint only** — give a reviewer a category/lens, never a
+  pre-baked conclusion; verify its findings against the actual code, not at face value.

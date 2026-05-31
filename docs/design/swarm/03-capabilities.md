@@ -35,17 +35,13 @@ impl NodeKind {
 }
 ```
 
-Make-illegal-states-unrepresentable is a first-class goal here (the type-elegance
-review flagged the original stringly-typed draft): `Persona`/`AgentName` and the
-typed `WorldEvent` (04) replace raw `String`s so a tool can't spoof a persona or
-fabricate an event, and the compiler enforces it. **`NodeKind` collapses the
+Make-illegal-states-unrepresentable is a first-class goal here: `Persona`/`AgentName`
+and the typed `WorldEvent` (04) replace raw `String`s so a tool can't spoof a persona
+or fabricate an event, and the compiler enforces it. **`NodeKind` collapses the
 correlated `(role, agent_type)` pair into one enum** — only the four real archetypes
 are representable, `agent_type` derives, and `(Root, Gemini)` / `(Worker, Claude)`
-become unnameable (closing the representational gap the idiom review flagged; the
-*construction* hazard was already closed by per-op spawn specs). (`NodeRef` was cut
-as an unused type — a future probe/`list_agents` surface can introduce a
-purpose-built node-view then; the parent's child-handle is just the folded
-`AgentSpawned` record.)
+are unnameable. The parent's handle on a child is the folded `AgentSpawned` record
+(see [04](04-policy.md)), not a standalone type.
 
 ## Message — plain text + a kind tag
 
@@ -130,8 +126,7 @@ tail branches only on `kind`; the per-op methods are the single place each tripl
 named. They back the `InlineChild` / `WorktreeChild` address variants: **shared**
 delivery, **distinct** spawn / papers / teardown. See [05](05-crates-and-binary.md).
 
-**Teardown is two independent steps, not one `reap`** (a conflation the review
-caught):
+**Teardown is two independent steps, not one `reap`:**
 - **Process teardown** — the pane (agent + sidecar) dies. *Graceful*: a
   `Control(Shutdown)` message → the child **self-kills its own pane** (it knows
   `$TMUX_PANE`; see [04](04-policy.md)). *Forceful*: the parent `tmux kill-pane`s a
@@ -153,15 +148,14 @@ The concrete **runtime type `R`** implements the individual cap traits it provid
 **Demand-driven, not coverage-driven:** a trait belongs in `exo-caps` only when a
 *policy* tool/hook is generic over it. Confirmed by a consumer: `Git`, `GitHub`, `Bus`,
 `Spawner`, `Kv` (hook allowlists). **Provisional** (no policy consumer yet — keep the
-trait, but it's runtime-internal unless a Wave-3 tool proves it): `Tmux` (delivery /
-pane creation are the *runtime's* job), `Fs`, `Process`, `Log`. (`Clock` was **cut** —
-`ts` is stamped by the runtime's Bus impl via `Utc::now()`; policy never reads time, so
-it was never a capability. See [07](07-open-questions.md).) A role's dispatch is built
-by **monomorphizing** its tools at `R`; the MCP edge erases *arguments* to JSON but
-**never erases the caps**. Shaping (decided — see [04](04-policy.md)): each tool is a
-**type** with a generic-over-caps `run` + a hand-written `Tool<R>` adapter (no macro);
-a role is a `Vec<Box<dyn Tool<R>>>` over the concrete `R`. The invariant is
-generic-over-caps, per-tool bounds, no `dyn Caps`.
+trait, but it's runtime-internal unless a Wave-3 tool needs it): `Tmux` (delivery /
+pane creation are the *runtime's* job), `Fs`, `Process`, `Log`. Time is **not** a
+capability — `ts` is stamped by the runtime's Bus impl via `Utc::now()`; policy never
+reads it. A role's dispatch is built by **monomorphizing** its tools at `R`; the MCP
+edge erases *arguments* to JSON but **never erases the caps**. Each tool is a **type**
+with a generic-over-caps `run` + a hand-written `Tool<R>` adapter (no macro — see
+[04](04-policy.md)); a role is a `Vec<Box<dyn Tool<R>>>` over the concrete `R`. The
+invariant is generic-over-caps, per-tool bounds, no `dyn Caps`.
 
 ## Still TBD
 
@@ -171,4 +165,4 @@ generic-over-caps, per-tool bounds, no `dyn Caps`.
   ported from the Haskell) + teardown method names (`reclaim_worktree` parent-side;
   force-`kill_pane`) — the per-op methods + two-step teardown are settled above.
 - Copilot-review is **not** a cap — it's the sidecar **self-poll**'s job (poll own
-  PR → `WorldEvent` → action), replacing the old blocking `wait_for_copilot_review`.
+  PR → `WorldEvent` → action).

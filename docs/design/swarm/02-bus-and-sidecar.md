@@ -1,41 +1,23 @@
 # The Bus & the Two-Loop Sidecar
 
-> **Status: settled** (message format + cursor details stubbed, see end).
+> **Status: settled.**
 
-## The Mailbox primitive — it's all *one* thing
+## It's a jsonl file. Don't build a queue.
 
-The append-only inbox, the atomic append, the byte-offset cursor, the inotify watch, the
-restart resume — these are **not** scattered concerns spread across "the Bus" and "the
-inbound loop." They are **one cohesive primitive: a file-backed, durable,
-multi-producer / single-consumer message queue.** One file per node. Build it as one
-well-defined module/crate (`exo-mailbox`), test it once in isolation; everything else is
-a thin adapter over it.
+The bus is **append a line to a file; read new lines from a saved offset.** That's the
+whole primitive — `OpenOptions::new().append()` + `write_all`, and a sibling `.cursor`
+holding a byte offset. There is **no `Mailbox` abstraction, no queue crate, no bespoke
+durable-log** — those would be over-engineering a `>>`. The two operations live where
+they're used: the **`Bus` impl** appends; the **inbound loop** reads-from-cursor. The
+only piece that isn't trivial stdlib is *async file watching* — use the **`notify`
+crate**, don't hand-roll inotify.
 
-```rust
-/// A durable file-MPSC queue — one file per node. Many producers append atomic lines;
-/// the single owning consumer reads from a persisted byte-offset cursor (inotify-woken)
-/// and commits after handling each line (at-least-once, restart-resumable). Knows
-/// nothing about agents / routing / envelopes — just durable opaque lines.
-struct Mailbox { /* inbox path + sibling `.cursor` */ }
-impl Mailbox {
-    fn append(&self, line: &[u8]) -> io::Result<()>;            // producer: atomic O_APPEND, ≤ PIPE_BUF
-    fn consume(&self) -> impl Stream<Item = (Offset, Vec<u8>)>; // consumer: from the cursor, inotify-driven
-    fn commit(&self, upto: Offset) -> io::Result<()>;          // advance the cursor (temp+rename)
-}
-```
+> **Principle: prefer well-understood primitives.** Reach for stdlib (`append`,
+> `temp+rename`) and a mature crate (`notify` for watching, `serde_json` per line) before
+> writing anything bespoke. Hand-roll only what no primitive covers — a durable-queue
+> abstraction would be over-engineering a `>>`.
 
-**Everything in *Cursor & restart* and *Implementation requirements* below is the
-Mailbox's internals** — they live in this one module, not smeared across the Bus and the
-loop. The two adapters are thin:
-- **`Bus::deliver`** = resolve [`Addressee`](03-capabilities.md) → wrap `Message` in an
-  `IngestionEntry` (stamp `from`/`ts`/`v`) → `mailbox.append`.
-- **inbound loop** = `mailbox.consume()` → route each entry by `kind` → `commit`.
-
-`exo-mailbox` depends on nothing exo-specific (just inotify + tokio + serde), so it's the
-one place the crash-consistency tests (concurrent append no-interleave, cursor restart,
-read-to-last-`\n`) are written and run.
-
-## The bus = per-node ingestion inboxes (Mailboxes)
+## The bus = per-node ingestion inboxes
 
 Each node has one **generic ingestion inbox**: an append-only file the sidecar
 owns. Senders drop a message there knowing nothing about the recipient's runtime.
@@ -112,8 +94,7 @@ of anything that concerns it (observability is inherent).
   birth ledger (the parent spawned it). O(1).
 
 So routing needs **no global worktree scan** — the parent pointer + child ledger
-are the whole table, both O(1), with no scan-latency or partial-papers race (the
-architecture review's concern, dissolved by the tree-only constraint).
+are the whole table, both O(1), with no scan-latency or partial-papers race.
 
 ## Ingestion entry format (settled)
 
@@ -171,12 +152,13 @@ restart.)
 `kind=control` (e.g. shutdown) is handled by the loop; `kind=chat` passes straight
 through. See [policy](04-policy.md).
 
-## Implementation requirements (fully realized — not the current jank)
+## Implementation requirements
 
 The current `rust/exo-scry/src/inbox.rs` (read-modify-write of a JSON array under a
 manual `O_EXCL` lock) and `exomonad-core/.../inbox_watcher.rs` (500 ms poll + a
-message-count snapshot) are **NOT** this design — they are the jank to be
-replaced. The bus must be built solid at the systems level:
+message-count snapshot) are **NOT** this design — they're what we replace. The
+replacement is **append + read-from-offset + `notify`-watch** (no bespoke queue); the
+notes below are cheap correctness constraints on that, not a subsystem:
 
 - **Every line is ≤ `PIPE_BUF`, and there is NO spill.** Atomicity of `O_APPEND` only
   holds up to `PIPE_BUF` (4 KiB on Linux); a larger write interleaves under concurrent
@@ -200,15 +182,15 @@ replaced. The bus must be built solid at the systems level:
   nothing to recover *to*. So **no fsync, and no fsync *policy* knob** (we don't need
   Redis's `everysec`/`always`/`no` trichotomy — plain OS-flush is correct here).
 - **Kernel `flock` only where a non-append op is unavoidable** (compaction), never
-  a manual lockfile — `flock` releases on process death, so no stale-lock deadlock
-  (the CRITICAL the concurrency review found).
+  a manual lockfile — `flock` releases on process death, so no stale-lock deadlock.
 - **Persisted cursor** = byte-offset (see *Cursor & restart*), advanced after a
   successful last hop via **temp+rename** (atomic replace — a "small" overwrite is
   *not* crash-atomic). **Never** a count-snapshot (which drops messages on restart).
 - **Schema-versioned** — every jsonl entry + papers file carries a `v` field, parsed
   tolerantly (serde defaults), so a mixed-version swarm (rolling `cargo install`)
   doesn't crash on an unknown field.
-- **inotify `IN_MODIFY`**, event-driven; on each wake re-read from the cursor
-  (absorbs coalesced events). **Never** a poll loop.
+- **File watching via the `notify` crate** (async, cross-backend), event-driven; on
+  each wake re-read from the cursor (absorbs coalesced events). **Never** a poll loop,
+  and **don't hand-roll inotify** — `notify` is the well-understood primitive.
 - **Reuse, don't rewrite:** the tested tmux-injection (buffer pattern) and
   CC-inbox delivery from exomonad-core are the last-hop mechanisms — adapt them.

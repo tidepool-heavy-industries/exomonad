@@ -6,11 +6,9 @@
 
 ```
 exo-scry      — identity resolution from live OS state (EXISTS, validated)
-exo-mailbox   — the durable file-MPSC queue primitive (append/consume/commit)
-   ↑    ↑       no exo-specific deps; the one systems-heavy piece, tested in isolation
 exo-caps      — capability traits + domain newtypes (the seam)        [stub: 03]
    ↑    ↑
-exo-policy  exo-runtime   — policy depends on caps; runtime depends on caps + exo-mailbox
+exo-policy  exo-runtime   — policy depends on caps; runtime depends on caps
    ↑    ↑                    policy MAY depend on runtime (IO escape hatch), but
    │    │                    caps is the preferred path — not a hard wall.
   exomonad (bin)          — links all; wires policy → runtime, serves rmcp,
@@ -20,10 +18,9 @@ exo-policy  exo-runtime   — policy depends on caps; runtime depends on caps + 
 | Crate | Holds | Status |
 |---|---|---|
 | `exo-scry` | pane/team/identity resolution | **exists** |
-| `exo-mailbox` | durable file-MPSC queue: atomic append / byte-offset cursor / inotify / restart resume. `Bus` impl + inbound loop are thin adapters over it. No exo-specific deps. | not started ([02](02-bus-and-sidecar.md)) |
 | `exo-caps` | capability traits, `Bus`, domain types | stub ([03](03-capabilities.md)) |
 | `exo-policy` | tools/roles/hooks/events (no phases) | partial ([04](04-policy.md)) |
-| `exo-runtime` | cap impls (git/gh/tmux/bus/spawner) over caps + exo-mailbox | not started |
+| `exo-runtime` | cap impls (git/gh/tmux/bus/spawner); the bus is jsonl append + `notify`-watch, no separate queue crate | not started |
 | `exomonad` (bin) | modes + DI + lifecycle | the target |
 
 `teams-mcp` (exists) is the prototype of the node's outbound half; it folds into
