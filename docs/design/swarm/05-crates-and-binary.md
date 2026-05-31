@@ -26,6 +26,28 @@ exo-policy  exo-runtime   — policy depends on caps; runtime depends on caps
 `teams-mcp` (exists) is the prototype of the node's outbound half; it folds into
 the binary's node mode as the design lands.
 
+## Module layout (one concern per file)
+
+Clean modules are a goal, not incidental — the swarm builds this in parallel leaves,
+so non-overlapping files matter:
+
+```
+exo-caps/src/     bus.rs  spawner.rs  git.rs  github.rs  tmux.rs  fs.rs
+                  process.rs  log.rs  clock.rs  kv.rs        — one cap trait per file
+                  types.rs                                   — domain newtypes + NodeKind/Persona/…
+exo-policy/src/   tools/{file_pr,merge_pr,spawn,messaging,tasks}.rs  — one tool (type+Args+adapter) per file
+                  hooks.rs   — pre_tool_use / stop / session_start (shared fns roles point at)
+                  events.rs  — on_world_event + WorldEvent
+                  roles.rs   — RoleDef + role_def(NodeKind) table (the lightweight specs)
+exo-runtime/src/  runtime.rs — the `Runtime` struct (holds EffectContext: agent identity)
+                  git.rs github.rs tmux.rs bus.rs spawner.rs …  — `impl <Cap> for Runtime`, one per file
+exomonad/src/     main.rs + mode handlers (init / mcp-stdio sidecar / hook / probe-team)
+```
+
+`Runtime` is one struct implementing ~10 cap traits, but each `impl` lives in its own
+file — modular by trait even though it's a single concrete type (the `R` policy
+monomorphizes against).
+
 ## One binary, several modes
 
 `exomonad <mode>` — not separate binaries:

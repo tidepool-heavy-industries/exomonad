@@ -152,10 +152,11 @@ async fn file_pr<C: Git + GitHub>(ctx: &C, args: FilePrArgs) -> Result<ToolOutpu
 The concrete **runtime type `R`** implements the individual cap traits it provides
 (`Git`, `GitHub`, `Tmux`, `Fs`, `Process`, `Log`, `Bus`, `Spawner`, `Clock`, `Kv` —
 `Fs`/`Process`/`Log` added per the caps-coverage review). A role's dispatch is built
-by **monomorphizing** its tools at `R`; the MCP edge erases *arguments* to JSON (the
-`TypedTool` wrapper) but **never erases the caps**. (Exact shaping — a `Tool<R>`
-trait object over the concrete `R`, or a per-role fn-table — is an impl detail; the
-invariant is generic-over-caps, per-tool bounds, no `dyn Caps`.)
+by **monomorphizing** its tools at `R`; the MCP edge erases *arguments* to JSON but
+**never erases the caps**. Shaping (decided — see [04](04-policy.md)): each tool is a
+**type** with a generic-over-caps `run` + a hand-written `Tool<R>` adapter (no macro);
+a role is a `Vec<Box<dyn Tool<R>>>` over the concrete `R`. The invariant is
+generic-over-caps, per-tool bounds, no `dyn Caps`.
 
 ## Still TBD
 

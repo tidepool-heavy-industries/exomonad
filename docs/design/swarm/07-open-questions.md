@@ -249,6 +249,30 @@ nodes. The Shoal worry dissolved on inspection: **Shoal is a companion/external-
 participant, not a per-op spawn archetype**, so it never needed a free `agent_type`
 on a tree node — it lives in the delivery `AgentType` only. ([01](01-identity.md)/[03](03-capabilities.md)/[04](04-policy.md))
 
+## Full review vs the goal (expressive sidecar · clean tool modules · lightweight role specs · one binary)
+
+Reviewed end-to-end against the stated goal. **Sidecar (facet 1)** and **one binary
+(facet 4)** are strong and settled. The thin part was the **tool/role layer** (facets
+2–3, the goal's heart) — now pinned:
+
+- **Tool shape — DECIDED: a type per tool + a hand-written `Tool<R>` adapter, no
+  macros** ([04](04-policy.md)). The free-fn sketch hid an object-safety wall:
+  `dyn Tool<R>` needs a non-generic method while `run` is generic over its caps, and
+  Rust has no blanket impl across that — so each tool carries a ~6-line mechanical
+  adapter. Chosen over a `tool!` macro (would keep the no-macros rule) and over
+  free-fn+closures (would push schema/closure noise *into* the role table, hurting the
+  "lightweight role specs" goal). A role is a clean list of tool types + 3 hook fns.
+- **Schema derives from `Args`** (`#[derive(JsonSchema)]`) — single source; the author
+  writes only `Args` + `run`.
+- **Module layout pinned** ([05](05-crates-and-binary.md)) — one cap-trait/file, one
+  tool/file, `hooks.rs`/`events.rs`/`roles.rs`; `Runtime`'s cap impls one-per-file.
+- **Caps seam ⇒ tools are unit-testable with mock caps, zero IO** — named as a
+  first-class payoff (every tool ships mock-cap tests); the WASM guest couldn't.
+- **Cap error types: hold to the `ScryError` bar** (distinct inspectable variants,
+  `#[from]` chaining), not `anyhow`. Still TBD in signatures.
+- **Idle/presence reaffirmed as a Wave-2 prerequisite** (a parent can't detect wave
+  convergence without it) — not a post-hoc nicety.
+
 ## Review-process note
 
 Adversarial reviewers must get a **viewpoint/category only** ("systems-level review

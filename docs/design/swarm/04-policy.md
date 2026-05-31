@@ -11,14 +11,29 @@ DSL. Everything else in the old guest was WASM-boundary tax that *deletes* — s
 
 ## How policy is defined — plain Rust, three forms
 
-1. **Tools = functions generic over the caps they need** (no `dyn Caps` — see [03](03-capabilities.md)):
+1. **Tools = a type per tool** — one module each (`tools/file_pr.rs`). The author
+   writes only `Args` (which *derives* its schema) and a generic-over-caps `run` (its
+   cap bounds *are* the least-privilege spec, compiler-checked, no `dyn Caps` — see
+   [03](03-capabilities.md)). A small hand-written `Tool<R>` adapter erases the JSON edge:
    ```rust
-   #[derive(Deserialize, JsonSchema)] struct FilePrArgs { /* … */ }
-   async fn file_pr<C: Git + GitHub>(ctx: &C, args: FilePrArgs) -> Result<ToolOutput>;
+   #[derive(Deserialize, JsonSchema)] struct FilePrArgs { /* … */ } // schema DERIVES from Args — single source
+   struct FilePr;
+   impl FilePr {
+       async fn run<C: Git + GitHub>(ctx: &C, args: FilePrArgs) -> Result<ToolOutput> { /* logic */ }
+   }
+   // mechanical adapter (~6 lines, NO macro — the locked rule). It monomorphizes `run`
+   // at the concrete runtime R and erases args↔JSON. Needed because `dyn Tool<R>` requires
+   // a NON-generic method while `run` is generic over its caps — Rust has no blanket impl
+   // across that gap. (The Haskell has an analogous per-tool `MCPTool` instance.)
+   impl<R: Git + GitHub> Tool<R> for FilePr {
+       fn name(&self) -> &str { "file_pr" }
+       fn schema(&self) -> Schema { schema_for!(FilePrArgs) }
+       async fn call(&self, ctx: &R, j: Value) -> Result<Value> { ok_json(Self::run(ctx, parse(j)?).await?) }
+   }
    ```
-   The per-tool bounds *are* the least-privilege spec, compiler-checked. Tool authors
-   never touch `serde_json::Value`: a `TypedTool { type Args; execute<C>(&C, Args) }`
-   wrapper handles the JSON edge; dispatch is monomorphized at the concrete runtime `R`.
+   The caps are generic in `run`, so the seam makes tools **unit-testable with zero IO**:
+   `impl Git for MockGit` and `run` executes against the mock. Every tool ships with
+   mock-cap tests — the payoff the WASM guest couldn't have.
 2. **Hooks & events = functions generic over the caps they need** (no `dyn Caps`):
    ```rust
    enum HookDecision { Allow, Deny { reason: String }, Modify(serde_json::Value) }
@@ -41,12 +56,21 @@ DSL. Everything else in the old guest was WASM-boundary tax that *deletes* — s
        stop:         fn(&R) -> StopDecision,
        on_event:     fn(&R, &WorldEvent) -> EventAction,
    }
-   fn role_def<R: Runtime>(kind: NodeKind) -> RoleDef<R> { match kind { /* … */ } }
+   fn role_def<R: Runtime>(kind: NodeKind) -> RoleDef<R> {
+       match kind {
+           NodeKind::Dev => RoleDef {
+               tools: vec![b(FilePr), b(NotifyParent), b(SendMessage)], // a clean list of tool types
+               pre_tool_use: dev_guard, stop: dev_stop, on_event: dev_events,
+           },
+           /* Root / Tl / Worker … */
+       }
+   }
    ```
 
 `RoleDef` literals *read* like declarative config but are plain, greppable,
-unit-testable Rust. (A `Role` trait with methods is the alternative; the
-struct-of-fn-pointers is more table-like — current lean.) The only infra dep is
+unit-testable Rust — a role is a **list of tool types + three shared hook fns**
+(hooks compose by pointing several roles at the same fn). (A `Role` trait with methods
+is the alternative; the struct-of-fn-pointers is more table-like — chosen.) The only infra dep is
 `async-trait` (or boxed futures) for the object-safe async `Tool::call`. Policy is
 transport-agnostic; the sidecar adapts `Tool` to rmcp.
 
