@@ -7,10 +7,14 @@
 
 ## Open — needs a test (empirical)
 
-- **CC multi-team membership** → the Wave-0 spike (Leaf S0, [06](06-migration.md)). Can
-  one CC session be in two teams at once, and which inbox does InboxPoller watch? Sets
-  the CC last-hop wiring (solo-team-per-session vs. join-spawner's-team); the
-  generic-ingestion layer is robust to either, so this doesn't touch the architecture.
+- **Hand-written member registration** (residual of the resolved Wave-0 spike — minor,
+  Wave-2 wiring-time, not blocking). The spike's architectural question is **settled** (see
+  ledger: solo-team-per-session). `exo-scry`'s live-validated findings already answer the
+  core: a CC session **leads exactly one team — a second `TeamCreate` errors** — and members
+  are keyed by `tmuxPaneId` in the team's `members[]`. The one detail to confirm when the CC
+  last-hop (N2a) is wired: whether writing a `members[]` entry *by hand* (rather than via the
+  Agent-tool spawn) is enough for InboxPoller to deliver to that teammate, or whether the
+  spawn flow registers something more. Robust either way — it only picks the registration call.
 - **tmux-paste into a *CC* conversation** — the gemini-paste path is proven; pasting into
   an un-teamed *Claude* pane (the no-team fallback) is untested.
 - **`send_message` mid-tool-call** — round-trips when the recipient is idle; unverified
@@ -62,6 +66,11 @@ Each points to where the detail lives. Recorded so these don't get reopened.
   restarts; pane-keying is stable within a run). ([01](01-identity.md)/[02](02-bus-and-sidecar.md))
 - Messaging is tree-edges-only (parent ↔ own children); routing is O(1) (parent pointer +
   child ledger), no global scan, no sibling/cross-tree channel. ([02](02-bus-and-sidecar.md))
+- **CC last-hop = solo-team-per-session** (each node leads its own 1-member team as a pure
+  push channel). Resolved at Wave 0 from `exo-scry`'s live-validated **one-team-per-leader**
+  finding — a CC session leads exactly one team (a second `TeamCreate` errors) and holds the
+  `tasks/{team}` inotify watch only for the team it *leads*; a joined member watches none.
+  No fresh CC-internals spike needed. ([01](01-identity.md))
 
 **The bus**
 - A jsonl file: append + read-from-cursor + `notify`-watch. No queue abstraction, no

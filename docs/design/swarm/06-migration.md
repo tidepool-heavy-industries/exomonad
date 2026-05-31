@@ -108,6 +108,14 @@ dark) → **solo-team-per-session** (each node leads its own 1-member team as a 
 push channel). Record the choice in [07](07-open-questions.md). *Either way the
 generic-ingestion layer is unaffected — this only sets the CC last-hop wiring.*
 
+**Spike outcome (recorded, not freshly spawned):** the central question — can a CC session
+belong to several teams, and which inbox does its InboxPoller watch — was already answered by
+`exo-scry`'s live-validated findings: a session **leads exactly one team (a second `TeamCreate`
+errors)** and holds the `tasks/{team}` inotify watch only for that led team; a joined member
+watches none. The decision is therefore **solo-team-per-session** (see [07](07-open-questions.md)),
+with only one minor registration detail (hand-written `members[]` vs. the spawn flow) left for
+Wave-2 wiring-time. No delicate CC-internals Gemini spike was needed.
+
 **Converge:** skeleton compiles (`cargo check`); decision recorded.
 
 ---
