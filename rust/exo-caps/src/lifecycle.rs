@@ -8,8 +8,7 @@
 //! genuinely recorded: `Spawned` (parent logs the intent) then `Started` (child checks
 //! in). See docs 04/07.
 
-use crate::spawner::ChildKind;
-use crate::types::{AgentName, InboxPath, PaneId};
+use crate::types::{AgentName, ChildKind, InboxPath, PaneId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

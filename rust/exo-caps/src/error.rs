@@ -30,4 +30,14 @@ pub enum CapError {
     },
 }
 
+impl CapError {
+    /// Construct an `Invalid` — a domain newtype's constructor rejecting bad input.
+    pub fn invalid(what: &'static str, detail: impl Into<String>) -> Self {
+        CapError::Invalid {
+            what,
+            detail: detail.into(),
+        }
+    }
+}
+
 pub type CapResult<T> = Result<T, CapError>;

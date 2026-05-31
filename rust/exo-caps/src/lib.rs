@@ -28,11 +28,11 @@ pub mod kv;
 
 pub use error::{CapError, CapResult};
 pub use types::{
-    AgentName, AgentType, Branch, ControlKind, InboxPath, Message, MessageBody, MessageId,
-    MessageKind, NodeKind, NodePath, PaneId, Persona, SyntheticName,
+    AgentName, AgentType, Branch, ChildKind, ControlKind, InboxPath, Message, MessageBody,
+    MessageId, MessageKind, NodeKind, NodePath, PaneId, Persona, SyntheticName,
 };
 pub use bus::{Addressee, Bus};
-pub use spawner::{ChildKind, ForkSpec, GeminiSpec, Spawner, WorkerSpec};
+pub use spawner::{ForkSpec, GeminiSpec, Spawner, WorkerSpec};
 pub use lifecycle::{fold_children, Child, ChildLifecycle, ChildRecord};
 pub use git::Git;
 pub use github::GitHub;

@@ -10,13 +10,6 @@ use crate::error::{CapError, CapResult};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-fn invalid(what: &'static str, detail: impl Into<String>) -> CapError {
-    CapError::Invalid {
-        what,
-        detail: detail.into(),
-    }
-}
-
 // ── identity newtypes ────────────────────────────────────────────────────────
 
 /// Tree address; `name()` = last segment, `parent()` = prefix. A **list**, not a
@@ -28,13 +21,13 @@ pub struct NodePath(Vec<String>);
 impl NodePath {
     pub fn new(segments: Vec<String>) -> CapResult<Self> {
         if segments.is_empty() {
-            return Err(invalid("NodePath", "must have at least one segment"));
+            return Err(CapError::invalid("NodePath", "must have at least one segment"));
         }
         if let Some(bad) = segments
             .iter()
             .find(|s| s.is_empty() || s.contains('/') || s.contains('\\'))
         {
-            return Err(invalid(
+            return Err(CapError::invalid(
                 "NodePath",
                 format!("segment empty or contains a path separator: {bad:?}"),
             ));
@@ -87,7 +80,7 @@ impl Branch {
             || s.ends_with(".lock")
             || s.chars().any(bad_char)
         {
-            return Err(invalid("Branch", format!("not a valid git ref name: {s:?}")));
+            return Err(CapError::invalid("Branch", format!("not a valid git ref name: {s:?}")));
         }
         Ok(Branch(s))
     }
@@ -132,7 +125,7 @@ pub struct PaneId(String);
 impl PaneId {
     pub fn new(s: String) -> CapResult<Self> {
         if !s.starts_with('%') || s.len() < 2 || !s[1..].bytes().all(|b| b.is_ascii_digit()) {
-            return Err(invalid("PaneId", format!("not a %N pane id: {s:?}")));
+            return Err(CapError::invalid("PaneId", format!("not a %N pane id: {s:?}")));
         }
         Ok(PaneId(s))
     }
@@ -170,7 +163,7 @@ pub struct AgentName(String);
 impl AgentName {
     pub fn new(s: String) -> CapResult<Self> {
         if s.is_empty() || s.contains('/') || s.contains('\\') {
-            return Err(invalid(
+            return Err(CapError::invalid(
                 "AgentName",
                 format!("empty or contains a path separator: {s:?}"),
             ));
@@ -197,7 +190,7 @@ pub struct SyntheticName(String);
 impl SyntheticName {
     pub fn new(s: String) -> CapResult<Self> {
         if s.is_empty() {
-            return Err(invalid("SyntheticName", "must be non-empty"));
+            return Err(CapError::invalid("SyntheticName", "must be non-empty"));
         }
         Ok(SyntheticName(s))
     }
@@ -222,7 +215,7 @@ pub struct MessageId(String);
 impl MessageId {
     pub fn new(s: String) -> CapResult<Self> {
         if s.is_empty() {
-            return Err(invalid("MessageId", "must be non-empty"));
+            return Err(CapError::invalid("MessageId", "must be non-empty"));
         }
         Ok(MessageId(s))
     }
@@ -249,7 +242,7 @@ impl MessageBody {
 
     pub fn new(s: String) -> CapResult<Self> {
         if s.len() > Self::MAX_LEN {
-            return Err(invalid(
+            return Err(CapError::invalid(
                 "MessageBody",
                 format!("{} bytes exceeds {} max", s.len(), Self::MAX_LEN),
             ));
@@ -258,7 +251,7 @@ impl MessageBody {
             .chars()
             .find(|&c| c.is_control() && c != '\t' && c != '\n' && c != '\r')
         {
-            return Err(invalid(
+            return Err(CapError::invalid(
                 "MessageBody",
                 format!("contains control char {:?}", c),
             ));
@@ -319,6 +312,17 @@ pub enum AgentType {
     Claude,
     Gemini,
     Shoal,
+}
+
+/// How a child relates to its parent's worktree. **Set by the spawn op, never a free
+/// caller field** — drives papers-location + teardown. Used by the [`Spawner`](crate::Spawner)
+/// and recorded in [`ChildRecord`](crate::ChildRecord). `Standalone` (own fresh repo) is
+/// a `Worktree` flavor; revisit if needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChildKind {
+    Inline,
+    Worktree,
 }
 
 // ── messaging vocabulary ─────────────────────────────────────────────────────

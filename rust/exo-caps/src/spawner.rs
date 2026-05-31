@@ -7,17 +7,9 @@
 use crate::error::CapResult;
 use crate::types::AgentName;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 
-/// How a child relates to its parent's worktree. **Set by the spawn op, never a free
-/// caller field** — drives papers-location + teardown. `Standalone` (own fresh repo) is
-/// a `Worktree` flavor; revisit if needed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ChildKind {
-    Inline,
-    Worktree,
-}
+// `ChildKind` lives in `types` — it's a shared domain enum (used here and by
+// `lifecycle::ChildRecord`), not specific to the `Spawner` trait.
 
 // Task-content specs — the ONLY thing the caller supplies; `(role, agent_type, kind)`
 // are fixed by which method is called. Field lists port field-for-field from the
