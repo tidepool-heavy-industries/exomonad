@@ -21,6 +21,13 @@
   of dense domain logic (`Spawn.hs` ~637, `MergePR.hs` ~364 — retries/guards/
   heuristics; roles/hooks/events ~2k). Budget accordingly; aim for best-practice,
   strongly-typed Rust, executed by a massively-parallel swarm.
+- **Granularity tracks complexity, not file count.** A Gemini gets exactly one job it
+  can hold in one head: adapt-a-service, or one-function-one-invariant. A *complex*
+  piece — systems-level races, several invariants at once, retry/guard heuristics — is
+  **never handed to a single Gemini**. It becomes a **sub-TL** (a Claude compression
+  boundary) that writes the test harness and splits the work into one-invariant-each
+  Gemini tasks, then converges them. This is why `Bus` and `Spawner` get their own
+  sub-TLs below, not one leaf each.
 
 ## Assets that already exist
 
@@ -44,16 +51,30 @@ Root TL (Claude, human-facing) ── scaffolds the frozen contract, converges e
 │                        + spawn 1 Gemini for the CC multi-team spike (S0)
 │
 ├─ then fork TWO Claude sub-TLs, CONCURRENT (different crates; both fork the caps-freeze commit):
-│  ├─ Runtime TL (Claude) ─ exo-runtime cap impls       → 5 Gemini leaves (one per cap file)
-│  └─ Policy  TL (Claude) ─ exo-policy tools/hooks/roles → 6 Gemini leaves (one per tool file)
-│        Policy unit-tests against MOCK caps, so it does NOT wait on Runtime —
-│        the caps seam decouples the two timelines. THIS is the parallelism payoff.
+│  │
+│  ├─ Runtime TL (Claude) ─ exo-runtime cap impls
+│  │   ├─ Gemini: Git + GitHub                  (adapt services — simple)
+│  │   ├─ Gemini: Tmux                          (adapt TmuxIpc — simple)
+│  │   ├─ Gemini: Fs+Process+Log+Kv+Clock       (trivial batch)
+│  │   ├─ Bus TL (Claude) ─── COMPLEX → its own level:        4 small Geminis
+│  │   │     append-primitive · cursor · inotify-watch · Addressee→path resolve
+│  │   └─ Spawner TL (Claude) ─ COMPLEX → its own level:      3 small Geminis
+│  │         branch-gen+worktree-add · birth-core · teardown
+│  │
+│  └─ Policy TL (Claude) ─ exo-policy  (unit-tests vs MOCK caps → does NOT wait on Runtime)
+│      ├─ Gemini: messaging   ├─ Gemini: tasks        ├─ Gemini: spawn tools (3 per-op)
+│      ├─ Gemini: file_pr     ├─ Gemini: merge_pr ←complex, own leaf
+│      ├─ Gemini: hooks       └─ Gemini: events + roles
 │
-├─ Node TL (Claude) ─ Wave 2, after Runtime converges ─ assembles the sidecar binary
-│                                                        → 4 Gemini leaves (the loops + hook mode)
+├─ Node TL (Claude) ─ Wave 2, after Runtime converges ─ the sidecar binary
+│     outbound · inbound{dispatch | loop} ←split · self-poll · hook-mode
 │
 └─ Root ─ Wave 4 cutover: wire node mode behind a flag, migrate roles, delete WASM/Bucket-A, drop serve
 ```
+
+Four levels deep on the complex paths (Root → Runtime TL → Bus TL → Gemini) — each
+Claude layer is a compression boundary that keeps any one context window reasoning
+about ≤~4 children, never the whole subtree.
 
 Within a sub-TL, leaves are conflict-free by construction — the pinned module layout
 ([05](05-crates-and-binary.md)) is one cap-trait/file and one tool/file, so N Geminis
@@ -95,27 +116,51 @@ generic-ingestion layer is unaffected — this only sets the CC last-hop wiring.
 ## Wave 1 — Runtime caps (`exo-runtime`) — **Runtime TL**
 
 **Runtime TL (Claude).** Scaffold: the `Runtime` struct stub (holds `EffectContext`:
-agent identity) + per-cap module stubs (`impl <Cap> for Runtime`, one file each). Fork
-(one leaf per cap file, no overlap):
+agent identity) + per-cap module stubs (`impl <Cap> for Runtime`, one file each). The
+**simple** caps are direct Gemini leaves; the **complex** caps (`Bus`, `Spawner`) are
+sub-TLs (below) — that's the extra level of granularity.
 
-| Leaf | Cap(s) | Source / notes |
+**Simple-cap leaves** (adapt-a-service, one head each):
+
+| Leaf | Cap(s) | Source |
 |---|---|---|
-| R1 | `Git` + `GitHub` | adapt `GitService`/`GitHubService` from exomonad-core |
-| R2 | `Tmux` | adapt `TmuxIpc`; includes the tmux-paste delivery last-hop |
-| R3 | `Fs` + `Process` + `Log` + `Kv` + `Clock` | mostly trivial (file kv, system clock, std fs/process, file-at-worktree-root log) — batch into one leaf |
-| R4 | **`Bus`** | ingestion-inbox atomic O_APPEND + byte-offset cursor + inotify + `Addressee`→run-id-keyed `InboxPath` resolve. **test-harness-first.** *The core new piece.* |
-| R5 | **`Spawner`** | per-op `birth(BirthCore)`: worktree-add (Worktree kind) → pane → write child papers (`parent_inbox`) → launch node mode → append `AgentSpawned`; + `reclaim_worktree`/`kill_pane`. **test-harness-first.** |
+| R1 | `Git` + `GitHub` | adapt `GitService`/`GitHubService` |
+| R2 | `Tmux` | adapt `TmuxIpc`; the tmux-paste last-hop |
+| R3 | `Fs` + `Process` + `Log` + `Kv` + `Clock` | trivial (std fs/process, file kv, system clock, file-at-worktree-root log) |
 
-**R1/R2/R3 reuse** exomonad-core services — adapt, don't rewrite. **R4 (`Bus`) and R5
-(`Spawner`) are systems-heavy** (atomic append, flock-for-compaction, cursor restart,
-inotify; worktree+pane+papers spawn races) — Gemini reliably fumbles this class, so the
-Runtime TL **writes the failing tests as part of the scaffold** (atomic-append
-concurrency, cursor-restart resume, spawn→papers→`AgentStarted`) and the Gemini
-implements to green; escalate to a higher-capability agent if it stalls.
+### Bus TL (Claude) — the append-only bus, decomposed
 
-**Converge:** Runtime TL wires the leaves into one `Runtime` impl'ing every cap;
-integration test that `Bus::deliver(Parent, …)` appends to a papers-pointed inbox and a
-restart resumes from the byte-offset cursor.
+Systems-heavy; **never one Gemini.** The Bus TL writes the failing harness first
+(N-appender no-interleave, cursor-restart resume, torn-trailing-line), then forks one
+invariant each:
+
+| Leaf | One job | Test it must pass |
+|---|---|---|
+| B1 | atomic append primitive — single `O_APPEND` ≤PIPE_BUF; oversized → temp+rename sidefile *then* pointer line | N concurrent appenders, zero interleaving |
+| B2 | byte-offset cursor — persist sibling `.cursor`, advance-after-delivery (atomic), read-to-last-`\n`, missing→EOF | restart resumes; torn trailing line re-read once |
+| B3 | inotify watch — `IN_MODIFY` → re-read from cursor (absorbs coalesced events) | an append wakes the watcher |
+| B4 | `Addressee`→`InboxPath` resolve — `Parent` (papers `parent_inbox`), `InlineChild`/`WorktreeChild` (ledger) → run-id-keyed path | resolves all three variants (reuse `exo-scry`) |
+
+**Converge:** wire into `impl Bus { deliver = resolve(B4) + append(B1) }` + the read
+side (B2+B3); harness green; PR up to Runtime TL.
+
+### Spawner TL (Claude) — birth & teardown, decomposed
+
+Spawn races are the other fumble-class. Harness first (spawn→papers-exist→`AgentStarted`
+appears; worktree add/remove), then:
+
+| Leaf | One job | Test |
+|---|---|---|
+| S1 | safe branch-gen + `git worktree add` (Worktree kind only) — generate `Branch` from `NodePath` with no `.`-corruption | branch round-trips; worktree created |
+| S2 | `birth(BirthCore)` core — append `AgentSpawned` **first** → `tmux new-pane` → write child papers (`node.json` incl. `parent_inbox`) → launch `exomonad mcp-stdio` | papers exist; record precedes pane |
+| S3 | teardown — `reclaim_worktree` (`git worktree remove`) + force `kill_pane` | worktree gone; pane killed |
+
+**Converge:** wire the three per-op birth paths over the core (worker = inline, no
+worktree; gemini/fork = worktree via S1); PR up.
+
+**Runtime TL converge:** wires R1–R3 + the two sub-TL PRs into one `Runtime` impl'ing
+every cap; integration test that `Bus::deliver(Parent, …)` appends to a papers-pointed
+inbox and a restart resumes from the cursor.
 
 ---
 
@@ -128,12 +173,17 @@ into the node. Scaffold: the node bootstrap (self-ID via `exo-scry` → build
 | Leaf | Piece |
 |---|---|
 | N1 | **Outbound** — rmcp adapter exposing `exo-policy` `Tool`s; `send_message`/`notify_parent` via `Bus`. (Refactor teams-mcp outbound: write the *ingestion* inbox, not CC Teams directly.) |
-| N2 | **Inbound loop** — inotify-watch own ingestion inbox + cursor; route each entry to the agent (Teams write / tmux-paste per `agent_type`); invoke `on_world_event` on `kind=event`, handle `kind=control`. |
-| N3 | **Self-poll** — periodic own-PR/CI poll → `WorldEvent` → `on_world_event` → `InjectMessage`/`NotifyParent`. (Per-agent realization of the old central poller.) |
+| N2a | **Last-hop dispatch** — route one entry by `node_kind.agent_type()`: CC-in-team → Teams inbox write (via `exo-scry` membership); else → tmux-paste. (Reuse exomonad-core delivery.) |
+| N2b | **Inbound loop** — drive the Bus read side (B2+B3, already built) → per new entry match `kind`: `Chat`→dispatch(N2a), `Event`→parse `WorldEvent`→`on_world_event`→act, `Control`→shutdown self-kill. |
+| N3 | **Self-poll** — periodic own-PR/CI poll → `WorldEvent` → `on_world_event` → `InjectMessage`/`NotifyParent`. (Per-agent realization of the old central poller; reuse `github_poller` timeout logic.) |
 | N4 | **`exomonad hook` mode** — CC payload → `exo-policy` `pre_tool_use`/`stop`/`session_start` → verdict. No server. |
 
-**Converge:** N assembles the three stimuli as tokio tasks in one process; e2e —
-spawn a node, round-trip a message parent↔child, fire a synthetic event.
+The inbound loop is split (N2a dispatch | N2b loop) and is **lighter than it looks** —
+the hard parts (cursor, inotify, atomic read) are the Bus's, already built and tested in
+Wave 1; N2b only *consumes* them.
+
+**Converge:** N assembles the stimuli as tokio tasks in one process; e2e — spawn a
+node, round-trip a message parent↔child, fire a synthetic event.
 
 ---
 
@@ -147,19 +197,22 @@ signature-freeze gate is load-bearing: if caps churn, the concurrent leaves brea
 review's #2 risk). One leaf per tool *file* (the type-per-tool layout — [04](04-policy.md)),
 each retiring its Haskell twin as its Rust lands:
 
-| Leaf | File(s) | Content |
-|---|---|---|
-| P1 | `tools/messaging.rs` | `notify_parent`, `send_message` (port/confirm from teams-mcp) over `Bus` |
-| P2 | `tools/tasks.rs` | `task_list`/`task_get`/`task_update` |
-| P3 | `tools/spawn.rs` | the three **per-op** spawn tools (`spawn_worker`/`spawn_gemini`/`fork_wave`) over `Spawner` — each fixes its `(role, agent_type, kind)` |
-| P4 | `tools/file_pr.rs`, `tools/merge_pr.rs` | PR create/update + merge |
-| P5 | `hooks.rs` | `pre_tool_use` (guard/PII), `stop` (live PR gate), `session_start` |
-| P6 | `events.rs`, `roles.rs` | `WorldEvent` handlers + the `role_def(NodeKind)` table |
+| Leaf | File(s) | Content | Complexity |
+|---|---|---|---|
+| P1 | `tools/messaging.rs` | `notify_parent`, `send_message` over `Bus` (port from teams-mcp) | simple |
+| P2 | `tools/tasks.rs` | `task_list`/`task_get`/`task_update` | simple |
+| P3 | `tools/spawn.rs` | the three **per-op** spawn tools over `Spawner` — each fixes its `(role, agent_type, kind)`; thin wrappers | simple |
+| P4 | `tools/file_pr.rs` | PR create/update | simple |
+| P5 | `tools/merge_pr.rs` | merge — **complex** (rebase/retry/guard heuristics, `MergePR.hs` ~364 LOC); own leaf, strong spec, escalate or sub-split if the conflict path is gnarly | **complex** |
+| P6 | `hooks.rs` | `pre_tool_use` (guard/PII), `stop` (live PR gate), `session_start` — the `stop` gate is the involved one; sub-split if it grows | moderate |
+| P7 | `events.rs`, `roles.rs` | `WorldEvent` handlers + the `role_def(NodeKind)` table | simple |
 
 Each tool = a type (`Args` + generic-over-caps `run` + hand `Tool<R>` adapter) with
-**mock-cap unit tests** in the same PR. **Converge:** Policy TL wires
-`role_def(NodeKind)`; each ported tool's WASM twin is removed in the same PR (Bucket B
-drains here).
+**mock-cap unit tests** in the same PR. The complexity column applies the same rule: a
+*moderate/complex* leaf (P5, maybe P6) gets a sharper spec and is the first candidate to
+sub-split if it stalls; the simple ones are direct Geminis. **Converge:** Policy TL
+wires `role_def(NodeKind)`; each ported tool's WASM twin is removed in the same PR
+(Bucket B drains here).
 
 ---
 
