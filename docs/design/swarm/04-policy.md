@@ -128,7 +128,7 @@ and O(N), and over CC-team membership, which re-introduces the multi-team coupli
 
 Requesting shutdown is **not a special mechanism** — it's a
 `Control(Shutdown { grace_ms })` message **appended to the target's ingestion
-mailbox via the ordinary send path** (`Bus::deliver` / `send_message`), exactly
+inbox via the ordinary send path** (`Bus::deliver` / `send_message`), exactly
 like messaging any teammate. (Same as Claude Teams, where `shutdown_request` is
 just a `SendMessage` payload, not a separate tool.) Any `shutdown(member)` surface
 is mere sugar over that one append; the `kind` tag is what carries it.
@@ -147,9 +147,9 @@ The recipient's sidecar **inbound loop** dispatches on `kind=Control(Shutdown)` 
   child's PR). Process teardown (here) and worktree reclamation are separate steps
   with separate owners — see [03](03-capabilities.md).
 
-So non-cooperative runtimes get the clean teardown CC has for free, **reusing the
-mailbox + `kind` we already built** — and the phantom-member problem closes at the
-root, because the sidecar reliably reaps its own pane on the control message.
+So non-cooperative runtimes get the clean teardown CC has for free over the same
+ingestion inbox + `kind` tag — and the phantom-member problem closes at the root,
+because the sidecar reliably reaps its own pane on the control message.
 
 ## Content (filled in incrementally — not "design")
 

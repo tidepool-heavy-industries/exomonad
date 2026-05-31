@@ -23,7 +23,7 @@ already knows the child's identity (it assigned it); it just writes it down.
 (`agent_type` is *derived* from `NodeKind`, so it's not separately recorded — see
 [03](03-capabilities.md).)
 
-This is *not* the mutable registry we killed. The distinction is **mutable vs
+This is *not* a mutable registry. The distinction is **mutable vs
 immutable**, not written-vs-derived: birth facts never change after birth, so
 frozen-at-spawn is correct for them. (The `CLAUDE_CODE_SESSION_ID` bug was a value
 that *did* change being treated as fixed — the opposite case.)
