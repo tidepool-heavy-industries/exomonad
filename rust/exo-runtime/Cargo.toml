@@ -1,0 +1,28 @@
+[package]
+name = "exo-runtime"
+version = "0.1.0"
+edition = "2021"
+description = "IO implementations of the exo-caps capability traits — the runtime side of the seam."
+
+[lib]
+name = "exo_runtime"
+path = "src/lib.rs"
+
+[dependencies]
+exo-caps = { path = "../exo-caps" }
+exo-scry = { path = "../exo-scry" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tempfile = { workspace = true }
+
+# Pre-pinned for the Wave-1 cap impls, so parallel leaves never collide on Cargo.toml:
+#   octocrab → GitHub cap;  notify → Bus inbox watch;  nix → signals/fs in Spawner/Tmux teardown.
+octocrab = { workspace = true }
+notify = { workspace = true }
+nix = { workspace = true }
