@@ -16,7 +16,7 @@ pub enum SpawnError {
     #[error("spawn {op} failed for {child:?}: {detail}")]
     Failed {
         op: &'static str,
-        child: Option<String>,
+        child: Option<AgentName>,
         detail: String,
     },
     #[error(transparent)]

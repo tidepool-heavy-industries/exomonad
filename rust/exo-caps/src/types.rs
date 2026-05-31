@@ -210,11 +210,13 @@ impl TryFrom<String> for SyntheticName {
 pub struct MessageBody(String);
 
 impl MessageBody {
-    /// 64 KiB — sized for a *message*, not a document. A body that won't fit a single
-    /// `≤ PIPE_BUF` inbox line spills to a side file at the bus layer (the tmp-file
-    /// path); content larger than this cap is a design smell — reference a file / PR /
-    /// path instead of inlining bulk into a message.
-    pub const MAX_LEN: usize = 64 * 1024;
+    /// 4 KiB — a message is ~a paragraph. The bus carries only small lines (no spill):
+    /// it asserts the serialized line ≤ `PIPE_BUF` at append, so the effective body max
+    /// is a touch under this once the envelope is added. **Bulk content is never inlined
+    /// in a message** — the sender writes a file (worktree `.exo/` or `/tmp`) and sends a
+    /// small message referencing the path; the receiver reads it with its file tools.
+    /// See doc 02.
+    pub const MAX_LEN: usize = 4 * 1024;
 
     pub fn new(s: String) -> CapResult<Self> {
         if s.len() > Self::MAX_LEN {

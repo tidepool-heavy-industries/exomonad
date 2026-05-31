@@ -319,6 +319,35 @@ cap and is now **cut**. Lesson: a metacog persona produces plausible idiom-flavo
 not accepted at face value. Generalized: the cap set was coverage-driven; it should be
 **demand-driven** — `Tmux`/`Fs`/`Process`/`Log` are provisional until a tool needs them.
 
+## Simplicity audit (epicycle sweep)
+
+Ran a skeptical pass for unnecessary machinery after the prune rounds. Most prior
+epicycles were already cut (Clock, MessageId, the 1 MiB body cap, the coverage-driven cap
+set) — **but the sweep plus a design question found one more structural one: the bus
+spill subsystem (cut, below).** What the sweep found, and the verdicts:
+
+- **Per-cap error enums: keep — they earn it.** 5 of 8 (`Bus`/`Fs`/`Process`/`Spawn`/`Kv`)
+  carry genuinely cap-specific variants; the source chain is preserved via each enum's
+  `Io(#[from])`. Not the boilerplate it looked like. (`Git`/`GitHub`/`Tmux` are identical
+  *for now* — Wave-1 differentiates them, or they share; low-stakes.)
+- **`WorkerSpec`/`GeminiSpec`/`ForkSpec` identical today** — *intentional* stubs for the
+  Wave-3 divergence (the Haskell `WorkerSpec` has ~16 fields; the others differ). Keep
+  separate (the per-op decision); if Wave-3 *doesn't* diverge them, collapse then.
+- **The real epicycle, cut: the bus spill subsystem.** The side-file/pointer-line/
+  reconstruction machinery (option B) existed to carry oversized bodies. Replaced by
+  **option A**: the bus carries only small (`≤ PIPE_BUF`) atomic lines, `MessageBody` is
+  capped at **4 KiB** (a message is ~a paragraph), and bulk content is a **sender-written
+  file referenced by path** — the sender writes it *first* (so it exists before the
+  reference is delivered; no read-races-write), the receiver reads it with its file
+  tools. No spill, no pointer lines, no attachment type — the bus stays dumb. (Driven by
+  the question "who writes the temp file?" — answer: the sender, before the send.)
+- **Fixed:** `SpawnError.child` `Option<String>` → `Option<AgentName>` (last stringly slip).
+- **Carried forward (not new):** provisional caps `Tmux`/`Fs`/`Process`/`Log` earn-or-cut
+  in Wave-3; `InboxPath` stays a plain newtype (the run-id/pane → path *scheme* is the
+  runtime's job, not a contract constructor).
+
+With the spill cut, the contract + bus are at their floor for what Wave-1 needs.
+
 ## Review-process note
 
 Adversarial reviewers must get a **viewpoint/category only** ("systems-level review

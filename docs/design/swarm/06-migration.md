@@ -113,20 +113,42 @@ generic-ingestion layer is unaffected — this only sets the CC last-hop wiring.
 
 ---
 
+## Wave 0.5 — `exo-mailbox` (Mailbox TL)
+
+**Mailbox TL (Claude).** The durable file-MPSC queue — the one systems-heavy primitive,
+in its own crate with **no exo-specific deps**, so it's built and tortured in isolation
+*before* Runtime's `Bus` (a thin adapter) and the Node's inbound loop both consume it.
+This is why it's its own sub-TL pulled ahead of Wave 1, not a leaf inside it. Harness
+first (the crash-consistency suite), then one invariant per Gemini:
+
+| Leaf | One job | Test it must pass |
+|---|---|---|
+| M1 | atomic append — single `O_APPEND`, assert serialized line ≤ PIPE_BUF (error if over; **no spill**) | N concurrent appenders, zero interleaving; an oversized line errors, never corrupts |
+| M2 | byte-offset cursor — persist sibling `.cursor`, advance via **temp+rename** (a small overwrite is NOT crash-atomic), read-to-last-`\n`, missing→EOF | restart resumes; a crash mid-cursor-write never yields a garbage offset |
+| M3 | inotify watch — `IN_MODIFY` → wake consumer, re-read from cursor (absorbs coalesced events). **Via the async reactor** (inotify `Stream`/`AsyncFd` or `notify`) — a blocking read stalls the executor | an append wakes the consumer; no executor block |
+
+**Converge:** `Mailbox { append, consume() -> Stream, commit }` — opaque lines, no exo
+types; the crash-consistency suite green. `Addressee`→path resolution and the
+`IngestionEntry` envelope are **not** here — they're the Runtime `Bus` adapter (R4),
+which wraps this. PR up to Root; gates Runtime's R4 and the Node inbound loop.
+
+---
+
 ## Wave 1 — Runtime caps (`exo-runtime`) — **Runtime TL**
 
 **Runtime TL (Claude).** Scaffold: the `Runtime` struct stub (holds `EffectContext`:
-agent identity) + per-cap module stubs (`impl <Cap> for Runtime`, one file each). The
-**simple** caps are direct Gemini leaves; the **complex** caps (`Bus`, `Spawner`) are
-sub-TLs (below) — that's the extra level of granularity.
+agent identity) + per-cap module stubs (`impl <Cap> for Runtime`, one file each). Most
+caps are direct Gemini leaves (adapt-a-service, or — for `Bus` — a thin wrapper over the
+already-built `exo-mailbox`); only `Spawner` (spawn races) stays a sub-TL.
 
-**Simple-cap leaves** (adapt-a-service, one head each):
+**Cap leaves** (one head each):
 
 | Leaf | Cap(s) | Source |
 |---|---|---|
 | R1 | `Git` + `GitHub` | adapt `GitService`/`GitHubService` |
 | R2 | `Tmux` | adapt `TmuxIpc`; the tmux-paste last-hop |
 | R3 | `Fs` + `Process` + `Log` + `Kv` | trivial (std fs/process, file kv, file-at-worktree-root log). `ts` is stamped by the Bus impl via `Utc::now()` — no `Clock` cap |
+| R4 | `Bus` | **thin adapter over `exo-mailbox`**: resolve `Addressee`→`InboxPath` (papers `parent_inbox` / child ledger → run-id-keyed path, reuse `exo-scry`), wrap `Message` in an `IngestionEntry` (stamp `from`/`ts`/`v`), `mailbox.append`. No queue internals here — those are `exo-mailbox`. |
 
 > **Async hazard (all of R1–R3): do NOT block the executor.** The services being
 > adapted use synchronous `std::process::Command`; calling `.output()` inside an
@@ -134,21 +156,8 @@ sub-TLs (below) — that's the extra level of granularity.
 > means **`tokio::process::Command`** (or wrap in `spawn_blocking`) — never a raw
 > sync call. This is the spec's biggest async footgun; front-load it in every leaf.
 
-### Bus TL (Claude) — the append-only bus, decomposed
-
-Systems-heavy; **never one Gemini.** The Bus TL writes the failing harness first
-(N-appender no-interleave, cursor-restart resume, torn-trailing-line), then forks one
-invariant each:
-
-| Leaf | One job | Test it must pass |
-|---|---|---|
-| B1 | atomic append primitive — single `O_APPEND` ≤PIPE_BUF; oversized → temp+rename sidefile *then* pointer line | N concurrent appenders, zero interleaving |
-| B2 | byte-offset cursor — persist sibling `.cursor`, advance-after-delivery via **temp+rename** (a small overwrite is NOT crash-atomic), read-to-last-`\n`, missing→EOF | restart resumes; a crash mid-cursor-write never yields a garbage offset |
-| B3 | inotify watch — `IN_MODIFY` → re-read from cursor (absorbs coalesced events). **Via the async reactor** (inotify `Stream`/`AsyncFd` or `notify`) — a blocking read in the async task stalls the executor | an append wakes the watcher; no executor block |
-| B4 | `Addressee`→`InboxPath` resolve — `Parent` (papers `parent_inbox`), `InlineChild`/`WorktreeChild` (ledger) → run-id-keyed path | resolves all three variants (reuse `exo-scry`) |
-
-**Converge:** wire into `impl Bus { deliver = resolve(B4) + append(B1) }` + the read
-side (B2+B3); harness green; PR up to Runtime TL.
+> **`Bus` (R4) is now thin** because the queue lives in `exo-mailbox`, built earlier as
+> its own sub-TL (see *Wave 0.5* below). R4 is just resolve + wrap + `mailbox.append`.
 
 ### Spawner TL (Claude) — birth & teardown, decomposed
 
@@ -164,9 +173,9 @@ appears; worktree add/remove), then:
 **Converge:** wire the three per-op birth paths over the core (worker = inline, no
 worktree; gemini/fork = worktree via S1); PR up.
 
-**Runtime TL converge:** wires R1–R3 + the two sub-TL PRs into one `Runtime` impl'ing
+**Runtime TL converge:** wires R1–R4 + the Spawner sub-TL PR into one `Runtime` impl'ing
 every cap; integration test that `Bus::deliver(Parent, …)` appends to a papers-pointed
-inbox and a restart resumes from the cursor.
+inbox (via `exo-mailbox`) and a restart resumes from the cursor.
 
 ---
 
@@ -237,11 +246,14 @@ wires `role_def(NodeKind)`; each ported tool's WASM twin is removed in the same 
 ## Dependency & parallelism summary
 
 - **Wave 0 first** — the caps signature-freeze is the gate everything forks from.
+- **`exo-mailbox` (Wave 0.5) early** — no exo deps, so it can build as soon as Wave 0's
+  workspace exists; it gates Runtime's `Bus` (R4) and the Node inbound loop, so pull it
+  ahead rather than blocking Runtime mid-wave. (Policy doesn't need it — mock caps.)
 - **Then Runtime TL ∥ Policy TL** — the two concurrent Claude sub-TLs. Policy needs
   only the cap *traits* (tests against mock caps), so it does **not** wait on Runtime
   impls. This is the core parallelism: two TLs, ~11 Gemini leaves in flight.
 - **Node (Wave 2) after Runtime** — it assembles real `Runtime` + `exo-policy` into the
-  sidecar; needs Runtime's impls and the W0 spike's CC-last-hop decision.
+  sidecar; needs Runtime's impls, `exo-mailbox`, and the W0 spike's CC-last-hop decision.
 - **Cutover (Wave 4) last.**
 - Within a sub-TL, leaves are conflict-free (one cap-trait/file, one tool/file) → full
   parallel fork.
@@ -249,7 +261,8 @@ wires `role_def(NodeKind)`; each ported tool's WASM twin is removed in the same 
 ## Gates (each wave's converge before the next forks)
 
 - W0: skeleton `cargo check`s; spike decision recorded.
-- W1: `Runtime` impls all cap traits + Bus integration test green.
+- W0.5: `exo-mailbox` crash-consistency suite green (append no-interleave, cursor restart).
+- W1: `Runtime` impls all cap traits + Bus integration test green (Bus over `exo-mailbox`).
 - W2: node e2e (message round-trip + synthetic event) green.
 - W3: each tool has parity with its WASM twin (Copilot-reviewed) before the twin is cut.
 - W4: full e2e on the new path; old path removed.

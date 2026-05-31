@@ -1010,6 +1010,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "exo-caps"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "exo-scry"
 version = "0.1.0"
 dependencies = [

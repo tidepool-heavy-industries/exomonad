@@ -2,7 +2,40 @@
 
 > **Status: settled** (message format + cursor details stubbed, see end).
 
-## The bus = per-node ingestion inboxes
+## The Mailbox primitive — it's all *one* thing
+
+The append-only inbox, the atomic append, the byte-offset cursor, the inotify watch, the
+restart resume — these are **not** scattered concerns spread across "the Bus" and "the
+inbound loop." They are **one cohesive primitive: a file-backed, durable,
+multi-producer / single-consumer message queue.** One file per node. Build it as one
+well-defined module/crate (`exo-mailbox`), test it once in isolation; everything else is
+a thin adapter over it.
+
+```rust
+/// A durable file-MPSC queue — one file per node. Many producers append atomic lines;
+/// the single owning consumer reads from a persisted byte-offset cursor (inotify-woken)
+/// and commits after handling each line (at-least-once, restart-resumable). Knows
+/// nothing about agents / routing / envelopes — just durable opaque lines.
+struct Mailbox { /* inbox path + sibling `.cursor` */ }
+impl Mailbox {
+    fn append(&self, line: &[u8]) -> io::Result<()>;            // producer: atomic O_APPEND, ≤ PIPE_BUF
+    fn consume(&self) -> impl Stream<Item = (Offset, Vec<u8>)>; // consumer: from the cursor, inotify-driven
+    fn commit(&self, upto: Offset) -> io::Result<()>;          // advance the cursor (temp+rename)
+}
+```
+
+**Everything in *Cursor & restart* and *Implementation requirements* below is the
+Mailbox's internals** — they live in this one module, not smeared across the Bus and the
+loop. The two adapters are thin:
+- **`Bus::deliver`** = resolve [`Addressee`](03-capabilities.md) → wrap `Message` in an
+  `IngestionEntry` (stamp `from`/`ts`/`v`) → `mailbox.append`.
+- **inbound loop** = `mailbox.consume()` → route each entry by `kind` → `commit`.
+
+`exo-mailbox` depends on nothing exo-specific (just inotify + tokio + serde), so it's the
+one place the crash-consistency tests (concurrent append no-interleave, cursor restart,
+read-to-last-`\n`) are written and run.
+
+## The bus = per-node ingestion inboxes (Mailboxes)
 
 Each node has one **generic ingestion inbox**: an append-only file the sidecar
 owns. Senders drop a message there knowing nothing about the recipient's runtime.
@@ -145,20 +178,21 @@ manual `O_EXCL` lock) and `exomonad-core/.../inbox_watcher.rs` (500 ms poll + a
 message-count snapshot) are **NOT** this design — they are the jank to be
 replaced. The bus must be built solid at the systems level:
 
-- **A line is *invariantly* ≤ `PIPE_BUF`.** Atomicity of `O_APPEND` only holds up to
-  `PIPE_BUF` (4 KiB on Linux); a larger write **interleaves under concurrent
-  appenders and corrupts the jsonl**. So the spill threshold is tied to the **line
-  size (PIPE_BUF)**: any entry whose serialized line would exceed PIPE_BUF spills its
-  body to a side file (written temp+rename **before** the small pointer line is
-  appended) and the line carries a pointer. `MessageBody` is itself capped at **64 KiB**
-  (message-sized, not a document — bulk content references a file/PR, it isn't inlined),
-  so the spill only ever covers the PIPE_BUF…64 KiB band; the common message is one
-  atomic line and never spills. With
-  this invariant every line is one atomic `write(2)` — no interleaving, no lock, and
-  no torn lines (a single atomic append is all-or-nothing, so "read to last `\n`" only
-  ever discards a *missing* final line, never a garbage one). Assumes a **local fs**
-  (`O_APPEND`≤PIPE_BUF isn't atomic on NFS; fine for a dev box). **Never**
-  read-modify-write the whole file.
+- **Every line is ≤ `PIPE_BUF`, and there is NO spill.** Atomicity of `O_APPEND` only
+  holds up to `PIPE_BUF` (4 KiB on Linux); a larger write interleaves under concurrent
+  appenders and corrupts the jsonl. So the bus only ever carries small lines:
+  `MessageBody` is capped at **4 KiB** and the bus **asserts the serialized line ≤
+  PIPE_BUF at append**, erroring if a (rare, escaping-inflated) line would overflow —
+  it never spills. **Bulk content is never put on the bus.** A sender with something
+  large writes a **file first** (in the worktree `.exo/` — durable, shared — or `/tmp`)
+  and sends a small message that *references the path*; the receiver reads it with its
+  own file tools (every agent has them). The file exists before the reference is
+  delivered, so there's no read-races-write window — and the bus stays dumb (no
+  side-file, no pointer line, no reconstruction; the spill subsystem is **deleted**).
+  Every line is thus one atomic `write(2)` — no interleaving, no lock, no torn lines
+  ("read to last `\n`" only ever discards a *missing* final line, never a garbage one).
+  Assumes a **local fs** (`O_APPEND`≤PIPE_BUF isn't atomic on NFS; fine for a dev box).
+  **Never** read-modify-write the whole file.
 - **Durability level (stated, not implied): no `fsync`.** A bus append survives an
   agent crash / `kill -9` (the bytes are in the kernel page cache the moment
   `write(2)` returns — process death doesn't lose them). It does **not** survive
