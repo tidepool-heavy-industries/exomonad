@@ -62,3 +62,28 @@
 - Identity: **assigned-at-birth papers** (immutable) for the tree; **pane** for the
   universal key; `exo-scry` for root-bootstrap + CC-membership + probing.
 - No central server, no HList, no macros, IO escape hatch (not a sandbox).
+
+## Resolved by the adversarial review (7 angles, folded in)
+
+- **Bus = build-not-validated.** What was validated is the CC *last-hop*, not a
+  durable bus. Implement it properly: O_APPEND jsonl (<PIPE_BUF, atomic, no lock),
+  `flock` only for compaction (no stale-lock deadlock), persisted ulid cursor (no
+  count-snapshot → no restart message-loss), inotify (no poll). Current
+  `inbox.rs`/`inbox_watcher.rs` are jank to replace.
+- **Polling stays decentralized, with discipline:** every 3 min, only while an open
+  PR exists; ~15-min review-timeout nudge resetting per Copilot round; sibling-merge
+  owned by the parent. Sparse load → no polling singleton (reuses `github_poller`).
+- **Child tracking = parent-local append-only birth ledger** (`children.jsonl`);
+  status never written back, computed live. (Replaces the dropped `TLPhase` map.)
+- **Reuse over rewrite** (tmux injection, CC delivery, exomonad-core services).
+- **Type system fully used:** `Persona`/`EventType`/`MemberName` enums + validated
+  newtypes, `TypedTool` wrapper, no `pub` fields, illegal states unrepresentable.
+- **Honest port scope:** ~4.5k LOC of dense domain logic, not "hundreds."
+- **Build-plan fixes:** pre-scaffold all deps (Cargo.toml), gate Wave 3 on
+  signature-freeze, route `Bus`/`Spawner` leaves to higher-capability + test harnesses.
+
+## Still genuinely open (need a test, not a decision)
+
+- **tmux-paste into a *CC* conversation** — the gemini-paste path is proven & reused,
+  but pasting into an un-teamed *Claude* pane (the no-team fallback) is untested.
+- **CC multi-team / which inbox InboxPoller watches** (Wave-0 spike).

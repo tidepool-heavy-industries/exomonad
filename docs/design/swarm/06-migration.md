@@ -13,6 +13,14 @@
   Gemini implements; Copilot reviews.
 - **The swarm drains Haskell as a side effect** — every ported tool retires its
   WASM twin (Bucket B); the boundary (Bucket A, ~37k LOC) deletes at the end.
+- **Reuse tested components, don't rewrite** — adapt exomonad-core's
+  `GitService`/`GitHubService`/`TmuxIpc`, the tmux-injection (works for Gemini
+  today), CC-inbox delivery, and the `github_poller` timeout logic. Greenfield only
+  the genuinely-new pieces (the append-only `Bus`, the inbound loop).
+- **Honest scope** — this is **not** a mechanical port. Real Bucket B+C is ~4.5k LOC
+  of dense domain logic (`Spawn.hs` ~637, `MergePR.hs` ~364 — retries/guards/
+  heuristics; roles/hooks/events ~2k). Budget accordingly; aim for best-practice,
+  strongly-typed Rust, executed by a massively-parallel swarm.
 
 ## Assets that already exist
 
@@ -43,7 +51,10 @@ Waves are sequential (deps); leaves within a wave are parallel (no shared files)
 `exo-caps` with the *full* domain newtypes + trait signatures from
 [03](03-capabilities.md)/[04](04-policy.md) (bodies `todo!()`), stub `exo-runtime`
 + `exo-policy` crates, workspace wiring, the `Caps` super-trait and `RoleDef`
-shape. This is the typed contract; all later leaves compile against it.
+shape. This is the typed contract; all later leaves compile against it. **Also
+pre-populate every anticipated dependency** in each crate's `Cargo.toml` (octocrab,
+inotify, ulid, nix, async-trait, schemars, tokio, …) so parallel leaves never
+collide on `Cargo.toml` (the review's top build risk).
 
 **Leaf S0 (Gemini) — the CC multi-team spike.** Empirically determine:
 - Can one CC session be in two teams at once (member of A + lead of B)?
@@ -77,6 +88,12 @@ plus per-cap module stubs. Fork (one leaf each, no file overlap):
 | R4 | `Spawner` | worktree + pane + write child papers (`parent_inbox`) + launch node mode |
 | R5 | `Kv` + `Clock` | trivial (file-backed kv; system clock) |
 
+**R1/R2/R5 reuse** exomonad-core services (`GitService`/`GitHubService`/`TmuxIpc`) —
+adapt, don't rewrite. **R3 (`Bus`) and R4 (`Spawner`) are systems-heavy** (atomic
+jsonl append, flock, ulid cursor, inotify; worktree+pane+papers spawn races) —
+assign to a higher-capability agent or ship them with **pre-written test
+harnesses**; Gemini reliably fumbles this class.
+
 **Converge:** R wires the leaves into `Runtime: Caps`; integration test that
 `Bus::deliver(Parent, …)` appends to a papers-pointed inbox.
 
@@ -102,7 +119,9 @@ spawn a node, round-trip a message parent↔child, fire a synthetic event.
 
 ## Wave 3 — Policy content (`exo-policy`)
 
-**Sub-TL P (Claude).** Parallel-able once `exo-caps` exists (after W0/W1). One leaf
+**Sub-TL P (Claude).** **Gated on `exo-caps` signature-freeze** — Wave 1 must first
+stub *all* `Caps` methods so the trait signatures stop changing; only then fork
+Wave 3, or trait churn breaks the concurrent leaves (the review's #2 risk). One leaf
 per tool/area, each retiring its Haskell twin as its Rust lands:
 
 | Leaf | Content |

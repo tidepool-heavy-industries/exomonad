@@ -21,6 +21,10 @@ DSL. Everything else in the old guest was WASM-boundary tax that *deletes* — s
            -> Result<serde_json::Value>;                   // Args erased to JSON at the edge
    }
    ```
+   Tool *authors* never touch `serde_json::Value`: they implement a strongly-typed
+   `TypedTool { type Args: DeserializeOwned; async fn execute(&self, &dyn Caps, Self::Args) }`,
+   and a blanket impl provides the object-safe `Tool` (deserialize → `execute`). The
+   JSON erasure is confined to the one inherent MCP-boundary seam.
 2. **Hooks & events = pure functions.**
    ```rust
    enum HookDecision { Allow, Deny { reason: String }, Modify(serde_json::Value) }
@@ -55,16 +59,37 @@ The one thing it backed, the **stop-gate**, becomes a live query: `stop(ctx)` as
 the `GitHub` cap "do I have an open PR with unaddressed `ChangesRequested`?" and
 returns `Block`/`Allow`. No persisted phase, consistent with observe-don't-store.
 
+**Child tracking** (the *other* thing the old `TLPhase` held — a `Map ChildHandle`)
+becomes a **parent-local birth ledger**, not a state machine: at spawn, the parent's
+sidecar appends the child (`{pane, path, inbox}`) to its own `children.jsonl`. The
+ledger is **append-only and immutable** — an entry is a *birth fact*, never
+modified; a child's status (alive / done / failed) is **never written back**, only
+computed live (pane-alive + PR checks). That's exactly what justifies jsonl here
+(same discipline as the bus): a retry is a *new* append, "current children" =
+live-filter at read, and dead entries are trimmed only by occasional compaction. If
+we stored mutable per-child status this would be the wrong format — we deliberately
+don't (observe-don't-store). "Who are my children" = read the ledger (authoritative
+— the parent recorded each birth, so there's **no orphan-before-papers gap** the
+live-scan would have); per-child liveness = a pane-alive check. Converge / can-I-exit is computed from the ledger +
+live pane/PR checks, not a phase. (Chosen over a live worktree scan, which is racy
+and O(N), and over CC-team membership, which re-introduces the multi-team coupling.)
+
 ## Where each runs
 
 - **Tools** — served over MCP by the sidecar (outbound loop). `tools = role_def(role).tools`.
 - **Hooks** — `exomonad hook` *mode* reads the CC hook payload, self-IDs, calls
   `pre_tool_use` / `stop` / `session_start`, emits the verdict. No central server.
 - **Events** — `on_world_event` is invoked from (a) the sidecar **inbound loop** on
-  a `kind=event` ingestion entry, and (b) the sidecar's **own PR self-poll** (the
-  per-agent realization of the old central poller; sibling-merge handled by the
-  parent, which knows its children). `InjectMessage` → append to own inbox;
-  `NotifyParent` → append to parent inbox.
+  a `kind=event` ingestion entry, and (b) the sidecar's **own PR self-poll**.
+  `InjectMessage` → append to own inbox; `NotifyParent` → append to parent inbox.
+
+  **Self-poll discipline** (bounds API load — no central poller needed): poll
+  **every 3 min, only while this agent has an open PR** (no PR → no polling, so a
+  swarm is *sparse*, not N×/min). A **~15 min review-timeout** nudges/notifies the
+  parent if no Copilot review arrived, and **resets on each round of Copilot
+  feedback**. Sibling-merge is handled by the **parent** (it has the child ledger),
+  not by each sibling polling. This adapts (reuses) the existing
+  `exomonad-core/.../github_poller.rs` timeout logic, per-sidecar.
 
 ## Content (filled in incrementally — not "design")
 

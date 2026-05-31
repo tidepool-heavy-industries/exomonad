@@ -102,3 +102,24 @@ message rather than dropping it. Mirrors CC's `tasks/.highwatermark`.
 (`on_world_event → InjectMessage | NotifyParent | NoAction`) before delivery;
 `kind=control` (e.g. shutdown) is handled by the loop; `kind=chat` passes straight
 through. See [policy](04-policy.md).
+
+## Implementation requirements (fully realized — not the current jank)
+
+The current `rust/exo-scry/src/inbox.rs` (read-modify-write of a JSON array under a
+manual `O_EXCL` lock) and `exomonad-core/.../inbox_watcher.rs` (500 ms poll + a
+message-count snapshot) are **NOT** this design — they are the jank to be
+replaced. The bus must be built solid at the systems level:
+
+- **Atomic append, no lock on the common path.** Each entry is one line written
+  with a single `O_APPEND` `write(2)` ≤ `PIPE_BUF` (4 KiB on Linux) → atomic, no
+  interleaving, no lock needed. Oversized bodies spill to a side file with a small
+  pointer line appended. **Never** read-modify-write the whole file.
+- **Kernel `flock` only where a non-append op is unavoidable** (compaction), never
+  a manual lockfile — `flock` releases on process death, so no stale-lock deadlock
+  (the CRITICAL the concurrency review found).
+- **Persisted cursor** = last-delivered ulid (above), advanced only after a
+  successful last hop. **Never** a count-snapshot (which drops messages on restart).
+- **inotify `IN_MODIFY`**, event-driven; on each wake re-read from the cursor
+  (absorbs coalesced events). **Never** a poll loop.
+- **Reuse, don't rewrite:** the tested tmux-injection (buffer pattern) and
+  CC-inbox delivery from exomonad-core are the last-hop mechanisms — adapt them.

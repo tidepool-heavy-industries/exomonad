@@ -14,28 +14,38 @@ it rarely want to.
 ## Domain newtypes
 
 ```rust
+// All newtypes VALIDATE AT CONSTRUCTION: private field + `fn new(..) -> Result<Self,_>`
+// (per .claude/rules/rust.md). Once constructed, always valid — no `pub` fields.
 struct NodePath(Vec<String>);   // tree address; AgentName = last segment; parent = prefix
 struct Branch(String);           // git branch, generated (decoupled from NodePath)
-struct PaneId(String);           // "%317"
-struct InboxPath(PathBuf);       // …/inbox/pane-317.jsonl
+struct PaneId(String);           // "%317" — validated %N form
+struct InboxPath(PathBuf);
+struct MemberName(String);       // non-empty, no path separators
 enum  Role      { Root, Tl, Dev, Worker }
 enum  AgentType { Claude, Gemini, Shoal }
-struct NodeRef  { path: NodePath, pane: PaneId, inbox: InboxPath, agent_type: AgentType } // spawn result
+enum  Persona   { Member(MemberName), Synthetic(SyntheticName) } // who a message is "from"
+enum  EventType { PrReview, SiblingMerged, CiStatus, ReviewTimeout } // not a raw String
+struct NodeRef  { path: NodePath, pane: PaneId, inbox: InboxPath, agent_type: AgentType }
 ```
+
+Make-illegal-states-unrepresentable is a first-class goal here (the type-elegance
+review flagged the original stringly-typed draft): `Persona`/`EventType`/
+`MemberName` replace raw `String`s so a tool can't spoof a persona or fabricate an
+event type, and the compiler enforces it.
 
 ## Message — plain text + a kind tag
 
 ```rust
 struct Message {
-    from:    String,        // sender persona: a member name, or synthetic ("github", "oracle")
-    text:    String,        // plain body — no rich structure
-    summary: String,        // short preview
-    kind:    MessageKind,   // lets the inbound loop route/transform without parsing text
+    from:    Persona,        // Member(name) or Synthetic(name) — not a raw String (no spoofing)
+    text:    MessageBody,    // plain body, validated newtype (length / control-char checks)
+    summary: String,         // short preview
+    kind:    MessageKind,    // lets the inbound loop route/transform without parsing text
 }
 enum MessageKind {
-    Chat,                       // peer/agent message
-    Event { event_type: String }, // world event (PR review, sibling merge, CI, …)
-    Control,                    // shutdown / lifecycle (exomonad-internal)
+    Chat,                          // peer/agent message
+    Event { event_type: EventType }, // typed world event — not a raw String
+    Control(ControlKind),          // shutdown / lifecycle (exomonad-internal)
 }
 // id + timestamp are stamped by the runtime at append (for the cursor) — not set by policy.
 ```
@@ -48,8 +58,8 @@ The body stays plain text; `kind` is the only structure, and it's exomonad-side
 
 ```rust
 enum Addressee {
-    Parent,            // my parent_inbox
-    Member(String),    // any teammate by name: real, synthetic (gemini worker), or a child
+    Parent,                // my parent_inbox
+    Member(MemberName),    // any teammate by name: real, synthetic (gemini worker), or a child
 }
 ```
 

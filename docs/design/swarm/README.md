@@ -44,6 +44,14 @@ is the bus; the process tree is the topology.
 - **No HList, no macros.** Plain `Tool` trait + a `Caps` super-trait + hand-written
   per-role tables.
 - **One shared `exomonad` binary** for everything (modes, not separate bins).
+- **Reuse tested components, don't rewrite.** Adapt `exo-scry`, the tmux injection
+  (works for Gemini today), CC-inbox delivery, and exomonad-core's git/github/tmux
+  services + poller logic — greenfield only the genuinely-new pieces.
+- **Use the type system fully.** Validated newtypes + enums (make illegal states
+  unrepresentable); no `pub` fields on domain types; observe-don't-store.
+
+> An adversarial review pass (7 independent angles) has been folded in — see
+> [07](07-open-questions.md) for the resulting decisions and remaining risks.
 
 ## Two kinds of state
 
