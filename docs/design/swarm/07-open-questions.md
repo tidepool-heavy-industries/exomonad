@@ -181,16 +181,72 @@ the `reap` conflation (split into process-teardown vs parent-side worktree-recla
 
 Still-open minor flags (low stakes; decide at impl):
 
-- **`AgentSpawned` record carries derivable fields** — `path` (= parent.path ++ child)
-  and `inbox` (= pane + run-id) are both recomputable, so the minimal record is
-  `{ child, kind, pane }`. Storing them is denormalization-for-robustness, consistent
-  with papers' "hold the path" choice — but pick store-vs-derive *deliberately* and
-  the same way in both places.
+- **`AgentSpawned` record — derivable fields resolve by a *rule*, not uniformly.**
+  Two of `{ child, kind, pane, path, inbox }` are recomputable, but for *different*
+  reasons, so they go opposite ways:
+  - **`path` → drop.** Its derivation (`parent.path ++ child`) is **scheme-stable**
+    (tree composition never evolves) and the child's identity has a **canonical home
+    elsewhere** (the child's own papers). Re-storing it in the parent's record only
+    creates a second home that can disagree.
+  - **`inbox` → keep (store).** Its derivation (`pane + run-id`) is **scheme-coupled**:
+    deriving it couples every reader to the inbox-path layout, and under a
+    mixed-version swarm (which the `v` field anticipates) a reader on a *new* layout
+    computes the *wrong* path for an *old* child. Stored, it's a birth-time snapshot —
+    self-describing, `tail`-able, correct-per-child across layout evolution — the same
+    reasoning that stores `parent_inbox` in papers.
+
+  **Rule: store a derivable field iff its derivation is scheme-coupled *or* it has no
+  canonical home in the reader's reach; otherwise derive.** Minimal record →
+  `{ child, kind, pane, inbox }`.
 - **`Role` ↔ `ChildKind` correlate** (`Worker`⟺`Inline`; `Tl`/`Dev`⟺`Worktree`). Both
   are parent-written (papers / record), never free user fields, so no construction
-  hazard — but don't ever re-introduce a free `kind` field beside `role`, and if the
-  correlation is meant to be a hard invariant forever, consider deriving one from the
-  other rather than storing both.
+  hazard — but don't ever re-introduce a free `kind` field beside `role`. (Note: `kind`
+  is a property of the *spawn relationship*, recorded in the parent's ledger — not in
+  the child's own papers, which is already correct.)
+
+## Type-system idiom assessment
+
+Does the design make good expressive use of the type system? **Largely yes** — and
+the gaps are now closed or are conscious boundary tradeoffs, not oversights.
+
+**Strong (keep):**
+- **Generic-over-caps, no `dyn Caps`** — per-tool bounds (`fn file_pr<C: Git + GitHub>`)
+  make least-privilege a *compiler-checked* property. The best type-system use here.
+- **`Addressee` encodes the tree topology** — `Parent`/`InlineChild`/`WorktreeChild`
+  makes sibling/cross-tree messaging *unrepresentable*; the constraint is in the type,
+  not a runtime check.
+- **`Persona` (anti-spoof), per-op spawn (illegal triples unnameable), `WorldEvent`
+  single-source, validated newtypes** (`PaneId %N`, `NodePath` non-empty, …).
+- **Errors-as-data** — `ScryError` is the bar: every failure a distinct inspectable
+  variant, `#[from]` source-chaining, no stringly soup. The new caps' `Result<_>`
+  error types are TBD — **specify them to the `ScryError` standard** (per-cap or a
+  shared `CapError`), not `anyhow`.
+
+**Principled *non*-use of the type system (correct call):**
+- **Phases/typestate dropped.** rust.md says "express state transitions in types," but
+  agent lifecycle is driven by *external* events (Copilot review, CI) not knowable at
+  compile time. Typestate would fight reality; "the state lives in the world, observe
+  it" is the right model. A deliberate, defensible *omission*, not a gap.
+
+**Conscious boundary tradeoffs (name them, don't fix):**
+- **Event payload is text-on-bus, parsed to `WorldEvent` at the handler** — chosen for
+  the plain-text body / CC-last-hop. The parse is the boundary (parse-don't-validate
+  *at* the edge), but an unparseable `kind=event` body is representable — handle it.
+- **`HookDecision::Modify(serde_json::Value)` + MCP arg-erasure + `dyn Tool<R>`** — the
+  inherently-dynamic MCP/JSON edge and Rust's lack of existentials over varying bounds.
+  Erase *arguments*, never *caps*; the `TypedTool` wrapper confines it. Correct.
+
+**The one open representational polish — `role` + `agent_type` correlation.** They're
+modeled as two independent fields but only ~4 pairs are legal (Root→Claude, Tl→Claude,
+Dev→Gemini, Worker→Gemini today). **Crucially, the per-op-spawn fix already closed the
+*construction* hazard** (the spawn op is the only writer and fixes legal pairs) — so a
+sum-collapse is *representational only* (self-documenting, impossible-to-misread), not
+a new safety guarantee. Whether to collapse hinges on **Shoal**: if `agent_type` is
+always op-determined → collapse to `enum NodeKind { Root, SubTl, Dev, Worker }` with
+`role()`/`agent_type()` accessors; if Shoal is a custom binary that can pair with
+multiple roles → keep them separate (flexible) or `Role { Root, Tl, Dev(AgentType),
+Worker(AgentType) }`. Deferred to the Shoal decision; **lean keep-separate** since the
+hazard is already gone and separation is the most Shoal-flexible.
 
 ## Review-process note
 
