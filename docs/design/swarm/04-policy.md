@@ -11,39 +11,37 @@ DSL. Everything else in the old guest was WASM-boundary tax that *deletes* — s
 
 ## How policy is defined — plain Rust, three forms
 
-1. **Tools = a trait you implement** (one polymorphic thing):
+1. **Tools = functions generic over the caps they need** (no `dyn Caps` — see [03](03-capabilities.md)):
    ```rust
-   #[async_trait]
-   trait Tool: Send + Sync {
-       fn name(&self) -> &'static str;
-       fn schema(&self) -> serde_json::Value;              // schemars on its Args
-       async fn call(&self, ctx: &dyn Caps, args: serde_json::Value)
-           -> Result<serde_json::Value>;                   // Args erased to JSON at the edge
-   }
+   #[derive(Deserialize, JsonSchema)] struct FilePrArgs { /* … */ }
+   async fn file_pr<C: Git + GitHub>(ctx: &C, args: FilePrArgs) -> Result<ToolOutput>;
    ```
-   Tool *authors* never touch `serde_json::Value`: they implement a strongly-typed
-   `TypedTool { type Args: DeserializeOwned; async fn execute(&self, &dyn Caps, Self::Args) }`,
-   and a blanket impl provides the object-safe `Tool` (deserialize → `execute`). The
-   JSON erasure is confined to the one inherent MCP-boundary seam.
-2. **Hooks & events = pure functions.**
+   The per-tool bounds *are* the least-privilege spec, compiler-checked. Tool authors
+   never touch `serde_json::Value`: a `TypedTool { type Args; execute<C>(&C, Args) }`
+   wrapper handles the JSON edge; dispatch is monomorphized at the concrete runtime `R`.
+2. **Hooks & events = functions generic over the caps they need** (no `dyn Caps`):
    ```rust
    enum HookDecision { Allow, Deny { reason: String }, Modify(serde_json::Value) }
    enum StopDecision { Allow, Block { reason: String } }
    enum EventAction  { InjectMessage{text,summary}, NotifyParent{text,summary}, NoAction }
 
-   fn pre_tool_use(input: &HookInput) -> HookDecision;            // guards, PII-rewrite
-   fn stop(ctx: &dyn Caps) -> StopDecision;                       // LIVE query — no phase
-   fn on_world_event(ctx: &dyn Caps, e: &WorldEvent) -> EventAction;
+   fn pre_tool_use<C: Kv>(ctx: &C, input: &HookInput) -> HookDecision; // guards/PII — &C for data-dependent checks (Kv allowlists)
+   fn stop<C: GitHub>(ctx: &C) -> StopDecision;                       // LIVE query — no phase
+   fn on_world_event<C: Bus>(ctx: &C, e: &WorldEvent) -> EventAction;  // bounds = the least-privilege spec
    ```
+   In the `RoleDef` table below these are stored as `fn(&R, …)` monomorphized at the
+   concrete runtime `R` (which impls the cap traits) — the generic bound *is* the
+   per-hook least-privilege spec, compiler-checked, exactly as for tools.
 3. **A role = a data struct bundling them, wired in a hand-written table:**
    ```rust
-   struct RoleDef {
-       tools:        &'static [&'static dyn Tool],
-       pre_tool_use: fn(&HookInput) -> HookDecision,
-       stop:         fn(&dyn Caps) -> StopDecision,
-       on_event:     fn(&dyn Caps, &WorldEvent) -> EventAction,
+   // parameterized by the concrete runtime R (which impls the cap traits) — no dyn Caps
+   struct RoleDef<R> {
+       tools:        Vec<Box<dyn Tool<R>>>,            // dyn over the CONCRETE R, not over Caps
+       pre_tool_use: fn(&R, &HookInput) -> HookDecision,
+       stop:         fn(&R) -> StopDecision,
+       on_event:     fn(&R, &WorldEvent) -> EventAction,
    }
-   fn role_def(role: Role) -> RoleDef { match role { /* … */ } }
+   fn role_def<R: Runtime>(role: Role) -> RoleDef<R> { match role { /* … */ } }
    ```
 
 `RoleDef` literals *read* like declarative config but are plain, greppable,
@@ -60,17 +58,26 @@ the `GitHub` cap "do I have an open PR with unaddressed `ChangesRequested`?" and
 returns `Block`/`Allow`. No persisted phase, consistent with observe-don't-store.
 
 **Child tracking** (the *other* thing the old `TLPhase` held — a `Map ChildHandle`)
-becomes a **parent-local birth ledger**, not a state machine: at spawn, the parent's
-sidecar appends the child (`{pane, path, inbox}`) to its own `children.jsonl`. The
-ledger is **append-only and immutable** — an entry is a *birth fact*, never
-modified; a child's status (alive / done / failed) is **never written back**, only
-computed live (pane-alive + PR checks). That's exactly what justifies jsonl here
-(same discipline as the bus): a retry is a *new* append, "current children" =
-live-filter at read, and dead entries are trimmed only by occasional compaction. If
-we stored mutable per-child status this would be the wrong format — we deliberately
-don't (observe-don't-store). "Who are my children" = read the ledger (authoritative
-— the parent recorded each birth, so there's **no orphan-before-papers gap** the
-live-scan would have); per-child liveness = a pane-alive check. Converge / can-I-exit is computed from the ledger +
+is a **parent-local append-only record log** (`children.jsonl`), not a state machine
+(these are lifecycle *records* — distinct from `MessageKind::Event` world-events on
+the bus). Two record kinds:
+- **`AgentSpawned { child, kind, pane, path, inbox }`** (`kind: ChildKind`) — appended
+  by the parent **first, before it creates the pane**, so there's never an untracked
+  process. `kind` drives papers-location + teardown: **Inline** → pane-keyed papers in
+  the shared run dir, torn down by pane-kill; **Worktree** → own-worktree `node.json`,
+  torn down by pane-kill + parent-side `git worktree remove` at convergence (the
+  two-step teardown — see [03](03-capabilities.md)).
+- **`AgentStarted { child }`** — the **child appends this to the record log** on
+  startup (its boot check-in; it knows the log path from its papers). A *record*,
+  not a message and not a `MessageKind::Event` — never delivered to anyone's
+  conversation, just folded for tracking.
+
+"Who are my children" = fold the log. A `Spawned` with **no `Started`** after a
+timeout is a **failed/ghost spawn** → the parent reaps/retries. Running-vs-done
+status is computed **live** (pane-alive check), never written back. Append-only +
+fold-to-state is the same discipline as the bus (a retry is a new append; no mutable
+per-child record; no orphan-before-papers gap — the parent logged the intent before
+the pane existed). Converge / can-I-exit is computed from the ledger +
 live pane/PR checks, not a phase. (Chosen over a live worktree scan, which is racy
 and O(N), and over CC-team membership, which re-introduces the multi-team coupling.)
 
@@ -90,6 +97,33 @@ and O(N), and over CC-team membership, which re-introduces the multi-team coupli
   feedback**. Sibling-merge is handled by the **parent** (it has the child ledger),
   not by each sibling polling. This adapts (reuses) the existing
   `exomonad-core/.../github_poller.rs` timeout logic, per-sidecar.
+
+## Shutdown (worker lifecycle) — just a message
+
+Requesting shutdown is **not a special mechanism** — it's a
+`Control(Shutdown { grace_ms })` message **appended to the target's ingestion
+mailbox via the ordinary send path** (`Bus::deliver` / `send_message`), exactly
+like messaging any teammate. (Same as Claude Teams, where `shutdown_request` is
+just a `SendMessage` payload, not a separate tool.) Any `shutdown(member)` surface
+is mere sugar over that one append; the `kind` tag is what carries it.
+
+The recipient's sidecar **inbound loop** dispatches on `kind=Control(Shutdown)` by
+`agent_type`:
+- **CC** → forward to CC's native `shutdown_request` (cooperative ack).
+- **gemini/shoal** → optionally inject a graceful "finish & exit", then after
+  `grace_ms` run `tmux kill-pane` on **its own** `$TMUX_PANE` — reaping the whole
+  worker (pane + agent + sidecar) in one shot. The worker **self-terminates** (it
+  knows its own pane); no parent force-kill, no separate channel.
+- No cleanup write — the child just stops passing the live-filter (pane gone); its
+  birth-ledger entry is a harmless stale record (status computed live).
+- For a **`Worktree` child** the worktree *dir* outlives the pane; the **parent**
+  reclaims it with `git worktree remove` at **convergence** (after merging the
+  child's PR). Process teardown (here) and worktree reclamation are separate steps
+  with separate owners — see [03](03-capabilities.md).
+
+So non-cooperative runtimes get the clean teardown CC has for free, **reusing the
+mailbox + `kind` we already built** — and the phantom-member problem closes at the
+root, because the sidecar reliably reaps its own pane on the control message.
 
 ## Content (filled in incrementally — not "design")
 

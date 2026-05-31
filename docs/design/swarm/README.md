@@ -41,7 +41,8 @@ is the bus; the process tree is the topology.
 - **Capabilities preferred, IO as escape hatch.** The crate split is for ergonomics
   and reuse, *not* a sandbox. Policy *may* drop to raw IO; good capabilities make
   it rarely want to.
-- **No HList, no macros.** Plain `Tool` trait + a `Caps` super-trait + hand-written
+- **No HList, no macros, no god-trait.** Plain `Tool`s + hooks/events as functions
+  **generic over the individual caps they need** (no `dyn Caps`) + hand-written
   per-role tables.
 - **One shared `exomonad` binary** for everything (modes, not separate bins).
 - **Reuse tested components, don't rewrite.** Adapt `exo-scry`, the tmux injection
@@ -49,6 +50,12 @@ is the bus; the process tree is the topology.
   services + poller logic — greenfield only the genuinely-new pieces.
 - **Use the type system fully.** Validated newtypes + enums (make illegal states
   unrepresentable); no `pub` fields on domain types; observe-don't-store.
+- **Feature parity with native teammates.** A worker spawned via exomonad — any
+  runtime (Gemini, Shoal) — is a *first-class teammate* with the same verbs as a
+  native Claude Teams teammate (send, receive, shut down, share tasks). The only
+  difference is the spawn path; the sidecar is the adapter that grants parity. This
+  is why shutdown is "just a message" — parity means reusing the same mechanism, not
+  a parallel one.
 
 > An adversarial review pass (7 independent angles) has been folded in — see
 > [07](07-open-questions.md) for the resulting decisions and remaining risks.

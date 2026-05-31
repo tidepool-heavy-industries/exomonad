@@ -42,7 +42,7 @@ Per node, written by the parent at spawn (by `init` for the root). Proposed:
   "role":       "dev",                                    // root | tl | dev | worker
   "agent_type": "gemini",                                 // claude | gemini | shoal
   "pane":       "%317",                                   // tmux pane (delivery + key derivation)
-  "parent_inbox": "/…/auth-claude/.exo/inbox/pane-311.jsonl" // path to parent's ingestion inbox; null for root
+  "parent_inbox": "/…/.claude/exo/inboxes/{run-id}/pane-311.jsonl" // path to parent's ingestion inbox; null for root
 }
 ```
 
@@ -59,17 +59,32 @@ Per node, written by the parent at spawn (by `init` for the root). Proposed:
 
 A node's sidecar identifies itself by:
 1. `$TMUX_PANE` → the **key** (always available, team-free).
-2. Its own `{cwd}/.exo/node.json` (or `--agent-id/--role` flags passed at spawn) →
-   the **enrichment** (role/parent/tree), if exomonad-spawned.
+2. Its **papers, located via a launch flag** the parent passes (`--papers <path>`) →
+   the **enrichment** (role/parent/tree), if exomonad-spawned. The node never has to
+   *guess* where its papers are — it's told. The storage *location* depends on
+   `ChildKind` (worktree → `{cwd}/.exo/node.json`; inline → pane-keyed run dir, see
+   [Location](#location--depends-on-childkind)), but that convention exists for
+   third-party enumeration, not for self-ID.
 3. `exo-scry` pane → Teams config → **CC membership** (team, member name), if the
    agent is in a CC team — needed only to choose the nice delivery path.
 
 A CC-Teams-spawned sub-claude with no papers is still a valid node: it has a pane
 (key) and a CC membership (delivery); it just lacks tree-enrichment, which is fine.
 
-## Location
+## Location — depends on `ChildKind`
 
-Per-worktree (`{cwd}/.exo/node.json`) — co-located with the node, so deleting a
-worktree GCs its papers for free; no central registry to drift. Enumeration of all
-nodes = glob `.exo/worktrees/*/.exo/node.json` (∪ the root's at the repo root); the
-worktrees directory *is* the registry.
+Papers live wherever the node's *own* state lives, so they GC with it — which
+differs by [`ChildKind`](03-capabilities.md), the same split that drives the inbox
+and reap:
+
+- **Worktree child** → `{cwd}/.exo/node.json`, co-located with its worktree, so
+  `git worktree remove` GCs the papers for free. Enumeration = glob
+  `.exo/worktrees/*/.exo/node.json` (∪ the root's at the repo root).
+- **Inline worker** → **pane-keyed in the run dir**
+  (`~/.claude/exo/papers/{run-id}/pane-N.json`), because it *shares the parent's
+  cwd* and can't own `{cwd}/.exo/node.json` without colliding. GC'd with the run
+  (run-id-namespaced, like the inbox). Enumeration = glob that dir.
+
+Either way there's no central registry to drift — the filesystem layout *is* the
+registry. (Papers location, inbox namespacing, and reap all key off the same
+`ChildKind` distinction — see [03](03-capabilities.md)/[04](04-policy.md).)

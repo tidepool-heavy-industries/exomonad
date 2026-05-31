@@ -19,7 +19,7 @@ exo-policy  exo-runtime   — policy depends on caps; runtime depends on caps
 |---|---|---|
 | `exo-scry` | pane/team/identity resolution | **exists** |
 | `exo-caps` | capability traits, `Bus`, domain types | stub ([03](03-capabilities.md)) |
-| `exo-policy` | tools/roles/phases/hooks/events | partial ([04](04-policy.md)) |
+| `exo-policy` | tools/roles/hooks/events (no phases) | partial ([04](04-policy.md)) |
 | `exo-runtime` | cap impls (git/gh/tmux/bus/spawner) | not started |
 | `exomonad` (bin) | modes + DI + lifecycle | the target |
 

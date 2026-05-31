@@ -50,8 +50,9 @@ Waves are sequential (deps); leaves within a wave are parallel (no shared files)
 **Scaffold (root TL commits):** the workspace skeleton everyone forks from —
 `exo-caps` with the *full* domain newtypes + trait signatures from
 [03](03-capabilities.md)/[04](04-policy.md) (bodies `todo!()`), stub `exo-runtime`
-+ `exo-policy` crates, workspace wiring, the `Caps` super-trait and `RoleDef`
-shape. This is the typed contract; all later leaves compile against it. **Also
++ `exo-policy` crates, workspace wiring, the **individual cap traits** (`Git`,
+`GitHub`, `Bus`, `Spawner`, …) and the `RoleDef<R>` shape. This is the typed
+contract; all later leaves compile against it. **Also
 pre-populate every anticipated dependency** in each crate's `Cargo.toml` (octocrab,
 inotify, ulid, nix, async-trait, schemars, tokio, …) so parallel leaves never
 collide on `Cargo.toml` (the review's top build risk).
@@ -77,8 +78,8 @@ generic-ingestion layer is unaffected — this only sets the CC last-hop wiring.
 
 ## Wave 1 — Runtime caps (`exo-runtime`)
 
-**Sub-TL R (Claude).** Scaffold: the `Runtime` struct stub that will `impl Caps`,
-plus per-cap module stubs. Fork (one leaf each, no file overlap):
+**Sub-TL R (Claude).** Scaffold: the `Runtime` struct stub that will implement the
+individual cap traits, plus per-cap module stubs. Fork (one leaf each, no file overlap):
 
 | Leaf | Cap | Source / notes |
 |---|---|---|
@@ -94,8 +95,9 @@ jsonl append, flock, ulid cursor, inotify; worktree+pane+papers spawn races) —
 assign to a higher-capability agent or ship them with **pre-written test
 harnesses**; Gemini reliably fumbles this class.
 
-**Converge:** R wires the leaves into `Runtime: Caps`; integration test that
-`Bus::deliver(Parent, …)` appends to a papers-pointed inbox.
+**Converge:** R wires the leaves into a single `Runtime` impl'ing all the cap
+traits; integration test that `Bus::deliver(Parent, …)` appends to a papers-pointed
+inbox.
 
 ---
 
@@ -162,7 +164,7 @@ the same PR (Bucket B drains here).
 ## Gates (each wave's converge before the next forks)
 
 - W0: skeleton `cargo check`s; spike decision recorded.
-- W1: `Runtime: Caps` + Bus integration test green.
+- W1: `Runtime` impls all cap traits + Bus integration test green.
 - W2: node e2e (message round-trip + synthetic event) green.
 - W3: each tool has parity with its WASM twin (Copilot-reviewed) before the twin is cut.
 - W4: full e2e on the new path; old path removed.
