@@ -38,7 +38,7 @@ pub use git::Git;
 pub use github::GitHub;
 pub use tmux::Tmux;
 pub use fs::Fs;
-pub use process::{Output, Process};
+pub use process::Process;
 pub use log::Log;
 pub use clock::Clock;
 pub use kv::Kv;
