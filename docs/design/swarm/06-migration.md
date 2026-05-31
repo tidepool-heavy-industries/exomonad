@@ -32,16 +32,32 @@
 
 ## The tree
 
+**Three Claude TLs; Gemini does the implementation.** Root scaffolds the contract and
+converges; each sub-TL runs its own scaffold-fork-converge over Gemini leaves. The
+headline is the **two concurrent sub-TLs** — Runtime ∥ Policy — which is what "multiple
+Claude TLs with Geminis under them" means in practice.
+
 ```
-ROOT TL (human + Claude) ── owns the migration; scaffolds + converges each wave
-├── Wave 0  Foundation & spike      (root scaffolds; 1 leaf)
-├── Wave 1  Runtime caps            (sub-TL R; 5 leaves)
-├── Wave 2  The node / sidecar      (sub-TL N; 4 leaves)   ── depends on W1 + W0 spike
-├── Wave 3  Policy content          (sub-TL P; 6 leaves)   ── parallel after caps
-└── Wave 4  Cutover & delete        (root TL)              ── last
+Root TL (Claude, human-facing) ── scaffolds the frozen contract, converges every wave, owns cutover
+│
+├─ Wave 0 (Root, solo): scaffold exo-caps — the contract everyone forks from (the coalgebra)
+│                        + spawn 1 Gemini for the CC multi-team spike (S0)
+│
+├─ then fork TWO Claude sub-TLs, CONCURRENT (different crates; both fork the caps-freeze commit):
+│  ├─ Runtime TL (Claude) ─ exo-runtime cap impls       → 5 Gemini leaves (one per cap file)
+│  └─ Policy  TL (Claude) ─ exo-policy tools/hooks/roles → 6 Gemini leaves (one per tool file)
+│        Policy unit-tests against MOCK caps, so it does NOT wait on Runtime —
+│        the caps seam decouples the two timelines. THIS is the parallelism payoff.
+│
+├─ Node TL (Claude) ─ Wave 2, after Runtime converges ─ assembles the sidecar binary
+│                                                        → 4 Gemini leaves (the loops + hook mode)
+│
+└─ Root ─ Wave 4 cutover: wire node mode behind a flag, migrate roles, delete WASM/Bucket-A, drop serve
 ```
 
-Waves are sequential (deps); leaves within a wave are parallel (no shared files).
+Within a sub-TL, leaves are conflict-free by construction — the pinned module layout
+([05](05-crates-and-binary.md)) is one cap-trait/file and one tool/file, so N Geminis
+never touch the same file. Waves gate on dependencies; siblings fork in parallel.
 
 ---
 
@@ -76,34 +92,36 @@ generic-ingestion layer is unaffected — this only sets the CC last-hop wiring.
 
 ---
 
-## Wave 1 — Runtime caps (`exo-runtime`)
+## Wave 1 — Runtime caps (`exo-runtime`) — **Runtime TL**
 
-**Sub-TL R (Claude).** Scaffold: the `Runtime` struct stub that will implement the
-individual cap traits, plus per-cap module stubs. Fork (one leaf each, no file overlap):
+**Runtime TL (Claude).** Scaffold: the `Runtime` struct stub (holds `EffectContext`:
+agent identity) + per-cap module stubs (`impl <Cap> for Runtime`, one file each). Fork
+(one leaf per cap file, no overlap):
 
-| Leaf | Cap | Source / notes |
+| Leaf | Cap(s) | Source / notes |
 |---|---|---|
 | R1 | `Git` + `GitHub` | adapt `GitService`/`GitHubService` from exomonad-core |
-| R2 | `Tmux` | adapt `TmuxIpc`; includes tmux-paste delivery |
-| R3 | **`Bus`** | ingestion-inbox append/read, ulid + cursor, `Addressee`→`InboxPath` resolve (reuse `exo-scry`). *The core new piece.* |
-| R4 | `Spawner` | worktree + pane + write child papers (`parent_inbox`) + launch node mode |
-| R5 | `Kv` + `Clock` | trivial (file-backed kv; system clock) |
+| R2 | `Tmux` | adapt `TmuxIpc`; includes the tmux-paste delivery last-hop |
+| R3 | `Fs` + `Process` + `Log` + `Kv` + `Clock` | mostly trivial (file kv, system clock, std fs/process, file-at-worktree-root log) — batch into one leaf |
+| R4 | **`Bus`** | ingestion-inbox atomic O_APPEND + byte-offset cursor + inotify + `Addressee`→run-id-keyed `InboxPath` resolve. **test-harness-first.** *The core new piece.* |
+| R5 | **`Spawner`** | per-op `birth(BirthCore)`: worktree-add (Worktree kind) → pane → write child papers (`parent_inbox`) → launch node mode → append `AgentSpawned`; + `reclaim_worktree`/`kill_pane`. **test-harness-first.** |
 
-**R1/R2/R5 reuse** exomonad-core services (`GitService`/`GitHubService`/`TmuxIpc`) —
-adapt, don't rewrite. **R3 (`Bus`) and R4 (`Spawner`) are systems-heavy** (atomic
-jsonl append, flock, ulid cursor, inotify; worktree+pane+papers spawn races) —
-assign to a higher-capability agent or ship them with **pre-written test
-harnesses**; Gemini reliably fumbles this class.
+**R1/R2/R3 reuse** exomonad-core services — adapt, don't rewrite. **R4 (`Bus`) and R5
+(`Spawner`) are systems-heavy** (atomic append, flock-for-compaction, cursor restart,
+inotify; worktree+pane+papers spawn races) — Gemini reliably fumbles this class, so the
+Runtime TL **writes the failing tests as part of the scaffold** (atomic-append
+concurrency, cursor-restart resume, spawn→papers→`AgentStarted`) and the Gemini
+implements to green; escalate to a higher-capability agent if it stalls.
 
-**Converge:** R wires the leaves into a single `Runtime` impl'ing all the cap
-traits; integration test that `Bus::deliver(Parent, …)` appends to a papers-pointed
-inbox.
+**Converge:** Runtime TL wires the leaves into one `Runtime` impl'ing every cap;
+integration test that `Bus::deliver(Parent, …)` appends to a papers-pointed inbox and a
+restart resumes from the byte-offset cursor.
 
 ---
 
-## Wave 2 — The node / sidecar (binary `mcp-stdio` mode)
+## Wave 2 — The node / sidecar (binary `mcp-stdio` mode) — **Node TL**
 
-**Sub-TL N (Claude).** Depends on W1 + the W0 spike decision. Refactors `teams-mcp`
+**Node TL (Claude).** Depends on the Runtime TL converging + the W0 spike decision. Refactors `teams-mcp`
 into the node. Scaffold: the node bootstrap (self-ID via `exo-scry` → build
 `Runtime` → assemble loops). Fork:
 
@@ -119,24 +137,29 @@ spawn a node, round-trip a message parent↔child, fire a synthetic event.
 
 ---
 
-## Wave 3 — Policy content (`exo-policy`)
+## Wave 3 — Policy content (`exo-policy`) — **Policy TL, concurrent with Runtime**
 
-**Sub-TL P (Claude).** **Gated on `exo-caps` signature-freeze** — Wave 1 must first
-stub *all* `Caps` methods so the trait signatures stop changing; only then fork
-Wave 3, or trait churn breaks the concurrent leaves (the review's #2 risk). One leaf
-per tool/area, each retiring its Haskell twin as its Rust lands:
+**Policy TL (Claude).** **Gated only on `exo-caps` signature-freeze (end of Wave 0)** —
+NOT on Runtime impls. Policy tools call cap *traits* and unit-test against **mock caps**
+(`impl Git for MockGit`, zero IO — the seam's payoff), so the Policy TL runs **fully
+concurrent with the Runtime TL**; real-impl integration happens at Wave 2. The
+signature-freeze gate is load-bearing: if caps churn, the concurrent leaves break (the
+review's #2 risk). One leaf per tool *file* (the type-per-tool layout — [04](04-policy.md)),
+each retiring its Haskell twin as its Rust lands:
 
-| Leaf | Content |
-|---|---|
-| P1 | messaging tools (port/confirm from teams-mcp) |
-| P2 | `tasks_*` tools |
-| P3 | `spawn_*` tools (`fork_wave`/`spawn_gemini`/`spawn_worker`) over `Spawner` |
-| P4 | `file_pr` / `merge_pr` |
-| P5 | hooks (`pre_tool_use`, `stop` live-query, `session_start`) |
-| P6 | events (`PrReview`/`SiblingMerged`/`CiStatus`/`ReviewTimeout`) + `RoleDef` tables |
+| Leaf | File(s) | Content |
+|---|---|---|
+| P1 | `tools/messaging.rs` | `notify_parent`, `send_message` (port/confirm from teams-mcp) over `Bus` |
+| P2 | `tools/tasks.rs` | `task_list`/`task_get`/`task_update` |
+| P3 | `tools/spawn.rs` | the three **per-op** spawn tools (`spawn_worker`/`spawn_gemini`/`fork_wave`) over `Spawner` — each fixes its `(role, agent_type, kind)` |
+| P4 | `tools/file_pr.rs`, `tools/merge_pr.rs` | PR create/update + merge |
+| P5 | `hooks.rs` | `pre_tool_use` (guard/PII), `stop` (live PR gate), `session_start` |
+| P6 | `events.rs`, `roles.rs` | `WorldEvent` handlers + the `role_def(NodeKind)` table |
 
-**Converge:** P wires `role_def(role)`; each ported tool's WASM twin is removed in
-the same PR (Bucket B drains here).
+Each tool = a type (`Args` + generic-over-caps `run` + hand `Tool<R>` adapter) with
+**mock-cap unit tests** in the same PR. **Converge:** Policy TL wires
+`role_def(NodeKind)`; each ported tool's WASM twin is removed in the same PR (Bucket B
+drains here).
 
 ---
 
@@ -154,11 +177,14 @@ the same PR (Bucket B drains here).
 
 ## Dependency & parallelism summary
 
-- **0 → 1 → 2** strictly (contract → caps → node).
-- **3** can start once `exo-caps` is real (end of W0) and run alongside W1/W2; it
-  only needs the `Tool`/`Caps` contract, not the runtime impls.
-- **4** is last.
-- Within each wave, leaves are conflict-free (separate crates/modules) → full
+- **Wave 0 first** — the caps signature-freeze is the gate everything forks from.
+- **Then Runtime TL ∥ Policy TL** — the two concurrent Claude sub-TLs. Policy needs
+  only the cap *traits* (tests against mock caps), so it does **not** wait on Runtime
+  impls. This is the core parallelism: two TLs, ~11 Gemini leaves in flight.
+- **Node (Wave 2) after Runtime** — it assembles real `Runtime` + `exo-policy` into the
+  sidecar; needs Runtime's impls and the W0 spike's CC-last-hop decision.
+- **Cutover (Wave 4) last.**
+- Within a sub-TL, leaves are conflict-free (one cap-trait/file, one tool/file) → full
   parallel fork.
 
 ## Gates (each wave's converge before the next forks)
