@@ -35,7 +35,10 @@
 
 - `Git` / `GitHub` / `Tmux` / `Clock` / `Kv` cap signatures — adapt from
   exomonad-core services.
-- `Spawner` method breakdown (one method + `ChildKind` vs N) — spawn ops stay separate per `ChildKind`.
+- `Spawner` — **decided: per-op methods** (`spawn_worker`/`spawn_gemini`/`fork_wave`),
+  each fixing its `(role, agent_type, kind)`, sharing a private `birth(BirthCore)`
+  tail. Remaining mechanical bit: port the narrow per-op spec field lists from the
+  Haskell `WorkerSpec`/`SpawnSpec`.
 - Sidecar concurrency: the three stimuli (outbound MCP, inbound inbox-watch,
   self-poll) as tokio tasks in one process.
 - `exomonad hook` mode wiring (CC payload → `pre_tool_use`/`stop`/`session_start`).
@@ -77,7 +80,7 @@
 - **Child tracking = parent-local append-only birth ledger** (`children.jsonl`);
   status never written back, computed live. (Replaces the dropped `TLPhase` map.)
 - **Reuse over rewrite** (tmux injection, CC delivery, exomonad-core services).
-- **Type system fully used:** `Persona`/`EventType`/`AgentName` enums + validated
+- **Type system fully used:** `Persona`/`WorldEvent`/`AgentName` enums + validated
   newtypes, `TypedTool` wrapper, no `pub` fields, illegal states unrepresentable.
 - **Honest port scope:** ~4.5k LOC of dense domain logic, not "hundreds."
 - **Build-plan fixes:** pre-scaffold all deps (Cargo.toml), gate Wave 3 on
@@ -146,29 +149,48 @@ Flagged for decision:
   serverless durability with far less bespoke systems code. Tension with the
   chosen append-only-jsonl direction (simplicity/inspectability/`tail`-ability). Open.
 
-## Deep-review pass — flagged for the Wave-0/1 signature freeze
+## Deep-review pass — type-shape hygiene (folded)
 
-A second ultrathink pass (post-conflation) fixed three things in place — the
-`id`-vs-byte-offset cursor contradiction ([02](02-bus-and-sidecar.md)/[03](03-capabilities.md)),
-the papers self-ID chicken-and-egg (told via launch flag, not guessed —
-[01](01-identity.md)), and the `reap` conflation (split into process-teardown vs
-parent-side worktree-reclamation — [03](03-capabilities.md)/[04](04-policy.md)). Two
-type-shape loose ends remain — **non-blocking** (they sit in already-TBD `exo-caps`
-signatures) but **decide before Wave 1 freezes the traits**:
+Two ultrathink passes hunting the unused-type / illegal-combo / parallel-enum /
+conflation class. Fixed in place across passes: the `id`-vs-byte-offset cursor
+contradiction ([02](02-bus-and-sidecar.md)/[03](03-capabilities.md)), the papers
+self-ID chicken-and-egg (told via launch flag, not guessed — [01](01-identity.md)),
+the `reap` conflation (split into process-teardown vs parent-side worktree-reclamation
+— [03](03-capabilities.md)/[04](04-policy.md)), and the "event log" mislabel
+(→ "record log"). The type-shape findings, all now **folded**:
 
-- **`NodeRef` is currently unused**, and its fields (`path, pane, inbox, agent_type`)
-  don't match the `AgentSpawned` record (`child, kind, pane, path, inbox`) a parent
-  folds to learn its children. Decide: make the folded child-handle *be* `NodeRef`
-  (then it needs `kind` for teardown and likely drops `agent_type` — the *sender*
-  never needs it; the *recipient* picks its own last-hop), or cut `NodeRef` and let
-  the fold yield the record type directly. Don't keep a floating unused type.
-- **`SpawnSpec { role, agent_type, kind }` admits illegal combinations** — e.g.
-  `(Inline, Tl, Claude)` — the same stringly-typed sin the type-elegance review
-  flagged, in a design that prizes illegal-states-unrepresentable. Only ~3 combos are
-  real (`spawn_worker`→Inline/Worker/Gemini; `spawn_gemini`→Worktree/Dev/Gemini;
-  `fork_wave`→Worktree/Tl/Claude). Reconcile with "spawn ops are separate per
-  `ChildKind`": prefer **per-op narrow specs** feeding a shared `birth(core)` helper
-  over one unified `SpawnSpec` with independent enums.
+- **`NodeRef` cut** (unused; its fields didn't even match the one job it could do —
+  missing `kind` for teardown, carrying `agent_type` the sender never needs since the
+  *recipient* picks its own last-hop). The parent's child-handle is just the folded
+  `AgentSpawned` record. A future probe/`list_agents` surface can add a purpose-built
+  node-view *then* — no speculative floating type now. ([03](03-capabilities.md))
+- **`SpawnSpec { role, agent_type, kind }` → per-op narrow specs.** The unified struct
+  admitted illegal combos (`(Inline, Tl, Claude)`) and was a *regression* vs the
+  ported Haskell, where `SpawnSpec` is task-content-only and the triple is fixed by
+  which core you call. Now: `spawn_worker`/`spawn_gemini`/`fork_wave` each fix their
+  own `(role, agent_type, kind)`; the spec carries only task content; a shared private
+  `birth(BirthCore)` is the common tail. Illegal combos are *unnameable*. ([03](03-capabilities.md))
+- **`EventType` cut — duplicated `WorldEvent`.** Two enums with identical variant
+  lists (`PrReview`/`SiblingMerged`/`CiStatus`/`ReviewTimeout`), one as the message
+  tag, one as the handler input — guaranteed to drift. Single source of truth:
+  `WorldEvent` (04) is the typed enum; `MessageKind::Event` is a bare tag and the
+  event detail rides the plain-text body (parsed into `WorldEvent` at the handler),
+  preserving the plain-text-body / CC-last-hop principle. ([03](03-capabilities.md)/[04](04-policy.md))
+- **`MessageBody` defined** — was referenced by `Message.text` but absent from the
+  newtype block (same gap `SyntheticName` had). Now a validated newtype.
+
+Still-open minor flags (low stakes; decide at impl):
+
+- **`AgentSpawned` record carries derivable fields** — `path` (= parent.path ++ child)
+  and `inbox` (= pane + run-id) are both recomputable, so the minimal record is
+  `{ child, kind, pane }`. Storing them is denormalization-for-robustness, consistent
+  with papers' "hold the path" choice — but pick store-vs-derive *deliberately* and
+  the same way in both places.
+- **`Role` ↔ `ChildKind` correlate** (`Worker`⟺`Inline`; `Tl`/`Dev`⟺`Worktree`). Both
+  are parent-written (papers / record), never free user fields, so no construction
+  hazard — but don't ever re-introduce a free `kind` field beside `role`, and if the
+  correlation is meant to be a hard invariant forever, consider deriving one from the
+  other rather than storing both.
 
 ## Review-process note
 

@@ -22,17 +22,19 @@ struct PaneId(String);           // "%317" — validated %N form
 struct InboxPath(PathBuf);
 struct AgentName(String);        // a node's name = NodePath.last(); non-empty, no path separators
 struct SyntheticName(String);    // a non-node persona ("github", "ci"); non-empty
+struct MessageBody(String);      // plain message body; validated (length / control-char checks)
 enum  Role      { Root, Tl, Dev, Worker }
 enum  AgentType { Claude, Gemini, Shoal }
 enum  Persona   { Agent(AgentName), Synthetic(SyntheticName) } // who a message is "from"
-enum  EventType { PrReview, SiblingMerged, CiStatus, ReviewTimeout } // not a raw String
-struct NodeRef  { path: NodePath, pane: PaneId, inbox: InboxPath, agent_type: AgentType }
+// (no EventType here — the single typed event enum is `WorldEvent` in 04; see Message below)
 ```
 
 Make-illegal-states-unrepresentable is a first-class goal here (the type-elegance
-review flagged the original stringly-typed draft): `Persona`/`EventType`/
-`AgentName` replace raw `String`s so a tool can't spoof a persona or fabricate an
-event type, and the compiler enforces it.
+review flagged the original stringly-typed draft): `Persona`/`AgentName` and the
+typed `WorldEvent` (04) replace raw `String`s so a tool can't spoof a persona or
+fabricate an event, and the compiler enforces it. (`NodeRef` was cut as an unused
+type — a future probe/`list_agents` surface can introduce a purpose-built node-view
+then; the parent's child-handle is just the folded `AgentSpawned` record.)
 
 ## Message — plain text + a kind tag
 
@@ -45,7 +47,7 @@ struct Message {
 }
 enum MessageKind {
     Chat,                          // peer/agent message
-    Event { event_type: EventType }, // typed world event — not a raw String
+    Event,                         // a world event — routed to on_world_event, which parses the body into a typed `WorldEvent` (04). Bare tag: the detail rides the plain-text body, not the enum (keeps the body CC-last-hop-friendly).
     Control(ControlKind),          // lifecycle (exomonad-internal) — see Shutdown in 04
 }
 enum ControlKind { Shutdown { grace_ms: u32 } } // a directed control MESSAGE; lifecycle RECORDS (spawned/started) live in the json record log, not here
@@ -89,20 +91,33 @@ mentions a delivery mechanism. This is the one cap that makes `notify_parent` /
 
 ## Spawner — the recursion
 
+**Per-op narrow specs — `(role, agent_type, kind)` are fixed by the op, never free
+caller fields** (so illegal combos like `(Inline, Tl, Claude)` are *unnameable*).
+This mirrors the existing Haskell exactly: there `SpawnSpec` is *task content only*
+(`steps`/`verify`/`done_criteria`/`context`/…), and the triple is fixed by **which
+core you call** (`spawnWorkerToolCore`/`spawnGeminiCore`/`forkWaveCore`). One op ↔
+one MCP tool ↔ one fixed triple:
+
 ```rust
-struct SpawnSpec { name: Option<AgentName>, role: Role, agent_type: AgentType,
-                   task: String, kind: ChildKind }
-enum ChildKind { Inline, Worktree } // Standalone (own fresh repo) = a Worktree flavor; revisit if needed
-trait Spawner { /* spawn ops — see note */ }
+enum ChildKind { Inline, Worktree } // internal; set by the op, drives birth/papers/teardown. Standalone = a Worktree flavor.
+
+trait Spawner {
+    // each op fixes its own (role, agent_type, kind); the spec carries ONLY task content
+    async fn spawn_worker(&self, spec: WorkerSpec) -> Result<AgentName>;   // → Inline / Worker / Gemini
+    async fn spawn_gemini(&self, spec: GeminiSpec) -> Result<AgentName>;   // → Worktree / Dev / Gemini
+    async fn fork_wave(&self, specs: Vec<ForkSpec>) -> Result<Vec<AgentName>>; // → Worktree / Tl / Claude
+}
+// WorkerSpec / GeminiSpec / ForkSpec = narrow task-content structs (name?, task, steps, verify, …),
+// ported field-for-field from the Haskell WorkerSpec / SpawnSpec. No role/agent_type/kind inside them.
 ```
 
-Spawn operations are **separate per `ChildKind`** — `spawn_worker` → `Inline`
-(ephemeral pane in the parent's worktree, no PR), `spawn_gemini`/`fork_wave` →
-`Worktree` (own worktree + branch + PR). They map to the `InlineChild` /
-`WorktreeChild` address variants: **shared** messaging/delivery, **distinct** spawn,
-papers location, and teardown. `spawn` births a child node: (`git worktree add` for
+All three ops share one private tail — **`birth(BirthCore { kind, agent_type, name,
+branch })`** — which the op constructs with its fixed triple: (`git worktree add` for
 a `Worktree` child) → `tmux new-pane` → write child papers (incl. `parent_inbox` = my
-inbox) → launch `exomonad` node mode. See [05](05-crates-and-binary.md).
+inbox) → launch `exomonad` node mode → append the `AgentSpawned` record. The shared
+tail branches only on `kind`; the per-op methods are the single place each triple is
+named. They back the `InlineChild` / `WorktreeChild` address variants: **shared**
+delivery, **distinct** spawn / papers / teardown. See [05](05-crates-and-binary.md).
 
 **Teardown is two independent steps, not one `reap`** (a conflation the review
 caught):
@@ -135,7 +150,8 @@ invariant is generic-over-caps, per-tool bounds, no `dyn Caps`.)
 
 - `Git` / `GitHub` / `Tmux` / `Fs` / `Process` / `Log` / `Clock` / `Kv` method
   signatures (mechanical; adapt from exomonad-core services).
-- `Spawner` exact method signatures (`spawn` per `ChildKind`; `reclaim_worktree`
-  parent-side; force-`kill_pane` — the two-step teardown above, not one `reap`).
+- `Spawner` narrow per-op spec field lists (`WorkerSpec`/`GeminiSpec`/`ForkSpec`,
+  ported from the Haskell) + teardown method names (`reclaim_worktree` parent-side;
+  force-`kill_pane`) — the per-op methods + two-step teardown are settled above.
 - Copilot-review is **not** a cap — it's the sidecar **self-poll**'s job (poll own
   PR → `WorldEvent` → action), replacing the old blocking `wait_for_copilot_review`.

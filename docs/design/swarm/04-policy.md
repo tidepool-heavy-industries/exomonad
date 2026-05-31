@@ -27,7 +27,7 @@ DSL. Everything else in the old guest was WASM-boundary tax that *deletes* — s
 
    fn pre_tool_use<C: Kv>(ctx: &C, input: &HookInput) -> HookDecision; // guards/PII — &C for data-dependent checks (Kv allowlists)
    fn stop<C: GitHub>(ctx: &C) -> StopDecision;                       // LIVE query — no phase
-   fn on_world_event<C: Bus>(ctx: &C, e: &WorldEvent) -> EventAction;  // bounds = the least-privilege spec
+   fn on_world_event<C: GitHub>(ctx: &C, e: &WorldEvent) -> EventAction; // RETURNS an action (loop delivers); bound is per-handler — GitHub here to inspect PR/CI state
    ```
    In the `RoleDef` table below these are stored as `fn(&R, …)` monomorphized at the
    concrete runtime `R` (which impls the cap traits) — the generic bound *is* the
@@ -132,5 +132,9 @@ root, because the sidecar reliably reaps its own pane on the control message.
 - **Hooks kept:** `pre_tool_use` (guards + PII-rewrite), `stop` (live PR gate),
   `session_start` (root identity bootstrap).
 - **Events:** `WorldEvent { PrReview, SiblingMerged, CiStatus, ReviewTimeout }` →
-  `EventAction`. Behavior ported from the current poller/event handlers.
+  `EventAction`. Behavior ported from the current poller/event handlers. **This is
+  the single typed event enum** — there is no parallel `EventType` on the message
+  envelope (`MessageKind::Event` is a bare tag, [03](03-capabilities.md)); a
+  `kind=event` ingestion entry has its body parsed into a `WorldEvent` before
+  `on_world_event` runs, and the in-process self-poll constructs one directly.
 - **Per-role toolsets** in `role_def`.
