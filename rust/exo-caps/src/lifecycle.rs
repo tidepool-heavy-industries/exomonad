@@ -67,12 +67,13 @@ pub struct Child {
     pub lifecycle: ChildLifecycle,
 }
 
-/// Fold append-only records into the current child set. Newest `Spawned` wins (a retry
-/// is a fresh append); a `Started` upgrades the lifecycle. A `Started` with no prior
-/// `Spawned` is ignored (cannot occur when the parent logs spawn-first). Deterministic
-/// order (by name).
-pub fn fold_children(records: &[ChildRecord]) -> Vec<Child> {
-    let mut map: BTreeMap<&str, Child> = BTreeMap::new();
+/// Fold append-only records into the current child set, **keyed by name** — uniqueness
+/// is in the return type, and down-routing (find-child-by-`AgentName`) is an O(log n)
+/// lookup. Newest `Spawned` wins (a retry is a fresh append); a `Started` upgrades the
+/// lifecycle. A `Started` with no prior `Spawned` is ignored (cannot occur when the
+/// parent logs spawn-first).
+pub fn fold_children(records: &[ChildRecord]) -> BTreeMap<AgentName, Child> {
+    let mut map: BTreeMap<AgentName, Child> = BTreeMap::new();
     for r in records {
         match r {
             ChildRecord::Spawned {
@@ -82,7 +83,7 @@ pub fn fold_children(records: &[ChildRecord]) -> Vec<Child> {
                 inbox,
             } => {
                 map.insert(
-                    child.as_str(),
+                    child.clone(),
                     Child {
                         name: child.clone(),
                         kind: *kind,
@@ -93,13 +94,13 @@ pub fn fold_children(records: &[ChildRecord]) -> Vec<Child> {
                 );
             }
             ChildRecord::Started { child } => {
-                if let Some(c) = map.get_mut(child.as_str()) {
+                if let Some(c) = map.get_mut(child) {
                     c.lifecycle = ChildLifecycle::Started;
                 }
             }
         }
     }
-    map.into_values().collect()
+    map
 }
 
 #[cfg(test)]
@@ -135,10 +136,8 @@ mod tests {
         ];
         let kids = fold_children(&recs);
         assert_eq!(kids.len(), 2);
-        let a = kids.iter().find(|c| c.name.as_str() == "a").unwrap();
-        assert_eq!(a.lifecycle, ChildLifecycle::Started);
-        let b = kids.iter().find(|c| c.name.as_str() == "b").unwrap();
-        assert_eq!(b.lifecycle, ChildLifecycle::Spawned); // ghost-spawn candidate
+        assert_eq!(kids[&name("a")].lifecycle, ChildLifecycle::Started);
+        assert_eq!(kids[&name("b")].lifecycle, ChildLifecycle::Spawned); // ghost-spawn candidate
     }
 
     #[test]
@@ -159,7 +158,7 @@ mod tests {
         ];
         let kids = fold_children(&recs);
         assert_eq!(kids.len(), 1);
-        assert_eq!(kids[0].pane.as_str(), "%9");
+        assert_eq!(kids[&name("a")].pane.as_str(), "%9");
     }
 
     #[test]

@@ -2,9 +2,9 @@
 //! inbox). The Teams-vs-tmux last-hop lives in the *recipient's* inbound loop, so policy
 //! never names a delivery mechanism. See docs 02/03.
 
-use crate::error::CapResult;
 use crate::types::{AgentName, Message};
 use async_trait::async_trait;
+use thiserror::Error;
 
 /// How policy names a delivery target — **tree-edges only** (no sibling / cross-tree:
 /// the messaging structure *is* the tree). `InlineChild` and `WorktreeChild` share the
@@ -21,9 +21,21 @@ pub enum Addressee {
     WorktreeChild(AgentName),
 }
 
+#[derive(Debug, Error)]
+pub enum BusError {
+    /// The addressee couldn't be resolved to an inbox (unknown child, no parent).
+    #[error("cannot resolve {0:?}")]
+    Unresolved(Addressee),
+    #[error("bus append failed: {detail}")]
+    Append { detail: String },
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
 #[async_trait]
 pub trait Bus {
-    /// Append `msg` to the target's ingestion inbox. Resolution (`Addressee` →
-    /// `InboxPath`) is internal to the runtime impl, never exposed to policy.
-    async fn deliver(&self, to: Addressee, msg: Message) -> CapResult<()>;
+    /// Append `msg` to the target's ingestion inbox. The runtime stamps the envelope
+    /// (`from`/`id`/`ts`/`v` — see [`IngestionEntry`](crate::IngestionEntry)); policy
+    /// supplies only the [`Message`]. Resolution (`Addressee` → `InboxPath`) is internal.
+    async fn deliver(&self, to: Addressee, msg: Message) -> Result<(), BusError>;
 }

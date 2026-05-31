@@ -7,40 +7,37 @@
 //! transparent (the inner value). See docs 01/03.
 
 use crate::error::{CapError, CapResult};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 // ── identity newtypes ────────────────────────────────────────────────────────
 
-/// Tree address; `name()` = last segment, `parent()` = prefix. A **list**, not a
-/// dot-string — branch names may contain `.`, so a joined form can't round-trip.
+/// Tree address; `name()` = last segment, `parent()` = prefix. A **list of
+/// [`AgentName`]**, not a dot-string — branch names may contain `.`, so a joined form
+/// can't round-trip. Segment-validity *is* the `AgentName` invariant (single source):
+/// the only extra rule here is non-empty.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "Vec<String>")]
-pub struct NodePath(Vec<String>);
+#[serde(try_from = "Vec<AgentName>")]
+pub struct NodePath(Vec<AgentName>);
 
 impl NodePath {
-    pub fn new(segments: Vec<String>) -> CapResult<Self> {
+    pub fn new(segments: Vec<AgentName>) -> CapResult<Self> {
         if segments.is_empty() {
             return Err(CapError::invalid("NodePath", "must have at least one segment"));
         }
-        if let Some(bad) = segments
-            .iter()
-            .find(|s| s.is_empty() || s.contains('/') || s.contains('\\'))
-        {
-            return Err(CapError::invalid(
-                "NodePath",
-                format!("segment empty or contains a path separator: {bad:?}"),
-            ));
-        }
         Ok(NodePath(segments))
     }
-    pub fn segments(&self) -> &[String] {
+    pub fn segments(&self) -> &[AgentName] {
         &self.0
     }
-    /// The node's own name = the last segment. (Always valid: a `NodePath` is non-empty
-    /// and its segments carry no path separators, so this satisfies `AgentName`.)
+    /// The node's own name = the last segment. Returns a real `AgentName` by
+    /// construction (a `NodePath` is a non-empty `Vec<AgentName>` — no validation bypass).
     pub fn name(&self) -> AgentName {
-        AgentName(self.0.last().cloned().unwrap_or_default())
+        self.0
+            .last()
+            .cloned()
+            .expect("NodePath is non-empty by construction")
     }
     /// The parent address = prefix (the tree is prefix-containment); `None` for the root.
     pub fn parent(&self) -> Option<NodePath> {
@@ -49,14 +46,14 @@ impl NodePath {
     /// Extend one level: `self ++ [name]`.
     pub fn child(&self, name: &AgentName) -> NodePath {
         let mut s = self.0.clone();
-        s.push(name.0.clone());
+        s.push(name.clone());
         NodePath(s)
     }
 }
 
-impl TryFrom<Vec<String>> for NodePath {
+impl TryFrom<Vec<AgentName>> for NodePath {
     type Error = CapError;
-    fn try_from(v: Vec<String>) -> CapResult<Self> {
+    fn try_from(v: Vec<AgentName>) -> CapResult<Self> {
         NodePath::new(v)
     }
 }
@@ -91,7 +88,8 @@ impl Branch {
             .0
             .iter()
             .map(|seg| {
-                seg.chars()
+                seg.as_str()
+                    .chars()
                     .map(|c| {
                         if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
                             c
@@ -156,7 +154,7 @@ impl InboxPath {
 }
 
 /// A node's name = the `NodePath` last segment; non-empty, no path separators.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String")]
 pub struct AgentName(String);
 
@@ -270,6 +268,39 @@ impl TryFrom<String> for MessageBody {
     }
 }
 
+/// A short one-line preview (rendered into panes / inbox UIs). Bounded, **no control
+/// chars at all** (including newlines — it's a single line), unlike the multi-line body.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String")]
+pub struct Summary(String);
+
+impl Summary {
+    pub const MAX_LEN: usize = 4096;
+
+    pub fn new(s: String) -> CapResult<Self> {
+        if s.len() > Self::MAX_LEN {
+            return Err(CapError::invalid(
+                "Summary",
+                format!("{} bytes exceeds {} max", s.len(), Self::MAX_LEN),
+            ));
+        }
+        if let Some(c) = s.chars().find(|c| c.is_control()) {
+            return Err(CapError::invalid("Summary", format!("contains control char {c:?}")));
+        }
+        Ok(Summary(s))
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for Summary {
+    type Error = CapError;
+    fn try_from(s: String) -> CapResult<Self> {
+        Summary::new(s)
+    }
+}
+
 // ── archetype & runtime ──────────────────────────────────────────────────────
 
 /// A node's archetype — the **one** stored identity enum. `role` (the `role_def` key)
@@ -335,14 +366,31 @@ pub enum Persona {
     Synthetic(SyntheticName),
 }
 
-/// A bus message — plain-text body + a `kind` tag (the only structure). `id`/`ts` are
-/// stamped by the runtime at append (the cursor is a byte-offset, NOT the `id`).
+/// What **policy** builds and hands to [`Bus::deliver`](crate::Bus) — plain-text body +
+/// a short summary + a `kind` tag. **No `from`/`id`/`ts`:** the runtime stamps the
+/// envelope at append (see [`IngestionEntry`]), so a tool *cannot* spoof its sender —
+/// the anti-spoof guarantee is structural, not a convention.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
-    pub from: Persona,
     pub text: MessageBody,
-    pub summary: String,
+    pub summary: Summary,
     pub kind: MessageKind,
+}
+
+/// One line of an ingestion inbox — the **wire** form. The runtime stamps `from` (the
+/// true sender; `Agent(me)` for a node send, `Synthetic(src)` for an event injection),
+/// `id`, `ts`, and the schema version `v`; the [`Message`] is flattened in, so the line
+/// is exactly `{v,id,ts,from,kind,summary,text}` (doc 02). `v` defaults and unknown
+/// fields are tolerated (no `deny_unknown_fields`) — a mixed-version swarm won't crash.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IngestionEntry {
+    #[serde(default)]
+    pub v: u32,
+    pub id: MessageId,
+    pub ts: DateTime<Utc>,
+    pub from: Persona,
+    #[serde(flatten)]
+    pub msg: Message,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -379,22 +427,28 @@ mod tests {
         assert_eq!(NodeKind::Dev.role_str(), "dev");
     }
 
+    fn an(s: &str) -> AgentName {
+        AgentName::new(s.into()).unwrap()
+    }
+
     #[test]
     fn node_path_name_parent_child() {
-        let p = NodePath::new(vec!["dev".into(), "auth-claude".into(), "oauth-gemini".into()])
-            .unwrap();
+        let p = NodePath::new(vec![an("dev"), an("auth-claude"), an("oauth-gemini")]).unwrap();
         assert_eq!(p.name().as_str(), "oauth-gemini");
         assert_eq!(p.parent().unwrap().name().as_str(), "auth-claude");
-        let root = NodePath::new(vec!["dev".into()]).unwrap();
+        let root = NodePath::new(vec![an("dev")]).unwrap();
         assert!(root.parent().is_none());
-        let kid = root.child(&AgentName::new("auth-claude".into()).unwrap());
-        assert_eq!(kid.segments(), &["dev", "auth-claude"]);
+        let kid = root.child(&an("auth-claude"));
+        assert_eq!(
+            kid.segments().iter().map(|a| a.as_str()).collect::<Vec<_>>(),
+            vec!["dev", "auth-claude"]
+        );
     }
 
     #[test]
     fn newtypes_reject_bad_input() {
         assert!(NodePath::new(vec![]).is_err());
-        assert!(NodePath::new(vec!["a/b".into()]).is_err());
+        // a bad segment is now rejected at AgentName construction — it can't even reach NodePath
         assert!(AgentName::new("".into()).is_err());
         assert!(AgentName::new("a/b".into()).is_err());
         assert!(PaneId::new("317".into()).is_err());
@@ -410,7 +464,7 @@ mod tests {
     #[test]
     fn branch_from_path_is_safe() {
         // A `.`-bearing segment must not corrupt the branch.
-        let p = NodePath::new(vec!["dev".into(), "v1.2".into()]).unwrap();
+        let p = NodePath::new(vec![an("dev"), an("v1.2")]).unwrap();
         let b = Branch::from_path(&p);
         assert_eq!(b.as_str(), "dev.v1-2");
         // and the generated branch is itself a valid ref name
@@ -429,15 +483,31 @@ mod tests {
     }
 
     #[test]
-    fn message_round_trips() {
-        let m = Message {
+    fn ingestion_entry_round_trips_and_flattens() {
+        let entry = IngestionEntry {
+            v: 1,
+            id: MessageId::new("01J8XYZ".into()).unwrap(),
+            ts: DateTime::parse_from_rfc3339("2026-05-31T22:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
             from: Persona::Synthetic(SyntheticName::new("github".into()).unwrap()),
-            text: MessageBody::new("PR #5 approved".into()).unwrap(),
-            summary: "approved".into(),
-            kind: MessageKind::Event,
+            msg: Message {
+                text: MessageBody::new("PR #5 approved".into()).unwrap(),
+                summary: Summary::new("approved".into()).unwrap(),
+                kind: MessageKind::Event,
+            },
         };
-        let json = serde_json::to_string(&m).unwrap();
-        let back: Message = serde_json::from_str(&json).unwrap();
-        assert_eq!(m, back);
+        let json = serde_json::to_string(&entry).unwrap();
+        // flattened: message fields sit at the top level, not nested under "msg"
+        assert!(json.contains(r#""text":"PR #5 approved""#));
+        assert!(!json.contains(r#""msg""#));
+        let back: IngestionEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry, back);
+    }
+
+    #[test]
+    fn summary_rejects_newline() {
+        assert!(Summary::new("ok".into()).is_ok());
+        assert!(Summary::new("two\nlines".into()).is_err());
     }
 }

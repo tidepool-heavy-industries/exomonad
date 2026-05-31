@@ -1,31 +1,40 @@
 //! The capability error type — held to the `exo-scry::ScryError` bar: distinct
-//! inspectable variants, `#[from]` source-chaining, no stringly-typed soup.
-//!
-//! Wave-1 note: per-cap leaves may introduce richer per-domain error enums (e.g.
-//! `GitError`) wrapped here via `#[from]`; the per-domain string variants below are the
-//! scaffold's floor.
+//! inspectable variants, source-preserving (`#[from]` the per-cap errors, never
+//! flattening to a `String`), no stringly-typed soup.
 
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CapError {
-    #[error("git: {0}")]
-    Git(String),
-    #[error("github: {0}")]
-    GitHub(String),
-    #[error("tmux: {0}")]
-    Tmux(String),
-    #[error("bus: {0}")]
-    Bus(String),
-    #[error("spawn: {0}")]
-    Spawn(String),
+    /// A domain newtype's constructor rejected bad input.
     #[error("invalid {what}: {detail}")]
     Invalid { what: &'static str, detail: String },
+
+    // Per-cap errors flow in transparently, preserving `source()` chaining. A tool
+    // generic over several caps unifies them with `?` via these `#[from]` impls.
+    #[error(transparent)]
+    Git(#[from] crate::git::GitError),
+    #[error(transparent)]
+    GitHub(#[from] crate::github::GitHubError),
+    #[error(transparent)]
+    Tmux(#[from] crate::tmux::TmuxError),
+    #[error(transparent)]
+    Bus(#[from] crate::bus::BusError),
+    #[error(transparent)]
+    Spawn(#[from] crate::spawner::SpawnError),
+    #[error(transparent)]
+    Fs(#[from] crate::fs::FsError),
+    #[error(transparent)]
+    Process(#[from] crate::process::ProcessError),
+    #[error(transparent)]
+    Kv(#[from] crate::kv::KvError),
+
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
     #[error("json ({context}): {source}")]
     Json {
         context: String,
+        #[source]
         source: serde_json::Error,
     },
 }

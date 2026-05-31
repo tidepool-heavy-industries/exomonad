@@ -28,17 +28,18 @@ pub mod kv;
 
 pub use error::{CapError, CapResult};
 pub use types::{
-    AgentName, AgentType, Branch, ChildKind, ControlKind, InboxPath, Message, MessageBody,
-    MessageId, MessageKind, NodeKind, NodePath, PaneId, Persona, SyntheticName,
+    AgentName, AgentType, Branch, ChildKind, ControlKind, InboxPath, IngestionEntry, Message,
+    MessageBody, MessageId, MessageKind, NodeKind, NodePath, PaneId, Persona, Summary,
+    SyntheticName,
 };
-pub use bus::{Addressee, Bus};
-pub use spawner::{ForkSpec, GeminiSpec, Spawner, WorkerSpec};
+pub use bus::{Addressee, Bus, BusError};
+pub use spawner::{ForkSpec, GeminiSpec, SpawnError, Spawner, WorkerSpec};
 pub use lifecycle::{fold_children, Child, ChildLifecycle, ChildRecord};
-pub use git::Git;
-pub use github::GitHub;
-pub use tmux::Tmux;
-pub use fs::Fs;
-pub use process::Process;
+pub use git::{Git, GitError};
+pub use github::{GitHub, GitHubError};
+pub use tmux::{Tmux, TmuxError};
+pub use fs::{Fs, FsError};
+pub use process::{Process, ProcessError};
 pub use log::Log;
 pub use clock::Clock;
-pub use kv::Kv;
+pub use kv::{Kv, KvError};

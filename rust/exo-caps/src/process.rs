@@ -6,10 +6,22 @@
 //!
 //! The argument surface (cwd / env / timeout) firms up in Wave 1.
 
-use crate::error::CapResult;
 use async_trait::async_trait;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum ProcessError {
+    #[error("failed to spawn {program}: {source}")]
+    Spawn {
+        program: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
 
 #[async_trait]
 pub trait Process {
-    async fn run(&self, program: &str, args: &[String]) -> CapResult<std::process::Output>;
+    async fn run(&self, program: &str, args: &[String]) -> Result<std::process::Output, ProcessError>;
 }
