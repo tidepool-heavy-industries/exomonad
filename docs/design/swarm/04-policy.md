@@ -96,8 +96,10 @@ the bus). Two record kinds:
   not a message and not a `MessageKind::Event` — never delivered to anyone's
   conversation, just folded for tracking.
 
-"Who are my children" = fold the log. A `Spawned` with **no `Started`** after a
-timeout is a **failed/ghost spawn** → the parent reaps/retries. Running-vs-done
+"Who are my children" = fold the log. The ghost-spawn reap predicate is
+**`Spawned ∧ ¬Started ∧ ¬pane-alive`** (after a timeout) — it must check pane-liveness,
+**not** just the missing `Started` record, or a slow-booting live child gets falsely
+reaped (a child that created its pane but hasn't yet appended `Started`). Running-vs-done
 status is computed **live** (pane-alive check), never written back. Append-only +
 fold-to-state is the same discipline as the bus (a retry is a new append; no mutable
 per-child record; no orphan-before-papers gap — the parent logged the intent before

@@ -128,6 +128,12 @@ sub-TLs (below) — that's the extra level of granularity.
 | R2 | `Tmux` | adapt `TmuxIpc`; the tmux-paste last-hop |
 | R3 | `Fs` + `Process` + `Log` + `Kv` + `Clock` | trivial (std fs/process, file kv, system clock, file-at-worktree-root log) |
 
+> **Async hazard (all of R1–R3): do NOT block the executor.** The services being
+> adapted use synchronous `std::process::Command`; calling `.output()` inside an
+> `async fn` cap method blocks a tokio worker for the whole git/tmux/gh call. "Adapt"
+> means **`tokio::process::Command`** (or wrap in `spawn_blocking`) — never a raw
+> sync call. This is the spec's biggest async footgun; front-load it in every leaf.
+
 ### Bus TL (Claude) — the append-only bus, decomposed
 
 Systems-heavy; **never one Gemini.** The Bus TL writes the failing harness first
@@ -137,8 +143,8 @@ invariant each:
 | Leaf | One job | Test it must pass |
 |---|---|---|
 | B1 | atomic append primitive — single `O_APPEND` ≤PIPE_BUF; oversized → temp+rename sidefile *then* pointer line | N concurrent appenders, zero interleaving |
-| B2 | byte-offset cursor — persist sibling `.cursor`, advance-after-delivery (atomic), read-to-last-`\n`, missing→EOF | restart resumes; torn trailing line re-read once |
-| B3 | inotify watch — `IN_MODIFY` → re-read from cursor (absorbs coalesced events) | an append wakes the watcher |
+| B2 | byte-offset cursor — persist sibling `.cursor`, advance-after-delivery via **temp+rename** (a small overwrite is NOT crash-atomic), read-to-last-`\n`, missing→EOF | restart resumes; a crash mid-cursor-write never yields a garbage offset |
+| B3 | inotify watch — `IN_MODIFY` → re-read from cursor (absorbs coalesced events). **Via the async reactor** (inotify `Stream`/`AsyncFd` or `notify`) — a blocking read in the async task stalls the executor | an append wakes the watcher; no executor block |
 | B4 | `Addressee`→`InboxPath` resolve — `Parent` (papers `parent_inbox`), `InlineChild`/`WorktreeChild` (ledger) → run-id-keyed path | resolves all three variants (reuse `exo-scry`) |
 
 **Converge:** wire into `impl Bus { deliver = resolve(B4) + append(B1) }` + the read
@@ -175,7 +181,7 @@ into the node. Scaffold: the node bootstrap (self-ID via `exo-scry` → build
 | N1 | **Outbound** — rmcp adapter exposing `exo-policy` `Tool`s; `send_message`/`notify_parent` via `Bus`. (Refactor teams-mcp outbound: write the *ingestion* inbox, not CC Teams directly.) |
 | N2a | **Last-hop dispatch** — route one entry by `node_kind.agent_type()`: CC-in-team → Teams inbox write (via `exo-scry` membership); else → tmux-paste. (Reuse exomonad-core delivery.) |
 | N2b | **Inbound loop** — drive the Bus read side (B2+B3, already built) → per new entry match `kind`: `Chat`→dispatch(N2a), `Event`→parse `WorldEvent`→`on_world_event`→act, `Control`→shutdown self-kill. |
-| N3 | **Self-poll** — periodic own-PR/CI poll → `WorldEvent` → `on_world_event` → `InjectMessage`/`NotifyParent`. (Per-agent realization of the old central poller; reuse `github_poller` timeout logic.) |
+| N3 | **Self-poll** — periodic own-PR/CI poll → `WorldEvent` → `on_world_event` → `InjectMessage`/`NotifyParent`. (Per-agent realization of the old central poller; reuse `github_poller` timeout logic.) **Needs a tracked `AbortHandle`**: abort the poll task when the PR merges/closes, and re-`file_pr` must not spawn a second poller (dedup/replace) — a bare `tokio::spawn` leaks and double-polls. |
 | N4 | **`exomonad hook` mode** — CC payload → `exo-policy` `pre_tool_use`/`stop`/`session_start` → verdict. No server. |
 
 The inbound loop is split (N2a dispatch | N2b loop) and is **lighter than it looks** —

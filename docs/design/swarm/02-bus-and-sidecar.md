@@ -84,37 +84,42 @@ architecture review's concern, dissolved by the tree-only constraint).
 
 ## Ingestion entry format (settled)
 
-One JSON object per line (append-only). Serializes the [`Message`](03-capabilities.md)
-plus runtime-stamped `id` + `ts`:
+One JSON object per line (append-only). The runtime flattens the
+[`Message`](03-capabilities.md) under a stamped envelope (`v` + `ts` + `from`):
 
 ```jsonc
-{ "v": 1,                    // schema version — parsed tolerantly (serde defaults)
-  "id": "01J8…",            // ulid/monotonic, stamped on append — for ordering + optional dedup (NOT the cursor; the cursor is a byte-offset, see below)
+{ "v": 1,                    // schema version — parsed tolerantly (serde defaults; no deny_unknown_fields)
   "ts": "2026-05-30T22:…Z",  // stamped on append
-  "from": "github",          // agent name or synthetic persona
+  "from": "github",          // agent name or synthetic persona — STAMPED by the runtime (a tool can't set it → no spoofing)
   "kind": "event",           // chat | event | control
   "summary": "PR #5 approved",
   "text": "…" }              // plain body
 ```
 
+**No message-id.** Ordering is the **append order** (line order in the file) — free,
+so no ulid is carried. At-least-once redelivery (see *Cursor & restart*) may show the
+agent a duplicate line; that's benign (it re-reads one message). Dedup, if ever wanted,
+is the **sink's** job (the agent / CC InboxPoller), never the sidecar's — a sidecar
+dedup record would have the same crash window as the cursor.
+
 **CC last-hop mapping:** entry → CC Teams entry `{from, text, summary, timestamp,
-read:false}`. `id`/`kind` are exomonad-side and dropped (or folded into `text`) at
-the CC write. **tmux-paste rendering:** `from` + `summary` + `text` formatted into
-the pane.
+read:false}`. `kind` is exomonad-side and dropped (or folded into `text`) at the CC
+write. **tmux-paste rendering:** `from` + `summary` + `text` formatted into the pane.
 
 ## Cursor & restart (settled)
 
 The node's **own sidecar is the sole reader** of its inbox — senders never touch the
 cursor, so there is no concurrency on it; restart is a pure single-process resume.
 
-- **Cursor = byte-offset** into the append-only file (sibling `pane-317.cursor`),
-  *not* the ulid. Valid because the common path **never** rewrites/renames — appends
-  only grow the file — so the offset stays correct and resume is **O(1)** (seek +
-  read forward). The entry `id` (ulid) is kept for ordering + optional dedup.
-- **Advance after a successful last-hop delivery**, written atomically (it's tiny).
-  A crash between delivery and advance re-delivers the one in-flight message on
-  restart: **at-least-once, never dropped**. Dedup by `id` at the consumer if a
-  duplicate paste/teammate-message would be harmful.
+- **Cursor = byte-offset** into the append-only file (sibling `pane-317.cursor`).
+  Valid because the common path **never** rewrites/renames — appends only grow the
+  file — so the offset stays correct and resume is **O(1)** (seek + read forward).
+- **Advance after a successful last-hop delivery**, written with **temp + rename**
+  (atomic replace) — **NOT** an in-place overwrite. "Small" is not "atomic": a crash
+  mid-overwrite of the offset can leave a garbage value → seek to the wrong place →
+  silently skip or land mid-line. `rename(2)` is atomic, so the cursor is always a
+  whole valid offset. A crash between delivery and advance re-delivers the one
+  in-flight message on restart: **at-least-once, never dropped, never corrupted.**
 - **Read only up to the last `\n`** — a torn trailing line is re-read once complete.
 - **Missing cursor** (fresh node, or lost) → start at current EOF; don't replay
   history.
@@ -140,18 +145,29 @@ manual `O_EXCL` lock) and `exomonad-core/.../inbox_watcher.rs` (500 ms poll + a
 message-count snapshot) are **NOT** this design — they are the jank to be
 replaced. The bus must be built solid at the systems level:
 
-- **Atomic append, no lock on the common path.** Each entry is one line written
-  with a single `O_APPEND` `write(2)` ≤ `PIPE_BUF` (4 KiB on Linux) → atomic, no
-  interleaving, no lock needed (assumes a **local fs** — `O_APPEND`≤PIPE_BUF isn't
-  atomic on NFS; fine for a dev box). Oversized bodies spill to a side file,
-  **written atomically (temp+rename) before the pointer line is appended**, so a
-  reader never sees a pointer to a half-written body. **Never** read-modify-write
-  the whole file.
+- **A line is *invariantly* ≤ `PIPE_BUF`.** Atomicity of `O_APPEND` only holds up to
+  `PIPE_BUF` (4 KiB on Linux); a larger write **interleaves under concurrent
+  appenders and corrupts the jsonl**. So the spill threshold is tied to the **line
+  size (PIPE_BUF)**, *not* the `MessageBody` cap (1 MiB): any entry whose serialized
+  line would exceed PIPE_BUF spills its body to a side file (written temp+rename
+  **before** the small pointer line is appended) and the line carries a pointer. With
+  this invariant every line is one atomic `write(2)` — no interleaving, no lock, and
+  no torn lines (a single atomic append is all-or-nothing, so "read to last `\n`" only
+  ever discards a *missing* final line, never a garbage one). Assumes a **local fs**
+  (`O_APPEND`≤PIPE_BUF isn't atomic on NFS; fine for a dev box). **Never**
+  read-modify-write the whole file.
+- **Durability level (stated, not implied): no `fsync`.** A bus append survives an
+  agent crash / `kill -9` (the bytes are in the kernel page cache the moment
+  `write(2)` returns — process death doesn't lose them). It does **not** survive
+  power-loss / kernel panic — but that kills the whole swarm anyway, so there's
+  nothing to recover *to*. So **no fsync, and no fsync *policy* knob** (we don't need
+  Redis's `everysec`/`always`/`no` trichotomy — plain OS-flush is correct here).
 - **Kernel `flock` only where a non-append op is unavoidable** (compaction), never
   a manual lockfile — `flock` releases on process death, so no stale-lock deadlock
   (the CRITICAL the concurrency review found).
 - **Persisted cursor** = byte-offset (see *Cursor & restart*), advanced after a
-  successful last hop. **Never** a count-snapshot (which drops messages on restart).
+  successful last hop via **temp+rename** (atomic replace — a "small" overwrite is
+  *not* crash-atomic). **Never** a count-snapshot (which drops messages on restart).
 - **Schema-versioned** — every jsonl entry + papers file carries a `v` field, parsed
   tolerantly (serde defaults), so a mixed-version swarm (rolling `cargo install`)
   doesn't crash on an unknown field.

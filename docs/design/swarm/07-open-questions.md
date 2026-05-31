@@ -273,6 +273,39 @@ Reviewed end-to-end against the stated goal. **Sidecar (facet 1)** and **one bin
 - **Idle/presence reaffirmed as a Wave-2 prerequisite** (a parent can't detect wave
   convergence without it) — not a post-hoc nicety.
 
+## Behavioral review (metacog round 2 — crash-consistency / async / AOF)
+
+After the type trio (jonhoo/dtolnay/niko) hardened the *types*, three authorities who've
+*built* this class of system reviewed *runtime behavior* (aphyr / Alice Ryhl / antirez).
+Two design bugs, three impl hazards, one simplification — all folded:
+
+- **Cursor must be temp+rename, not "tiny ⇒ atomic"** (aphyr). A small in-place
+  overwrite is not crash-atomic → a garbage offset → silent skip/data-loss. The one
+  real loss window; fixed in [02](02-bus-and-sidecar.md).
+- **An inbox line is invariantly ≤ PIPE_BUF** (aphyr). `O_APPEND` atomicity only holds
+  to PIPE_BUF, but `MessageBody` allows 1 MiB → medium bodies corrupt the log under
+  concurrent append. Spill threshold tied to the *line* size (PIPE_BUF), not the body
+  cap; once it holds, torn lines can't occur. [02](02-bus-and-sidecar.md).
+- **`MessageId` dropped** (aphyr + antirez converged). Ordering = append order (free);
+  dedup is the *sink's* job (a sidecar dedup record has the cursor's crash window), and
+  the id was even dropped at the CC hop — vestigial. Removed from the contract +
+  `Clock::new_id`. At-least-once duplicates are benign (agent re-reads one line).
+- **Cap impls must not block the executor** (Ryhl) — the adapted `std::process`
+  services must become `tokio::process`/`spawn_blocking`. The plan's biggest async
+  footgun; written into every Runtime-TL leaf ([06](06-migration.md)).
+- **inotify via the async reactor**, not blocking reads (Ryhl) — Bus-TL B3.
+- **Self-poll needs a tracked `AbortHandle`** (Ryhl) — abort on PR-close, dedup on
+  re-`file_pr`; a bare `tokio::spawn` leaks. Node-TL N3.
+- **Ghost-spawn reap = `Spawned ∧ ¬Started ∧ ¬pane-alive`** (aphyr) — check pane
+  liveness, don't reap a slow boot. [04](04-policy.md).
+- **Durability stated: no fsync, no fsync-policy knob** (aphyr + antirez) — survives
+  crash/`kill -9` (bytes in page cache), not power-loss (which kills the swarm anyway).
+
+Validated as correct (recorded so we don't relitigate): deferring compaction (antirez —
+the most bug-prone part of Redis AOF; run-id namespacing also bounds per-run growth);
+JSON over binary for `tail`-ability; single-task cursor needs no lock (Ryhl); at-least-once
+makes the `select!` loop cancellation-tolerant; tail recovery mirrors AOF `aof-load-truncated`.
+
 ## Review-process note
 
 Adversarial reviewers must get a **viewpoint/category only** ("systems-level review

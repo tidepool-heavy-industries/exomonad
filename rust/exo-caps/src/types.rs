@@ -204,31 +204,6 @@ impl TryFrom<String> for SyntheticName {
     }
 }
 
-/// A message `id` (ulid) — minted by the [`Clock`](crate::Clock) at append, for
-/// ordering / optional dedup. NOT the cursor (the cursor is a byte-offset — doc 02).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String")]
-pub struct MessageId(String);
-
-impl MessageId {
-    pub fn new(s: String) -> CapResult<Self> {
-        if s.is_empty() {
-            return Err(CapError::invalid("MessageId", "must be non-empty"));
-        }
-        Ok(MessageId(s))
-    }
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl TryFrom<String> for MessageId {
-    type Error = CapError;
-    fn try_from(s: String) -> CapResult<Self> {
-        MessageId::new(s)
-    }
-}
-
 /// Plain message body; bounded length, no C0 control chars except `\t \n \r`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String")]
@@ -379,14 +354,15 @@ pub struct Message {
 
 /// One line of an ingestion inbox — the **wire** form. The runtime stamps `from` (the
 /// true sender; `Agent(me)` for a node send, `Synthetic(src)` for an event injection),
-/// `id`, `ts`, and the schema version `v`; the [`Message`] is flattened in, so the line
-/// is exactly `{v,id,ts,from,kind,summary,text}` (doc 02). `v` defaults and unknown
-/// fields are tolerated (no `deny_unknown_fields`) — a mixed-version swarm won't crash.
+/// `ts`, and the schema version `v`; the [`Message`] is flattened in, so the line is
+/// exactly `{v,ts,from,kind,summary,text}` (doc 02). **Ordering is the append order**
+/// (line order) — no message-id is carried; at-least-once redelivery may show the agent
+/// a duplicate line, which is benign. `v` defaults and unknown fields are tolerated (no
+/// `deny_unknown_fields`) — a mixed-version swarm won't crash.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IngestionEntry {
     #[serde(default)]
     pub v: u32,
-    pub id: MessageId,
     pub ts: DateTime<Utc>,
     pub from: Persona,
     #[serde(flatten)]
@@ -486,7 +462,6 @@ mod tests {
     fn ingestion_entry_round_trips_and_flattens() {
         let entry = IngestionEntry {
             v: 1,
-            id: MessageId::new("01J8XYZ".into()).unwrap(),
             ts: DateTime::parse_from_rfc3339("2026-05-31T22:00:00Z")
                 .unwrap()
                 .with_timezone(&Utc),

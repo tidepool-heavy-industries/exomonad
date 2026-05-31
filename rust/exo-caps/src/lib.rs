@@ -29,8 +29,7 @@ pub mod kv;
 pub use error::{CapError, CapResult};
 pub use types::{
     AgentName, AgentType, Branch, ChildKind, ControlKind, InboxPath, IngestionEntry, Message,
-    MessageBody, MessageId, MessageKind, NodeKind, NodePath, PaneId, Persona, Summary,
-    SyntheticName,
+    MessageBody, MessageKind, NodeKind, NodePath, PaneId, Persona, Summary, SyntheticName,
 };
 pub use bus::{Addressee, Bus, BusError};
 pub use spawner::{ForkSpec, GeminiSpec, SpawnError, Spawner, WorkerSpec};
