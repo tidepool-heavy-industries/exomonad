@@ -1,0 +1,16 @@
+[package]
+name = "exo-caps"
+version = "0.1.0"
+edition = "2021"
+description = "Capability traits + domain types — the seam between exo-policy (decision logic) and exo-runtime (IO)."
+
+[lib]
+name = "exo_caps"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
