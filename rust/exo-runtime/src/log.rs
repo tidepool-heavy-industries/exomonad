@@ -8,12 +8,29 @@
 use crate::runtime::Runtime;
 use exo_caps::Log;
 
+use std::fs::OpenOptions;
+use std::io::Write;
+
 impl Log for Runtime {
-    fn info(&self, _msg: &str) {
-        todo!("R3: append an info line to the worktree-root log file under self.working_dir")
+    fn info(&self, msg: &str) {
+        let path = self.working_dir().join("exo-runtime.log");
+        let _ = (|| -> std::io::Result<()> {
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)?;
+            writeln!(file, "[INFO] {}", msg)
+        })();
     }
 
-    fn error(&self, _msg: &str) {
-        todo!("R3: append an error line to the worktree-root log file under self.working_dir")
+    fn error(&self, msg: &str) {
+        let path = self.working_dir().join("exo-runtime.log");
+        let _ = (|| -> std::io::Result<()> {
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)?;
+            writeln!(file, "[ERROR] {}", msg)
+        })();
     }
 }
