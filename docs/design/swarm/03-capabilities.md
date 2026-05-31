@@ -23,18 +23,29 @@ struct InboxPath(PathBuf);
 struct AgentName(String);        // a node's name = NodePath.last(); non-empty, no path separators
 struct SyntheticName(String);    // a non-node persona ("github", "ci"); non-empty
 struct MessageBody(String);      // plain message body; validated (length / control-char checks)
-enum  Role      { Root, Tl, Dev, Worker }
-enum  AgentType { Claude, Gemini, Shoal }
+enum  NodeKind  { Root, Tl, Dev, Worker } // the node's archetype — the ONE stored identity enum; role + runtime derive from it (no illegal (role, runtime) pair representable)
+enum  AgentType { Claude, Gemini, Shoal }  // runtime — used by the DELIVERY last-hop only; for a tree node = node_kind.agent_type(). Shoal is a companion/external-rmcp participant, NOT a per-op spawn archetype, so it never forces a free agent_type field on a tree node.
 enum  Persona   { Agent(AgentName), Synthetic(SyntheticName) } // who a message is "from"
 // (no EventType here — the single typed event enum is `WorldEvent` in 04; see Message below)
+
+// NodeKind is the single source of a node's correlated identity. role (the role_def key,
+// = the variant: "root"/"tl"/"dev"/"worker") and agent_type both DERIVE; neither is stored separately.
+impl NodeKind {
+    fn agent_type(&self) -> AgentType { /* Root | Tl => Claude ;  Dev | Worker => Gemini */ }
+}
 ```
 
 Make-illegal-states-unrepresentable is a first-class goal here (the type-elegance
 review flagged the original stringly-typed draft): `Persona`/`AgentName` and the
 typed `WorldEvent` (04) replace raw `String`s so a tool can't spoof a persona or
-fabricate an event, and the compiler enforces it. (`NodeRef` was cut as an unused
-type — a future probe/`list_agents` surface can introduce a purpose-built node-view
-then; the parent's child-handle is just the folded `AgentSpawned` record.)
+fabricate an event, and the compiler enforces it. **`NodeKind` collapses the
+correlated `(role, agent_type)` pair into one enum** — only the four real archetypes
+are representable, `agent_type` derives, and `(Root, Gemini)` / `(Worker, Claude)`
+become unnameable (closing the representational gap the idiom review flagged; the
+*construction* hazard was already closed by per-op spawn specs). (`NodeRef` was cut
+as an unused type — a future probe/`list_agents` surface can introduce a
+purpose-built node-view then; the parent's child-handle is just the folded
+`AgentSpawned` record.)
 
 ## Message — plain text + a kind tag
 

@@ -236,17 +236,18 @@ the gaps are now closed or are conscious boundary tradeoffs, not oversights.
   inherently-dynamic MCP/JSON edge and Rust's lack of existentials over varying bounds.
   Erase *arguments*, never *caps*; the `TypedTool` wrapper confines it. Correct.
 
-**The one open representational polish — `role` + `agent_type` correlation.** They're
-modeled as two independent fields but only ~4 pairs are legal (Root→Claude, Tl→Claude,
-Dev→Gemini, Worker→Gemini today). **Crucially, the per-op-spawn fix already closed the
-*construction* hazard** (the spawn op is the only writer and fixes legal pairs) — so a
-sum-collapse is *representational only* (self-documenting, impossible-to-misread), not
-a new safety guarantee. Whether to collapse hinges on **Shoal**: if `agent_type` is
-always op-determined → collapse to `enum NodeKind { Root, SubTl, Dev, Worker }` with
-`role()`/`agent_type()` accessors; if Shoal is a custom binary that can pair with
-multiple roles → keep them separate (flexible) or `Role { Root, Tl, Dev(AgentType),
-Worker(AgentType) }`. Deferred to the Shoal decision; **lean keep-separate** since the
-hazard is already gone and separation is the most Shoal-flexible.
+**`role` + `agent_type` correlation — RESOLVED: collapsed to `NodeKind`.** They were
+two independent fields though only ~4 pairs are legal (Root→Claude, Tl→Claude,
+Dev→Gemini, Worker→Gemini). The per-op-spawn fix had already closed the *construction*
+hazard (the spawn op is the only writer and fixes legal pairs), so this collapse is
+*representational* — self-documenting, `(Root, Gemini)`/`(Worker, Claude)` unnameable.
+`enum NodeKind { Root, Tl, Dev, Worker }` is now the single stored identity enum;
+`role` (the `role_def` key) is the variant, `agent_type` derives via `NodeKind::
+agent_type()`. **`AgentType` survives only as a delivery-routing concern** (the
+last-hop's Claude/Gemini/Shoal switch), fed by `node_kind.agent_type()` for tree
+nodes. The Shoal worry dissolved on inspection: **Shoal is a companion/external-rmcp
+participant, not a per-op spawn archetype**, so it never needed a free `agent_type`
+on a tree node — it lives in the delivery `AgentType` only. ([01](01-identity.md)/[03](03-capabilities.md)/[04](04-policy.md))
 
 ## Review-process note
 

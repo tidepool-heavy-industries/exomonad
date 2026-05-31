@@ -41,7 +41,7 @@ DSL. Everything else in the old guest was WASM-boundary tax that *deletes* — s
        stop:         fn(&R) -> StopDecision,
        on_event:     fn(&R, &WorldEvent) -> EventAction,
    }
-   fn role_def<R: Runtime>(role: Role) -> RoleDef<R> { match role { /* … */ } }
+   fn role_def<R: Runtime>(kind: NodeKind) -> RoleDef<R> { match kind { /* … */ } }
    ```
 
 `RoleDef` literals *read* like declarative config but are plain, greppable,

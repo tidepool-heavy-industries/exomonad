@@ -17,9 +17,11 @@ else enriches it.
 
 ## Assigned-at-birth, not derived
 
-The exomonad identity — `role`, `parent`, tree position, `agent_type` — exists in
+The exomonad identity — `role` (the `NodeKind`), `parent`, tree position — exists in
 no runtime's live state, so it is **recorded at spawn**, not inferred. The parent
 already knows the child's identity (it assigned it); it just writes it down.
+(`agent_type` is *derived* from `NodeKind`, so it's not separately recorded — see
+[03](03-capabilities.md).)
 
 This is *not* the mutable registry we killed. The distinction is **mutable vs
 immutable**, not written-vs-derived: birth facts never change after birth, so
@@ -39,8 +41,7 @@ Per node, written by the parent at spawn (by `init` for the root). Proposed:
 {
   "path":       ["dev", "auth-claude", "oauth-gemini"], // tree address (list of segments)
   "branch":     "dev.auth-claude.oauth-gemini",          // git branch — SEPARATE, generated safely
-  "role":       "dev",                                    // root | tl | dev | worker
-  "agent_type": "gemini",                                 // claude | gemini | shoal
+  "role":       "dev",                                    // the NodeKind: root | tl | dev | worker (agent_type DERIVES from this — not stored; see 03)
   "pane":       "%317",                                   // tmux pane (delivery + key derivation)
   "parent_inbox": "/…/.claude/exo/inboxes/{run-id}/pane-311.jsonl" // path to parent's ingestion inbox; null for root
 }
