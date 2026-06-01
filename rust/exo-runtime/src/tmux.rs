@@ -28,7 +28,16 @@ impl Tmux for Runtime {
     }
 
     async fn paste(&self, pane: &PaneId, text: &str) -> Result<(), TmuxError> {
-        crate::session_boot::paste_to_pane(&self.tmux_session, pane, text).await
+        // Delegate to exomonad's hardened injection: per-target lock, copy/scroll-mode
+        // cancel, 150ms debounce, and Enter-retry — the machinery that prevents the silent
+        // paste failures a hand-rolled `load-buffer`/`send-keys` is prone to.
+        exomonad_core::services::tmux_ipc::TmuxIpc::new(&self.tmux_session)
+            .inject_input(pane.as_str(), text)
+            .await
+            .map_err(|e| TmuxError::Failed {
+                op: "paste",
+                detail: e.to_string(),
+            })
     }
 
     async fn kill_pane(&self, pane: &PaneId) -> Result<(), TmuxError> {

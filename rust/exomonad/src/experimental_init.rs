@@ -58,7 +58,9 @@ pub async fn run(config: &Config, session: Option<String>, recreate: bool) -> Re
         "EXOMONAD_SWARM_RUN_ID={run_id} EXOMONAD_TMUX_SESSION={session} claude --dangerously-skip-permissions{model_flag}"
     );
 
-    exo_runtime::paste_to_pane(&session, &root_pane, &launch).await?;
+    exomonad_core::services::tmux_ipc::TmuxIpc::new(&session)
+        .inject_input(root_pane.as_str(), &launch)
+        .await?;
 
     println!("Root node up in tmux session '{session}'. Attaching (detach: Ctrl-b d; reattach: tmux attach -t {session})...");
 

@@ -35,4 +35,4 @@ mod tmux;
 
 pub use node_config::write_node_agent_config;
 pub use runtime::Runtime;
-pub use session_boot::{boot_root_session, paste_to_pane};
+pub use session_boot::boot_root_session;
