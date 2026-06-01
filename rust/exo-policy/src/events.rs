@@ -158,6 +158,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_on_world_event_sibling_merged() {
+        let ctx = MockRuntime::default();
+        let e = WorldEvent::SiblingMerged {
+            pr: 123,
+            branch: "main.feature-a".to_string(),
+        };
+        let action = on_world_event(&ctx, &e).await;
+        if let EventAction::InjectMessage { text, summary } = action {
+            assert!(text.contains("[Sibling Merged]"));
+            assert!(text.contains("main.feature-a"));
+            assert!(text.contains("merged into main"));
+            assert_eq!(summary, "[Sibling Merged]");
+        } else {
+            panic!("Expected InjectMessage, got {:?}", action);
+        }
+    }
+
+    #[tokio::test]
     async fn test_mock_runtime_new_methods() {
         let ctx = MockRuntime {
             review_state: Some(ReviewState::Approved),

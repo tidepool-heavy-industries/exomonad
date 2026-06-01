@@ -95,6 +95,7 @@ impl GitHub for Runtime {
         let reviews = octo
             .pulls(owner, repo)
             .list_reviews(pr)
+            .per_page(100)
             .send()
             .await
             .map_err(|e| GitHubError::Failed {
@@ -139,7 +140,7 @@ impl GitHub for Runtime {
             })?;
 
         if runs.check_runs.is_empty() {
-            return Ok(CiStatus::Passing);
+            return Ok(CiStatus::Pending);
         }
 
         let mut any_failed = false;
