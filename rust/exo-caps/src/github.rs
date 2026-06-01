@@ -3,6 +3,7 @@
 
 use crate::types::Branch;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -11,6 +12,22 @@ pub enum GitHubError {
     Failed { op: &'static str, detail: String },
     #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewState {
+    Approved,
+    ChangesRequested,
+    Commented,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CiStatus {
+    Passing,
+    Failing,
+    Pending,
 }
 
 #[async_trait]
@@ -22,4 +39,49 @@ pub trait GitHub {
     async fn merge_pr(&self, pr: u64) -> Result<(), GitHubError>;
     /// Does the open PR have unaddressed `ChangesRequested`? (the live stop-gate).
     async fn has_unaddressed_changes(&self, pr: u64) -> Result<bool, GitHubError>;
+    /// The latest review decision on the PR. None if no reviews have arrived.
+    async fn review_state(&self, pr: u64) -> Result<Option<ReviewState>, GitHubError>;
+    /// The rolled-up CI conclusion for the PR's HEAD.
+    async fn ci_status(&self, pr: u64) -> Result<CiStatus, GitHubError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn review_state_serde_round_trip() {
+        let states = vec![
+            ReviewState::Approved,
+            ReviewState::ChangesRequested,
+            ReviewState::Commented,
+        ];
+        for s in states {
+            let j = serde_json::to_string(&s).unwrap();
+            let back: ReviewState = serde_json::from_str(&j).unwrap();
+            assert_eq!(s, back);
+        }
+    }
+
+    #[test]
+    fn ci_status_serde_round_trip() {
+        let statuses = vec![CiStatus::Passing, CiStatus::Failing, CiStatus::Pending];
+        for s in statuses {
+            let j = serde_json::to_string(&s).unwrap();
+            let back: CiStatus = serde_json::from_str(&j).unwrap();
+            assert_eq!(s, back);
+        }
+    }
+
+    #[test]
+    fn review_state_json_representation() {
+        assert_eq!(
+            serde_json::to_value(ReviewState::Approved).unwrap(),
+            serde_json::json!("approved")
+        );
+        assert_eq!(
+            serde_json::to_value(ReviewState::ChangesRequested).unwrap(),
+            serde_json::json!("changes_requested")
+        );
+    }
 }
