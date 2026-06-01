@@ -60,7 +60,10 @@ DSL. Everything else in the old guest was WASM-boundary tax that *deletes* — s
        match kind {
            NodeKind::Dev => RoleDef {
                tools: vec![b(FilePr), b(NotifyParent), b(SendMessage)], // a clean list of tool types
-               pre_tool_use: dev_nudges, stop: dev_stop, on_event: dev_events,           },
+               pre_tool_use: dev_nudges,
+               stop: dev_stop,
+               on_event: dev_events,
+           },
            /* Root / Tl / Worker … */
        }
    }

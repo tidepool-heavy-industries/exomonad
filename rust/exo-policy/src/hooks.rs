@@ -64,12 +64,21 @@ pub fn pre_tool_use<'a, R: Send + Sync>(
 
     Box::pin(async move {
         // Antipattern: Avoid `git add .` or `git add -A`.
-        if tool_name == "run_shell_command" {
+        // Appears in Gemini's `run_shell_command` and Claude's `Bash`.
+        if tool_name == "run_shell_command" || tool_name == "Bash" {
             if let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) {
-                if cmd.contains("git add .") || cmd.contains("git add -A") {
-                    return HookDecision::Deny {
-                        reason: "Avoid `git add -A`/`git add .` — stage specific files by path to avoid committing stray artifacts.".into(),
-                    };
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                for i in 0..parts.len() {
+                    // Look for 'git add' followed by '.' or '-A' as a distinct argument.
+                    if parts[i] == "git"
+                        && i + 2 < parts.len()
+                        && parts[i + 1] == "add"
+                        && (parts[i + 2] == "." || parts[i + 2] == "-A")
+                    {
+                        return HookDecision::Deny {
+                            reason: "Avoid `git add -A`/`git add .` — stage specific files by path to avoid committing stray artifacts.".into(),
+                        };
+                    }
                 }
             }
         }
@@ -162,37 +171,64 @@ mod tests {
     #[tokio::test]
     async fn test_pre_tool_use_git_add_antipattern_denied() {
         let ctx = MockRuntime::default();
-        let input = HookInput {
-            tool_name: "run_shell_command".into(),
-            tool_input: json!({ "command": "git add ." }),
-        };
-        match pre_tool_use(&ctx, &input).await {
-            HookDecision::Deny { reason } => {
-                assert!(reason.contains("Avoid `git add -A`/`git add .`"));
-            }
-            _ => panic!("Should be Deny for antipattern"),
-        }
+        let tools = ["run_shell_command", "Bash"];
 
-        let input_a = HookInput {
-            tool_name: "run_shell_command".into(),
-            tool_input: json!({ "command": "git add -A" }),
-        };
-        match pre_tool_use(&ctx, &input_a).await {
-            HookDecision::Deny { reason } => {
-                assert!(reason.contains("Avoid `git add -A`/`git add .`"));
+        for tool in tools {
+            let input = HookInput {
+                tool_name: tool.into(),
+                tool_input: json!({ "command": "git add ." }),
+            };
+            match pre_tool_use(&ctx, &input).await {
+                HookDecision::Deny { reason } => {
+                    assert!(reason.contains("Avoid `git add -A`/`git add .`"));
+                }
+                _ => panic!("Should be Deny for {} with 'git add .'", tool),
             }
-            _ => panic!("Should be Deny for antipattern"),
+
+            let input_a = HookInput {
+                tool_name: tool.into(),
+                tool_input: json!({ "command": "git add -A" }),
+            };
+            match pre_tool_use(&ctx, &input_a).await {
+                HookDecision::Deny { reason } => {
+                    assert!(reason.contains("Avoid `git add -A`/`git add .`"));
+                }
+                _ => panic!("Should be Deny for {} with 'git add -A'", tool),
+            }
+
+            // Test with extra whitespace
+            let input_ws = HookInput {
+                tool_name: tool.into(),
+                tool_input: json!({ "command": "  git   add    .  " }),
+            };
+            assert!(matches!(
+                pre_tool_use(&ctx, &input_ws).await,
+                HookDecision::Deny { .. }
+            ));
         }
     }
 
     #[tokio::test]
     async fn test_pre_tool_use_git_add_specific_allowed() {
         let ctx = MockRuntime::default();
-        let input = HookInput {
-            tool_name: "run_shell_command".into(),
-            tool_input: json!({ "command": "git add src/main.rs" }),
-        };
-        assert_eq!(pre_tool_use(&ctx, &input).await, HookDecision::Allow);
+        let cases = [
+            "git add src/main.rs",
+            "git add .gitignore",
+            "git add ./src/file",
+        ];
+
+        for cmd in cases {
+            let input = HookInput {
+                tool_name: "run_shell_command".into(),
+                tool_input: json!({ "command": cmd }),
+            };
+            assert_eq!(
+                pre_tool_use(&ctx, &input).await,
+                HookDecision::Allow,
+                "Should allow '{}'",
+                cmd
+            );
+        }
     }
 
     #[tokio::test]
