@@ -307,6 +307,12 @@ impl Runtime {
                         child: Some(core.name.clone()),
                         detail: e.to_string(),
                     })?;
+                // Enable Claude Code Teams so the Bus→Teams last hop (dispatch.rs) can
+                // deliver as a native `<teammate-message>` instead of falling back to paste.
+                env_vars.insert(
+                    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".into(),
+                    "1".into(),
+                );
                 exomonad_core::services::agent_control::AgentType::Claude
             }
             AgentType::Gemini => {

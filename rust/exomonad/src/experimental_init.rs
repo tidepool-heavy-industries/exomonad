@@ -54,8 +54,11 @@ pub async fn run(config: &Config, session: Option<String>, recreate: bool) -> Re
     // up the session vars — `claude` (and the `experimental node` sidecar it spawns) would
     // otherwise start without EXOMONAD_SWARM_RUN_ID and fail bootstrap. The session-env calls
     // above still serve descendant panes spawned later.
+    // `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` enables Teams (TeamCreate + the Teams inbox),
+    // which is the Bus's last hop into a running CC session — without it, the root can't lead
+    // a team and child messages fall back to raw tmux paste.
     let launch = format!(
-        "EXOMONAD_SWARM_RUN_ID={run_id} EXOMONAD_TMUX_SESSION={session} claude --dangerously-skip-permissions{model_flag}"
+        "EXOMONAD_SWARM_RUN_ID={run_id} EXOMONAD_TMUX_SESSION={session} CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --dangerously-skip-permissions{model_flag}"
     );
 
     exomonad_core::services::tmux_ipc::TmuxIpc::new(&session)
