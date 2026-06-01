@@ -4,9 +4,10 @@
 //! adapter. Ships mock-cap unit tests in this file. See `docs/design/swarm/04-policy.md`.
 
 use crate::tool::{ok_json, parse, schema_json, Tool, ToolOutput};
-use exo_caps::{CapResult, Fs};
+use exo_caps::{CapResult, Fs, FsError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::io;
 use std::path::Path;
 
 /// Path to the shared task list JSON file.
@@ -24,6 +25,13 @@ pub struct Task {
     pub active_form: Option<String>,
 }
 
+fn is_not_found(e: &FsError) -> bool {
+    match e {
+        FsError::At { source, .. } => source.kind() == io::ErrorKind::NotFound,
+        FsError::Io(source) => source.kind() == io::ErrorKind::NotFound,
+    }
+}
+
 pub struct TaskList;
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -34,13 +42,14 @@ impl TaskList {
         let path = Path::new(TASKS_PATH);
         let bytes = match ctx.read(path).await {
             Ok(b) => b,
-            Err(_) => {
+            Err(e) if is_not_found(&e) => {
                 // If the file doesn't exist, we treat it as an empty list.
                 return Ok(ToolOutput::with_data(
                     "No tasks found.",
                     serde_json::json!([]),
                 ));
             }
+            Err(e) => return Err(e.into()),
         };
         let tasks: Vec<Task> = serde_json::from_slice(&bytes).map_err(|e| exo_caps::CapError::Json {
             context: "parsing tasks.json".into(),
@@ -77,7 +86,13 @@ pub struct TaskGetArgs {
 impl TaskGet {
     pub async fn run<C: Fs>(ctx: &C, args: TaskGetArgs) -> CapResult<ToolOutput> {
         let path = Path::new(TASKS_PATH);
-        let bytes = ctx.read(path).await?;
+        let bytes = match ctx.read(path).await {
+            Ok(b) => b,
+            Err(e) if is_not_found(&e) => {
+                return Ok(ToolOutput::text(format!("Task {} not found.", args.id)));
+            }
+            Err(e) => return Err(e.into()),
+        };
         let tasks: Vec<Task> = serde_json::from_slice(&bytes).map_err(|e| exo_caps::CapError::Json {
             context: "parsing tasks.json".into(),
             source: e,
@@ -123,7 +138,13 @@ pub struct TaskUpdateArgs {
 impl TaskUpdate {
     pub async fn run<C: Fs>(ctx: &C, args: TaskUpdateArgs) -> CapResult<ToolOutput> {
         let path = Path::new(TASKS_PATH);
-        let bytes = ctx.read(path).await?;
+        let bytes = match ctx.read(path).await {
+            Ok(b) => b,
+            Err(e) if is_not_found(&e) => {
+                return Ok(ToolOutput::text(format!("Task {} not found.", args.id)));
+            }
+            Err(e) => return Err(e.into()),
+        };
         let mut tasks: Vec<Task> =
             serde_json::from_slice(&bytes).map_err(|e| exo_caps::CapError::Json {
                 context: "parsing tasks.json".into(),
