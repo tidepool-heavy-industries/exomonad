@@ -83,6 +83,13 @@ pub fn bootstrap(papers_path: &Path, working_dir: PathBuf) -> NodeResult<NodeCon
 
     let own_inbox = exo_caps::paths::inbox_path(Path::new(&home), &run_id, &own_pane);
 
+    // Ensure the inbox directory exists before the inbound loop watches it. `notify` cannot
+    // watch a missing parent dir, and nothing else creates it for the root (children's dirs
+    // are likewise created here at their own bootstrap). The file is created on first write.
+    if let Some(inbox_dir) = own_inbox.as_path().parent() {
+        std::fs::create_dir_all(inbox_dir)?;
+    }
+
     let node_path: NodePath = papers.path.clone();
     let branch: Branch = papers.branch.clone();
     let kind: NodeKind = papers.role;
