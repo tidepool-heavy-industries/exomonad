@@ -5,7 +5,9 @@
 //! with the right `Addressee`/`Message`) in this file. See `docs/design/swarm/04-policy.md`.
 
 use crate::tool::{ok_json, parse, schema_json, Tool, ToolOutput};
-use exo_caps::{Addressee, AgentName, Bus, CapResult, Message, MessageBody, MessageKind, Summary};
+use exo_caps::{
+    Addressee, AgentName, Bus, CapResult, ControlKind, Message, MessageBody, MessageKind, Summary,
+};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -18,6 +20,9 @@ pub struct NotifyParentArgs {
     pub text: String,
     /// A short one-line preview/summary.
     pub summary: String,
+    /// The kind of message (defaults to chat).
+    #[serde(default)]
+    pub kind: ToolMessageKind,
 }
 
 impl NotifyParent {
@@ -26,7 +31,7 @@ impl NotifyParent {
         let msg = Message {
             text: MessageBody::new(args.text)?,
             summary: Summary::new(args.summary)?,
-            kind: MessageKind::Chat,
+            kind: args.kind.into(),
         };
         ctx.deliver(Addressee::Parent, msg).await?;
         Ok(ToolOutput::text("delivered"))
@@ -57,6 +62,9 @@ pub struct SendMessageArgs {
     pub text: String,
     /// A short one-line preview/summary.
     pub summary: String,
+    /// The kind of message (defaults to chat).
+    #[serde(default)]
+    pub kind: ToolMessageKind,
 }
 
 /// Selects an [`Addressee`] child variant.
@@ -69,6 +77,30 @@ pub enum ChildTarget {
     Worktree(String),
 }
 
+/// The kind of message to send, porting the [`MessageKind`] vocabulary to a
+/// schema-friendly form.
+#[derive(Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolMessageKind {
+    /// A standard peer-to-peer chat message.
+    #[default]
+    Chat,
+    /// A world event notification.
+    Event,
+    /// A lifecycle control message (e.g. shutdown).
+    Shutdown { grace_ms: u32 },
+}
+
+impl From<ToolMessageKind> for MessageKind {
+    fn from(k: ToolMessageKind) -> Self {
+        match k {
+            ToolMessageKind::Chat => MessageKind::Chat,
+            ToolMessageKind::Event => MessageKind::Event,
+            ToolMessageKind::Shutdown { grace_ms } => MessageKind::Control(ControlKind::Shutdown { grace_ms }),
+        }
+    }
+}
+
 impl SendMessage {
     /// The typed logic: builds a [`Message`] and delivers it to the specified child.
     pub async fn run<C: Bus>(ctx: &C, args: SendMessageArgs) -> CapResult<ToolOutput> {
@@ -79,7 +111,7 @@ impl SendMessage {
         let msg = Message {
             text: MessageBody::new(args.text)?,
             summary: Summary::new(args.summary)?,
-            kind: MessageKind::Chat,
+            kind: args.kind.into(),
         };
         ctx.deliver(to, msg).await?;
         Ok(ToolOutput::text("delivered"))
@@ -123,6 +155,7 @@ mod tests {
             assert_eq!(to, &Addressee::Parent);
             assert_eq!(msg.text.as_str(), "Hello parent");
             assert_eq!(msg.summary.as_str(), "Greeting");
+            assert_eq!(msg.kind, MessageKind::Chat);
         } else {
             panic!("expected BusDeliver call, got {:?}", calls[0]);
         }
@@ -149,19 +182,21 @@ mod tests {
             );
             assert_eq!(msg.text.as_str(), "Hello worker");
             assert_eq!(msg.summary.as_str(), "Greeting");
+            assert_eq!(msg.kind, MessageKind::Chat);
         } else {
             panic!("expected BusDeliver call, got {:?}", calls[0]);
         }
     }
 
     #[tokio::test]
-    async fn test_send_message_worktree() {
+    async fn test_send_message_shutdown() {
         let mock = MockRuntime::default();
         let tool = SendMessage;
         let args = json!({
             "to": { "worktree": "child-1" },
-            "text": "Hello child",
-            "summary": "Greeting"
+            "text": "finish and exit",
+            "summary": "shutdown",
+            "kind": { "shutdown": { "grace_ms": 5000 } }
         });
 
         tool.call(&mock, args).await.expect("tool call failed");
@@ -173,10 +208,10 @@ mod tests {
                 to,
                 &Addressee::WorktreeChild(AgentName::new("child-1".into()).unwrap())
             );
-            assert_eq!(msg.text.as_str(), "Hello child");
-            assert_eq!(msg.summary.as_str(), "Greeting");
+            assert_eq!(msg.kind, MessageKind::Control(ControlKind::Shutdown { grace_ms: 5000 }));
         } else {
             panic!("expected BusDeliver call, got {:?}", calls[0]);
         }
     }
 }
+
