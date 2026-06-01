@@ -224,10 +224,14 @@ impl Runtime {
             }
         });
 
+        // Every value interpolated into `launch_cmd` is pasted into a shell, so each is
+        // shell-escaped — a name/path with a space or metachar must not break the command.
+        let esc = |s: &str| shell_escape::escape(s.to_string().into()).into_owned();
+
         let mut env_prefix = format!(
             "EXOMONAD_AGENT_ID={} EXOMONAD_ROLE={} ",
-            core.name.as_str(),
-            core.role.role_str()
+            esc(core.name.as_str()),
+            esc(core.role.role_str())
         );
 
         let agent_bin = match core.agent_type {
@@ -258,7 +262,7 @@ impl Runtime {
                 .await?;
                 env_prefix.push_str(&format!(
                     "GEMINI_CLI_SYSTEM_SETTINGS_PATH={} ",
-                    settings_path.display()
+                    esc(&settings_path.to_string_lossy())
                 ));
                 "gemini --yolo"
             }
@@ -272,11 +276,11 @@ impl Runtime {
         };
 
         let launch_cmd = format!(
-            "{} {} --papers {} '{}'\n",
+            "{} {} --papers {} {}\n",
             env_prefix,
             agent_bin,
-            papers_path.display(),
-            core.task.replace('\'', "'\\''")
+            esc(&papers_path.to_string_lossy()),
+            esc(&core.task)
         );
 
         exo_caps::Tmux::paste(self, &pane, &launch_cmd)

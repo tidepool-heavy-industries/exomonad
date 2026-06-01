@@ -63,9 +63,16 @@ impl Tmux for Runtime {
 
         // 2. Buffer paste pattern — load-buffer temp + paste-buffer + send-keys Enter
         let payload = text.trim_end_matches('\n').trim_end_matches('\r');
-        let tmp = tempfile::NamedTempFile::new().map_err(TmuxError::Io)?;
-        let tmp_path = tmp.path();
-        tokio::fs::write(tmp_path, payload)
+        // NamedTempFile::new() does sync filesystem work; keep it off the async executor.
+        let tmp = tokio::task::spawn_blocking(tempfile::NamedTempFile::new)
+            .await
+            .map_err(|e| TmuxError::Failed {
+                op: "paste",
+                detail: format!("temp-file task join: {e}"),
+            })?
+            .map_err(TmuxError::Io)?;
+        let tmp_path = tmp.path().to_path_buf();
+        tokio::fs::write(&tmp_path, payload)
             .await
             .map_err(TmuxError::Io)?;
 
@@ -77,12 +84,10 @@ impl Tmux for Runtime {
                 .unwrap_or_default()
                 .to_string_lossy()
         );
+        let tmp_path_str = tmp_path.to_string_lossy().into_owned();
 
-        self.tmux(
-            "paste",
-            &["load-buffer", "-b", &buf_name, &tmp_path.to_string_lossy()],
-        )
-        .await?;
+        self.tmux("paste", &["load-buffer", "-b", &buf_name, &tmp_path_str])
+            .await?;
 
         self.tmux(
             "paste",
