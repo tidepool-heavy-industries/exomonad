@@ -40,7 +40,7 @@ DSL. Everything else in the old guest was WASM-boundary tax that *deletes* — s
    enum StopDecision { Allow, Block { reason: String } }
    enum EventAction  { InjectMessage{text,summary}, NotifyParent{text,summary}, NoAction }
 
-   fn pre_tool_use<C: Kv>(ctx: &C, input: &HookInput) -> HookDecision; // guards/PII — &C for data-dependent checks (Kv allowlists)
+   fn pre_tool_use<C>(ctx: &C, input: &HookInput) -> HookDecision; // antipattern nudges/PII — &C for data-dependent heuristics
    fn stop<C: GitHub>(ctx: &C) -> StopDecision;                       // LIVE query — no phase
    fn on_world_event<C: GitHub>(ctx: &C, e: &WorldEvent) -> EventAction; // RETURNS an action (loop delivers); bound is per-handler — GitHub here to inspect PR/CI state
    ```
@@ -60,8 +60,7 @@ DSL. Everything else in the old guest was WASM-boundary tax that *deletes* — s
        match kind {
            NodeKind::Dev => RoleDef {
                tools: vec![b(FilePr), b(NotifyParent), b(SendMessage)], // a clean list of tool types
-               pre_tool_use: dev_guard, stop: dev_stop, on_event: dev_events,
-           },
+               pre_tool_use: dev_nudges, stop: dev_stop, on_event: dev_events,           },
            /* Root / Tl / Worker … */
        }
    }
@@ -155,7 +154,7 @@ because the sidecar reliably reaps its own pane on the control message.
 
 - **Tools:** `file_pr`, `merge_pr`, `spawn_*`, `tasks_*`, messaging (already in
   `teams-mcp`). Per-tool `Args`/handlers ported one at a time.
-- **Hooks kept:** `pre_tool_use` (guards + PII-rewrite), `stop` (live PR gate),
+- **Hooks kept:** `pre_tool_use` (antipattern nudges + PII-rewrite), `stop` (live PR gate),
   `session_start` (root identity bootstrap).
 - **Events:** `WorldEvent { PrReview, SiblingMerged, CiStatus, ReviewTimeout }` →
   `EventAction`. Behavior ported from the current poller/event handlers. **This is

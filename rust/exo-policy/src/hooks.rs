@@ -1,4 +1,4 @@
-//! Hooks — `pre_tool_use` (guards / PII-rewrite), `stop` (the live PR-gate), and
+//! Hooks — `pre_tool_use` (antipattern nudges), `stop` (the live PR-gate), and
 //! `session_start` (root identity bootstrap). These are **functions generic over the caps
 //! they need** (no `dyn Caps`); the [`RoleDef`](crate::roles::RoleDef) table stores them as
 //! `fn(&R, …) -> BoxFuture<…>` monomorphized at the concrete runtime `R`, so the generic
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::tool::BoxFuture;
-use exo_caps::{Git, GitHub, Kv};
+use exo_caps::{Git, GitHub};
 
 /// A `PreToolUse` verdict. `Modify` rewrites the tool input in place (the PII-rewrite path).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,27 +51,30 @@ pub struct HookInput {
 }
 
 /// Ported hook implementations.
-pub fn pre_tool_use<'a, R: Kv + Send + Sync>(
-    ctx: &'a R,
+///
+/// `pre_tool_use` is a **default-ALLOW antipattern-nudge** hook. It inspects tool calls
+/// for known antipatterns and returns `Deny` with a guidance message or `Modify` to
+/// rewrite the call toward a better pattern. It is NOT a security/allowlist gate.
+pub fn pre_tool_use<'a, R: Send + Sync>(
+    _ctx: &'a R,
     input: &'a HookInput,
 ) -> BoxFuture<'a, HookDecision> {
     let tool_name = input.tool_name.clone();
+    let tool_input = input.tool_input.clone();
+
     Box::pin(async move {
-        // Guard check: look up "allowlist:{tool_name}" in KV.
-        // Enforce allowlist semantics (deny by default).
-        let key = format!("allowlist:{}", tool_name);
-        match ctx.get(&key).await {
-            Ok(Some(v)) if v == "allow" => HookDecision::Allow,
-            Ok(Some(v)) => HookDecision::Deny {
-                reason: format!("Tool '{}' is explicitly blocked: {}", tool_name, v),
-            },
-            Ok(None) => HookDecision::Deny {
-                reason: format!("Tool '{}' is not in the allowlist", tool_name),
-            },
-            Err(e) => HookDecision::Deny {
-                reason: format!("Policy lookup failed for tool '{}': {}", tool_name, e),
-            },
+        // Antipattern: Avoid `git add .` or `git add -A`.
+        if tool_name == "run_shell_command" {
+            if let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) {
+                if cmd.contains("git add .") || cmd.contains("git add -A") {
+                    return HookDecision::Deny {
+                        reason: "Avoid `git add -A`/`git add .` — stage specific files by path to avoid committing stray artifacts.".into(),
+                    };
+                }
+            }
         }
+
+        HookDecision::Allow
     })
 }
 
@@ -124,6 +127,7 @@ pub fn session_start<'a, R: Send + Sync>(_ctx: &'a R) -> BoxFuture<'a, SessionSt
 mod tests {
     use super::*;
     use crate::testing::MockRuntime;
+    use serde_json::json;
 
     #[test]
     fn hook_decision_serde_is_tagged() {
@@ -146,51 +150,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pre_tool_use_deny_by_default() {
+    async fn test_pre_tool_use_allow_by_default() {
         let ctx = MockRuntime::default();
         let input = HookInput {
-            tool_name: "test_tool".into(),
-            tool_input: Value::Null,
-        };
-        match pre_tool_use(&ctx, &input).await {
-            HookDecision::Deny { reason } => {
-                assert!(reason.contains("not in the allowlist"));
-            }
-            _ => panic!("Should be Deny by default"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_pre_tool_use_explicit_allow() {
-        let ctx = MockRuntime::default();
-        ctx.kv
-            .lock()
-            .unwrap()
-            .insert("allowlist:test_tool".into(), "allow".into());
-        let input = HookInput {
-            tool_name: "test_tool".into(),
-            tool_input: Value::Null,
+            tool_name: "some_unknown_tool".into(),
+            tool_input: json!({ "arg": 1 }),
         };
         assert_eq!(pre_tool_use(&ctx, &input).await, HookDecision::Allow);
     }
 
     #[tokio::test]
-    async fn test_pre_tool_use_explicit_deny() {
+    async fn test_pre_tool_use_git_add_antipattern_denied() {
         let ctx = MockRuntime::default();
-        ctx.kv
-            .lock()
-            .unwrap()
-            .insert("allowlist:test_tool".into(), "deny".into());
         let input = HookInput {
-            tool_name: "test_tool".into(),
-            tool_input: Value::Null,
+            tool_name: "run_shell_command".into(),
+            tool_input: json!({ "command": "git add ." }),
         };
         match pre_tool_use(&ctx, &input).await {
             HookDecision::Deny { reason } => {
-                assert!(reason.contains("explicitly blocked"));
+                assert!(reason.contains("Avoid `git add -A`/`git add .`"));
             }
-            _ => panic!("Should be Deny"),
+            _ => panic!("Should be Deny for antipattern"),
         }
+
+        let input_a = HookInput {
+            tool_name: "run_shell_command".into(),
+            tool_input: json!({ "command": "git add -A" }),
+        };
+        match pre_tool_use(&ctx, &input_a).await {
+            HookDecision::Deny { reason } => {
+                assert!(reason.contains("Avoid `git add -A`/`git add .`"));
+            }
+            _ => panic!("Should be Deny for antipattern"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_pre_tool_use_git_add_specific_allowed() {
+        let ctx = MockRuntime::default();
+        let input = HookInput {
+            tool_name: "run_shell_command".into(),
+            tool_input: json!({ "command": "git add src/main.rs" }),
+        };
+        assert_eq!(pre_tool_use(&ctx, &input).await, HookDecision::Allow);
     }
 
     #[tokio::test]
