@@ -288,16 +288,6 @@ impl Runtime {
         let esc = |s: &str| shell_escape::escape(s.to_string().into()).into_owned();
 
         // (f) Launch the agent
-        let mcp_config = serde_json::json!({
-            "mcpServers": {
-                "exomonad": {
-                    "type": "stdio",
-                    "command": "exomonad",
-                    "args": exo_caps::invocation::node_args(&papers_path.to_string_lossy())
-                }
-            }
-        });
-
         let mut env_prefix = format!(
             "EXOMONAD_AGENT_ID={} EXOMONAD_ROLE={} ",
             esc(core.name.as_str()),
@@ -306,51 +296,27 @@ impl Runtime {
 
         let agent_bin = match core.agent_type {
             AgentType::Claude => {
-                let mcp_path = child_dir.join(".mcp.json");
-                tokio::fs::write(
-                    &mcp_path,
-                    serde_json::to_vec_pretty(&mcp_config).map_err(|e| SpawnError::Failed {
-                        op: "write_mcp_config",
+                crate::node_config::write_node_agent_config(&child_dir, &papers_path)
+                    .await
+                    .map_err(|e| SpawnError::Failed {
+                        op: "write_node_agent_config",
                         child: Some(core.name.clone()),
                         detail: e.to_string(),
-                    })?,
-                )
-                .await?;
-
-                // Write .claude/settings.local.json with experimental hooks
-                let claude_dir = child_dir.join(".claude");
-                tokio::fs::create_dir_all(&claude_dir).await?;
-                let settings_path = claude_dir.join("settings.local.json");
-                let p_str = esc(&papers_path.to_string_lossy());
-                use exo_caps::invocation::{hook_command, PRE_TOOL_USE, SESSION_START, STOP};
-                let settings = serde_json::json!({
-                    "hooks": {
-                        "PreToolUse": [{
-                            "matcher": "*",
-                            "hooks": [{"type": "command", "command": hook_command(PRE_TOOL_USE, &p_str)}]
-                        }],
-                        "Stop": [{
-                            "hooks": [{"type": "command", "command": hook_command(STOP, &p_str)}]
-                        }],
-                        "SessionStart": [{
-                            "hooks": [{"type": "command", "command": hook_command(SESSION_START, &p_str)}]
-                        }]
-                    },
-                    "_exomonad_generated": true
-                });
-                tokio::fs::write(
-                    &settings_path,
-                    serde_json::to_vec_pretty(&settings).map_err(|e| SpawnError::Failed {
-                        op: "write_claude_settings",
-                        child: Some(core.name.clone()),
-                        detail: e.to_string(),
-                    })?,
-                )
-                .await?;
+                    })?;
 
                 "claude --dangerously-skip-permissions"
             }
             AgentType::Gemini => {
+                let mcp_config = serde_json::json!({
+                    "mcpServers": {
+                        "exomonad": {
+                            "type": "stdio",
+                            "command": "exomonad",
+                            "args": exo_caps::invocation::node_args(&papers_path.to_string_lossy())
+                        }
+                    }
+                });
+
                 // Gemini child hooks are not wired (not supported in the same command-type way)
                 let settings_path = papers_path.with_file_name("settings.json");
                 let settings = mcp_config.clone();

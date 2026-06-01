@@ -27,8 +27,10 @@ mod git;
 mod github;
 mod kv;
 mod log;
+pub mod node_config;
 mod process;
 mod spawner;
 mod tmux;
 
+pub use node_config::write_node_agent_config;
 pub use runtime::Runtime;
