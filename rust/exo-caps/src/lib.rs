@@ -12,6 +12,7 @@
 
 pub mod bus;
 pub mod error;
+pub mod invocation;
 pub mod lifecycle;
 pub mod papers;
 pub mod paths;

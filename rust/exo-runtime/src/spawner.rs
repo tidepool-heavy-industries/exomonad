@@ -293,7 +293,7 @@ impl Runtime {
                 "exomonad": {
                     "type": "stdio",
                     "command": "exomonad",
-                    "args": ["experimental", "node", "--papers", papers_path.to_string_lossy()]
+                    "args": exo_caps::invocation::node_args(&papers_path.to_string_lossy())
                 }
             }
         });
@@ -322,17 +322,18 @@ impl Runtime {
                 tokio::fs::create_dir_all(&claude_dir).await?;
                 let settings_path = claude_dir.join("settings.local.json");
                 let p_str = esc(&papers_path.to_string_lossy());
+                use exo_caps::invocation::{hook_command, PRE_TOOL_USE, SESSION_START, STOP};
                 let settings = serde_json::json!({
                     "hooks": {
                         "PreToolUse": [{
                             "matcher": "*",
-                            "hooks": [{"type": "command", "command": format!("exomonad experimental hook pre-tool-use --papers {}", p_str)}]
+                            "hooks": [{"type": "command", "command": hook_command(PRE_TOOL_USE, &p_str)}]
                         }],
                         "Stop": [{
-                            "hooks": [{"type": "command", "command": format!("exomonad experimental hook stop --papers {}", p_str)}]
+                            "hooks": [{"type": "command", "command": hook_command(STOP, &p_str)}]
                         }],
                         "SessionStart": [{
-                            "hooks": [{"type": "command", "command": format!("exomonad experimental hook session-start --papers {}", p_str)}]
+                            "hooks": [{"type": "command", "command": hook_command(SESSION_START, &p_str)}]
                         }]
                     },
                     "_exomonad_generated": true
