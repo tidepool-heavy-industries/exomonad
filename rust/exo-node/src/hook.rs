@@ -1,4 +1,4 @@
-//! **N4 — Hook mode.** `exomonad hook <event>` reads the CC hook payload on stdin, self-IDs
+//! **N4 — Hook mode.** `exomonad experimental hook <event>` reads the CC hook payload on stdin, self-IDs
 //! (same papers + exo-scry path as the sidecar), runs the role's `exo-policy` hook, and emits
 //! the verdict on stdout. **No central server** — the hook is a short-lived process that
 //! builds a `Runtime` and calls policy directly.

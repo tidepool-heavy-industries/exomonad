@@ -7,7 +7,7 @@
 //!   → (`git worktree add` for a Worktree child — Inline shares the parent's cwd)
 //!   → `tmux new_pane`
 //!   → write child papers (`node.json`, incl. `parent_inbox` = my inbox)
-//!   → launch `exomonad mcp-stdio` in the pane.
+//!   → launch `exomonad experimental node --papers <node.json>` in the pane.
 //!
 //! Decomposition:
 //!   - **S1**: safe branch-gen (`Branch::from_path`) + `git worktree add` (Worktree only).
@@ -32,7 +32,7 @@
 //!   3. Append `Spawned { child, kind, pane: %N, inbox }` to `children.jsonl`. ← THE GUARD.
 //!   4. Write the child's `node.json` papers (`parent_inbox` = *my* inbox).
 //!   5. `Tmux::paste(%N, "<launch cmd>\n")` — inject the agent command into the holding
-//!      shell, starting `claude`/`gemini` (+ its `exomonad mcp-stdio` sidecar via .mcp.json).
+//!      shell, starting `claude`/`gemini` (+ its `exomonad experimental node` sidecar via .mcp.json).
 //!
 //! The record precedes the **agent** launch (step 3 before step 5). The holding shell
 //! (step 2) carries no agent, so a crash before step 5 leaves only a bare shell — nothing
@@ -283,20 +283,20 @@ impl Runtime {
         })?;
         tokio::fs::write(&papers_path, papers_json).await?;
 
+        // Every value interpolated into `launch_cmd` is pasted into a shell, so each is
+        // shell-escaped — a name/path with a space or metachar must not break the command.
+        let esc = |s: &str| shell_escape::escape(s.to_string().into()).into_owned();
+
         // (f) Launch the agent
         let mcp_config = serde_json::json!({
             "mcpServers": {
                 "exomonad": {
                     "type": "stdio",
                     "command": "exomonad",
-                    "args": ["mcp-stdio", "--role", core.role.role_str(), "--name", core.name.as_str()]
+                    "args": ["experimental", "node", "--papers", papers_path.to_string_lossy()]
                 }
             }
         });
-
-        // Every value interpolated into `launch_cmd` is pasted into a shell, so each is
-        // shell-escaped — a name/path with a space or metachar must not break the command.
-        let esc = |s: &str| shell_escape::escape(s.to_string().into()).into_owned();
 
         let mut env_prefix = format!(
             "EXOMONAD_AGENT_ID={} EXOMONAD_ROLE={} ",
@@ -316,9 +316,41 @@ impl Runtime {
                     })?,
                 )
                 .await?;
+
+                // Write .claude/settings.local.json with experimental hooks
+                let claude_dir = child_dir.join(".claude");
+                tokio::fs::create_dir_all(&claude_dir).await?;
+                let settings_path = claude_dir.join("settings.local.json");
+                let p_str = esc(&papers_path.to_string_lossy());
+                let settings = serde_json::json!({
+                    "hooks": {
+                        "PreToolUse": [{
+                            "matcher": "*",
+                            "hooks": [{"type": "command", "command": format!("exomonad experimental hook pre-tool-use --papers {}", p_str)}]
+                        }],
+                        "Stop": [{
+                            "hooks": [{"type": "command", "command": format!("exomonad experimental hook stop --papers {}", p_str)}]
+                        }],
+                        "SessionStart": [{
+                            "hooks": [{"type": "command", "command": format!("exomonad experimental hook session-start --papers {}", p_str)}]
+                        }]
+                    },
+                    "_exomonad_generated": true
+                });
+                tokio::fs::write(
+                    &settings_path,
+                    serde_json::to_vec_pretty(&settings).map_err(|e| SpawnError::Failed {
+                        op: "write_claude_settings",
+                        child: Some(core.name.clone()),
+                        detail: e.to_string(),
+                    })?,
+                )
+                .await?;
+
                 "claude --dangerously-skip-permissions"
             }
             AgentType::Gemini => {
+                // Gemini child hooks are not wired (not supported in the same command-type way)
                 let settings_path = papers_path.with_file_name("settings.json");
                 let settings = mcp_config.clone();
                 tokio::fs::write(

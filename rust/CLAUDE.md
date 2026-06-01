@@ -126,8 +126,11 @@ nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm 
 # MCP server (stdio)
 exomonad mcp-stdio --role root --agent-id root
 
-# Handle Claude Code hook
+# Handle Claude Code hook (legacy, forwards to server)
 echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
+
+# Handle Claude Code hook (experimental node mode, no server)
+echo '{"hook_event_name":"PreToolUse",...}' | exomonad experimental hook pre-tool-use --papers node.json
 ```
 
 **Note:** WASM is loaded from `.exo/wasm/` at runtime. To update WASM, run `just wasm-all` or `exomonad recompile --role devswarm`.

@@ -413,11 +413,19 @@ Claude Code → stdio (JSON-RPC) → exomonad mcp-stdio (translates JSON-RPC →
 ```
 
 **Hook Call:**
-```
+
+*Legacy (production, server-based):*
 Claude Code → exomonad hook pre-tool-use (reads stdin JSON)
 → UDS request to server → WASM handle_pre_tool_use
 → Haskell decides allow/deny → HookEnvelope { stdout, exit_code }
 → Claude Code proceeds or blocks
+
+*Experimental (Wave 2, node-based):*
+Claude Code → exomonad experimental hook pre-tool-use --papers node.json
+→ bootstrap NodeContext from papers
+→ run exo-policy hook directly (no server)
+→ stdout verdict
+
 ```
 
 **Session Start:**
