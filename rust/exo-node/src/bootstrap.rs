@@ -20,6 +20,7 @@ use crate::error::{NodeError, NodeResult};
 /// the ambient context the loops read. `Runtime` does not itself store the [`NodeKind`]
 /// (its identity is the tree address + branch), so the context carries it for
 /// [`exo_policy::role_def`].
+#[derive(Debug)]
 pub struct NodeContext {
     /// The concrete runtime — implements every `exo-caps` capability. Policy monomorphizes
     /// against this `R`; the outbound loop serves `role_def::<Runtime>(kind).tools`.
@@ -105,4 +106,63 @@ pub fn bootstrap(papers_path: &Path, working_dir: PathBuf) -> NodeResult<NodeCon
         parent_inbox,
         run_id,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use exo_caps::{AgentName, Branch, InboxPath, NodeKind, NodePapers, NodePath, PaneId};
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_bootstrap_logic() {
+        let dir = tempdir().unwrap();
+        let papers_path = dir.path().join("papers.json");
+        let working_dir = dir.path().join("work");
+        fs::create_dir(&working_dir).unwrap();
+
+        let own_pane = PaneId::new("%42".into()).unwrap();
+        let parent_inbox = InboxPath::new(dir.path().join("parent-inbox.jsonl"));
+        let node_path = NodePath::new(vec![
+            AgentName::new("root".into()).unwrap(),
+            AgentName::new("me".into()).unwrap(),
+        ])
+        .unwrap();
+        let branch = Branch::new("root.me".into()).unwrap();
+
+        let papers = NodePapers {
+            v: 1,
+            role: NodeKind::Tl,
+            path: node_path.clone(),
+            branch: branch.clone(),
+            pane: own_pane.clone(),
+            parent_inbox: Some(parent_inbox.clone()),
+        };
+
+        let papers_json = serde_json::to_string(&papers).unwrap();
+        fs::write(&papers_path, papers_json).unwrap();
+
+        // 1. Success case
+        std::env::set_var("EXOMONAD_SWARM_RUN_ID", "test-run");
+        std::env::set_var("EXOMONAD_TMUX_SESSION", "test-session");
+        std::env::set_var("HOME", dir.path().to_str().unwrap());
+
+        let ctx = bootstrap(&papers_path, working_dir.clone()).unwrap();
+
+        assert_eq!(ctx.kind, NodeKind::Tl);
+        assert_eq!(ctx.own_pane, own_pane);
+        assert_eq!(ctx.parent_inbox, Some(parent_inbox));
+        assert_eq!(ctx.run_id, "test-run");
+        assert_eq!(ctx.runtime.name(), AgentName::new("me".into()).unwrap());
+
+        // 2. Missing env case
+        std::env::remove_var("EXOMONAD_SWARM_RUN_ID");
+        let res = bootstrap(&papers_path, working_dir.clone());
+        assert!(res.is_err());
+
+        // Cleanup env
+        std::env::remove_var("EXOMONAD_TMUX_SESSION");
+        std::env::remove_var("HOME");
+    }
 }

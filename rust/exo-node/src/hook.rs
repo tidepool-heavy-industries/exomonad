@@ -1,19 +1,16 @@
-//! **N4 — Hook mode.** `exomonad experimental hook <event>` reads the CC hook payload on stdin, self-IDs
-//! (same papers + exo-scry path as the sidecar), runs the role's `exo-policy` hook, and emits
-//! the verdict on stdout. **No central server** — the hook is a short-lived process that
-//! builds a `Runtime` and calls policy directly.
+//! **N4 — Hook mode.** Implements the `exomonad experimental hook` interface for Claude Code.
+//! This module handles hook events by performing a papers-based identity bootstrap and
+//! executing policy hooks directly in a short-lived process, without requiring a central server.
 //!
-//! - `pre_tool_use` → `HookDecision` (default-allow antipattern *nudge*, NOT a gate — C3).
-//! - `stop` → `StopDecision` (the live PR-gate: open PR with unaddressed ChangesRequested).
-//! - `session_start` → `SessionStartOutput`. **Must do the REAL papers-based root identity
-//!   bootstrap** (currently a `default()` no-op): inject `additionalContext` describing the
-//!   node's tree identity (role/path/parent) so a fresh agent knows who it is. See doc 01.
+//! Supported hooks:
+//! - `pre_tool_use`: Evaluates tool use against policy, providing nudges or anti-pattern
+//!   warnings.
+//! - `stop`: Implements the PR-gate, blocking session termination if there is an open PR
+//!   with unaddressed changes.
+//! - `session_start`: Performs the identity bootstrap, injecting context about the node's
+//!   role, path, and parent into the agent's session so it understands its place in the swarm.
 //!
-//! Reads the role's hook fns from `exo_policy::role_def::<Runtime>(kind)`.
-//!
-//! **Status: stub (N4 leaf fills this).** Acceptance: a `pre_tool_use` payload for an
-//! unrecognized tool → `{"decision":"allow"}`; a `session_start` for a non-root node →
-//! `additionalContext` naming its role + parent.
+//! Policy logic is dynamically resolved from `exo_policy::role_def` based on the node's role.
 
 use std::path::Path;
 
@@ -129,6 +126,7 @@ async fn run_hook(
 mod tests {
     use super::*;
     use exo_caps::{AgentName, Branch, NodeKind, NodePath, PaneId};
+    use exo_policy::{HookDecision, HookInput, RoleDef, StopDecision};
     use exo_runtime::Runtime;
     use serde_json::{json, Value};
     use std::sync::Arc;
@@ -218,5 +216,105 @@ mod tests {
             .unwrap();
         assert!(add_ctx.contains("dev-node"));
         assert!(add_ctx.contains("role: dev"));
+    }
+
+    fn mock_stop_block<'a>(
+        _: &'a exo_runtime::Runtime,
+    ) -> exo_policy::tool::BoxFuture<'a, StopDecision> {
+        Box::pin(async {
+            StopDecision::Block {
+                reason: "test reason".into(),
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn test_run_hook_stop_blocked() {
+        let ctx = mock_ctx(NodeKind::Dev, vec!["root", "dev"], "main", false);
+        let rd = RoleDef {
+            tools: vec![],
+            pre_tool_use: exo_policy::hooks::pre_tool_use,
+            stop: mock_stop_block,
+            session_start: exo_policy::hooks::session_start,
+            on_event: exo_policy::events::on_world_event,
+        };
+
+        let res = run_hook(ctx, rd, HookEvent::Stop, "").await.unwrap();
+        let val: Value = serde_json::from_str(&res).unwrap();
+        assert_eq!(val["decision"], "block");
+        assert_eq!(val["reason"], "test reason");
+    }
+
+    fn mock_pre_tool_deny<'a>(
+        _: &'a exo_runtime::Runtime,
+        _: &'a HookInput,
+    ) -> exo_policy::tool::BoxFuture<'a, HookDecision> {
+        Box::pin(async {
+            HookDecision::Deny {
+                reason: "test deny".into(),
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn test_run_hook_pre_tool_deny() {
+        let ctx = mock_ctx(NodeKind::Dev, vec!["root", "dev"], "main", false);
+        let rd = RoleDef {
+            tools: vec![],
+            pre_tool_use: mock_pre_tool_deny,
+            stop: exo_policy::hooks::stop,
+            session_start: exo_policy::hooks::session_start,
+            on_event: exo_policy::events::on_world_event,
+        };
+        let stdin = json!({
+            "tool_name": "any",
+            "tool_input": {}
+        })
+        .to_string();
+
+        let res = run_hook(ctx, rd, HookEvent::PreToolUse, &stdin)
+            .await
+            .unwrap();
+        let val: Value = serde_json::from_str(&res).unwrap();
+        assert_eq!(val["continue"], true);
+        assert_eq!(val["systemMessage"], "test deny");
+    }
+
+    fn mock_pre_tool_modify<'a>(
+        _: &'a exo_runtime::Runtime,
+        _: &'a HookInput,
+    ) -> exo_policy::tool::BoxFuture<'a, HookDecision> {
+        Box::pin(async {
+            HookDecision::Modify {
+                input: json!({"modified": true}),
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn test_run_hook_pre_tool_modify() {
+        let ctx = mock_ctx(NodeKind::Dev, vec!["root", "dev"], "main", false);
+        let rd = RoleDef {
+            tools: vec![],
+            pre_tool_use: mock_pre_tool_modify,
+            stop: exo_policy::hooks::stop,
+            session_start: exo_policy::hooks::session_start,
+            on_event: exo_policy::events::on_world_event,
+        };
+        let stdin = json!({
+            "tool_name": "any",
+            "tool_input": {}
+        })
+        .to_string();
+
+        let res = run_hook(ctx, rd, HookEvent::PreToolUse, &stdin)
+            .await
+            .unwrap();
+        let val: Value = serde_json::from_str(&res).unwrap();
+        assert_eq!(val["continue"], true);
+        assert_eq!(
+            val["hookSpecificOutput"]["toolInput"],
+            json!({"modified": true})
+        );
     }
 }
