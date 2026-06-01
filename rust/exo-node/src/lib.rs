@@ -9,7 +9,7 @@
 //!                   last-hop dispatch (N2a) by agent_type: CC-in-team → Teams inbox; else tmux-paste.
 //!   SELF-POLL (N3): while an open PR exists, poll review_state/ci_status → WorldEvent →
 //!                   on_world_event → InjectMessage / NotifyParent.
-//!   HOOK (N4):      `exomonad hook` → exo-policy pre_tool_use / stop / session_start.
+//!   HOOK (N4):      `exomonad experimental hook` → exo-policy pre_tool_use / stop / session_start.
 //! ```
 //!
 //! See `docs/design/swarm/02-bus-and-sidecar.md` (two-loop model + cursor/restart),

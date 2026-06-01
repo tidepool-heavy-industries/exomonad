@@ -6,11 +6,14 @@ Unified sidecar binary: Rust host with Haskell WASM plugin.
 
 **All logic is in Haskell WASM. Rust handles I/O only.**
 
-WASM is loaded from `.exo/wasm/wasm-guest-devswarm.wasm` at runtime by `exomonad serve`. The `exomonad hook` command is a thin UDS client that forwards hook events to the running server — it does NOT load WASM itself.
+WASM is loaded from `.exo/wasm/wasm-guest-devswarm.wasm` at runtime by `exomonad serve`. The `exomonad hook` command (legacy) is a thin UDS client that forwards hook events to the running server — it does NOT load WASM itself. The `exomonad experimental hook` command handles hooks via `exo-policy` against node papers (no server).
 
 ```
 # Hook mode (thin UDS client → server)
 Claude Code → exomonad hook → UDS (.exo/server.sock) → server WASM → HookEnvelope → stdout
+
+# Experimental Hook mode (Wave 2, no server)
+Claude Code → exomonad experimental hook --papers node.json → exo-policy → stdout
 
 # MCP mode (multi-agent, devswarm WASM)
 N agents → exomonad serve → UDS (.exo/server.sock) → Unified WASM (handles all roles) → effects → I/O
@@ -21,7 +24,9 @@ N agents → exomonad serve → UDS (.exo/server.sock) → Unified WASM (handles
 ## CLI Usage
 
 ```bash
-exomonad hook pre-tool-use        # Handle Claude Code hook
+exomonad hook pre-tool-use        # Handle Claude Code hook (legacy, forwards to server)
+exomonad experimental node        # Run swarm-sidecar node mode (Wave 2)
+exomonad experimental hook        # Handle hook via exo-policy (Wave 2, no server)
 exomonad mcp-stdio                # Stdio MCP server (single agent)
 exomonad serve                    # UDS MCP server (multi-agent, hot reload)
 exomonad recompile [--role ROLE]  # Build WASM from Haskell source
