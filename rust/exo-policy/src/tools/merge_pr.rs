@@ -17,6 +17,7 @@ pub struct MergePrArgs {
     /// The PR number to merge.
     pub pr: u64,
     /// The merge strategy to use (squash, merge, or rebase). Defaults to squash.
+    /// Invalid values will result in an error.
     pub strategy: Option<String>,
     /// If true, skip the readiness guard (unaddressed changes check).
     #[serde(default)]
@@ -54,11 +55,19 @@ impl MergePr {
         }
 
         // 3. Merge
-        let strategy = args
-            .strategy
-            .as_deref()
-            .map(MergeStrategy::parse)
-            .unwrap_or_default();
+        let strategy = if let Some(s) = args.strategy.as_deref() {
+            MergeStrategy::parse(s).ok_or_else(|| {
+                exo_caps::CapError::invalid(
+                    "strategy",
+                    format!(
+                        "Invalid merge strategy: '{}'. Must be squash, merge, or rebase.",
+                        s
+                    ),
+                )
+            })?
+        } else {
+            MergeStrategy::Squash
+        };
         ctx.merge_pr(args.pr, strategy).await?;
 
         // 4. Fetch (best-effort): pulls merged changes
@@ -165,9 +174,8 @@ mod tests {
             pr: 123,
             strategy: MergeStrategy::Squash
         }));
-        // fetch should NOT be in calls if it failed (in MockRuntime implementation)
-        // Wait, MockRuntime record happens AFTER failure check.
-        // Let's check MockRuntime fetch impl.
+        // Verify fetch was NOT recorded because it failed
+        assert!(!calls.contains(&Call::Fetch));
     }
 
     #[tokio::test]
@@ -274,6 +282,21 @@ mod tests {
                 panic!("merge_pr should not have been called");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_merge_pr_invalid_strategy() {
+        let mock = MockRuntime::default();
+        let args = MergePrArgs {
+            pr: 123,
+            strategy: Some("sqush".into()),
+            force: false,
+        };
+
+        let res = MergePr::run(&mock, args).await;
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        assert!(err.to_string().contains("Invalid merge strategy: 'sqush'"));
     }
 
     #[tokio::test]

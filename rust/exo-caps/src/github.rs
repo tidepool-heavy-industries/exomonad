@@ -40,12 +40,12 @@ pub enum MergeStrategy {
 }
 
 impl MergeStrategy {
-    pub fn parse(s: &str) -> Self {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
-            "squash" => Self::Squash,
-            "merge" => Self::Merge,
-            "rebase" => Self::Rebase,
-            _ => Self::Squash,
+            "squash" => Some(Self::Squash),
+            "merge" => Some(Self::Merge),
+            "rebase" => Some(Self::Rebase),
+            _ => None,
         }
     }
 
