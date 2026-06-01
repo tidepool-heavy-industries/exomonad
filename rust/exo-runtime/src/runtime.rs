@@ -1,0 +1,76 @@
+//! The `Runtime` struct — the single concrete type that implements every `exo-caps`
+//! capability trait. Policy monomorphizes against this `R`.
+//!
+//! Identity (the swarm's `EffectContext` analogue) is baked in at construction and is
+//! always present — no `Option`, no task-locals. The per-cap `impl` blocks live in sibling
+//! modules (`git`, `github`, `tmux`, `bus`, `spawner`, `fs`, `process`, `log`, `kv`); this
+//! file owns **only** the struct + its accessors, so cap leaves never collide here.
+
+use exo_caps::{AgentName, Branch, InboxPath, NodePath};
+use std::path::{Path, PathBuf};
+
+/// One node's runtime. Holds the node's birth identity + the ambient context the cap
+/// impls need (worktree dir, parent inbox pointer, run-id namespace, tmux session).
+///
+/// Fields are `pub(crate)` so each cap `impl` module reads what it needs without a
+/// setter; the struct is constructed once at node boot (Wave 2 wires `new`/self-ID via
+/// `exo-scry`). All anticipated fields are present up-front so a cap leaf edits only its
+/// own impl file, never this struct.
+#[derive(Debug, Clone)]
+pub struct Runtime {
+    /// Full tree address; `name()` = last segment, `parent()` = prefix.
+    pub(crate) node_path: NodePath,
+    /// This node's git branch (generated safely from `node_path`).
+    pub(crate) branch: Branch,
+    /// The node's worktree root (where git/log/fs operations are rooted).
+    pub(crate) working_dir: PathBuf,
+    /// Path to the parent's ingestion inbox (`Bus::deliver(Parent, …)` appends here).
+    /// `None` for the root, which has no parent.
+    pub(crate) parent_inbox: Option<InboxPath>,
+    /// Swarm run-id — namespaces the inbox dir (`…/inboxes/{run_id}/pane-N.jsonl`) so a
+    /// fresh swarm gets a clean namespace and pane-ids can't collide across runs.
+    pub(crate) run_id: String,
+    /// tmux session name (for pane creation + the tmux-paste delivery last-hop).
+    pub(crate) tmux_session: String,
+}
+
+impl Runtime {
+    /// Construct a node runtime from its resolved birth identity + ambient context.
+    pub fn new(
+        node_path: NodePath,
+        branch: Branch,
+        working_dir: PathBuf,
+        parent_inbox: Option<InboxPath>,
+        run_id: String,
+        tmux_session: String,
+    ) -> Self {
+        Runtime {
+            node_path,
+            branch,
+            working_dir,
+            parent_inbox,
+            run_id,
+            tmux_session,
+        }
+    }
+
+    /// This node's own name (the `NodePath` last segment).
+    pub fn name(&self) -> AgentName {
+        self.node_path.name()
+    }
+
+    /// This node's tree address.
+    pub fn node_path(&self) -> &NodePath {
+        &self.node_path
+    }
+
+    /// This node's branch.
+    pub fn branch(&self) -> &Branch {
+        &self.branch
+    }
+
+    /// The node's worktree root.
+    pub fn working_dir(&self) -> &Path {
+        &self.working_dir
+    }
+}

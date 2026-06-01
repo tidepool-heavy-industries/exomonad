@@ -20,6 +20,8 @@ chrono = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tempfile = { workspace = true }
+# Quote values interpolated into the agent launch command pasted into a tmux pane.
+shell-escape = "0.1"
 
 # Pre-pinned for the Wave-1 cap impls, so parallel leaves never collide on Cargo.toml:
 #   octocrab → GitHub cap;  notify → Bus inbox watch;  nix → signals/fs in Spawner/Tmux teardown.

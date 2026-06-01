@@ -15,6 +15,7 @@ pub mod types;
 pub mod bus;
 pub mod spawner;
 pub mod lifecycle;
+pub mod papers;
 
 // IO caps — one trait per file (see `docs/design/swarm/05-crates-and-binary.md`).
 pub mod git;
@@ -33,6 +34,7 @@ pub use types::{
 pub use bus::{Addressee, Bus, BusError};
 pub use spawner::{ForkSpec, GeminiSpec, SpawnError, Spawner, WorkerSpec};
 pub use lifecycle::{fold_children, Child, ChildLifecycle, ChildRecord};
+pub use papers::NodePapers;
 pub use git::{Git, GitError};
 pub use github::{GitHub, GitHubError};
 pub use tmux::{Tmux, TmuxError};
