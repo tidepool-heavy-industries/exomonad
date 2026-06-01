@@ -13,6 +13,7 @@ exo-caps = { path = "../exo-caps" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
+tracing = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }

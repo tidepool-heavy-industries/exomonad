@@ -4,7 +4,7 @@
 //! `Git` and `GitHub` capabilities to verify readiness (checking for unaddressed
 //! changes and self-merge attempts) before performing the merge.
 
-use exo_caps::{CapResult, Git, GitHub};
+use exo_caps::{CapResult, Git, GitHub, MergeStrategy};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -16,6 +16,9 @@ use crate::tool::{ok_json, parse, schema_json, Tool, ToolOutput};
 pub struct MergePrArgs {
     /// The PR number to merge.
     pub pr: u64,
+    /// The merge strategy to use (squash, merge, or rebase). Defaults to squash.
+    /// Invalid values will result in an error.
+    pub strategy: Option<String>,
     /// If true, skip the readiness guard (unaddressed changes check).
     #[serde(default)]
     pub force: bool,
@@ -30,6 +33,7 @@ impl MergePr {
     /// 1. **Self-merge guard**: Prevents an agent from merging its own PR.
     /// 2. **Readiness guard**: Checks if there are unaddressed `ChangesRequested` reviews.
     /// 3. **Merge**: Executes the merge via the GitHub capability.
+    /// 4. **Fetch**: Syncs local state after a successful merge (best-effort).
     pub async fn run<C: Git + GitHub>(ctx: &C, args: MergePrArgs) -> CapResult<ToolOutput> {
         // 1. Self-merge guard (always enforced)
         let current_branch = ctx.current_branch().await?;
@@ -51,15 +55,37 @@ impl MergePr {
         }
 
         // 3. Merge
-        // TODO(cap): GitHub::merge_pr does not support merge strategies (squash/merge/rebase) yet.
-        ctx.merge_pr(args.pr).await?;
+        let strategy = if let Some(s) = args.strategy.as_deref() {
+            MergeStrategy::parse(s).ok_or_else(|| {
+                exo_caps::CapError::invalid(
+                    "strategy",
+                    format!(
+                        "Invalid merge strategy: '{}'. Must be squash, merge, or rebase.",
+                        s
+                    ),
+                )
+            })?
+        } else {
+            MergeStrategy::Squash
+        };
+        ctx.merge_pr(args.pr, strategy).await?;
 
-        // TODO(cap): Git capability does not support 'pull' or 'fetch' to sync local state after merge.
-        // TODO(cap): No capability for agent shutdown/cleanup yet.
+        // 4. Fetch (best-effort): pulls merged changes
+        if let Err(e) = ctx.fetch().await {
+            tracing::warn!(error = %e, "post-merge git fetch failed (ignoring)");
+        }
+
+        // NOTE: Agent teardown (worktree reclaim + pane kill) is parent-side at
+        // convergence by design (Spawner::reclaim_worktree / kill_pane) —
+        // merge_pr does not shut down the merged agent.
 
         Ok(ToolOutput::with_data(
-            format!("merged PR #{}", args.pr),
-            json!({ "pr": args.pr }),
+            format!(
+                "merged PR #{} using {} strategy",
+                args.pr,
+                strategy.as_str()
+            ),
+            json!({ "pr": args.pr, "strategy": strategy.as_str() }),
         ))
     }
 }
@@ -92,17 +118,64 @@ mod tests {
         let mock = MockRuntime::default();
         let args = MergePrArgs {
             pr: 123,
+            strategy: None,
             force: false,
         };
 
         let out = MergePr::run(&mock, args).await.unwrap();
 
-        assert_eq!(out.text, "merged PR #123");
-        assert_eq!(out.data, Some(json!({ "pr": 123 })));
+        assert_eq!(out.text, "merged PR #123 using squash strategy");
+        assert_eq!(out.data, Some(json!({ "pr": 123, "strategy": "squash" })));
 
         // Verify merge was called
         let calls = mock.calls_made();
-        assert!(calls.contains(&Call::MergePr { pr: 123 }));
+        assert!(calls.contains(&Call::MergePr {
+            pr: 123,
+            strategy: MergeStrategy::Squash
+        }));
+        assert!(calls.contains(&Call::Fetch));
+    }
+
+    #[tokio::test]
+    async fn test_merge_pr_with_explicit_strategy() {
+        let mock = MockRuntime::default();
+        let args = MergePrArgs {
+            pr: 123,
+            strategy: Some("rebase".into()),
+            force: false,
+        };
+
+        let out = MergePr::run(&mock, args).await.unwrap();
+
+        assert_eq!(out.text, "merged PR #123 using rebase strategy");
+        assert_eq!(out.data, Some(json!({ "pr": 123, "strategy": "rebase" })));
+
+        let calls = mock.calls_made();
+        assert!(calls.contains(&Call::MergePr {
+            pr: 123,
+            strategy: MergeStrategy::Rebase
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_merge_pr_fetch_failure_ignored() {
+        let mock = MockRuntime::failing("fetch");
+        let args = MergePrArgs {
+            pr: 123,
+            strategy: None,
+            force: false,
+        };
+
+        let out = MergePr::run(&mock, args).await.unwrap();
+
+        assert_eq!(out.text, "merged PR #123 using squash strategy");
+        let calls = mock.calls_made();
+        assert!(calls.contains(&Call::MergePr {
+            pr: 123,
+            strategy: MergeStrategy::Squash
+        }));
+        // Verify fetch was NOT recorded because it failed
+        assert!(!calls.contains(&Call::Fetch));
     }
 
     #[tokio::test]
@@ -115,6 +188,7 @@ mod tests {
 
         let args = MergePrArgs {
             pr: 123,
+            strategy: None,
             force: false,
         }; // Trying to merge own PR 123
         let out = MergePr::run(&mock, args).await.unwrap();
@@ -140,6 +214,7 @@ mod tests {
 
         let args = MergePrArgs {
             pr: 123,
+            strategy: None,
             force: false,
         };
         let out = MergePr::run(&mock, args).await.unwrap();
@@ -165,16 +240,20 @@ mod tests {
 
         let args = MergePrArgs {
             pr: 123,
+            strategy: None,
             force: true, // Skip the guard
         };
         let out = MergePr::run(&mock, args).await.unwrap();
 
-        assert_eq!(out.text, "merged PR #123");
-        assert_eq!(out.data, Some(json!({ "pr": 123 })));
+        assert_eq!(out.text, "merged PR #123 using squash strategy");
+        assert_eq!(out.data, Some(json!({ "pr": 123, "strategy": "squash" })));
 
         // Verify merge WAS called
         let calls = mock.calls_made();
-        assert!(calls.contains(&Call::MergePr { pr: 123 }));
+        assert!(calls.contains(&Call::MergePr {
+            pr: 123,
+            strategy: MergeStrategy::Squash
+        }));
     }
 
     #[tokio::test]
@@ -188,6 +267,7 @@ mod tests {
 
         let args = MergePrArgs {
             pr: 123,
+            strategy: None,
             force: true, // Try to force self-merge
         };
         let out = MergePr::run(&mock, args).await.unwrap();
@@ -205,10 +285,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_merge_pr_invalid_strategy() {
+        let mock = MockRuntime::default();
+        let args = MergePrArgs {
+            pr: 123,
+            strategy: Some("sqush".into()),
+            force: false,
+        };
+
+        let res = MergePr::run(&mock, args).await;
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        assert!(err.to_string().contains("Invalid merge strategy: 'sqush'"));
+    }
+
+    #[tokio::test]
     async fn test_merge_pr_error_path() {
         let mock = MockRuntime::failing("merge_pr");
         let args = MergePrArgs {
             pr: 123,
+            strategy: None,
             force: false,
         };
 

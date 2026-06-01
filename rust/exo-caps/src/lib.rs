@@ -32,7 +32,7 @@ pub use bus::{Addressee, Bus, BusError};
 pub use error::{CapError, CapResult};
 pub use fs::{Fs, FsError};
 pub use git::{Git, GitError};
-pub use github::{CiStatus, GitHub, GitHubError, ReviewState};
+pub use github::{CiStatus, GitHub, GitHubError, MergeStrategy, ReviewState};
 pub use kv::{Kv, KvError};
 pub use lifecycle::{fold_children, Child, ChildLifecycle, ChildRecord};
 pub use log::Log;

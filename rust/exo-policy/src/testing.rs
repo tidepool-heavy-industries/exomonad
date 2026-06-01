@@ -13,8 +13,8 @@
 use async_trait::async_trait;
 use exo_caps::{
     Addressee, AgentName, Branch, Bus, BusError, CiStatus, ForkSpec, Fs, FsError, GeminiSpec, Git,
-    GitError, GitHub, GitHubError, Kv, KvError, Log, Message, PaneId, Process, ProcessError,
-    ReviewState, SpawnError, Spawner, Tmux, TmuxError, WorkerSpec,
+    GitError, GitHub, GitHubError, Kv, KvError, Log, MergeStrategy, Message, PaneId, Process,
+    ProcessError, ReviewState, SpawnError, Spawner, Tmux, TmuxError, WorkerSpec,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -35,7 +35,9 @@ pub enum Call {
     },
     MergePr {
         pr: u64,
+        strategy: MergeStrategy,
     },
+    Fetch,
     SpawnWorker {
         spec_task: String,
         step_count: usize,
@@ -149,6 +151,16 @@ impl Git for MockRuntime {
     async fn is_clean(&self) -> Result<bool, GitError> {
         Ok(self.is_clean)
     }
+    async fn fetch(&self) -> Result<(), GitError> {
+        if self.should_fail("fetch") {
+            return Err(GitError::Failed {
+                op: "fetch",
+                detail: "mock forced failure".into(),
+            });
+        }
+        self.record(Call::Fetch);
+        Ok(())
+    }
     async fn worktree_add(&self, _branch: &Branch, _at: &Path) -> Result<(), GitError> {
         Ok(())
     }
@@ -176,14 +188,14 @@ impl GitHub for MockRuntime {
     async fn pr_for_branch(&self, _branch: &Branch) -> Result<Option<u64>, GitHubError> {
         Ok(self.pr_for_branch)
     }
-    async fn merge_pr(&self, pr: u64) -> Result<(), GitHubError> {
+    async fn merge_pr(&self, pr: u64, strategy: MergeStrategy) -> Result<(), GitHubError> {
         if self.should_fail("merge_pr") {
             return Err(GitHubError::Failed {
                 op: "merge_pr",
                 detail: "mock forced failure".into(),
             });
         }
-        self.record(Call::MergePr { pr });
+        self.record(Call::MergePr { pr, strategy });
         Ok(())
     }
     async fn has_unaddressed_changes(&self, _pr: u64) -> Result<bool, GitHubError> {
@@ -348,6 +360,6 @@ mod tests {
     #[tokio::test]
     async fn forced_failure_surfaces() {
         let m = MockRuntime::failing("merge_pr");
-        assert!(m.merge_pr(3).await.is_err());
+        assert!(m.merge_pr(3, MergeStrategy::Squash).await.is_err());
     }
 }

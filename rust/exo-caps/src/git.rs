@@ -19,6 +19,7 @@ pub enum GitError {
 pub trait Git {
     async fn current_branch(&self) -> Result<Branch, GitError>;
     async fn is_clean(&self) -> Result<bool, GitError>;
+    async fn fetch(&self) -> Result<(), GitError>;
     async fn worktree_add(&self, branch: &Branch, at: &Path) -> Result<(), GitError>;
     async fn worktree_remove(&self, at: &Path) -> Result<(), GitError>;
 }

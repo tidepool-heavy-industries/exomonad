@@ -26,6 +26,11 @@ impl Git for Runtime {
         Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())
     }
 
+    async fn fetch(&self) -> Result<(), GitError> {
+        self.git(&["fetch"]).await?;
+        Ok(())
+    }
+
     async fn worktree_add(&self, branch: &Branch, at: &Path) -> Result<(), GitError> {
         self.git(&[
             "worktree",
