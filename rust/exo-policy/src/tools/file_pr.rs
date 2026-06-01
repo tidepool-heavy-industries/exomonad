@@ -69,9 +69,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_pr_dotted_branch() {
-        let mut mock = MockRuntime::default();
-        mock.current_branch = Branch::new("main.policy-claude.p4".into()).unwrap();
-        mock.next_pr = 123;
+        let mock = MockRuntime {
+            current_branch: Branch::new("main.policy-claude.p4".into()).unwrap(),
+            next_pr: 123,
+            ..Default::default()
+        };
 
         let args = FilePrArgs {
             title: "Test PR".into(),
@@ -90,9 +92,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_pr_no_dot_branch() {
-        let mut mock = MockRuntime::default();
-        mock.current_branch = Branch::new("feature-branch".into()).unwrap();
-        mock.next_pr = 456;
+        let mock = MockRuntime {
+            current_branch: Branch::new("feature-branch".into()).unwrap(),
+            next_pr: 456,
+            ..Default::default()
+        };
 
         let args = FilePrArgs {
             title: "Standalone PR".into(),
