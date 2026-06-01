@@ -845,7 +845,7 @@ impl<
         } else {
             // Fallback for resolver miss: derive agent name from branch and attempt best-effort cleanup.
             // Branch naming: {parent}.{slug}-{type} -> last segment is internal_name.
-            let agent_name = req.branch_name.split('.').last().unwrap_or(&req.branch_name);
+            let agent_name = req.branch_name.split('.').next_back().unwrap_or(&req.branch_name);
             info!(branch = %req.branch_name, derived_name = %agent_name, "Agent not found in resolver — falling back to name-derived cleanup");
             
             self.service
