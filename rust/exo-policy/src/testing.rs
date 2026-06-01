@@ -38,9 +38,11 @@ pub enum Call {
     },
     SpawnWorker {
         spec_task: String,
+        step_count: usize,
     },
     SpawnGemini {
         spec_task: String,
+        step_count: usize,
     },
     ForkWave {
         n: usize,
@@ -190,6 +192,7 @@ impl Spawner for MockRuntime {
     async fn spawn_worker(&self, spec: WorkerSpec) -> Result<AgentName, SpawnError> {
         self.record(Call::SpawnWorker {
             spec_task: spec.task.clone(),
+            step_count: spec.steps.len(),
         });
         Ok(spec
             .name
@@ -198,6 +201,7 @@ impl Spawner for MockRuntime {
     async fn spawn_gemini(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError> {
         self.record(Call::SpawnGemini {
             spec_task: spec.task.clone(),
+            step_count: spec.steps.len(),
         });
         Ok(spec
             .name

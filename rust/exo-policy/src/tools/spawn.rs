@@ -14,6 +14,18 @@ use serde::Deserialize;
 pub struct SpawnWorkerArgs {
     pub name: Option<String>,
     pub task: String,
+    #[serde(default)]
+    pub steps: Vec<String>,
+    #[serde(default)]
+    pub verify: Vec<String>,
+    #[serde(default)]
+    pub done_criteria: Vec<String>,
+    #[serde(default)]
+    pub context: Option<String>,
+    #[serde(default)]
+    pub boundary: Vec<String>,
+    #[serde(default)]
+    pub read_first: Vec<String>,
 }
 
 pub struct SpawnWorker;
@@ -27,6 +39,12 @@ impl SpawnWorker {
         let spec = WorkerSpec {
             name,
             task: args.task,
+            steps: args.steps,
+            verify: args.verify,
+            done_criteria: args.done_criteria,
+            context: args.context,
+            boundary: args.boundary,
+            read_first: args.read_first,
         };
         let spawned = ctx.spawn_worker(spec).await?;
         Ok(ToolOutput::with_data(
@@ -55,6 +73,18 @@ impl<R: Spawner + Send + Sync> Tool<R> for SpawnWorker {
 pub struct SpawnGeminiArgs {
     pub name: Option<String>,
     pub task: String,
+    #[serde(default)]
+    pub steps: Vec<String>,
+    #[serde(default)]
+    pub verify: Vec<String>,
+    #[serde(default)]
+    pub done_criteria: Vec<String>,
+    #[serde(default)]
+    pub context: Option<String>,
+    #[serde(default)]
+    pub boundary: Vec<String>,
+    #[serde(default)]
+    pub read_first: Vec<String>,
 }
 
 pub struct SpawnGemini;
@@ -68,6 +98,12 @@ impl SpawnGemini {
         let spec = GeminiSpec {
             name,
             task: args.task,
+            steps: args.steps,
+            verify: args.verify,
+            done_criteria: args.done_criteria,
+            context: args.context,
+            boundary: args.boundary,
+            read_first: args.read_first,
         };
         let spawned = ctx.spawn_gemini(spec).await?;
         Ok(ToolOutput::with_data(
@@ -96,6 +132,18 @@ impl<R: Spawner + Send + Sync> Tool<R> for SpawnGemini {
 pub struct ForkChildArgs {
     pub name: Option<String>,
     pub task: String,
+    #[serde(default)]
+    pub steps: Vec<String>,
+    #[serde(default)]
+    pub verify: Vec<String>,
+    #[serde(default)]
+    pub done_criteria: Vec<String>,
+    #[serde(default)]
+    pub context: Option<String>,
+    #[serde(default)]
+    pub boundary: Vec<String>,
+    #[serde(default)]
+    pub read_first: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -116,6 +164,12 @@ impl ForkWave {
             specs.push(ForkSpec {
                 name,
                 task: child.task,
+                steps: child.steps,
+                verify: child.verify,
+                done_criteria: child.done_criteria,
+                context: child.context,
+                boundary: child.boundary,
+                read_first: child.read_first,
             });
         }
         let results = ctx.fork_wave(specs).await;
@@ -172,13 +226,51 @@ mod tests {
         let args = SpawnWorkerArgs {
             name: Some("worker-1".to_string()),
             task: "do something".to_string(),
+            steps: vec![],
+            verify: vec![],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec![],
+            read_first: vec![],
         };
         let out = SpawnWorker::run(&mock, args).await.unwrap();
         assert!(out.text.contains("Spawned worker"));
         let calls = mock.calls_made();
         assert_eq!(calls.len(), 1);
         match &calls[0] {
-            Call::SpawnWorker { spec_task } => assert_eq!(spec_task, "do something"),
+            Call::SpawnWorker {
+                spec_task,
+                step_count,
+            } => {
+                assert_eq!(spec_task, "do something");
+                assert_eq!(*step_count, 0);
+            }
+            _ => panic!("wrong call"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_spawn_worker_structured() {
+        let mock = MockRuntime::default();
+        let args = SpawnWorkerArgs {
+            name: Some("worker-1".to_string()),
+            task: "do something".to_string(),
+            steps: vec!["step 1".into()],
+            verify: vec!["verify 1".into()],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec!["boundary 1".into()],
+            read_first: vec![],
+        };
+        let _ = SpawnWorker::run(&mock, args).await.unwrap();
+        let calls = mock.calls_made();
+        match &calls[0] {
+            Call::SpawnWorker {
+                spec_task: _,
+                step_count,
+            } => {
+                assert_eq!(*step_count, 1);
+            }
             _ => panic!("wrong call"),
         }
     }
@@ -189,13 +281,25 @@ mod tests {
         let args = SpawnGeminiArgs {
             name: Some("gemini-1".to_string()),
             task: "do something else".to_string(),
+            steps: vec![],
+            verify: vec![],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec![],
+            read_first: vec![],
         };
         let out = SpawnGemini::run(&mock, args).await.unwrap();
         assert!(out.text.contains("Spawned dev"));
         let calls = mock.calls_made();
         assert_eq!(calls.len(), 1);
         match &calls[0] {
-            Call::SpawnGemini { spec_task } => assert_eq!(spec_task, "do something else"),
+            Call::SpawnGemini {
+                spec_task,
+                step_count,
+            } => {
+                assert_eq!(spec_task, "do something else");
+                assert_eq!(*step_count, 0);
+            }
             _ => panic!("wrong call"),
         }
     }
@@ -208,10 +312,22 @@ mod tests {
                 ForkChildArgs {
                     name: Some("child-1".to_string()),
                     task: "task 1".to_string(),
+                    steps: vec![],
+                    verify: vec![],
+                    done_criteria: vec![],
+                    context: None,
+                    boundary: vec![],
+                    read_first: vec![],
                 },
                 ForkChildArgs {
                     name: Some("child-2".to_string()),
                     task: "task 2".to_string(),
+                    steps: vec![],
+                    verify: vec![],
+                    done_criteria: vec![],
+                    context: None,
+                    boundary: vec![],
+                    read_first: vec![],
                 },
             ],
         };

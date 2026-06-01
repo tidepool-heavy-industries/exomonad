@@ -33,6 +33,12 @@ pub enum SpawnError {
 pub struct WorkerSpec {
     pub name: Option<AgentName>,
     pub task: String,
+    pub steps: Vec<String>,
+    pub verify: Vec<String>,
+    pub done_criteria: Vec<String>,
+    pub context: Option<String>,
+    pub boundary: Vec<String>,
+    pub read_first: Vec<String>,
 }
 
 /// → Worktree / Dev / Gemini.
@@ -40,6 +46,12 @@ pub struct WorkerSpec {
 pub struct GeminiSpec {
     pub name: Option<AgentName>,
     pub task: String,
+    pub steps: Vec<String>,
+    pub verify: Vec<String>,
+    pub done_criteria: Vec<String>,
+    pub context: Option<String>,
+    pub boundary: Vec<String>,
+    pub read_first: Vec<String>,
 }
 
 /// → Worktree / Tl / Claude.
@@ -47,6 +59,12 @@ pub struct GeminiSpec {
 pub struct ForkSpec {
     pub name: Option<AgentName>,
     pub task: String,
+    pub steps: Vec<String>,
+    pub verify: Vec<String>,
+    pub done_criteria: Vec<String>,
+    pub context: Option<String>,
+    pub boundary: Vec<String>,
+    pub read_first: Vec<String>,
 }
 
 #[async_trait]
