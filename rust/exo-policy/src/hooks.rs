@@ -11,6 +11,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::tool::BoxFuture;
+use exo_caps::{Git, GitHub, Kv};
+
 /// A `PreToolUse` verdict. `Modify` rewrites the tool input in place (the PII-rewrite path).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "decision")]
@@ -47,9 +50,56 @@ pub struct HookInput {
     pub tool_input: Value,
 }
 
+/// Ported hook implementations.
+pub fn pre_tool_use<'a, R: Kv + Send + Sync>(ctx: &'a R, input: &'a HookInput) -> BoxFuture<'a, HookDecision> {
+    let tool_name = input.tool_name.clone();
+    Box::pin(async move {
+        // Guard check: look up "allowlist:{tool_name}" in KV.
+        // "deny" -> Deny, else Allow. Skeleton for Wave 3.
+        let key = format!("allowlist:{}", tool_name);
+        match ctx.get(&key).await {
+            Ok(Some(v)) if v == "deny" => HookDecision::Deny {
+                reason: format!("Tool '{}' is blocked by policy", tool_name),
+            },
+            // TODO: Port PII-rewrite (HookDecision::Modify) from Haskell logic when firmed.
+            _ => HookDecision::Allow,
+        }
+    })
+}
+
+pub fn stop<'a, R: Git + GitHub + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, StopDecision> {
+    Box::pin(async move {
+        // The live PR-gate: block if there's an open PR with unaddressed changes.
+        let branch = match ctx.current_branch().await {
+            Ok(b) => b,
+            Err(_) => return StopDecision::Allow,
+        };
+
+        let pr = match ctx.pr_for_branch(&branch).await {
+            Ok(Some(pr)) => pr,
+            _ => return StopDecision::Allow,
+        };
+
+        match ctx.has_unaddressed_changes(pr).await {
+            Ok(true) => StopDecision::Block {
+                reason: "Open PR has unaddressed ChangesRequested".into(),
+            },
+            _ => StopDecision::Allow,
+        }
+    })
+}
+
+pub fn session_start<'a, R: Send + Sync>(_ctx: &'a R) -> BoxFuture<'a, SessionStartOutput> {
+    Box::pin(async move {
+        // Root identity bootstrap context injection goes here (additional_context).
+        SessionStartOutput::default()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::MockRuntime;
 
     #[test]
     fn hook_decision_serde_is_tagged() {
@@ -66,5 +116,66 @@ mod tests {
     fn session_start_empty_omits_context() {
         let j = serde_json::to_value(SessionStartOutput::default()).unwrap();
         assert_eq!(j, serde_json::json!({}));
+    }
+
+    #[tokio::test]
+    async fn test_pre_tool_use_allow_by_default() {
+        let ctx = MockRuntime::default();
+        let input = HookInput {
+            tool_name: "test_tool".into(),
+            tool_input: Value::Null,
+        };
+        assert_eq!(pre_tool_use(&ctx, &input).await, HookDecision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_pre_tool_use_deny() {
+        let ctx = MockRuntime::default();
+        ctx.kv
+            .lock()
+            .unwrap()
+            .insert("allowlist:test_tool".into(), "deny".into());
+        let input = HookInput {
+            tool_name: "test_tool".into(),
+            tool_input: Value::Null,
+        };
+        match pre_tool_use(&ctx, &input).await {
+            HookDecision::Deny { reason } => {
+                assert!(reason.contains("test_tool"));
+            }
+            _ => panic!("Should be Deny"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stop_allow_no_pr() {
+        let ctx = MockRuntime::default();
+        assert_eq!(stop(&ctx).await, StopDecision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_stop_block_with_changes() {
+        let ctx = MockRuntime {
+            pr_for_branch: Some(123),
+            has_unaddressed_changes: true,
+            ..Default::default()
+        };
+        match stop(&ctx).await {
+            StopDecision::Block { reason } => {
+                assert!(reason.contains("unaddressed ChangesRequested"));
+            }
+            _ => panic!("Should be Block"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_session_start_default() {
+        let ctx = MockRuntime::default();
+        assert_eq!(
+            session_start(&ctx).await,
+            SessionStartOutput {
+                additional_context: None
+            }
+        );
     }
 }
