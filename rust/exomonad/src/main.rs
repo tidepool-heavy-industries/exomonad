@@ -7,6 +7,7 @@
 //! WASM plugins are loaded from file (server-side only).
 
 mod app_state;
+mod experimental_init;
 mod init;
 mod logging;
 mod mcp_stdio;
@@ -126,6 +127,16 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum ExperimentalCommands {
+    /// Bootstrap a node-mode ROOT: own tmux session, root papers, NO central server.
+    Init {
+        /// tmux session name (default: "{config.tmux_session}-exp").
+        #[arg(long)]
+        session: Option<String>,
+        /// Tear down an existing session of the same name first.
+        #[arg(long)]
+        recreate: bool,
+    },
+
     /// Run the swarm-sidecar node mode: self-ID from papers, then the two-loop
     /// sidecar (outbound MCP serve + inbound ingestion-inbox watch + self-poll).
     Node {
@@ -172,6 +183,9 @@ async fn main() -> Result<()> {
         }
 
         Commands::Experimental { command } => match command {
+            ExperimentalCommands::Init { session, recreate } => {
+                return experimental_init::run(&config, session, recreate).await;
+            }
             ExperimentalCommands::Node { papers } => {
                 let cwd = std::env::current_dir().context("resolving node cwd")?;
                 let ctx = exo_node::bootstrap(&papers, cwd)
