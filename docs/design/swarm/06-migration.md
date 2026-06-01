@@ -161,9 +161,27 @@ inbox and a restart resumes from the cursor.
 
 ---
 
+## Wave 1.5 — Cap completion (re-freeze the contract before Node)
+
+**Status: planned.** Wave 1 + Wave 3 are merged, but a post-merge review found three
+`exo-caps` *contract* gaps the original plan assumed filled. They change the frozen
+contract, so they land as a small dedicated wave **before** the Node TL forks — doing them
+*inside* Node would re-introduce the churn the freeze prevents. Small + mechanical (adapt
+from existing exomonad-core services / `Spawn.hs`): 2–3 Gemini leaves, no sub-TL.
+
+| Leaf | Gap | Source |
+|---|---|---|
+| C1 | **Spawner spec fields** — port `steps`/`verify`/`done_criteria`/`context`/`boundary`/`read_first` onto `WorkerSpec`/`GeminiSpec`/`ForkSpec` (shipped as `{name,task}` placeholders); thread through the policy spawn tools + birth launch-cmd | Haskell `SpawnSpec` |
+| C2 | **`GitHub` cap reads for the self-poll** — add review-state / CI-status / review-comment-timestamp queries so N3 can *produce* `WorldEvent`s (today only `has_unaddressed_changes` exists; `on_world_event` has no producer) | `GitHubService`/`github_poller` |
+| C3 | **`pre_tool_use` is inverted + `merge_pr` `force`** — rewrite `pre_tool_use` to **default-allow antipattern nudges** (NOT the deny-by-default allowlist that shipped — see [07](07-open-questions.md)); fix the doc-04 wording; add `force: bool` to `MergePrArgs` | — |
+
+**Converge:** contract re-frozen; `cargo test` green; then fork the Node TL.
+
 ## Wave 2 — The node / sidecar (binary `mcp-stdio` mode) — **Node TL**
 
-**Node TL (Claude).** Depends on the Runtime TL converging + the W0 spike decision. Refactors `teams-mcp`
+**Node TL (Claude).** Depends on the Runtime TL converging + the W0 spike decision + the
+Wave-1.5 cap completion (C2 is a hard prerequisite — N3 can't construct events without it).
+Also ports the `session_start` papers bootstrap (currently a no-op). Refactors `teams-mcp`
 into the node. Scaffold: the node bootstrap (self-ID via `exo-scry` → build
 `Runtime` → assemble loops). Fork:
 
@@ -226,12 +244,15 @@ wires `role_def(NodeKind)`; each ported tool's WASM twin is removed in the same 
 
 ## Dependency & parallelism summary
 
-- **Wave 0 first** — the caps signature-freeze is the gate everything forks from.
+- **Wave 0 first** — the caps signature-freeze is the gate everything forks from. **Done.**
 - **Then Runtime TL ∥ Policy TL** — the two concurrent Claude sub-TLs. Policy needs
   only the cap *traits* (tests against mock caps), so it does **not** wait on Runtime
-  impls. This is the core parallelism: two TLs, ~11 Gemini leaves in flight.
-- **Node (Wave 2) after Runtime** — it assembles real `Runtime` + `exo-policy` into the
-  sidecar; needs Runtime's impls and the W0 spike's CC-last-hop decision.
+  impls. This was the core parallelism: two TLs, ~11 Gemini leaves. **Done + merged.**
+- **Wave 1.5 cap-completion next** — three contract gaps the merged code surfaced
+  (Spawner spec fields, GitHub self-poll reads, `pre_tool_use` inversion); re-freezes the
+  contract before Node forks against it.
+- **Node (Wave 2) after cap-completion** — assembles real `Runtime` + `exo-policy` into the
+  sidecar; needs the W0 CC-last-hop decision and the C2 GitHub reads.
 - **Cutover (Wave 4) last.**
 - Within a sub-TL, leaves are conflict-free (one cap-trait/file, one tool/file) → full
   parallel fork.

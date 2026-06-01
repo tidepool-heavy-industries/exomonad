@@ -25,25 +25,44 @@
 
 ## Open — needs a decision
 
-- **Provisional caps: `Tmux` / `Fs` / `Process` / `Log`.** A cap belongs in `exo-caps`
-  only when a *policy* tool/hook is generic over it. These have no confirmed policy
-  consumer yet (`Tmux`'s real users are runtime-internal). Keep during build; **cut any
-  that no Wave-3 tool needs.** Confirmed caps: `Git`, `GitHub`, `Bus`, `Spawner`, `Kv`.
 - **Crate names** — `exo-caps` / `exo-policy` / `exo-runtime` provisional.
 - **Readability index** (optional) — a `{name} → pane` map/symlink so a human can tell
   which `pane-NNN.jsonl` is whom.
 
-## Open — build work (mechanical, not design)
+## Cap-completion wave (gaps the real code surfaced — do BEFORE Node)
 
-- **`exo-caps` method bodies** — `Git`/`GitHub`/`Tmux`/`Fs`/`Process`/`Log`/`Kv` signatures
-  (adapt from exomonad-core services). `Bus`/`Addressee`/`Spawner`/newtypes are pinned.
-- **Per-op spawn spec fields** — port the `WorkerSpec`/`GeminiSpec`/`ForkSpec` field lists
-  from the Haskell `WorkerSpec`/`SpawnSpec`.
-- **Per-role toolset content** ([04](04-policy.md)) — the Bucket-C tools/hooks/events,
+The Wave-1/Wave-3 code is merged, but a post-merge review found three `exo-caps`
+*contract* gaps the original plan assumed away. Because they change the frozen contract,
+they land as a small dedicated wave **before** the Node TL forks against it — not during
+Node assembly (which would re-introduce the churn the freeze prevents).
+
+- **Spawner spec fields never ported.** `WorkerSpec`/`GeminiSpec`/`ForkSpec` shipped as
+  `{ name, task }` placeholders ([spawner.rs]); the structured TL-praxis fields
+  (`steps`/`verify`/`done_criteria`/`context`/`boundary`/`read_first`) the spawn tools need
+  to carry a real spec were never added. Port them field-for-field from the Haskell
+  `SpawnSpec`. (Contract change → pre-Node.)
+- **`GitHub` cap too thin to feed the self-poll.** `on_world_event` (consumer) is done, but
+  *nothing produces a `WorldEvent`*, and the N3 self-poll can't: the cap has only
+  `has_unaddressed_changes`. Add review-state, CI-status, and review-comment-timestamp reads
+  (adapt exomonad-core `GitHubService`/`github_poller`) so the poll can construct
+  `PrReview`/`CiStatus`/`ReviewTimeout`. (Contract change → pre-Node.)
+- **`pre_tool_use` shipped inverted.** It must be **default-allow** — a tool-specific
+  *antipattern nudge* ("this fits a common antipattern, try X"), NOT a security/allowlist
+  gate. The merged version is a deny-by-default KV allowlist (the literal inverse) and the
+  [04](04-policy.md) description ("guards + PII-rewrite") is also wrong. Rewrite to
+  default-allow heuristics; fix the doc. (Policy-only, but bundle it here.)
+- **`merge_pr` lacks `force`.** Both its own message and the `ReviewTimeout` event tell
+  agents to "use `force: true`," but `MergePrArgs` has no such field. Add it.
+
+## Open — build work (the Node TL / Wave 2, after cap-completion)
+
+- **Per-role toolset content** ([04](04-policy.md)) — remaining Bucket-C tools/hooks/events,
   ported one at a time as each Haskell twin retires.
 - **Sidecar concurrency** — the three stimuli (outbound MCP, inbound watch, self-poll) as
   tokio tasks in one process; `R: Send + Sync + 'static` at the dispatch boundary.
 - **`exomonad hook` mode wiring** — CC payload → `pre_tool_use`/`stop`/`session_start`.
+- **`session_start` papers bootstrap.** Currently a `default()` no-op; the root identity
+  self-ID (papers-based, doc 01) is unported — a real N-leaf, not polish.
 
 ## Open — known missing feature
 
@@ -51,6 +70,21 @@
   turn-end; we don't. **Required for convergence** — a sub-TL waiting on a wave can't
   detect completion without it (it would deadlock). The sidecar emits when its agent goes
   quiet. Not yet built; a Wave-2 prerequisite, not an optional nicety.
+
+## Done (merged to main — Wave 1 + Wave 3)
+
+- **`exo-caps`** — full contract: validated newtypes, `Message`/`IngestionEntry` split,
+  `NodePapers`, per-cap errors, `fold_children` lifecycle, `Spawner`/`Bus` seam.
+- **`exo-runtime`** — `Runtime` impls all 9 caps. `Bus` = jsonl append (PIPE_BUF assert,
+  no-spill, flush-not-fsync). `Spawner` = record-first / two-phase-pane birth + teardown.
+  Hardening landed: `own_pane`-derived `parent_inbox` (no silent `None`), `resolve_child_name`
+  (derive-unique / error-on-duplicate), single `exo_caps::paths` site.
+- **`exo-policy`** — `Tool<R>` (object-safe over concrete `R`, hand adapter, no macro),
+  `role_def(NodeKind)` table, all 7 tool groups, hooks, `on_world_event`. 0 `dyn Caps`,
+  0 macros, 0 phases. 56 tests across the three crates; fmt/clippy clean.
+- **Provisional caps resolved — none cut.** `PolicyCaps` (the dispatch-boundary bound-union)
+  requires all 9, and the runtime uses `Tmux`/`Fs`/`Process`/`Log` internally (Bus paste +
+  side-files, Spawner panes). The "cut if no consumer" question is closed: all have one.
 
 ## Settled (ledger — don't relitigate)
 
