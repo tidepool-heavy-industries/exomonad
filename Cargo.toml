@@ -10,6 +10,7 @@ members = [
     "rust/exo-caps",
     "rust/exo-runtime",
     "rust/exo-policy",
+    "rust/exo-node",
 ]
 
 [workspace.dependencies]

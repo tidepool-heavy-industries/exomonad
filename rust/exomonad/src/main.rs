@@ -51,6 +51,12 @@ enum Commands {
         /// The runtime environment (Claude or Gemini)
         #[arg(long, default_value = "claude")]
         runtime: HookRuntime,
+
+        /// Swarm node mode (Wave 2): handle the hook via `exo-policy` against a node's
+        /// papers, with NO central server. When present, routes to the node hook path;
+        /// when absent, the legacy WASM-server-forward path is used (unchanged).
+        #[arg(long)]
+        papers: Option<std::path::PathBuf>,
     },
 
     /// Initialize tmux session for this project.
@@ -96,6 +102,15 @@ enum Commands {
         name: String,
     },
 
+    /// Run the swarm-sidecar node mode (Wave 2): self-ID from papers, then the two-loop
+    /// sidecar (outbound MCP serve + inbound ingestion-inbox watch + self-poll). The new
+    /// path; coexists with the WASM `serve`/`mcp-stdio` during transition.
+    Node {
+        /// Path to this node's birth papers (`node.json`), written by the parent at spawn.
+        #[arg(long)]
+        papers: std::path::PathBuf,
+    },
+
     /// Reply to a UI request
     Reply {
         /// Request ID
@@ -139,6 +154,14 @@ async fn main() -> Result<()> {
             return mcp_stdio::run(role, name).await;
         }
 
+        Commands::Node { ref papers } => {
+            let cwd = std::env::current_dir().context("resolving node cwd")?;
+            let ctx = exo_node::bootstrap(papers, cwd)
+                .map(std::sync::Arc::new)
+                .context("node self-ID / bootstrap")?;
+            return exo_node::run_node(ctx).await.context("node run");
+        }
+
         Commands::Recompile { ref role } => {
             let role_str = role.as_deref().unwrap_or(&config.wasm_name);
             let project_dir = if config.project_dir.is_absolute() {
@@ -158,7 +181,31 @@ async fn main() -> Result<()> {
             return serve::run(&config).await;
         }
 
-        Commands::Hook { event, runtime } => {
+        Commands::Hook { event, runtime, papers } => {
+            // Wave-2 node path: handle the hook via exo-policy against papers, no server.
+            if let Some(papers_path) = papers {
+                let node_event = match event {
+                    HookEventType::PreToolUse => exo_node::HookEvent::PreToolUse,
+                    HookEventType::Stop => exo_node::HookEvent::Stop,
+                    HookEventType::SessionStart => exo_node::HookEvent::SessionStart,
+                    other => {
+                        // Node path only handles the three policy hooks; anything else is a
+                        // no-op pass-through (don't block the agent on an unhandled event).
+                        eprintln!("[exomonad] node hook: unhandled event {other:?}, passing through");
+                        println!("{{\"continue\": true}}");
+                        return Ok(());
+                    }
+                };
+                let mut body = String::new();
+                use std::io::Read;
+                std::io::stdin().read_to_string(&mut body)?;
+                let verdict = exo_node::handle_hook(node_event, &papers_path, &body)
+                    .await
+                    .context("node hook")?;
+                println!("{verdict}");
+                return Ok(());
+            }
+
             let mut path = format!("/hook?event={}&runtime={}", event, runtime);
             if let Ok(agent_id) = std::env::var("EXOMONAD_AGENT_ID") {
                 path.push_str(&format!("&agent_id={}", encode(&agent_id)));
