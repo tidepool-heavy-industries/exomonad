@@ -47,7 +47,23 @@ pub struct RoleDef<R: Send + Sync> {
 /// the real per-role fns.
 pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
     match kind {
-        NodeKind::Root | NodeKind::Tl => RoleDef {
+        // Root is the human-facing top: no parent (so no `notify_parent`) and it does not
+        // file its own PR (it merges children's). It spawns and merges; that's it.
+        NodeKind::Root => RoleDef {
+            tools: vec![
+                Box::new(ForkWave),
+                Box::new(SpawnGemini),
+                Box::new(SpawnWorker),
+                Box::new(MergePr),
+                Box::new(SendMessage),
+            ],
+            pre_tool_use,
+            stop,
+            session_start,
+            on_event: on_world_event,
+        },
+        // A spawned TL also files a PR up to its parent and notifies that parent.
+        NodeKind::Tl => RoleDef {
             tools: vec![
                 Box::new(ForkWave),
                 Box::new(SpawnGemini),
