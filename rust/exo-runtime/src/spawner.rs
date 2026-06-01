@@ -42,8 +42,8 @@
 use crate::runtime::Runtime;
 use async_trait::async_trait;
 use exo_caps::{
-    AgentName, AgentType, Branch, ChildKind, ChildRecord, ForkSpec, GeminiSpec, InboxPath, PaneId,
-    SpawnError, Spawner, WorkerSpec,
+    AgentName, AgentType, Branch, ChildKind, ChildRecord, ForkSpec, GeminiSpec, InboxPath, NodeKind,
+    NodePapers, PaneId, SpawnError, Spawner, WorkerSpec,
 };
 use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
@@ -54,6 +54,7 @@ use tokio::io::AsyncWriteExt;
 pub(crate) struct BirthCore {
     pub kind: ChildKind,
     pub agent_type: AgentType,
+    pub role: NodeKind,
     pub name: AgentName,
     pub branch: Branch,
     pub task: String,
@@ -131,33 +132,233 @@ impl Runtime {
 
 impl Runtime {
     /// The shared birth tail. **S2.** Record-first, then pane, then papers, then launch.
-    pub(crate) async fn birth(&self, _core: BirthCore) -> Result<AgentName, SpawnError> {
-        todo!(
-            "S2: append AgentSpawned FIRST -> (worktree add if kind==Worktree) -> \
-             tmux new_pane -> write child node.json (parent_inbox = mine) -> launch mcp-stdio"
-        )
+    pub(crate) async fn birth(&self, core: BirthCore) -> Result<AgentName, SpawnError> {
+        // (a) compute child worktree path
+        let child_dir = match core.kind {
+            ChildKind::Worktree => self.working_dir.join(".exo/worktrees").join(core.name.as_str()),
+            ChildKind::Inline => self.working_dir.to_path_buf(),
+        };
+
+        // (b) If core.kind == ChildKind::Worktree: call self.worktree_add
+        if core.kind == ChildKind::Worktree {
+            exo_caps::Git::worktree_add(self, &core.branch, &child_dir)
+                .await
+                .map_err(|e| SpawnError::Failed {
+                    op: "worktree_add",
+                    child: Some(core.name.clone()),
+                    detail: e.to_string(),
+                })?;
+        }
+
+        // (c) Two-phase pane: call self.new_pane(&cwd, shell)
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
+        let pane = exo_caps::Tmux::new_pane(self, &child_dir, &shell)
+            .await
+            .map_err(|e| SpawnError::Failed {
+                op: "new_pane",
+                child: Some(core.name.clone()),
+                detail: e.to_string(),
+            })?;
+
+        // (d) RECORD FIRST — BEFORE launching the agent
+        let inbox = self.child_inbox_path(&pane);
+        let record = ChildRecord::Spawned {
+            child: core.name.clone(),
+            kind: core.kind,
+            pane: pane.clone(),
+            inbox: inbox.clone(),
+        };
+        self.append_child_record(&record).await?;
+
+        // (e) Write child papers
+        let papers = NodePapers::new(
+            self.node_path().child(&core.name),
+            core.branch.clone(),
+            core.role,
+            pane.clone(),
+            None, // TODO(wave2): wire self-pane -> parent_inbox
+        );
+        let papers_dir = child_dir.join(".exo");
+        tokio::fs::create_dir_all(&papers_dir).await?;
+        let papers_json = serde_json::to_vec_pretty(&papers).map_err(|e| SpawnError::Failed {
+            op: "serialize_papers",
+            child: Some(core.name.clone()),
+            detail: e.to_string(),
+        })?;
+        tokio::fs::write(papers_dir.join("node.json"), papers_json).await?;
+
+        // (f) Launch the agent
+        let agent_bin = match core.agent_type {
+            AgentType::Claude => "claude --dangerously-skip-permissions",
+            AgentType::Gemini => "gemini --yolo",
+            AgentType::Shoal => {
+                return Err(SpawnError::Failed {
+                    op: "launch",
+                    child: Some(core.name.clone()),
+                    detail: "Shoal is not spawnable as a tree child".into(),
+                })
+            }
+        };
+        let launch_cmd = format!("{}\n", agent_bin);
+
+        exo_caps::Tmux::paste(self, &pane, &launch_cmd)
+            .await
+            .map_err(|e| SpawnError::Failed {
+                op: "launch",
+                child: Some(core.name.clone()),
+                detail: e.to_string(),
+            })?;
+
+        Ok(core.name)
     }
 }
 
 #[async_trait]
 impl Spawner for Runtime {
-    async fn spawn_worker(&self, _spec: WorkerSpec) -> Result<AgentName, SpawnError> {
-        todo!("S2: fix (Worker, Gemini, Inline); build BirthCore; self.birth(core).await")
+    async fn spawn_worker(&self, spec: WorkerSpec) -> Result<AgentName, SpawnError> {
+        let name = spec.name.unwrap_or_else(|| AgentName::new("worker".into()).unwrap());
+        let core = BirthCore {
+            kind: ChildKind::Inline,
+            agent_type: AgentType::Gemini,
+            role: NodeKind::Worker,
+            branch: Branch::from_path(&self.node_path().child(&name)),
+            name,
+            task: spec.task,
+        };
+        self.birth(core).await
     }
 
-    async fn spawn_gemini(&self, _spec: GeminiSpec) -> Result<AgentName, SpawnError> {
-        todo!("S2: fix (Dev, Gemini, Worktree); build BirthCore; self.birth(core).await")
+    async fn spawn_gemini(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError> {
+        let name = spec.name.unwrap_or_else(|| AgentName::new("dev".into()).unwrap());
+        let core = BirthCore {
+            kind: ChildKind::Worktree,
+            agent_type: AgentType::Gemini,
+            role: NodeKind::Dev,
+            branch: Branch::from_path(&self.node_path().child(&name)),
+            name,
+            task: spec.task,
+        };
+        self.birth(core).await
     }
 
-    async fn fork_wave(&self, _specs: Vec<ForkSpec>) -> Vec<Result<AgentName, SpawnError>> {
-        todo!("S2: fix (Tl, Claude, Worktree) per spec; birth each; collect per-spec Results")
+    async fn fork_wave(&self, specs: Vec<ForkSpec>) -> Vec<Result<AgentName, SpawnError>> {
+        let mut results = Vec::with_capacity(specs.len());
+        for (i, spec) in specs.into_iter().enumerate() {
+            let name = spec
+                .name
+                .unwrap_or_else(|| AgentName::new(format!("tl-{}", i)).unwrap());
+            let core = BirthCore {
+                kind: ChildKind::Worktree,
+                agent_type: AgentType::Claude,
+                role: NodeKind::Tl,
+                branch: Branch::from_path(&self.node_path().child(&name)),
+                name,
+                task: spec.task,
+            };
+            results.push(self.birth(core).await);
+        }
+        results
     }
 
-    async fn reclaim_worktree(&self, _child: &AgentName) -> Result<(), SpawnError> {
-        todo!("S3: look up child worktree path; git worktree remove (parent-side, at converge)")
+    async fn reclaim_worktree(&self, child: &AgentName) -> Result<(), SpawnError> {
+        let records = self.read_child_records().await?;
+        let current_set = exo_caps::fold_children(&records);
+        let record = current_set.get(child).ok_or_else(|| SpawnError::Failed {
+            op: "reclaim_worktree",
+            child: Some(child.clone()),
+            detail: "unknown child".into(),
+        })?;
+
+        match record.kind {
+            ChildKind::Worktree => {
+                let path = self.working_dir.join(".exo/worktrees").join(child.as_str());
+                exo_caps::Git::worktree_remove(self, &path)
+                    .await
+                    .map_err(|e| SpawnError::Failed {
+                        op: "reclaim_worktree",
+                        child: Some(child.clone()),
+                        detail: e.to_string(),
+                    })
+            }
+            ChildKind::Inline => Ok(()),
+        }
     }
 
-    async fn kill_pane(&self, _child: &AgentName) -> Result<(), SpawnError> {
-        todo!("S3: fold children -> child.pane -> tmux kill-pane (forceful teardown)")
+    async fn kill_pane(&self, child: &AgentName) -> Result<(), SpawnError> {
+        let records = self.read_child_records().await?;
+        let current_set = exo_caps::fold_children(&records);
+        let record = current_set.get(child).ok_or_else(|| SpawnError::Failed {
+            op: "kill_pane",
+            child: Some(child.clone()),
+            detail: "unknown child".into(),
+        })?;
+
+        exo_caps::Tmux::kill_pane(self, &record.pane)
+            .await
+            .map_err(|e| SpawnError::Failed {
+                op: "kill_pane",
+                child: Some(child.clone()),
+                detail: e.to_string(),
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use exo_caps::{AgentName, ChildKind, ChildRecord, NodePath, PaneId};
+    use tempfile::tempdir;
+
+    fn an(s: &str) -> AgentName {
+        AgentName::new(s.into()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_ledger_append_and_read() {
+        let tmp = tempdir().unwrap();
+        let rt = Runtime::new(
+            NodePath::new(vec![an("root")]).unwrap(),
+            Branch::new("main".into()).unwrap(),
+            tmp.path().to_path_buf(),
+            None,
+            "test-run".into(),
+            "test-session".into(),
+        );
+
+        let pane = PaneId::new("%1".into()).unwrap();
+        let record = ChildRecord::Spawned {
+            child: an("worker-1"),
+            kind: ChildKind::Inline,
+            pane: pane.clone(),
+            inbox: rt.child_inbox_path(&pane),
+        };
+
+        rt.append_child_record(&record).await.unwrap();
+
+        let records = rt.read_child_records().await.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0], record);
+
+        let kids = exo_caps::fold_children(&records);
+        assert!(kids.contains_key(&an("worker-1")));
+        assert_eq!(kids[&an("worker-1")].pane, pane);
+    }
+
+    #[tokio::test]
+    async fn test_child_inbox_path_derivation() {
+        let tmp = tempdir().unwrap();
+        let rt = Runtime::new(
+            NodePath::new(vec![an("root")]).unwrap(),
+            Branch::new("main".into()).unwrap(),
+            tmp.path().to_path_buf(),
+            None,
+            "run-42".into(),
+            "session".into(),
+        );
+
+        let path = rt.child_inbox_path(&PaneId::new("%317".into()).unwrap());
+        let s = path.as_path().to_string_lossy();
+        assert!(s.contains("run-42"));
+        assert!(s.contains("pane-317.jsonl"));
     }
 }
