@@ -9,6 +9,10 @@ use async_trait::async_trait;
 use exo_caps::{Fs, FsError};
 use std::path::Path;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
 #[async_trait]
 impl Fs for Runtime {
     async fn read(&self, path: &Path) -> Result<Vec<u8>, FsError> {
@@ -29,7 +33,9 @@ impl Fs for Runtime {
                 std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no file name")
             })?
             .to_string_lossy();
-        let tmp_path = parent.join(format!("{}.tmp", file_name));
+
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let tmp_path = parent.join(format!("{}.{}.{}.tmp", file_name, std::process::id(), id));
 
         tokio::fs::write(&tmp_path, bytes).await.map_err(|e| FsError::At {
             op: "write_atomic (write tmp)",

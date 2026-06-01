@@ -7,12 +7,15 @@
 use crate::runtime::Runtime;
 use async_trait::async_trait;
 use exo_caps::{Kv, KvError};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[async_trait]
 impl Kv for Runtime {
     async fn get(&self, key: &str) -> Result<Option<String>, KvError> {
-        let sanitized = sanitize_key(key);
-        let path = self.working_dir().join("kv").join(sanitized);
+        let encoded = encode_key(key);
+        let path = self.working_dir().join("kv").join(encoded);
 
         match tokio::fs::read_to_string(&path).await {
             Ok(content) => Ok(Some(content)),
@@ -33,9 +36,10 @@ impl Kv for Runtime {
             detail: e.to_string(),
         })?;
 
-        let sanitized = sanitize_key(key);
-        let path = kv_dir.join(&sanitized);
-        let tmp_path = kv_dir.join(format!("{}.tmp", sanitized));
+        let encoded = encode_key(key);
+        let path = kv_dir.join(&encoded);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let tmp_path = kv_dir.join(format!("{}.{}.{}.tmp", encoded, std::process::id(), id));
 
         tokio::fs::write(&tmp_path, value).await.map_err(|e| KvError::Failed {
             op: "set (write tmp)",
@@ -51,14 +55,9 @@ impl Kv for Runtime {
     }
 }
 
-fn sanitize_key(key: &str) -> String {
-    key.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
+fn encode_key(key: &str) -> String {
+    key.as_bytes()
+        .iter()
+        .map(|b| format!("{:02x}", b))
         .collect()
 }
