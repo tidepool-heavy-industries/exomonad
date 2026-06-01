@@ -56,17 +56,14 @@ Node assembly (which would re-introduce the churn the freeze prevents).
 
 ## Open — build work (remaining)
 
-- **`exomonad experimental init` — the node-mode entry point (NOT YET BUILT).** The only
-  thing standing between "merged" and "a human can run it." Today the experimental surface
-  is child-side only (`experimental node` / `experimental hook`, which a parent writes into
-  a child's `.mcp.json`/settings). There is no command to bootstrap a node-mode *root* from
-  scratch: write the root's papers (`node.json`), an `.mcp.json` pointing CC at
-  `experimental node --papers`, the experimental hooks in settings, and launch the root
-  pane. Lighter than production `init` (no central server to stand up). Reuses the spawner's
-  config-writing logic for the root. Needs a short design pass (root papers schema, no-server
-  tmux setup) then a leaf.
 - **Per-role toolset content** ([04](04-policy.md)) — remaining Bucket-C tools/hooks/events,
   ported one at a time as each Haskell twin retires (incremental, demand-driven).
+- **CC last-hop into a root pane (unverified, runtime).** `experimental init` stands up the
+  root; the one untested hop is delivering a child's message *into the root's CC conversation*
+  (Teams-inbox route needs the root to `TeamCreate`; the tmux-paste fallback into a CC pane is
+  unproven). Surfaces on first real smoke, not a build blocker.
+- **Spawner record-first-ordering integration test** — wants a pure-fn seam like `poll_once`
+  got; deferred (genuinely hard to test hermetically — needs tmux+git).
 
 ## Open — optional liveness feature (NOT a convergence blocker)
 
@@ -96,8 +93,16 @@ Node assembly (which would re-introduce the churn the freeze prevents).
 - **Wave 1 hardening (#922, #923).** `merge_pr` now selects merge strategy + does best-effort
   post-merge `git fetch` (agent teardown stays parent-side by design); `exo-node` gained
   bootstrap/hook(Stop+Deny)/inbound-cursor-restart/dispatch coverage + honest module docs.
-  **Still open:** `poll_once` edge-trigger test (needs a pure-fn seam) and the
-  `exo-runtime` bus/spawner deterministic integration tests.
+- **Wave 1.5 hardening (#924, #925).** `poll_once` decision extracted to a pure
+  `diff_to_events` + edge-trigger tests; `Bus` invariants tested (PIPE_BUF no-spill +
+  Addressee routing for every variant). (Finding: `MessageBody::MAX_LEN == PIPE_BUF`, so a
+  max body always trips the guard once enveloped.)
+- **`exomonad experimental init` — the node-mode entry point (#926–#929).** A human can now
+  run it. Decomposed into: the shared `write_node_agent_config` helper (#926, reused by
+  spawner + init), `boot_root_session`/`paste_to_pane` tmux primitives (#928, paste dedup'd
+  to a single impl), `NodePapers::root` (#927), and the `init` command itself (#929). Stands
+  up an own `{session}-exp` tmux session, mints a run-id, two-phase root-pane birth, writes
+  root papers + config, launches `claude` — **no central server**. Coexists with production.
 
 
 - **`exo-caps`** — full contract: validated newtypes, `Message`/`IngestionEntry` split,
