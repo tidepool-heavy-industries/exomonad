@@ -160,9 +160,16 @@ impl Runtime {
         verify: &[String],
         boundary: &[String],
         context: Option<&String>,
-        done_criteria: Option<&String>,
+        done_criteria: &[String],
     ) -> String {
         let mut prompt = task.to_string();
+
+        if !boundary.is_empty() {
+            prompt.push_str("\n\nBOUNDARY (DO NOT):");
+            for b in boundary {
+                prompt.push_str(&format!("\n- {}", b));
+            }
+        }
 
         if !read_first.is_empty() {
             prompt.push_str("\n\nREAD FIRST:");
@@ -185,13 +192,6 @@ impl Runtime {
             }
         }
 
-        if !boundary.is_empty() {
-            prompt.push_str("\n\nBOUNDARY (DO NOT):");
-            for b in boundary {
-                prompt.push_str(&format!("\n- {}", b));
-            }
-        }
-
         if let Some(ctx) = context {
             if !ctx.is_empty() {
                 prompt.push_str("\n\nCONTEXT:\n");
@@ -199,10 +199,10 @@ impl Runtime {
             }
         }
 
-        if let Some(done) = done_criteria {
-            if !done.is_empty() {
-                prompt.push_str("\n\nDONE:\n");
-                prompt.push_str(done);
+        if !done_criteria.is_empty() {
+            prompt.push_str("\n\nDONE CRITERIA:");
+            for d in done_criteria {
+                prompt.push_str(&format!("\n- {}", d));
             }
         }
 
@@ -376,7 +376,7 @@ impl Spawner for Runtime {
             &spec.verify,
             &spec.boundary,
             spec.context.as_ref(),
-            spec.done_criteria.as_ref(),
+            &spec.done_criteria,
         );
         let core = BirthCore {
             kind: ChildKind::Inline,
@@ -398,7 +398,7 @@ impl Spawner for Runtime {
             &spec.verify,
             &spec.boundary,
             spec.context.as_ref(),
-            spec.done_criteria.as_ref(),
+            &spec.done_criteria,
         );
         let core = BirthCore {
             kind: ChildKind::Worktree,
@@ -428,7 +428,7 @@ impl Spawner for Runtime {
                 &spec.verify,
                 &spec.boundary,
                 spec.context.as_ref(),
-                spec.done_criteria.as_ref(),
+                &spec.done_criteria,
             );
             let core = BirthCore {
                 kind: ChildKind::Worktree,
@@ -607,7 +607,7 @@ mod extra_tests {
         let verify = vec!["cargo test".to_string()];
         let boundary = vec!["no delete".to_string()];
         let context = Some("some context".to_string());
-        let done_criteria = Some("all green".to_string());
+        let done_criteria = vec!["all green".to_string()];
 
         let prompt = Runtime::render_spec_prompt(
             task,
@@ -616,19 +616,19 @@ mod extra_tests {
             &verify,
             &boundary,
             context.as_ref(),
-            done_criteria.as_ref(),
+            &done_criteria,
         );
 
         assert!(prompt.contains("do work"));
+        assert!(prompt.contains("BOUNDARY (DO NOT):\n- no delete"));
         assert!(prompt.contains("READ FIRST:\n- README.md"));
         assert!(prompt.contains("STEPS:\n1. step 1\n2. step 2"));
         assert!(prompt.contains("VERIFY:\n- cargo test"));
-        assert!(prompt.contains("BOUNDARY (DO NOT):\n- no delete"));
         assert!(prompt.contains("CONTEXT:\nsome context"));
-        assert!(prompt.contains("DONE:\nall green"));
+        assert!(prompt.contains("DONE CRITERIA:\n- all green"));
 
         // Bare task
-        let bare = Runtime::render_spec_prompt("task", &[], &[], &[], &[], None, None);
+        let bare = Runtime::render_spec_prompt("task", &[], &[], &[], &[], None, &[]);
         assert_eq!(bare, "task");
     }
 }

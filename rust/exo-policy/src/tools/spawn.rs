@@ -19,7 +19,7 @@ pub struct SpawnWorkerArgs {
     #[serde(default)]
     pub verify: Vec<String>,
     #[serde(default)]
-    pub done_criteria: Option<String>,
+    pub done_criteria: Vec<String>,
     #[serde(default)]
     pub context: Option<String>,
     #[serde(default)]
@@ -78,7 +78,7 @@ pub struct SpawnGeminiArgs {
     #[serde(default)]
     pub verify: Vec<String>,
     #[serde(default)]
-    pub done_criteria: Option<String>,
+    pub done_criteria: Vec<String>,
     #[serde(default)]
     pub context: Option<String>,
     #[serde(default)]
@@ -137,7 +137,7 @@ pub struct ForkChildArgs {
     #[serde(default)]
     pub verify: Vec<String>,
     #[serde(default)]
-    pub done_criteria: Option<String>,
+    pub done_criteria: Vec<String>,
     #[serde(default)]
     pub context: Option<String>,
     #[serde(default)]
@@ -228,7 +228,7 @@ mod tests {
             task: "do something".to_string(),
             steps: vec![],
             verify: vec![],
-            done_criteria: None,
+            done_criteria: vec![],
             context: None,
             boundary: vec![],
             read_first: vec![],
@@ -257,7 +257,7 @@ mod tests {
             task: "do something".to_string(),
             steps: vec!["step 1".into()],
             verify: vec!["verify 1".into()],
-            done_criteria: None,
+            done_criteria: vec![],
             context: None,
             boundary: vec!["boundary 1".into()],
             read_first: vec![],
@@ -283,7 +283,7 @@ mod tests {
             task: "do something else".to_string(),
             steps: vec![],
             verify: vec![],
-            done_criteria: None,
+            done_criteria: vec![],
             context: None,
             boundary: vec![],
             read_first: vec![],
@@ -314,7 +314,7 @@ mod tests {
                     task: "task 1".to_string(),
                     steps: vec![],
                     verify: vec![],
-                    done_criteria: None,
+                    done_criteria: vec![],
                     context: None,
                     boundary: vec![],
                     read_first: vec![],
@@ -324,7 +324,7 @@ mod tests {
                     task: "task 2".to_string(),
                     steps: vec![],
                     verify: vec![],
-                    done_criteria: None,
+                    done_criteria: vec![],
                     context: None,
                     boundary: vec![],
                     read_first: vec![],
