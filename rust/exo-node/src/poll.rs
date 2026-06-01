@@ -32,6 +32,7 @@ use tracing::warn;
 use crate::bootstrap::NodeContext;
 use crate::error::NodeResult;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PrState {
     pr: u64,
     first_seen: Instant,
@@ -92,41 +93,8 @@ async fn poll_once(ctx: &Arc<NodeContext>, state: &mut PrState) -> NodeResult<()
         .await
         .map_err(|e| std::io::Error::other(e.to_string()))?;
 
-    let mut events = Vec::new();
-
-    // 1. PrReview event if state changed
-    if review_state != state.last_review_state {
-        if let Some(s) = review_state {
-            events.push(WorldEvent::PrReview { pr, state: s });
-        }
-        state.last_review_state = review_state;
-        // Reset timeout window on each feedback round
-        state.first_seen = Instant::now();
-        state.timeout_fired = false;
-    }
-
-    // 2. CiStatus event on TRANSITION only. The first observation seeds the baseline without
-    //    emitting (symmetric with the PrReview branch, which suppresses when there's no prior
-    //    state) — otherwise every freshly-observed PR would fire a spurious CiStatus.
-    match state.last_ci_status {
-        Some(prev) if prev != ci_status => {
-            events.push(WorldEvent::CiStatus {
-                pr,
-                status: ci_status,
-            });
-        }
-        _ => {}
-    }
-    state.last_ci_status = Some(ci_status);
-
-    // 3. ReviewTimeout: if review_state stays None for ~15 minutes
-    if !state.timeout_fired
-        && state.last_review_state.is_none()
-        && state.first_seen.elapsed() > Duration::from_secs(15 * 60)
-    {
-        events.push(WorldEvent::ReviewTimeout { pr });
-        state.timeout_fired = true;
-    }
+    let (next_state, events) = diff_to_events(state, review_state, ci_status, Instant::now());
+    *state = next_state;
 
     for ev in events {
         let action = on_world_event(&*ctx.runtime, &ev).await;
@@ -145,6 +113,53 @@ async fn poll_once(ctx: &Arc<NodeContext>, state: &mut PrState) -> NodeResult<()
     }
 
     Ok(())
+}
+
+fn diff_to_events(
+    prev: &PrState,
+    review_state: Option<ReviewState>,
+    ci_status: CiStatus,
+    now: Instant,
+) -> (PrState, Vec<WorldEvent>) {
+    let pr = prev.pr;
+    let mut next = prev.clone();
+    let mut events = Vec::new();
+
+    // 1. PrReview event if state changed
+    if review_state != next.last_review_state {
+        if let Some(s) = review_state {
+            events.push(WorldEvent::PrReview { pr, state: s });
+        }
+        next.last_review_state = review_state;
+        // Reset timeout window on each feedback round
+        next.first_seen = now;
+        next.timeout_fired = false;
+    }
+
+    // 2. CiStatus event on TRANSITION only. The first observation seeds the baseline without
+    //    emitting (symmetric with the PrReview branch, which suppresses when there's no prior
+    //    state) — otherwise every freshly-observed PR would fire a spurious CiStatus.
+    match next.last_ci_status {
+        Some(prev_ci) if prev_ci != ci_status => {
+            events.push(WorldEvent::CiStatus {
+                pr,
+                status: ci_status,
+            });
+        }
+        _ => {}
+    }
+    next.last_ci_status = Some(ci_status);
+
+    // 3. ReviewTimeout: if review_state stays None for ~15 minutes
+    if !next.timeout_fired
+        && next.last_review_state.is_none()
+        && now.duration_since(next.first_seen) > Duration::from_secs(15 * 60)
+    {
+        events.push(WorldEvent::ReviewTimeout { pr });
+        next.timeout_fired = true;
+    }
+
+    (next, events)
 }
 
 /// Parent-side producer of `WorldEvent::SiblingMerged`: after this (parent) node merges a
@@ -405,5 +420,98 @@ mod tests {
 
         // Case: Review state exists -> timeout logic shouldn't even be reached in poll_once
         // (verified by reading the code: `state.last_review_state.is_none()`)
+    }
+
+    #[test]
+    fn test_diff_to_events_edge_triggering() {
+        let now = Instant::now();
+        let pr = 123;
+        let initial_state = PrState {
+            pr,
+            first_seen: now,
+            last_review_state: None,
+            timeout_fired: false,
+            last_ci_status: None,
+        };
+
+        // 1. Initial observation of review state
+        let (state2, events) = diff_to_events(
+            &initial_state,
+            Some(ReviewState::Approved),
+            CiStatus::Pending,
+            now,
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events[0],
+            WorldEvent::PrReview {
+                pr: 123,
+                state: ReviewState::Approved
+            }
+        ));
+        assert_eq!(state2.last_review_state, Some(ReviewState::Approved));
+        assert_eq!(state2.last_ci_status, Some(CiStatus::Pending));
+
+        // 2. Same state on next call -> NO events
+        let (state3, events) =
+            diff_to_events(&state2, Some(ReviewState::Approved), CiStatus::Pending, now);
+        assert!(events.is_empty());
+        assert_eq!(state3, state2);
+
+        // 3. Change review state -> emits PrReview
+        let (state4, events) = diff_to_events(
+            &state3,
+            Some(ReviewState::ChangesRequested),
+            CiStatus::Pending,
+            now,
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events[0],
+            WorldEvent::PrReview {
+                pr: 123,
+                state: ReviewState::ChangesRequested
+            }
+        ));
+        assert_eq!(
+            state4.last_review_state,
+            Some(ReviewState::ChangesRequested)
+        );
+
+        // 4. CI transition -> emits CiStatus
+        let (state5, events) = diff_to_events(
+            &state4,
+            Some(ReviewState::ChangesRequested),
+            CiStatus::Passing,
+            now,
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events[0],
+            WorldEvent::CiStatus {
+                pr: 123,
+                status: CiStatus::Passing
+            }
+        ));
+        assert_eq!(state5.last_ci_status, Some(CiStatus::Passing));
+
+        // 5. ReviewTimeout
+        let state_none = PrState {
+            pr,
+            first_seen: now - Duration::from_secs(16 * 60),
+            last_review_state: None,
+            timeout_fired: false,
+            last_ci_status: Some(CiStatus::Pending),
+        };
+        let (state_timeout, events) = diff_to_events(&state_none, None, CiStatus::Pending, now);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], WorldEvent::ReviewTimeout { pr: 123 }));
+        assert!(state_timeout.timeout_fired);
+
+        // 6. ReviewTimeout only fires once
+        let (state_timeout_2, events) =
+            diff_to_events(&state_timeout, None, CiStatus::Pending, now);
+        assert!(events.is_empty());
+        assert!(state_timeout_2.timeout_fired);
     }
 }
