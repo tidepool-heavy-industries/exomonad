@@ -38,6 +38,9 @@ cabal.project.wasm.dev
 .exo/sockets/
 .exomonad/logs/
 .exo/logs/
+# Node-mode runtime artifacts (spawn ledger + per-run papers)
+.exo/children.jsonl
+.exo/node/
 .exomonad/tmp/
 .exo/tmp/
 .exomonad/wasm-cache

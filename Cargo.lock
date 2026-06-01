@@ -1070,6 +1070,7 @@ dependencies = [
  "chrono",
  "exo-caps",
  "exo-scry",
+ "exomonad-core",
  "nix",
  "notify",
  "octocrab",
