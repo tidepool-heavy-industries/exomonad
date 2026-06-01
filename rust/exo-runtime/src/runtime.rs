@@ -6,7 +6,7 @@
 //! modules (`git`, `github`, `tmux`, `bus`, `spawner`, `fs`, `process`, `log`, `kv`); this
 //! file owns **only** the struct + its accessors, so cap leaves never collide here.
 
-use exo_caps::{AgentName, Branch, InboxPath, NodePath};
+use exo_caps::{AgentName, Branch, InboxPath, NodePath, PaneId};
 use std::path::{Path, PathBuf};
 
 /// One node's runtime. Holds the node's birth identity + the ambient context the cap
@@ -32,6 +32,8 @@ pub struct Runtime {
     pub(crate) run_id: String,
     /// tmux session name (for pane creation + the tmux-paste delivery last-hop).
     pub(crate) tmux_session: String,
+    /// This node's own tmux pane id.
+    pub(crate) own_pane: PaneId,
 }
 
 impl Runtime {
@@ -43,6 +45,7 @@ impl Runtime {
         parent_inbox: Option<InboxPath>,
         run_id: String,
         tmux_session: String,
+        own_pane: PaneId,
     ) -> Self {
         Runtime {
             node_path,
@@ -51,6 +54,7 @@ impl Runtime {
             parent_inbox,
             run_id,
             tmux_session,
+            own_pane,
         }
     }
 
@@ -73,4 +77,18 @@ impl Runtime {
     pub fn working_dir(&self) -> &Path {
         &self.working_dir
     }
+
+    /// This node's own pane id.
+    pub fn own_pane(&self) -> &PaneId {
+        &self.own_pane
+    }
+
+    /// This node's own ingestion inbox.
+    pub(crate) fn own_inbox(&self) -> InboxPath {
+        exo_caps::paths::inbox_path(&home(), &self.run_id, &self.own_pane)
+    }
+}
+
+fn home() -> PathBuf {
+    std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."))
 }

@@ -45,7 +45,7 @@ use exo_caps::{
     AgentName, AgentType, Branch, ChildKind, ChildRecord, ForkSpec, GeminiSpec, InboxPath, NodeKind,
     NodePapers, PaneId, SpawnError, Spawner, WorkerSpec,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 
 /// The fixed triple + identity each op hands to the shared `birth` tail. Constructed by
@@ -117,17 +117,36 @@ impl Runtime {
     }
 
     /// The child's OWN ingestion inbox, derived from its pane + the run-id namespace:
-    /// `~/.claude/exo/inboxes/{run_id}/pane-{N}.jsonl` (pane `%317` → `pane-317.jsonl`).
+    /// `~/.claude/exo/inboxes/{run_id}/pane-{N}.jsonl`.
     /// Stored in the child's `Spawned` record so the parent can address DOWN to it.
     pub(crate) fn child_inbox_path(&self, pane: &PaneId) -> InboxPath {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let n = pane.as_str().trim_start_matches('%');
-        InboxPath::new(
-            PathBuf::from(home)
-                .join(".claude/exo/inboxes")
-                .join(&self.run_id)
-                .join(format!("pane-{n}.jsonl")),
-        )
+        exo_caps::paths::inbox_path(Path::new(&home), &self.run_id, pane)
+    }
+
+    pub(crate) async fn resolve_child_name(&self, given: Option<AgentName>, prefix: &str) -> Result<AgentName, SpawnError> {
+        let records = self.read_child_records().await?;
+        let current_set = exo_caps::fold_children(&records);
+
+        if let Some(name) = given {
+            if current_set.contains_key(&name) {
+                return Err(SpawnError::Failed {
+                    op: "spawn",
+                    child: Some(name),
+                    detail: "duplicate child name".into(),
+                });
+            }
+            Ok(name)
+        } else {
+            let mut i = 0;
+            loop {
+                let name = AgentName::new(format!("{}-{}", prefix, i)).unwrap();
+                if !current_set.contains_key(&name) {
+                    return Ok(name);
+                }
+                i += 1;
+            }
+        }
     }
 }
 
@@ -172,15 +191,7 @@ impl Runtime {
         self.append_child_record(&record).await?;
 
         // (e) Write child papers
-        let parent_inbox = if let Ok(pane_str) = std::env::var("TMUX_PANE") {
-            if let Ok(my_pane) = PaneId::new(pane_str) {
-                Some(self.child_inbox_path(&my_pane))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let parent_inbox = Some(self.own_inbox());
 
         let papers = NodePapers::new(
             self.node_path().child(&core.name),
@@ -194,11 +205,7 @@ impl Runtime {
             ChildKind::Worktree => child_dir.join(".exo/node.json"),
             ChildKind::Inline => {
                 let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                let n = pane.as_str().trim_start_matches('%');
-                PathBuf::from(home)
-                    .join(".claude/exo/papers")
-                    .join(&self.run_id)
-                    .join(format!("pane-{n}.json"))
+                exo_caps::paths::papers_path(Path::new(&home), &self.run_id, &pane)
             }
         };
 
@@ -298,7 +305,7 @@ impl Runtime {
 #[async_trait]
 impl Spawner for Runtime {
     async fn spawn_worker(&self, spec: WorkerSpec) -> Result<AgentName, SpawnError> {
-        let name = spec.name.unwrap_or_else(|| AgentName::new("worker".into()).unwrap());
+        let name = self.resolve_child_name(spec.name, "worker").await?;
         let core = BirthCore {
             kind: ChildKind::Inline,
             agent_type: AgentType::Gemini,
@@ -311,7 +318,7 @@ impl Spawner for Runtime {
     }
 
     async fn spawn_gemini(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError> {
-        let name = spec.name.unwrap_or_else(|| AgentName::new("dev".into()).unwrap());
+        let name = self.resolve_child_name(spec.name, "dev").await?;
         let core = BirthCore {
             kind: ChildKind::Worktree,
             agent_type: AgentType::Gemini,
@@ -325,10 +332,14 @@ impl Spawner for Runtime {
 
     async fn fork_wave(&self, specs: Vec<ForkSpec>) -> Vec<Result<AgentName, SpawnError>> {
         let mut results = Vec::with_capacity(specs.len());
-        for (i, spec) in specs.into_iter().enumerate() {
-            let name = spec
-                .name
-                .unwrap_or_else(|| AgentName::new(format!("tl-{}", i)).unwrap());
+        for spec in specs {
+            let name = match self.resolve_child_name(spec.name, "tl").await {
+                Ok(n) => n,
+                Err(e) => {
+                    results.push(Err(e));
+                    continue;
+                }
+            };
             let core = BirthCore {
                 kind: ChildKind::Worktree,
                 agent_type: AgentType::Claude,
@@ -405,6 +416,7 @@ mod tests {
             None,
             "test-run".into(),
             "test-session".into(),
+            PaneId::new("%100".into()).unwrap(),
         );
 
         let pane = PaneId::new("%1".into()).unwrap();
@@ -427,6 +439,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_resolve_child_name() {
+        let tmp = tempdir().unwrap();
+        let rt = Runtime::new(
+            NodePath::new(vec![an("root")]).unwrap(),
+            Branch::new("main".into()).unwrap(),
+            tmp.path().to_path_buf(),
+            None,
+            "run".into(),
+            "session".into(),
+            PaneId::new("%100".into()).unwrap(),
+        );
+
+        // 1. Unnamed → worker-0
+        let name0 = rt.resolve_child_name(None, "worker").await.unwrap();
+        assert_eq!(name0.as_str(), "worker-0");
+
+        // 2. Add worker-0 to ledger
+        let pane = PaneId::new("%1".into()).unwrap();
+        rt.append_child_record(&ChildRecord::Spawned {
+            child: name0.clone(),
+            kind: ChildKind::Inline,
+            pane: pane.clone(),
+            inbox: rt.child_inbox_path(&pane),
+        })
+        .await
+        .unwrap();
+
+        // 3. Unnamed again → worker-1
+        let name1 = rt.resolve_child_name(None, "worker").await.unwrap();
+        assert_eq!(name1.as_str(), "worker-1");
+
+        // 4. Explicit duplicate → Err
+        let res = rt.resolve_child_name(Some(name0), "worker").await;
+        match res {
+            Err(SpawnError::Failed { detail, .. }) => assert!(detail.contains("duplicate")),
+            _ => panic!("expected duplicate error"),
+        }
+
+        // 5. Explicit unique → Ok
+        let name_unique = rt.resolve_child_name(Some(an("custom")), "worker").await.unwrap();
+        assert_eq!(name_unique.as_str(), "custom");
+    }
+
+    #[tokio::test]
     async fn test_child_inbox_path_derivation() {
         let tmp = tempdir().unwrap();
         let rt = Runtime::new(
@@ -436,6 +492,7 @@ mod tests {
             None,
             "run-42".into(),
             "session".into(),
+            PaneId::new("%100".into()).unwrap(),
         );
 
         let path = rt.child_inbox_path(&PaneId::new("%317".into()).unwrap());

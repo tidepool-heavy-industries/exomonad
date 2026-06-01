@@ -118,7 +118,7 @@ impl Bus for Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use exo_caps::{AgentName, Branch, MessageBody, MessageKind, NodePath, Summary};
+    use exo_caps::{AgentName, Branch, MessageBody, MessageKind, NodePath, PaneId, Summary};
     use tempfile::tempdir;
 
     #[tokio::test]
@@ -135,6 +135,7 @@ mod tests {
             Some(inbox),
             "run-1".into(),
             "session-1".into(),
+            PaneId::new("%1".into()).unwrap(),
         );
 
         let msg = Message {
@@ -169,6 +170,7 @@ mod tests {
             Some(inbox),
             "run-1".into(),
             "session-1".into(),
+            PaneId::new("%1".into()).unwrap(),
         );
 
         // Build a body that is large enough that when combined with the envelope it exceeds 4096.
@@ -214,6 +216,7 @@ mod tests {
             None,
             "run-1".into(),
             "session-1".into(),
+            PaneId::new("%100".into()).unwrap(),
         );
 
         let resolved = runtime

@@ -1,9 +1,11 @@
 //! `impl Tmux for Runtime` — pane lifecycle + the tmux-paste delivery last-hop.
 //!
 //! **Leaf R2.** Adapt exomonad-core `TmuxIpc` (`services/tmux_ipc.rs`): `split_window`
-//! /`new_window` for `new_pane`, the buffer-paste pattern (`load-buffer` + `paste-buffer`
-//! + `send-keys Enter`) in `inject_input` for `paste`, `kill_pane` for `kill_pane`. Those
-//! are already async (`tokio::process` under the hood) — do NOT reintroduce blocking calls.
+//! or `new_window` for `new_pane`, the buffer-paste pattern (`load-buffer` +
+//! `paste-buffer` + `send-keys Enter`) in `inject_input` for `paste`,
+//! `kill_pane` for `kill_pane`. Those are already async (`tokio::process`
+//! under the hood) — do NOT reintroduce blocking calls.
+//!
 //! `self.tmux_session` is the session name to target.
 //!
 //! Consumers (why this cap stays, despite "provisional"): the `Bus` last-hop (`paste`)
