@@ -20,28 +20,11 @@ use std::path::Path;
 #[async_trait]
 impl Tmux for Runtime {
     async fn new_pane(&self, cwd: &Path, cmd: &str) -> Result<PaneId, TmuxError> {
-        let output = self
-            .tmux(
-                "new_pane",
-                &[
-                    "split-window",
-                    "-t",
-                    &self.tmux_session,
-                    "-c",
-                    &cwd.to_string_lossy(),
-                    "-P",
-                    "-F",
-                    "#{pane_id}",
-                    cmd,
-                ],
-            )
-            .await?;
+        self.spawn_in_session("split-window", cwd, cmd).await
+    }
 
-        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        PaneId::new(s).map_err(|e| TmuxError::Failed {
-            op: "new_pane",
-            detail: e.to_string(),
-        })
+    async fn new_window(&self, cwd: &Path, cmd: &str) -> Result<PaneId, TmuxError> {
+        self.spawn_in_session("new-window", cwd, cmd).await
     }
 
     async fn paste(&self, pane: &PaneId, text: &str) -> Result<(), TmuxError> {
@@ -56,6 +39,38 @@ impl Tmux for Runtime {
 }
 
 impl Runtime {
+    /// Spawn `cmd` in `cwd` under this session via `subcmd` (`split-window` for a pane,
+    /// `new-window` for a tab), printing + parsing the new pane's `%id`. Shared by
+    /// `new_pane` / `new_window` so there is one spawn-and-capture path.
+    async fn spawn_in_session(
+        &self,
+        subcmd: &'static str,
+        cwd: &Path,
+        cmd: &str,
+    ) -> Result<PaneId, TmuxError> {
+        let output = self
+            .tmux(
+                subcmd,
+                &[
+                    subcmd,
+                    "-t",
+                    &self.tmux_session,
+                    "-c",
+                    &cwd.to_string_lossy(),
+                    "-P",
+                    "-F",
+                    "#{pane_id}",
+                    cmd,
+                ],
+            )
+            .await?;
+        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        PaneId::new(s).map_err(|e| TmuxError::Failed {
+            op: subcmd,
+            detail: e.to_string(),
+        })
+    }
+
     /// Private async helper for tmux CLI calls.
     /// Maps non-success exits to TmuxError::Failed { op, detail }.
     async fn tmux(

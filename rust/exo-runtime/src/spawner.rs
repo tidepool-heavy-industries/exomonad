@@ -233,15 +233,19 @@ impl Runtime {
                 })?;
         }
 
-        // (c) Two-phase pane: call self.new_pane(&cwd, shell)
+        // (c) Two-phase birth: open a holding shell, capture its pane id. A Worktree child
+        // gets its own window (tab — one agent per window, the triad); an Inline worker gets
+        // a split pane in the parent's window.
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
-        let pane = exo_caps::Tmux::new_pane(self, &child_dir, &shell)
-            .await
-            .map_err(|e| SpawnError::Failed {
-                op: "new_pane",
-                child: Some(core.name.clone()),
-                detail: e.to_string(),
-            })?;
+        let pane = match core.kind {
+            ChildKind::Worktree => exo_caps::Tmux::new_window(self, &child_dir, &shell).await,
+            ChildKind::Inline => exo_caps::Tmux::new_pane(self, &child_dir, &shell).await,
+        }
+        .map_err(|e| SpawnError::Failed {
+            op: "new_pane",
+            child: Some(core.name.clone()),
+            detail: e.to_string(),
+        })?;
 
         // (d) RECORD FIRST — BEFORE launching the agent
         let inbox = self.child_inbox_path(&pane);
