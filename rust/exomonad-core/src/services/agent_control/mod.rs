@@ -8,6 +8,7 @@
 mod cleanup;
 pub mod error;
 mod internal;
+pub mod launch;
 mod spawn;
 
 pub use cleanup::GcStats;
