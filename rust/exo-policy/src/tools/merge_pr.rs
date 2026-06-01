@@ -16,6 +16,9 @@ use crate::tool::{ok_json, parse, schema_json, Tool, ToolOutput};
 pub struct MergePrArgs {
     /// The PR number to merge.
     pub pr: u64,
+    /// If true, skip the readiness guard (unaddressed changes check).
+    #[serde(default)]
+    pub force: bool,
 }
 
 /// The `merge_pr` tool implementation.
@@ -28,7 +31,7 @@ impl MergePr {
     /// 2. **Readiness guard**: Checks if there are unaddressed `ChangesRequested` reviews.
     /// 3. **Merge**: Executes the merge via the GitHub capability.
     pub async fn run<C: Git + GitHub>(ctx: &C, args: MergePrArgs) -> CapResult<ToolOutput> {
-        // 1. Self-merge guard
+        // 1. Self-merge guard (always enforced)
         let current_branch = ctx.current_branch().await?;
         if let Some(own_pr) = ctx.pr_for_branch(&current_branch).await? {
             if own_pr == args.pr {
@@ -40,7 +43,7 @@ impl MergePr {
         }
 
         // 2. Readiness guard: check for unaddressed changes
-        if ctx.has_unaddressed_changes(args.pr).await? {
+        if !args.force && ctx.has_unaddressed_changes(args.pr).await? {
             return Ok(ToolOutput::text(format!(
                 "Copilot requested changes on PR #{}. Wait for the agent to push fixes or use force=true (if supported).",
                 args.pr
@@ -87,7 +90,10 @@ mod tests {
     #[tokio::test]
     async fn test_merge_pr_happy_path() {
         let mock = MockRuntime::default();
-        let args = MergePrArgs { pr: 123 };
+        let args = MergePrArgs {
+            pr: 123,
+            force: false,
+        };
 
         let out = MergePr::run(&mock, args).await.unwrap();
 
@@ -107,7 +113,10 @@ mod tests {
             ..Default::default()
         };
 
-        let args = MergePrArgs { pr: 123 }; // Trying to merge own PR 123
+        let args = MergePrArgs {
+            pr: 123,
+            force: false,
+        }; // Trying to merge own PR 123
         let out = MergePr::run(&mock, args).await.unwrap();
 
         assert!(out.text.contains("Cannot merge your own PR #123"));
@@ -129,7 +138,10 @@ mod tests {
             ..Default::default()
         };
 
-        let args = MergePrArgs { pr: 123 };
+        let args = MergePrArgs {
+            pr: 123,
+            force: false,
+        };
         let out = MergePr::run(&mock, args).await.unwrap();
 
         assert!(out.text.contains("Copilot requested changes on PR #123"));
@@ -145,9 +157,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_merge_pr_force_skips_readiness_guard() {
+        let mock = MockRuntime {
+            has_unaddressed_changes: true, // Blocked by default
+            ..Default::default()
+        };
+
+        let args = MergePrArgs {
+            pr: 123,
+            force: true, // Skip the guard
+        };
+        let out = MergePr::run(&mock, args).await.unwrap();
+
+        assert_eq!(out.text, "merged PR #123");
+        assert_eq!(out.data, Some(json!({ "pr": 123 })));
+
+        // Verify merge WAS called
+        let calls = mock.calls_made();
+        assert!(calls.contains(&Call::MergePr { pr: 123 }));
+    }
+
+    #[tokio::test]
+    async fn test_merge_pr_force_still_respects_self_merge_guard() {
+        let mock = MockRuntime {
+            current_branch: Branch::new("feat.topic".into()).unwrap(),
+            pr_for_branch: Some(123),
+            has_unaddressed_changes: true,
+            ..Default::default()
+        };
+
+        let args = MergePrArgs {
+            pr: 123,
+            force: true, // Try to force self-merge
+        };
+        let out = MergePr::run(&mock, args).await.unwrap();
+
+        assert!(out.text.contains("Cannot merge your own PR #123"));
+        assert_eq!(out.data, None);
+
+        // Verify merge was NOT called
+        let calls = mock.calls_made();
+        for call in calls {
+            if let Call::MergePr { .. } = call {
+                panic!("merge_pr should not have been called");
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn test_merge_pr_error_path() {
         let mock = MockRuntime::failing("merge_pr");
-        let args = MergePrArgs { pr: 123 };
+        let args = MergePrArgs {
+            pr: 123,
+            force: false,
+        };
 
         let res = MergePr::run(&mock, args).await;
         assert!(res.is_err());
