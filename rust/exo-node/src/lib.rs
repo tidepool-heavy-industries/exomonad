@@ -16,10 +16,9 @@
 //! `05-crates-and-binary.md` (modes), `06-migration.md` (the Wave-2 leaf table + the
 //! "every WorldEvent variant has a live producer" converge gate), `01-identity.md` (papers).
 //!
-//! **Status: Wave-2 scaffold.** [`bootstrap`] is real (self-ID from papers + exo-scry →
-//! build `NodeContext`); the loop modules (`outbound` N1, `dispatch` N2a, `inbound` N2b,
-//! `poll` N3, `hook` N4) are stubs the Gemini leaves fill in, one file each — non-overlapping
-//! so leaves never collide. [`run_node`] assembles them as tokio tasks at converge.
+//! **Status: Wave-2 assembled.** [`bootstrap`] self-IDs from papers; the loop modules
+//! (`outbound` N1, `dispatch` N2a, `inbound` N2b, `poll` N3, `hook` N4) are implemented;
+//! [`run_node`] wires the three stimuli as concurrent tokio tasks.
 
 pub mod bootstrap;
 pub mod dispatch;
@@ -31,18 +30,45 @@ pub mod poll;
 
 pub use bootstrap::{bootstrap, NodeContext};
 pub use error::{NodeError, NodeResult};
+pub use hook::{handle as handle_hook, HookEvent};
 
 use std::sync::Arc;
 
-/// Assemble and run the node's three concurrent stimuli (outbound MCP serve, inbound
-/// inbox watch, self-poll) as tokio tasks in one process. The dispatch boundary requires
-/// `R: Send + Sync + 'static` — satisfied by `Arc<NodeContext>`.
+/// Run the node's three concurrent stimuli in one process:
+/// - **outbound** ([`outbound::serve`]) — serve the role's MCP tools over stdio. This owns
+///   stdin/stdout and returns when the stream closes (agent gone), so it is the node's
+///   **lifetime anchor**: when it ends, the node ends.
+/// - **inbound** ([`inbound::watch`]) — watch the ingestion inbox (cursor + notify) and route
+///   each entry; ends on a `Control(Shutdown)`.
+/// - **self-poll** ([`poll::supervise`]) — poll the node's own PR while one is open.
 ///
-/// **Converge wiring (filled at convergence, after the loop leaves land).** Until then this
-/// is a stub so the crate's public shape is fixed for the leaves.
+/// The two background loops are aborted when `serve` returns. `Arc<NodeContext>` satisfies the
+/// `R: Send + Sync + 'static` dispatch boundary. A background loop erroring is logged but does
+/// not tear down the node — only the outbound anchor closing (or a shutdown) ends it.
 pub async fn run_node(ctx: Arc<NodeContext>) -> NodeResult<()> {
-    // Converge: tokio::join! the outbound serve, inbound watch, and self-poll supervisor.
-    // Each leaf lands its half (outbound::serve / inbound::watch / poll::supervise) first.
-    let _ = ctx;
-    Err(NodeError::NotAssembled)
+    let inbound = tokio::spawn({
+        let ctx = ctx.clone();
+        async move {
+            if let Err(e) = inbound::watch(ctx).await {
+                tracing::error!("inbound loop exited with error: {e}");
+            }
+        }
+    });
+    let poll = tokio::spawn({
+        let ctx = ctx.clone();
+        async move {
+            if let Err(e) = poll::supervise(ctx).await {
+                tracing::error!("self-poll exited with error: {e}");
+            }
+        }
+    });
+
+    // The outbound serve owns stdio and runs for the node's lifetime.
+    let result = outbound::serve(ctx).await;
+
+    // Agent stream closed (or serve errored) → reap the background loops.
+    inbound.abort();
+    poll.abort();
+
+    result
 }
