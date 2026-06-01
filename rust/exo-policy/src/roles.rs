@@ -37,7 +37,7 @@ pub struct RoleDef<R: Send + Sync> {
 
 // Default no-op hooks — the scaffold's wiring so the table compiles before P6/P7 supply the
 // real fns. P7 replaces these per-role with the ported guard/stop/event logic.
-fn allow_all<R: PolicyCaps>(_ctx: &R, _input: &HookInput) -> BoxFuture<'_, HookDecision> {
+fn allow_all<'a, R: PolicyCaps>(_ctx: &'a R, _input: &'a HookInput) -> BoxFuture<'a, HookDecision> {
     Box::pin(async { HookDecision::Allow })
 }
 fn allow_stop<R: PolicyCaps>(_ctx: &R) -> BoxFuture<'_, StopDecision> {
@@ -46,7 +46,7 @@ fn allow_stop<R: PolicyCaps>(_ctx: &R) -> BoxFuture<'_, StopDecision> {
 fn no_context<R: PolicyCaps>(_ctx: &R) -> BoxFuture<'_, SessionStartOutput> {
     Box::pin(async { SessionStartOutput::default() })
 }
-fn no_event<R: PolicyCaps>(_ctx: &R, _e: &WorldEvent) -> BoxFuture<'_, EventAction> {
+fn no_event<'a, R: PolicyCaps>(_ctx: &'a R, _e: &'a WorldEvent) -> BoxFuture<'a, EventAction> {
     Box::pin(async { EventAction::NoAction })
 }
 
