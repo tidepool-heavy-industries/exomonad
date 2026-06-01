@@ -121,6 +121,7 @@ impl Bus for Runtime {
 mod tests {
     use super::*;
     use exo_caps::{AgentName, Branch, MessageBody, MessageKind, NodePath, PaneId, Summary};
+    use std::io::Write;
     use tempfile::tempdir;
 
     #[tokio::test]
@@ -226,5 +227,177 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resolved, child_inbox);
+    }
+
+    #[tokio::test]
+    async fn test_deliver_overflow_no_spill() {
+        let dir = tempdir().unwrap();
+        let inbox_path = dir.path().join("inbox.jsonl");
+        let inbox = InboxPath::new(inbox_path.clone());
+
+        let node_path = NodePath::new(vec![AgentName::new("node".into()).unwrap()]).unwrap();
+        let runtime = Runtime::new(
+            node_path,
+            Branch::new("main".into()).unwrap(),
+            dir.path().to_path_buf(),
+            Some(inbox),
+            "run-1".into(),
+            "session-1".into(),
+            PaneId::new("%1".into()).unwrap(),
+        );
+
+        // Max MessageBody is 4096, which GUARANTEES the total line exceeds 4096.
+        let msg = Message {
+            text: MessageBody::new("A".repeat(MessageBody::MAX_LEN)).unwrap(),
+            summary: Summary::new("overflow".into()).unwrap(),
+            kind: MessageKind::Chat,
+        };
+
+        let res = runtime.deliver(Addressee::Parent, msg).await;
+        match res {
+            Err(BusError::Append { detail }) => assert!(detail.contains("exceeds PIPE_BUF")),
+            _ => panic!("Expected Append error, got {:?}", res),
+        }
+
+        // NO-SPILL: The file must not exist or be empty.
+        if inbox_path.exists() {
+            let content = std::fs::read(&inbox_path).unwrap();
+            assert!(content.is_empty(), "File should be empty on overflow");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_deliver_all_addressee_variants() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+
+        // 1. Setup Parent inbox
+        let parent_inbox_path = root.join("parent.jsonl");
+        let parent_inbox = InboxPath::new(parent_inbox_path.clone());
+
+        // 2. Setup Children (Inline and Worktree)
+        let exo_dir = root.join(".exo");
+        std::fs::create_dir_all(&exo_dir).unwrap();
+        let children_file = exo_dir.join("children.jsonl");
+
+        let inline_name = AgentName::new("inline-kid".into()).unwrap();
+        let inline_inbox_path = root.join("inline.jsonl");
+        let inline_inbox = InboxPath::new(inline_inbox_path.clone());
+
+        let worktree_name = AgentName::new("worktree-kid".into()).unwrap();
+        let worktree_inbox_path = root.join("worktree.jsonl");
+        let worktree_inbox = InboxPath::new(worktree_inbox_path.clone());
+
+        let records = vec![
+            ChildRecord::Spawned {
+                child: inline_name.clone(),
+                kind: exo_caps::ChildKind::Inline,
+                pane: PaneId::new("%2".into()).unwrap(),
+                inbox: inline_inbox,
+            },
+            ChildRecord::Spawned {
+                child: worktree_name.clone(),
+                kind: exo_caps::ChildKind::Worktree,
+                pane: PaneId::new("%3".into()).unwrap(),
+                inbox: worktree_inbox,
+            },
+        ];
+
+        for r in records {
+            let line = serde_json::to_string(&r).unwrap() + "\n";
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&children_file)
+                .unwrap()
+                .write_all(line.as_bytes())
+                .unwrap();
+        }
+
+        let node_path = NodePath::new(vec![AgentName::new("me".into()).unwrap()]).unwrap();
+        let runtime = Runtime::new(
+            node_path,
+            Branch::new("main".into()).unwrap(),
+            root,
+            Some(parent_inbox),
+            "run-1".into(),
+            "session-1".into(),
+            PaneId::new("%1".into()).unwrap(),
+        );
+
+        let msg = Message {
+            text: MessageBody::new("hi".into()).unwrap(),
+            summary: Summary::new("greeting".into()).unwrap(),
+            kind: MessageKind::Chat,
+        };
+
+        // Deliver to Parent
+        runtime
+            .deliver(Addressee::Parent, msg.clone())
+            .await
+            .unwrap();
+        assert!(parent_inbox_path.exists());
+
+        // Deliver to InlineChild
+        runtime
+            .deliver(Addressee::InlineChild(inline_name), msg.clone())
+            .await
+            .unwrap();
+        assert!(inline_inbox_path.exists());
+
+        // Deliver to WorktreeChild
+        runtime
+            .deliver(Addressee::WorktreeChild(worktree_name), msg.clone())
+            .await
+            .unwrap();
+        assert!(worktree_inbox_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_deliver_append_order() {
+        let dir = tempdir().unwrap();
+        let inbox_path = dir.path().join("inbox.jsonl");
+        let inbox = InboxPath::new(inbox_path.clone());
+
+        let node_path = NodePath::new(vec![AgentName::new("node".into()).unwrap()]).unwrap();
+        let runtime = Runtime::new(
+            node_path,
+            Branch::new("main".into()).unwrap(),
+            dir.path().to_path_buf(),
+            Some(inbox),
+            "run-1".into(),
+            "session-1".into(),
+            PaneId::new("%1".into()).unwrap(),
+        );
+
+        let msg1 = Message {
+            text: MessageBody::new("first".into()).unwrap(),
+            summary: Summary::new("1".into()).unwrap(),
+            kind: MessageKind::Chat,
+        };
+        let msg2 = Message {
+            text: MessageBody::new("second".into()).unwrap(),
+            summary: Summary::new("2".into()).unwrap(),
+            kind: MessageKind::Chat,
+        };
+
+        runtime
+            .deliver(Addressee::Parent, msg1.clone())
+            .await
+            .unwrap();
+        runtime
+            .deliver(Addressee::Parent, msg2.clone())
+            .await
+            .unwrap();
+
+        let content = std::fs::read_to_string(&inbox_path).unwrap();
+        let mut lines = content.lines();
+
+        let entry1: IngestionEntry = serde_json::from_str(lines.next().unwrap()).unwrap();
+        let entry2: IngestionEntry = serde_json::from_str(lines.next().unwrap()).unwrap();
+
+        assert_eq!(entry1.msg, msg1);
+        assert_eq!(entry2.msg, msg2);
+        assert!(lines.next().is_none());
     }
 }
