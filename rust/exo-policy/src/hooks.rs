@@ -55,36 +55,57 @@ pub fn pre_tool_use<'a, R: Kv + Send + Sync>(ctx: &'a R, input: &'a HookInput) -
     let tool_name = input.tool_name.clone();
     Box::pin(async move {
         // Guard check: look up "allowlist:{tool_name}" in KV.
-        // "deny" -> Deny, else Allow. Skeleton for Wave 3.
+        // Enforce allowlist semantics (deny by default).
         let key = format!("allowlist:{}", tool_name);
         match ctx.get(&key).await {
-            Ok(Some(v)) if v == "deny" => HookDecision::Deny {
-                reason: format!("Tool '{}' is blocked by policy", tool_name),
+            Ok(Some(v)) if v == "allow" => HookDecision::Allow,
+            Ok(Some(v)) => HookDecision::Deny {
+                reason: format!("Tool '{}' is explicitly blocked: {}", tool_name, v),
             },
-            // TODO: Port PII-rewrite (HookDecision::Modify) from Haskell logic when firmed.
-            _ => HookDecision::Allow,
+            Ok(None) => HookDecision::Deny {
+                reason: format!("Tool '{}' is not in the allowlist", tool_name),
+            },
+            Err(e) => HookDecision::Deny {
+                reason: format!("Policy lookup failed for tool '{}': {}", tool_name, e),
+            },
         }
     })
 }
 
+// TODO(cap): The stop hook needs to query the PR for the current branch. Currently
+// this requires Git + GitHub bounds. If we add pr_for_current_branch() to GitHub,
+// we can drop the Git bound.
 pub fn stop<'a, R: Git + GitHub + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, StopDecision> {
     Box::pin(async move {
         // The live PR-gate: block if there's an open PR with unaddressed changes.
+        // Fail closed: block on error so the agent doesn't exit on transient failures.
         let branch = match ctx.current_branch().await {
             Ok(b) => b,
-            Err(_) => return StopDecision::Allow,
+            Err(e) => {
+                return StopDecision::Block {
+                    reason: format!("Failed to get current branch: {}", e),
+                }
+            }
         };
 
         let pr = match ctx.pr_for_branch(&branch).await {
             Ok(Some(pr)) => pr,
-            _ => return StopDecision::Allow,
+            Ok(None) => return StopDecision::Allow,
+            Err(e) => {
+                return StopDecision::Block {
+                    reason: format!("Failed to query PR for branch '{}': {}", branch.as_str(), e),
+                }
+            }
         };
 
         match ctx.has_unaddressed_changes(pr).await {
             Ok(true) => StopDecision::Block {
-                reason: "Open PR has unaddressed ChangesRequested".into(),
+                reason: format!("Open PR #{} has unaddressed ChangesRequested", pr),
             },
-            _ => StopDecision::Allow,
+            Ok(false) => StopDecision::Allow,
+            Err(e) => StopDecision::Block {
+                reason: format!("Failed to check PR #{} changes: {}", pr, e),
+            },
         }
     })
 }
@@ -119,8 +140,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pre_tool_use_allow_by_default() {
+    async fn test_pre_tool_use_deny_by_default() {
         let ctx = MockRuntime::default();
+        let input = HookInput {
+            tool_name: "test_tool".into(),
+            tool_input: Value::Null,
+        };
+        match pre_tool_use(&ctx, &input).await {
+            HookDecision::Deny { reason } => {
+                assert!(reason.contains("not in the allowlist"));
+            }
+            _ => panic!("Should be Deny by default"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_pre_tool_use_explicit_allow() {
+        let ctx = MockRuntime::default();
+        ctx.kv
+            .lock()
+            .unwrap()
+            .insert("allowlist:test_tool".into(), "allow".into());
         let input = HookInput {
             tool_name: "test_tool".into(),
             tool_input: Value::Null,
@@ -129,7 +169,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pre_tool_use_deny() {
+    async fn test_pre_tool_use_explicit_deny() {
         let ctx = MockRuntime::default();
         ctx.kv
             .lock()
@@ -141,7 +181,7 @@ mod tests {
         };
         match pre_tool_use(&ctx, &input).await {
             HookDecision::Deny { reason } => {
-                assert!(reason.contains("test_tool"));
+                assert!(reason.contains("explicitly blocked"));
             }
             _ => panic!("Should be Deny"),
         }
@@ -162,7 +202,7 @@ mod tests {
         };
         match stop(&ctx).await {
             StopDecision::Block { reason } => {
-                assert!(reason.contains("unaddressed ChangesRequested"));
+                assert!(reason.contains("Open PR #123 has unaddressed ChangesRequested"));
             }
             _ => panic!("Should be Block"),
         }
