@@ -23,5 +23,9 @@ pub enum ProcessError {
 
 #[async_trait]
 pub trait Process {
-    async fn run(&self, program: &str, args: &[String]) -> Result<std::process::Output, ProcessError>;
+    async fn run(
+        &self,
+        program: &str,
+        args: &[String],
+    ) -> Result<std::process::Output, ProcessError>;
 }

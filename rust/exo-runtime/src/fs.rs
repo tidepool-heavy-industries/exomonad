@@ -37,16 +37,20 @@ impl Fs for Runtime {
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
         let tmp_path = parent.join(format!("{}.{}.{}.tmp", file_name, std::process::id(), id));
 
-        tokio::fs::write(&tmp_path, bytes).await.map_err(|e| FsError::At {
-            op: "write_atomic (write tmp)",
-            path: tmp_path.display().to_string(),
-            source: e,
-        })?;
+        tokio::fs::write(&tmp_path, bytes)
+            .await
+            .map_err(|e| FsError::At {
+                op: "write_atomic (write tmp)",
+                path: tmp_path.display().to_string(),
+                source: e,
+            })?;
 
-        tokio::fs::rename(&tmp_path, path).await.map_err(|e| FsError::At {
-            op: "write_atomic (rename)",
-            path: path.display().to_string(),
-            source: e,
-        })
+        tokio::fs::rename(&tmp_path, path)
+            .await
+            .map_err(|e| FsError::At {
+                op: "write_atomic (rename)",
+                path: path.display().to_string(),
+                source: e,
+            })
     }
 }

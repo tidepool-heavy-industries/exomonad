@@ -42,8 +42,8 @@
 use crate::runtime::Runtime;
 use async_trait::async_trait;
 use exo_caps::{
-    AgentName, AgentType, Branch, ChildKind, ChildRecord, ForkSpec, GeminiSpec, InboxPath, NodeKind,
-    NodePapers, PaneId, SpawnError, Spawner, WorkerSpec,
+    AgentName, AgentType, Branch, ChildKind, ChildRecord, ForkSpec, GeminiSpec, InboxPath,
+    NodeKind, NodePapers, PaneId, SpawnError, Spawner, WorkerSpec,
 };
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
@@ -124,7 +124,11 @@ impl Runtime {
         exo_caps::paths::inbox_path(Path::new(&home), &self.run_id, pane)
     }
 
-    pub(crate) async fn resolve_child_name(&self, given: Option<AgentName>, prefix: &str) -> Result<AgentName, SpawnError> {
+    pub(crate) async fn resolve_child_name(
+        &self,
+        given: Option<AgentName>,
+        prefix: &str,
+    ) -> Result<AgentName, SpawnError> {
         let records = self.read_child_records().await?;
         let current_set = exo_caps::fold_children(&records);
 
@@ -155,7 +159,10 @@ impl Runtime {
     pub(crate) async fn birth(&self, core: BirthCore) -> Result<AgentName, SpawnError> {
         // (a) compute child worktree path
         let child_dir = match core.kind {
-            ChildKind::Worktree => self.working_dir.join(".exo/worktrees").join(core.name.as_str()),
+            ChildKind::Worktree => self
+                .working_dir
+                .join(".exo/worktrees")
+                .join(core.name.as_str()),
             ChildKind::Inline => self.working_dir.to_path_buf(),
         };
 
@@ -478,7 +485,10 @@ mod tests {
         }
 
         // 5. Explicit unique → Ok
-        let name_unique = rt.resolve_child_name(Some(an("custom")), "worker").await.unwrap();
+        let name_unique = rt
+            .resolve_child_name(Some(an("custom")), "worker")
+            .await
+            .unwrap();
         assert_eq!(name_unique.as_str(), "custom");
     }
 

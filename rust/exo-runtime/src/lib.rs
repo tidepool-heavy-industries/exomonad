@@ -14,10 +14,10 @@
 //! zero-consumer, so none is cut. (Cutting one would also churn the frozen `exo-caps`
 //! contract that the Policy TL is forking from concurrently — out of scope for Wave 1.)
 //!
-//! **Status: Wave-1 scaffold.** Struct + all impl files present, bodies `todo!()`. Gemini
-//! leaves fill them in (R1 git/github, R2 tmux, R3 fs/process/log/kv, R4 bus; Spawner
-//! sub-TL S1–S3). Converge gate: `Runtime` impls every cap + a `Bus` append→cursor-restart
-//! integration test. See `docs/design/swarm/06-migration.md`.
+//! **Status: Wave 1 complete.** `Runtime` implements every cap (R1 git/github, R2 tmux,
+//! R3 fs/process/log/kv, R4 bus; Spawner S1–S3). The `Bus` append half is done here; the
+//! read/cursor/`notify`-watch half is the Wave-2 inbound loop. See
+//! `docs/design/swarm/06-migration.md`.
 
 mod runtime;
 

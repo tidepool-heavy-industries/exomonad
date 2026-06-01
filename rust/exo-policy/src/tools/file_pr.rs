@@ -24,7 +24,10 @@ pub struct FilePr;
 
 impl FilePr {
     /// Implementation of the `file_pr` tool, generic over capabilities.
-    pub async fn run<C: Git + GitHub>(ctx: &C, args: FilePrArgs) -> exo_caps::CapResult<ToolOutput> {
+    pub async fn run<C: Git + GitHub>(
+        ctx: &C,
+        args: FilePrArgs,
+    ) -> exo_caps::CapResult<ToolOutput> {
         let current = ctx.current_branch().await?;
         let branch_str = current.as_str();
 
@@ -57,7 +60,11 @@ impl<R: Git + GitHub + Send + Sync> Tool<R> for FilePr {
         schema_json(schemars::schema_for!(FilePrArgs))
     }
 
-    async fn call(&self, ctx: &R, args: serde_json::Value) -> exo_caps::CapResult<serde_json::Value> {
+    async fn call(
+        &self,
+        ctx: &R,
+        args: serde_json::Value,
+    ) -> exo_caps::CapResult<serde_json::Value> {
         ok_json(Self::run(ctx, parse(args)?).await?)
     }
 }
@@ -85,9 +92,15 @@ mod tests {
         assert_eq!(res.data, Some(json!({ "pr": 123 })));
 
         let calls = mock.calls_made();
-        let found = calls.iter().any(|c| matches!(c, Call::FilePr { title, body, base }
-            if title == "Test PR" && body == "Test Body" && base.as_str() == "main.policy-claude"));
-        assert!(found, "Expected FilePr call with base 'main.policy-claude', got: {:?}", calls);
+        let found = calls.iter().any(|c| {
+            matches!(c, Call::FilePr { title, body, base }
+            if title == "Test PR" && body == "Test Body" && base.as_str() == "main.policy-claude")
+        });
+        assert!(
+            found,
+            "Expected FilePr call with base 'main.policy-claude', got: {:?}",
+            calls
+        );
     }
 
     #[tokio::test]
@@ -107,7 +120,13 @@ mod tests {
         assert_eq!(res.text, "PR #456");
 
         let calls = mock.calls_made();
-        let found = calls.iter().any(|c| matches!(c, Call::FilePr { base, .. } if base.as_str() == "main"));
-        assert!(found, "Expected FilePr call with base 'main', got: {:?}", calls);
+        let found = calls
+            .iter()
+            .any(|c| matches!(c, Call::FilePr { base, .. } if base.as_str() == "main"));
+        assert!(
+            found,
+            "Expected FilePr call with base 'main', got: {:?}",
+            calls
+        );
     }
 }

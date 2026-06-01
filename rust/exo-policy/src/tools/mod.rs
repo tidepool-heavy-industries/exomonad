@@ -8,8 +8,8 @@
 //! (the three per-op spawn tools), `file_pr`, `merge_pr`. P7 wires the resulting tool types
 //! into [`role_def`](crate::roles::role_def).
 
-pub mod messaging;
-pub mod tasks;
-pub mod spawn;
 pub mod file_pr;
 pub mod merge_pr;
+pub mod messaging;
+pub mod spawn;
+pub mod tasks;

@@ -81,10 +81,7 @@ impl Tmux for Runtime {
         // Use temp file name as a unique buffer name
         let buf_name = format!(
             "exo_{}",
-            tmp_path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
+            tmp_path.file_name().unwrap_or_default().to_string_lossy()
         );
         let tmp_path_str = tmp_path.to_string_lossy().into_owned();
 
@@ -116,7 +113,11 @@ impl Tmux for Runtime {
 impl Runtime {
     /// Private async helper for tmux CLI calls.
     /// Maps non-success exits to TmuxError::Failed { op, detail }.
-    async fn tmux(&self, op: &'static str, args: &[&str]) -> Result<std::process::Output, TmuxError> {
+    async fn tmux(
+        &self,
+        op: &'static str,
+        args: &[&str],
+    ) -> Result<std::process::Output, TmuxError> {
         let output = tokio::process::Command::new("tmux")
             .args(args)
             .output()

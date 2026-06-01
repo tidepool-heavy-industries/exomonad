@@ -51,10 +51,11 @@ impl TaskList {
             }
             Err(e) => return Err(e.into()),
         };
-        let tasks: Vec<Task> = serde_json::from_slice(&bytes).map_err(|e| exo_caps::CapError::Json {
-            context: "parsing tasks.json".into(),
-            source: e,
-        })?;
+        let tasks: Vec<Task> =
+            serde_json::from_slice(&bytes).map_err(|e| exo_caps::CapError::Json {
+                context: "parsing tasks.json".into(),
+                source: e,
+            })?;
         Ok(ToolOutput::with_data(
             format!("Listed {} tasks.", tasks.len()),
             serde_json::json!(tasks),
@@ -93,10 +94,11 @@ impl TaskGet {
             }
             Err(e) => return Err(e.into()),
         };
-        let tasks: Vec<Task> = serde_json::from_slice(&bytes).map_err(|e| exo_caps::CapError::Json {
-            context: "parsing tasks.json".into(),
-            source: e,
-        })?;
+        let tasks: Vec<Task> =
+            serde_json::from_slice(&bytes).map_err(|e| exo_caps::CapError::Json {
+                context: "parsing tasks.json".into(),
+                source: e,
+            })?;
 
         for task in tasks {
             if task.id == args.id {
@@ -267,11 +269,9 @@ mod tests {
         assert_eq!(out.data.unwrap(), serde_json::json!(updated));
 
         // Verify write
-        assert!(mock
-            .calls_made()
-            .contains(&Call::FsWrite {
-                path: TASKS_PATH.into()
-            }));
+        assert!(mock.calls_made().contains(&Call::FsWrite {
+            path: TASKS_PATH.into()
+        }));
 
         // Get again to verify persistent change in mock
         let out = TaskGet::run(&mock, TaskGetArgs { id: "T1".into() })

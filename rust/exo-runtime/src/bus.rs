@@ -57,8 +57,10 @@ impl Runtime {
                     if line.is_empty() {
                         continue;
                     }
-                    let record: ChildRecord = serde_json::from_slice(line)
-                        .map_err(|e| BusError::Append { detail: e.to_string() })?;
+                    let record: ChildRecord =
+                        serde_json::from_slice(line).map_err(|e| BusError::Append {
+                            detail: e.to_string(),
+                        })?;
                     records.push(record);
                 }
 

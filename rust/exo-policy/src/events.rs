@@ -19,24 +19,13 @@ use exo_caps::GitHub;
 #[serde(rename_all = "snake_case", tag = "event")]
 pub enum WorldEvent {
     /// A Copilot/human review landed on my PR.
-    PrReview {
-        pr: u64,
-        state: ReviewState,
-    },
+    PrReview { pr: u64, state: ReviewState },
     /// A sibling's PR merged — the parent fans this out to siblings that may need to rebase.
-    SiblingMerged {
-        pr: u64,
-        branch: String,
-    },
+    SiblingMerged { pr: u64, branch: String },
     /// CI transitioned on my PR.
-    CiStatus {
-        pr: u64,
-        status: CiStatus,
-    },
+    CiStatus { pr: u64, status: CiStatus },
     /// No review arrived within the timeout window (≈15 min, resets on each feedback round).
-    ReviewTimeout {
-        pr: u64,
-    },
+    ReviewTimeout { pr: u64 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

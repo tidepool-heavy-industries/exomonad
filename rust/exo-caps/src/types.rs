@@ -24,7 +24,10 @@ pub struct NodePath(Vec<AgentName>);
 impl NodePath {
     pub fn new(segments: Vec<AgentName>) -> CapResult<Self> {
         if segments.is_empty() {
-            return Err(CapError::invalid("NodePath", "must have at least one segment"));
+            return Err(CapError::invalid(
+                "NodePath",
+                "must have at least one segment",
+            ));
         }
         Ok(NodePath(segments))
     }
@@ -77,7 +80,10 @@ impl Branch {
             || s.ends_with(".lock")
             || s.chars().any(bad_char)
         {
-            return Err(CapError::invalid("Branch", format!("not a valid git ref name: {s:?}")));
+            return Err(CapError::invalid(
+                "Branch",
+                format!("not a valid git ref name: {s:?}"),
+            ));
         }
         Ok(Branch(s))
     }
@@ -123,7 +129,10 @@ pub struct PaneId(String);
 impl PaneId {
     pub fn new(s: String) -> CapResult<Self> {
         if !s.starts_with('%') || s.len() < 2 || !s[1..].bytes().all(|b| b.is_ascii_digit()) {
-            return Err(CapError::invalid("PaneId", format!("not a %N pane id: {s:?}")));
+            return Err(CapError::invalid(
+                "PaneId",
+                format!("not a %N pane id: {s:?}"),
+            ));
         }
         Ok(PaneId(s))
     }
@@ -266,7 +275,10 @@ impl Summary {
             ));
         }
         if let Some(c) = s.chars().find(|c| c.is_control()) {
-            return Err(CapError::invalid("Summary", format!("contains control char {c:?}")));
+            return Err(CapError::invalid(
+                "Summary",
+                format!("contains control char {c:?}"),
+            ));
         }
         Ok(Summary(s))
     }
@@ -422,7 +434,10 @@ mod tests {
         assert!(root.parent().is_none());
         let kid = root.child(&an("auth-claude"));
         assert_eq!(
-            kid.segments().iter().map(|a| a.as_str()).collect::<Vec<_>>(),
+            kid.segments()
+                .iter()
+                .map(|a| a.as_str())
+                .collect::<Vec<_>>(),
             vec!["dev", "auth-claude"]
         );
     }

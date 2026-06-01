@@ -12,8 +12,8 @@
 
 use async_trait::async_trait;
 use exo_caps::{
-    Addressee, AgentName, Branch, Bus, BusError, Fs, FsError, Git, GitError, GitHub, GitHubError,
-    ForkSpec, GeminiSpec, Kv, KvError, Log, Message, PaneId, Process, ProcessError, SpawnError,
+    Addressee, AgentName, Branch, Bus, BusError, ForkSpec, Fs, FsError, GeminiSpec, Git, GitError,
+    GitHub, GitHubError, Kv, KvError, Log, Message, PaneId, Process, ProcessError, SpawnError,
     Spawner, Tmux, TmuxError, WorkerSpec,
 };
 use std::collections::HashMap;
@@ -24,18 +24,46 @@ use std::sync::Mutex;
 /// observe more calls — this enum is part of the shared test contract.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Call {
-    BusDeliver { to: Addressee, msg: Message },
-    FilePr { title: String, body: String, base: Branch },
-    MergePr { pr: u64 },
-    SpawnWorker { spec_task: String },
-    SpawnGemini { spec_task: String },
-    ForkWave { n: usize },
-    KvGet { key: String },
-    KvSet { key: String, value: String },
-    FsRead { path: String },
-    FsWrite { path: String },
-    LogInfo { msg: String },
-    LogError { msg: String },
+    BusDeliver {
+        to: Addressee,
+        msg: Message,
+    },
+    FilePr {
+        title: String,
+        body: String,
+        base: Branch,
+    },
+    MergePr {
+        pr: u64,
+    },
+    SpawnWorker {
+        spec_task: String,
+    },
+    SpawnGemini {
+        spec_task: String,
+    },
+    ForkWave {
+        n: usize,
+    },
+    KvGet {
+        key: String,
+    },
+    KvSet {
+        key: String,
+        value: String,
+    },
+    FsRead {
+        path: String,
+    },
+    FsWrite {
+        path: String,
+    },
+    LogInfo {
+        msg: String,
+    },
+    LogError {
+        msg: String,
+    },
 }
 
 /// Canned return values + a recording log. Interior-mutable so the cap methods take `&self`
@@ -163,13 +191,17 @@ impl Spawner for MockRuntime {
         self.record(Call::SpawnWorker {
             spec_task: spec.task.clone(),
         });
-        Ok(spec.name.unwrap_or_else(|| AgentName::new("worker-mock".into()).unwrap()))
+        Ok(spec
+            .name
+            .unwrap_or_else(|| AgentName::new("worker-mock".into()).unwrap()))
     }
     async fn spawn_gemini(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError> {
         self.record(Call::SpawnGemini {
             spec_task: spec.task.clone(),
         });
-        Ok(spec.name.unwrap_or_else(|| AgentName::new("gemini-mock".into()).unwrap()))
+        Ok(spec
+            .name
+            .unwrap_or_else(|| AgentName::new("gemini-mock".into()).unwrap()))
     }
     async fn fork_wave(&self, specs: Vec<ForkSpec>) -> Vec<Result<AgentName, SpawnError>> {
         self.record(Call::ForkWave { n: specs.len() });
@@ -177,8 +209,7 @@ impl Spawner for MockRuntime {
             .into_iter()
             .enumerate()
             .map(|(i, s)| {
-                Ok(s
-                    .name
+                Ok(s.name
                     .unwrap_or_else(|| AgentName::new(format!("fork-mock-{i}")).unwrap()))
             })
             .collect()

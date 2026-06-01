@@ -27,8 +27,14 @@ impl Git for Runtime {
     }
 
     async fn worktree_add(&self, branch: &Branch, at: &Path) -> Result<(), GitError> {
-        self.git(&["worktree", "add", "-b", branch.as_str(), &at.to_string_lossy()])
-            .await?;
+        self.git(&[
+            "worktree",
+            "add",
+            "-b",
+            branch.as_str(),
+            &at.to_string_lossy(),
+        ])
+        .await?;
         Ok(())
     }
 

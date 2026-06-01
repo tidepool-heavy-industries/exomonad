@@ -11,7 +11,9 @@
 
 use crate::caps::PolicyCaps;
 use crate::events::{on_world_event, EventAction, WorldEvent};
-use crate::hooks::{pre_tool_use, session_start, stop, HookDecision, HookInput, SessionStartOutput, StopDecision};
+use crate::hooks::{
+    pre_tool_use, session_start, stop, HookDecision, HookInput, SessionStartOutput, StopDecision,
+};
 use crate::tool::{BoxFuture, Tool};
 use crate::tools::file_pr::FilePr;
 use crate::tools::merge_pr::MergePr;
@@ -97,15 +99,29 @@ mod tests {
 
     #[tokio::test]
     async fn every_role_builds_non_empty_tools() {
-        for kind in [NodeKind::Root, NodeKind::Tl, NodeKind::Dev, NodeKind::Worker] {
+        for kind in [
+            NodeKind::Root,
+            NodeKind::Tl,
+            NodeKind::Dev,
+            NodeKind::Worker,
+        ] {
             let rd = role_def::<MockRuntime>(kind);
             assert!(!rd.tools.is_empty(), "Role {:?} should have tools", kind);
-            
+
             // Verify hooks are wired (pointers are non-null by definition of fn pointers in Rust)
-            assert_eq!(rd.pre_tool_use as usize, pre_tool_use::<MockRuntime> as *const () as usize);
+            assert_eq!(
+                rd.pre_tool_use as usize,
+                pre_tool_use::<MockRuntime> as *const () as usize
+            );
             assert_eq!(rd.stop as usize, stop::<MockRuntime> as *const () as usize);
-            assert_eq!(rd.session_start as usize, session_start::<MockRuntime> as *const () as usize);
-            assert_eq!(rd.on_event as usize, on_world_event::<MockRuntime> as *const () as usize);
+            assert_eq!(
+                rd.session_start as usize,
+                session_start::<MockRuntime> as *const () as usize
+            );
+            assert_eq!(
+                rd.on_event as usize,
+                on_world_event::<MockRuntime> as *const () as usize
+            );
         }
     }
 
@@ -117,7 +133,7 @@ mod tests {
             has_unaddressed_changes: true,
             ..Default::default()
         };
-        
+
         match (rd.stop)(&ctx).await {
             StopDecision::Block { reason } => {
                 assert!(reason.contains("Open PR #123 has unaddressed ChangesRequested"));

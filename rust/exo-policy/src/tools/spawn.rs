@@ -119,7 +119,7 @@ impl ForkWave {
             });
         }
         let results = ctx.fork_wave(specs).await;
-        
+
         let mut spawned = Vec::new();
         let mut errors = Vec::new();
         for res in results {
@@ -128,13 +128,21 @@ impl ForkWave {
                 Err(e) => errors.push(e.to_string()),
             }
         }
-        
+
         let total = spawned.len() + errors.len();
-        let text = format!("Forked {} children ({} succeeded, {} failed)", total, spawned.len(), errors.len());
-        Ok(ToolOutput::with_data(text, serde_json::json!({
-            "spawned": spawned,
-            "errors": errors
-        })))
+        let text = format!(
+            "Forked {} children ({} succeeded, {} failed)",
+            total,
+            spawned.len(),
+            errors.len()
+        );
+        Ok(ToolOutput::with_data(
+            text,
+            serde_json::json!({
+                "spawned": spawned,
+                "errors": errors
+            }),
+        ))
     }
 }
 
@@ -208,7 +216,9 @@ mod tests {
             ],
         };
         let out = ForkWave::run(&mock, args).await.unwrap();
-        assert!(out.text.contains("Forked 2 children (2 succeeded, 0 failed)"));
+        assert!(out
+            .text
+            .contains("Forked 2 children (2 succeeded, 0 failed)"));
         let calls = mock.calls_made();
         assert_eq!(calls.len(), 1);
         match &calls[0] {

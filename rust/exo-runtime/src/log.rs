@@ -15,10 +15,7 @@ impl Log for Runtime {
     fn info(&self, msg: &str) {
         let path = self.working_dir().join("exo-runtime.log");
         let _ = (|| -> std::io::Result<()> {
-            let mut file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)?;
+            let mut file = OpenOptions::new().create(true).append(true).open(path)?;
             writeln!(file, "[INFO] {}", msg)
         })();
     }
@@ -26,10 +23,7 @@ impl Log for Runtime {
     fn error(&self, msg: &str) {
         let path = self.working_dir().join("exo-runtime.log");
         let _ = (|| -> std::io::Result<()> {
-            let mut file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)?;
+            let mut file = OpenOptions::new().create(true).append(true).open(path)?;
             writeln!(file, "[ERROR] {}", msg)
         })();
     }

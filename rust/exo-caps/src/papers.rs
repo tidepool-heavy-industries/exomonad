@@ -102,7 +102,8 @@ mod tests {
     #[test]
     fn version_defaults_when_absent() {
         // papers written by an older binary without `v` still parse
-        let json = r#"{"path":["root"],"branch":"main","role":"root","pane":"%1","parent_inbox":null}"#;
+        let json =
+            r#"{"path":["root"],"branch":"main","role":"root","pane":"%1","parent_inbox":null}"#;
         let papers: NodePapers = serde_json::from_str(json).unwrap();
         assert_eq!(papers.v, 1);
     }

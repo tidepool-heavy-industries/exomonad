@@ -96,7 +96,9 @@ impl From<ToolMessageKind> for MessageKind {
         match k {
             ToolMessageKind::Chat => MessageKind::Chat,
             ToolMessageKind::Event => MessageKind::Event,
-            ToolMessageKind::Shutdown { grace_ms } => MessageKind::Control(ControlKind::Shutdown { grace_ms }),
+            ToolMessageKind::Shutdown { grace_ms } => {
+                MessageKind::Control(ControlKind::Shutdown { grace_ms })
+            }
         }
     }
 }
@@ -208,10 +210,12 @@ mod tests {
                 to,
                 &Addressee::WorktreeChild(AgentName::new("child-1".into()).unwrap())
             );
-            assert_eq!(msg.kind, MessageKind::Control(ControlKind::Shutdown { grace_ms: 5000 }));
+            assert_eq!(
+                msg.kind,
+                MessageKind::Control(ControlKind::Shutdown { grace_ms: 5000 })
+            );
         } else {
             panic!("expected BusDeliver call, got {:?}", calls[0]);
         }
     }
 }
-

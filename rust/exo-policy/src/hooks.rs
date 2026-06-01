@@ -51,7 +51,10 @@ pub struct HookInput {
 }
 
 /// Ported hook implementations.
-pub fn pre_tool_use<'a, R: Kv + Send + Sync>(ctx: &'a R, input: &'a HookInput) -> BoxFuture<'a, HookDecision> {
+pub fn pre_tool_use<'a, R: Kv + Send + Sync>(
+    ctx: &'a R,
+    input: &'a HookInput,
+) -> BoxFuture<'a, HookDecision> {
     let tool_name = input.tool_name.clone();
     Box::pin(async move {
         // Guard check: look up "allowlist:{tool_name}" in KV.
@@ -128,7 +131,10 @@ mod tests {
             reason: "blocked".into(),
         };
         let j = serde_json::to_value(&d).unwrap();
-        assert_eq!(j, serde_json::json!({ "decision": "deny", "reason": "blocked" }));
+        assert_eq!(
+            j,
+            serde_json::json!({ "decision": "deny", "reason": "blocked" })
+        );
         let back: HookDecision = serde_json::from_value(j).unwrap();
         assert_eq!(d, back);
     }
