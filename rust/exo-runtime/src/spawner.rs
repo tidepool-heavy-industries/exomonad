@@ -152,6 +152,62 @@ impl Runtime {
             }
         }
     }
+
+    fn render_spec_prompt(
+        task: &str,
+        read_first: &[String],
+        steps: &[String],
+        verify: &[String],
+        boundary: &[String],
+        context: Option<&String>,
+        done_criteria: Option<&String>,
+    ) -> String {
+        let mut prompt = task.to_string();
+
+        if !read_first.is_empty() {
+            prompt.push_str("\n\nREAD FIRST:");
+            for rf in read_first {
+                prompt.push_str(&format!("\n- {}", rf));
+            }
+        }
+
+        if !steps.is_empty() {
+            prompt.push_str("\n\nSTEPS:");
+            for (i, step) in steps.iter().enumerate() {
+                prompt.push_str(&format!("\n{}. {}", i + 1, step));
+            }
+        }
+
+        if !verify.is_empty() {
+            prompt.push_str("\n\nVERIFY:");
+            for v in verify {
+                prompt.push_str(&format!("\n- {}", v));
+            }
+        }
+
+        if !boundary.is_empty() {
+            prompt.push_str("\n\nBOUNDARY (DO NOT):");
+            for b in boundary {
+                prompt.push_str(&format!("\n- {}", b));
+            }
+        }
+
+        if let Some(ctx) = context {
+            if !ctx.is_empty() {
+                prompt.push_str("\n\nCONTEXT:\n");
+                prompt.push_str(ctx);
+            }
+        }
+
+        if let Some(done) = done_criteria {
+            if !done.is_empty() {
+                prompt.push_str("\n\nDONE:\n");
+                prompt.push_str(done);
+            }
+        }
+
+        prompt
+    }
 }
 
 impl Runtime {
@@ -313,26 +369,44 @@ impl Runtime {
 impl Spawner for Runtime {
     async fn spawn_worker(&self, spec: WorkerSpec) -> Result<AgentName, SpawnError> {
         let name = self.resolve_child_name(spec.name, "worker").await?;
+        let task = Self::render_spec_prompt(
+            &spec.task,
+            &spec.read_first,
+            &spec.steps,
+            &spec.verify,
+            &spec.boundary,
+            spec.context.as_ref(),
+            spec.done_criteria.as_ref(),
+        );
         let core = BirthCore {
             kind: ChildKind::Inline,
             agent_type: AgentType::Gemini,
             role: NodeKind::Worker,
             branch: self.branch().clone(),
             name,
-            task: spec.task,
+            task,
         };
         self.birth(core).await
     }
 
     async fn spawn_gemini(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError> {
         let name = self.resolve_child_name(spec.name, "dev").await?;
+        let task = Self::render_spec_prompt(
+            &spec.task,
+            &spec.read_first,
+            &spec.steps,
+            &spec.verify,
+            &spec.boundary,
+            spec.context.as_ref(),
+            spec.done_criteria.as_ref(),
+        );
         let core = BirthCore {
             kind: ChildKind::Worktree,
             agent_type: AgentType::Gemini,
             role: NodeKind::Dev,
             branch: Branch::from_path(&self.node_path().child(&name)),
             name,
-            task: spec.task,
+            task,
         };
         self.birth(core).await
     }
@@ -347,13 +421,22 @@ impl Spawner for Runtime {
                     continue;
                 }
             };
+            let task = Self::render_spec_prompt(
+                &spec.task,
+                &spec.read_first,
+                &spec.steps,
+                &spec.verify,
+                &spec.boundary,
+                spec.context.as_ref(),
+                spec.done_criteria.as_ref(),
+            );
             let core = BirthCore {
                 kind: ChildKind::Worktree,
                 agent_type: AgentType::Claude,
                 role: NodeKind::Tl,
                 branch: Branch::from_path(&self.node_path().child(&name)),
                 name,
-                task: spec.task,
+                task,
             };
             results.push(self.birth(core).await);
         }
@@ -509,5 +592,43 @@ mod tests {
         let s = path.as_path().to_string_lossy();
         assert!(s.contains("run-42"));
         assert!(s.contains("pane-317.jsonl"));
+    }
+}
+
+#[cfg(test)]
+mod extra_tests {
+    use super::*;
+
+    #[test]
+    fn test_render_spec_prompt() {
+        let task = "do work";
+        let read_first = vec!["README.md".to_string()];
+        let steps = vec!["step 1".to_string(), "step 2".to_string()];
+        let verify = vec!["cargo test".to_string()];
+        let boundary = vec!["no delete".to_string()];
+        let context = Some("some context".to_string());
+        let done_criteria = Some("all green".to_string());
+
+        let prompt = Runtime::render_spec_prompt(
+            task,
+            &read_first,
+            &steps,
+            &verify,
+            &boundary,
+            context.as_ref(),
+            done_criteria.as_ref(),
+        );
+
+        assert!(prompt.contains("do work"));
+        assert!(prompt.contains("READ FIRST:\n- README.md"));
+        assert!(prompt.contains("STEPS:\n1. step 1\n2. step 2"));
+        assert!(prompt.contains("VERIFY:\n- cargo test"));
+        assert!(prompt.contains("BOUNDARY (DO NOT):\n- no delete"));
+        assert!(prompt.contains("CONTEXT:\nsome context"));
+        assert!(prompt.contains("DONE:\nall green"));
+
+        // Bare task
+        let bare = Runtime::render_spec_prompt("task", &[], &[], &[], &[], None, None);
+        assert_eq!(bare, "task");
     }
 }
