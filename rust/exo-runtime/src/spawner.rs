@@ -287,11 +287,15 @@ impl Runtime {
         // shell-escaped — a name/path with a space or metachar must not break the command.
         let esc = |s: &str| shell_escape::escape(s.to_string().into()).into_owned();
 
-        // (f) Launch the agent
+        // (f) Launch the agent.
+        // The child self-IDs from its papers (via `.mcp.json` → `experimental node --papers`),
+        // so the only env it needs is the boot context its `bootstrap` reads. Set these
+        // explicitly rather than relying on inherited session env (the set-environment-timing
+        // bug that bit the root). `EXOMONAD_AGENT_ID/ROLE` are mcp-stdio-era and unused here.
         let mut env_prefix = format!(
-            "EXOMONAD_AGENT_ID={} EXOMONAD_ROLE={} ",
-            esc(core.name.as_str()),
-            esc(core.role.role_str())
+            "EXOMONAD_SWARM_RUN_ID={} EXOMONAD_TMUX_SESSION={} ",
+            esc(&self.run_id),
+            esc(&self.tmux_session),
         );
 
         let agent_bin = match core.agent_type {
@@ -344,13 +348,10 @@ impl Runtime {
             }
         };
 
-        let launch_cmd = format!(
-            "{} {} --papers {} {}\n",
-            env_prefix,
-            agent_bin,
-            esc(&papers_path.to_string_lossy()),
-            esc(&core.task)
-        );
+        // The agent (claude/gemini) receives ONLY its task as a positional arg. Its papers
+        // reach it via `.mcp.json` (`exomonad experimental node --papers …`), NOT a CLI flag —
+        // neither `claude` nor `gemini` accepts `--papers`.
+        let launch_cmd = format!("{} {} {}\n", env_prefix, agent_bin, esc(&core.task));
 
         exo_caps::Tmux::paste(self, &pane, &launch_cmd)
             .await
