@@ -293,7 +293,7 @@ impl Tmux for MockRuntime {
     async fn new_pane(&self, _cwd: &Path, _cmd: &str) -> Result<PaneId, TmuxError> {
         Ok(PaneId::new("%999".into()).unwrap())
     }
-    async fn new_window(&self, _cwd: &Path, _cmd: &str) -> Result<PaneId, TmuxError> {
+    async fn new_window(&self, _name: &str, _cwd: &Path, _cmd: &str) -> Result<PaneId, TmuxError> {
         Ok(PaneId::new("%999".into()).unwrap())
     }
     async fn paste(&self, _pane: &PaneId, _text: &str) -> Result<(), TmuxError> {

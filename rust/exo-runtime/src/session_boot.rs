@@ -39,6 +39,8 @@ pub async fn boot_root_session(
         session,
         "-c",
         &cwd_str,
+        "-n",
+        "🤖 root",
         "-P",
         "-F",
         "#{pane_id}",

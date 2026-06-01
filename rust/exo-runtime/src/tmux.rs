@@ -20,11 +20,12 @@ use std::path::Path;
 #[async_trait]
 impl Tmux for Runtime {
     async fn new_pane(&self, cwd: &Path, cmd: &str) -> Result<PaneId, TmuxError> {
-        self.spawn_in_session("split-window", cwd, cmd).await
+        self.spawn_in_session("split-window", None, cwd, cmd).await
     }
 
-    async fn new_window(&self, cwd: &Path, cmd: &str) -> Result<PaneId, TmuxError> {
-        self.spawn_in_session("new-window", cwd, cmd).await
+    async fn new_window(&self, name: &str, cwd: &Path, cmd: &str) -> Result<PaneId, TmuxError> {
+        self.spawn_in_session("new-window", Some(name), cwd, cmd)
+            .await
     }
 
     async fn paste(&self, pane: &PaneId, text: &str) -> Result<(), TmuxError> {
@@ -54,25 +55,19 @@ impl Runtime {
     async fn spawn_in_session(
         &self,
         subcmd: &'static str,
+        name: Option<&str>,
         cwd: &Path,
         cmd: &str,
     ) -> Result<PaneId, TmuxError> {
-        let output = self
-            .tmux(
-                subcmd,
-                &[
-                    subcmd,
-                    "-t",
-                    &self.tmux_session,
-                    "-c",
-                    &cwd.to_string_lossy(),
-                    "-P",
-                    "-F",
-                    "#{pane_id}",
-                    cmd,
-                ],
-            )
-            .await?;
+        let cwd_str = cwd.to_string_lossy();
+        // `-n <name>` names the window (new-window only; split-window has no window name).
+        let mut args: Vec<&str> = vec![subcmd, "-t", &self.tmux_session, "-c", &cwd_str];
+        if let Some(name) = name {
+            args.push("-n");
+            args.push(name);
+        }
+        args.extend(["-P", "-F", "#{pane_id}", cmd]);
+        let output = self.tmux(subcmd, &args).await?;
         let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
         PaneId::new(s).map_err(|e| TmuxError::Failed {
             op: subcmd,

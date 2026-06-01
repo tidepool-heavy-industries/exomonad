@@ -237,8 +237,17 @@ impl Runtime {
         // gets its own window (tab — one agent per window, the triad); an Inline worker gets
         // a split pane in the parent's window.
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
+        // Name the window after the agent (emoji + slug), not the bare `claude`/shell process.
+        let emoji = match core.agent_type {
+            AgentType::Claude => "🤖",
+            AgentType::Gemini => "💎",
+            AgentType::Shoal => "🌊",
+        };
+        let window_name = format!("{} {}", emoji, core.name.as_str());
         let pane = match core.kind {
-            ChildKind::Worktree => exo_caps::Tmux::new_window(self, &child_dir, &shell).await,
+            ChildKind::Worktree => {
+                exo_caps::Tmux::new_window(self, &window_name, &child_dir, &shell).await
+            }
             ChildKind::Inline => exo_caps::Tmux::new_pane(self, &child_dir, &shell).await,
         }
         .map_err(|e| SpawnError::Failed {

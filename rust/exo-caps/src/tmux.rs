@@ -17,9 +17,10 @@ pub enum TmuxError {
 #[async_trait]
 pub trait Tmux {
     async fn new_pane(&self, cwd: &Path, cmd: &str) -> Result<PaneId, TmuxError>;
-    /// Like `new_pane` but a fresh tmux WINDOW (tab) rather than a split. Worktree children
-    /// (each agent = its own window) use this; `new_pane` (split) is for inline workers.
-    async fn new_window(&self, cwd: &Path, cmd: &str) -> Result<PaneId, TmuxError>;
+    /// Like `new_pane` but a fresh tmux WINDOW (tab) rather than a split, named `name` (so
+    /// the tab shows the agent, not the bare process). Worktree children (each agent = its
+    /// own window) use this; `new_pane` (split) is for inline workers.
+    async fn new_window(&self, name: &str, cwd: &Path, cmd: &str) -> Result<PaneId, TmuxError>;
     /// The non-CC delivery last-hop: paste rendered `[from: X] …` text into the pane.
     async fn paste(&self, pane: &PaneId, text: &str) -> Result<(), TmuxError>;
     async fn kill_pane(&self, pane: &PaneId) -> Result<(), TmuxError>;
