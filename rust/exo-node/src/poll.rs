@@ -34,6 +34,7 @@ use exo_caps::{
 };
 use exo_policy::events::on_world_event;
 use exo_policy::{EventAction, WorldEvent};
+use tracing::warn;
 
 use crate::bootstrap::NodeContext;
 use crate::error::NodeResult;
@@ -52,15 +53,10 @@ pub async fn supervise(ctx: Arc<NodeContext>) -> NodeResult<()> {
     let mut state: Option<PrState> = None;
 
     loop {
-        let branch = ctx.runtime.branch();
-        let pr_opt = ctx
-            .runtime
-            .pr_for_branch(branch)
-            .await
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
-
-        match pr_opt {
-            Some(pr) => {
+        // A transient cap error (a single GitHub API hiccup) must NOT end the poller for the
+        // node's lifetime — log and retry on the next tick. The poll stays alive across blips.
+        match ctx.runtime.pr_for_branch(ctx.runtime.branch()).await {
+            Ok(Some(pr)) => {
                 // If we switched PRs or just started, reset state
                 if state.as_ref().map(|s| s.pr) != Some(pr) {
                     state = Some(PrState {
@@ -73,11 +69,16 @@ pub async fn supervise(ctx: Arc<NodeContext>) -> NodeResult<()> {
                 }
 
                 if let Some(s) = state.as_mut() {
-                    poll_once(&ctx, s).await?;
+                    if let Err(e) = poll_once(&ctx, s).await {
+                        warn!("self-poll cycle failed (will retry next tick): {e}");
+                    }
                 }
             }
-            None => {
+            Ok(None) => {
                 state = None;
+            }
+            Err(e) => {
+                warn!("self-poll: pr_for_branch failed (will retry next tick): {e}");
             }
         }
 
@@ -111,14 +112,19 @@ async fn poll_once(ctx: &Arc<NodeContext>, state: &mut PrState) -> NodeResult<()
         state.timeout_fired = false;
     }
 
-    // 2. CiStatus event on change
-    if Some(ci_status) != state.last_ci_status {
-        events.push(WorldEvent::CiStatus {
-            pr,
-            status: ci_status,
-        });
-        state.last_ci_status = Some(ci_status);
+    // 2. CiStatus event on TRANSITION only. The first observation seeds the baseline without
+    //    emitting (symmetric with the PrReview branch, which suppresses when there's no prior
+    //    state) — otherwise every freshly-observed PR would fire a spurious CiStatus.
+    match state.last_ci_status {
+        Some(prev) if prev != ci_status => {
+            events.push(WorldEvent::CiStatus {
+                pr,
+                status: ci_status,
+            });
+        }
+        _ => {}
     }
+    state.last_ci_status = Some(ci_status);
 
     // 3. ReviewTimeout: if review_state stays None for ~15 minutes
     if !state.timeout_fired

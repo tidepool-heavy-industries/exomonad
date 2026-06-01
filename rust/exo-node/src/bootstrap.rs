@@ -56,12 +56,6 @@ fn load_papers(papers_path: &Path) -> NodeResult<NodePapers> {
     })
 }
 
-fn home() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-}
-
 /// Self-ID and assemble the [`NodeContext`].
 ///
 /// Inputs:
@@ -70,7 +64,7 @@ fn home() -> PathBuf {
 /// - `working_dir` — the node's cwd (worktree root for a Worktree child).
 ///
 /// Ambient (env): `$TMUX_PANE` (the universal key — must agree with papers.pane),
-/// `EXOMONAD_SWARM_RUN_ID`, `EXOMONAD_TMUX_SESSION`.
+/// `EXOMONAD_SWARM_RUN_ID`, `EXOMONAD_TMUX_SESSION`, `$HOME`.
 pub fn bootstrap(papers_path: &Path, working_dir: PathBuf) -> NodeResult<NodeContext> {
     let papers = load_papers(papers_path)?;
 
@@ -78,11 +72,15 @@ pub fn bootstrap(papers_path: &Path, working_dir: PathBuf) -> NodeResult<NodeCon
         .map_err(|_| NodeError::MissingContext("EXOMONAD_SWARM_RUN_ID"))?;
     let tmux_session = std::env::var("EXOMONAD_TMUX_SESSION")
         .map_err(|_| NodeError::MissingContext("EXOMONAD_TMUX_SESSION"))?;
+    // `$HOME` is required, NOT silently defaulted: the inbox dir is `$HOME/.claude/exo/...`,
+    // and a fallback to `.` would point `own_inbox` under cwd — the node would watch a file
+    // the parent never writes and silently receive nothing. Fail loudly instead.
+    let home = std::env::var("HOME").map_err(|_| NodeError::MissingContext("HOME"))?;
 
     // The pane in papers is authoritative; `$TMUX_PANE` is the live cross-check.
     let own_pane = papers.pane.clone();
 
-    let own_inbox = exo_caps::paths::inbox_path(&home(), &run_id, &own_pane);
+    let own_inbox = exo_caps::paths::inbox_path(Path::new(&home), &run_id, &own_pane);
 
     let node_path: NodePath = papers.path.clone();
     let branch: Branch = papers.branch.clone();
