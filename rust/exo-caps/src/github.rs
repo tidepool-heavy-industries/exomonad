@@ -30,13 +30,41 @@ pub enum CiStatus {
     Pending,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MergeStrategy {
+    #[default]
+    Squash,
+    Merge,
+    Rebase,
+}
+
+impl MergeStrategy {
+    pub fn parse(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "squash" => Self::Squash,
+            "merge" => Self::Merge,
+            "rebase" => Self::Rebase,
+            _ => Self::Squash,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Squash => "squash",
+            Self::Merge => "merge",
+            Self::Rebase => "rebase",
+        }
+    }
+}
+
 #[async_trait]
 pub trait GitHub {
     /// Create or update the PR for the current branch; returns the PR number.
     async fn file_pr(&self, title: &str, body: &str, base: &Branch) -> Result<u64, GitHubError>;
     /// The open PR number for a branch, if any.
     async fn pr_for_branch(&self, branch: &Branch) -> Result<Option<u64>, GitHubError>;
-    async fn merge_pr(&self, pr: u64) -> Result<(), GitHubError>;
+    async fn merge_pr(&self, pr: u64, strategy: MergeStrategy) -> Result<(), GitHubError>;
     /// Does the open PR have unaddressed `ChangesRequested`? (the live stop-gate).
     async fn has_unaddressed_changes(&self, pr: u64) -> Result<bool, GitHubError>;
     /// The latest review decision on the PR. None if no reviews have arrived.

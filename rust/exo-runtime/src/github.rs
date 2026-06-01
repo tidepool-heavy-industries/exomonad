@@ -6,8 +6,9 @@
 
 use crate::runtime::Runtime;
 use async_trait::async_trait;
-use exo_caps::{Branch, CiStatus, GitHub, GitHubError, ReviewState};
+use exo_caps::{Branch, CiStatus, GitHub, GitHubError, MergeStrategy, ReviewState};
 use octocrab::models::pulls::ReviewState as OctoReviewState;
+use octocrab::params::pulls::MergeMethod;
 use octocrab::{params, Octocrab, OctocrabBuilder};
 use tokio::process::Command;
 
@@ -52,11 +53,19 @@ impl GitHub for Runtime {
         Ok(page.into_iter().next().map(|pr| pr.number))
     }
 
-    async fn merge_pr(&self, pr: u64) -> Result<(), GitHubError> {
+    async fn merge_pr(&self, pr: u64, strategy: MergeStrategy) -> Result<(), GitHubError> {
         let (owner, repo) = self.repo().await?;
         let octo = self.octocrab().await?;
+
+        let method = match strategy {
+            MergeStrategy::Squash => MergeMethod::Squash,
+            MergeStrategy::Merge => MergeMethod::Merge,
+            MergeStrategy::Rebase => MergeMethod::Rebase,
+        };
+
         octo.pulls(owner, repo)
             .merge(pr)
+            .method(method)
             .send()
             .await
             .map_err(|e| GitHubError::Failed {
