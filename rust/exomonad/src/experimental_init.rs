@@ -49,7 +49,14 @@ pub async fn run(config: &Config, session: Option<String>, recreate: bool) -> Re
         .as_deref()
         .map(|m| format!(" --model {m}"))
         .unwrap_or_default();
-    let launch = format!("claude --dangerously-skip-permissions{model_flag}");
+    // Embed the boot env directly in the launch command. The holding-shell pane was created
+    // by `boot_root_session` BEFORE the `tmux set-environment` calls above, so it never picked
+    // up the session vars — `claude` (and the `experimental node` sidecar it spawns) would
+    // otherwise start without EXOMONAD_SWARM_RUN_ID and fail bootstrap. The session-env calls
+    // above still serve descendant panes spawned later.
+    let launch = format!(
+        "EXOMONAD_SWARM_RUN_ID={run_id} EXOMONAD_TMUX_SESSION={session} claude --dangerously-skip-permissions{model_flag}"
+    );
 
     exo_runtime::paste_to_pane(&session, &root_pane, &launch).await?;
 
