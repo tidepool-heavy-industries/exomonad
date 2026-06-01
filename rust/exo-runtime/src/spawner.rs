@@ -247,7 +247,6 @@ impl Runtime {
             AgentType::Gemini => {
                 let settings_path = papers_path.with_file_name("settings.json");
                 let settings = mcp_config.clone();
-                // Add default gemini hooks if we were following init.rs exactly, but let's keep it simple
                 tokio::fs::write(
                     &settings_path,
                     serde_json::to_vec_pretty(&settings).map_err(|e| SpawnError::Failed {
