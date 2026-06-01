@@ -29,8 +29,10 @@ mod kv;
 mod log;
 pub mod node_config;
 mod process;
+pub mod session_boot;
 mod spawner;
 mod tmux;
 
 pub use node_config::write_node_agent_config;
 pub use runtime::Runtime;
+pub use session_boot::{boot_root_session, paste_to_pane};

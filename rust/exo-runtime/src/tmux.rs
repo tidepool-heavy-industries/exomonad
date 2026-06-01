@@ -45,62 +45,7 @@ impl Tmux for Runtime {
     }
 
     async fn paste(&self, pane: &PaneId, text: &str) -> Result<(), TmuxError> {
-        let target = pane.as_str();
-
-        // 1. Exit copy/scroll mode if active — copy mode intercepts input (matches TmuxIpc)
-        let mode_output = tokio::process::Command::new("tmux")
-            .args(["display-message", "-p", "-t", target, "#{pane_in_mode}"])
-            .output()
-            .await;
-
-        if let Ok(output) = mode_output {
-            if output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "1" {
-                let _ = tokio::process::Command::new("tmux")
-                    .args(["send-keys", "-t", target, "-X", "cancel"])
-                    .output()
-                    .await;
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            }
-        }
-
-        // 2. Buffer paste pattern — load-buffer temp + paste-buffer + send-keys Enter
-        let payload = text.trim_end_matches('\n').trim_end_matches('\r');
-        // NamedTempFile::new() does sync filesystem work; keep it off the async executor.
-        let tmp = tokio::task::spawn_blocking(tempfile::NamedTempFile::new)
-            .await
-            .map_err(|e| TmuxError::Failed {
-                op: "paste",
-                detail: format!("temp-file task join: {e}"),
-            })?
-            .map_err(TmuxError::Io)?;
-        let tmp_path = tmp.path().to_path_buf();
-        tokio::fs::write(&tmp_path, payload)
-            .await
-            .map_err(TmuxError::Io)?;
-
-        // Use temp file name as a unique buffer name
-        let buf_name = format!(
-            "exo_{}",
-            tmp_path.file_name().unwrap_or_default().to_string_lossy()
-        );
-        let tmp_path_str = tmp_path.to_string_lossy().into_owned();
-
-        self.tmux("paste", &["load-buffer", "-b", &buf_name, &tmp_path_str])
-            .await?;
-
-        self.tmux(
-            "paste",
-            &["paste-buffer", "-t", target, "-b", &buf_name, "-d"],
-        )
-        .await?;
-
-        // Debounce: allow TUI (Claude Code Ink, Gemini CLI readline) to process pasted text
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-
-        self.tmux("paste", &["send-keys", "-t", target, "Enter"])
-            .await?;
-
-        Ok(())
+        crate::session_boot::paste_to_pane(&self.tmux_session, pane, text).await
     }
 
     async fn kill_pane(&self, pane: &PaneId) -> Result<(), TmuxError> {
