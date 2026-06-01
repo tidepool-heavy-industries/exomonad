@@ -12,9 +12,16 @@ use exo_caps::{Process, ProcessError};
 impl Process for Runtime {
     async fn run(
         &self,
-        _program: &str,
-        _args: &[String],
+        program: &str,
+        args: &[String],
     ) -> Result<std::process::Output, ProcessError> {
-        todo!("R3: tokio::process::Command output().await; map spawn err to ProcessError::Spawn")
+        tokio::process::Command::new(program)
+            .args(args)
+            .output()
+            .await
+            .map_err(|e| ProcessError::Spawn {
+                program: program.to_string(),
+                source: e,
+            })
     }
 }
