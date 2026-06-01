@@ -90,6 +90,7 @@ impl Runtime {
             .open(&path)
             .await?;
         f.write_all(line.as_bytes()).await?;
+        f.sync_all().await?;
         Ok(())
     }
 
@@ -171,26 +172,97 @@ impl Runtime {
         self.append_child_record(&record).await?;
 
         // (e) Write child papers
+        let parent_inbox = if let Ok(pane_str) = std::env::var("TMUX_PANE") {
+            if let Ok(my_pane) = PaneId::new(pane_str) {
+                Some(self.child_inbox_path(&my_pane))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let papers = NodePapers::new(
             self.node_path().child(&core.name),
             core.branch.clone(),
             core.role,
             pane.clone(),
-            None, // TODO(wave2): wire self-pane -> parent_inbox
+            parent_inbox,
         );
-        let papers_dir = child_dir.join(".exo");
-        tokio::fs::create_dir_all(&papers_dir).await?;
+
+        let papers_path = match core.kind {
+            ChildKind::Worktree => child_dir.join(".exo/node.json"),
+            ChildKind::Inline => {
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                let n = pane.as_str().trim_start_matches('%');
+                PathBuf::from(home)
+                    .join(".claude/exo/papers")
+                    .join(&self.run_id)
+                    .join(format!("pane-{n}.json"))
+            }
+        };
+
+        if let Some(parent) = papers_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
         let papers_json = serde_json::to_vec_pretty(&papers).map_err(|e| SpawnError::Failed {
             op: "serialize_papers",
             child: Some(core.name.clone()),
             detail: e.to_string(),
         })?;
-        tokio::fs::write(papers_dir.join("node.json"), papers_json).await?;
+        tokio::fs::write(&papers_path, papers_json).await?;
 
         // (f) Launch the agent
+        let mcp_config = serde_json::json!({
+            "mcpServers": {
+                "exomonad": {
+                    "type": "stdio",
+                    "command": "exomonad",
+                    "args": ["mcp-stdio", "--role", core.role.role_str(), "--name", core.name.as_str()]
+                }
+            }
+        });
+
+        let mut env_prefix = format!(
+            "EXOMONAD_AGENT_ID={} EXOMONAD_ROLE={} ",
+            core.name.as_str(),
+            core.role.role_str()
+        );
+
         let agent_bin = match core.agent_type {
-            AgentType::Claude => "claude --dangerously-skip-permissions",
-            AgentType::Gemini => "gemini --yolo",
+            AgentType::Claude => {
+                let mcp_path = child_dir.join(".mcp.json");
+                tokio::fs::write(
+                    &mcp_path,
+                    serde_json::to_vec_pretty(&mcp_config).map_err(|e| SpawnError::Failed {
+                        op: "write_mcp_config",
+                        child: Some(core.name.clone()),
+                        detail: e.to_string(),
+                    })?,
+                )
+                .await?;
+                "claude --dangerously-skip-permissions"
+            }
+            AgentType::Gemini => {
+                let settings_path = papers_path.with_file_name("settings.json");
+                let settings = mcp_config.clone();
+                // Add default gemini hooks if we were following init.rs exactly, but let's keep it simple
+                tokio::fs::write(
+                    &settings_path,
+                    serde_json::to_vec_pretty(&settings).map_err(|e| SpawnError::Failed {
+                        op: "write_gemini_settings",
+                        child: Some(core.name.clone()),
+                        detail: e.to_string(),
+                    })?,
+                )
+                .await?;
+                env_prefix.push_str(&format!(
+                    "GEMINI_CLI_SYSTEM_SETTINGS_PATH={} ",
+                    settings_path.display()
+                ));
+                "gemini --yolo"
+            }
             AgentType::Shoal => {
                 return Err(SpawnError::Failed {
                     op: "launch",
@@ -199,7 +271,14 @@ impl Runtime {
                 })
             }
         };
-        let launch_cmd = format!("{}\n", agent_bin);
+
+        let launch_cmd = format!(
+            "{} {} --papers {} '{}'\n",
+            env_prefix,
+            agent_bin,
+            papers_path.display(),
+            core.task.replace('\'', "'\\''")
+        );
 
         exo_caps::Tmux::paste(self, &pane, &launch_cmd)
             .await
@@ -221,7 +300,7 @@ impl Spawner for Runtime {
             kind: ChildKind::Inline,
             agent_type: AgentType::Gemini,
             role: NodeKind::Worker,
-            branch: Branch::from_path(&self.node_path().child(&name)),
+            branch: self.branch().clone(),
             name,
             task: spec.task,
         };
