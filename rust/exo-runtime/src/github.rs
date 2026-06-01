@@ -6,8 +6,8 @@
 
 use crate::runtime::Runtime;
 use async_trait::async_trait;
-use exo_caps::{Branch, GitHub, GitHubError};
-use octocrab::models::pulls::ReviewState;
+use exo_caps::{Branch, CiStatus, GitHub, GitHubError, ReviewState};
+use octocrab::models::pulls::ReviewState as OctoReviewState;
 use octocrab::{params, Octocrab, OctocrabBuilder};
 use tokio::process::Command;
 
@@ -82,10 +82,96 @@ impl GitHub for Runtime {
         if let Some(last_review) = reviews.into_iter().last() {
             Ok(matches!(
                 last_review.state,
-                Some(ReviewState::ChangesRequested)
+                Some(OctoReviewState::ChangesRequested)
             ))
         } else {
             Ok(false)
+        }
+    }
+
+    async fn review_state(&self, pr: u64) -> Result<Option<ReviewState>, GitHubError> {
+        let (owner, repo) = self.repo().await?;
+        let octo = self.octocrab().await?;
+        let reviews = octo
+            .pulls(owner, repo)
+            .list_reviews(pr)
+            .per_page(100)
+            .send()
+            .await
+            .map_err(|e| GitHubError::Failed {
+                op: "review_state",
+                detail: e.to_string(),
+            })?;
+
+        if let Some(last_review) = reviews.into_iter().last() {
+            match last_review.state {
+                Some(OctoReviewState::Approved) => Ok(Some(ReviewState::Approved)),
+                Some(OctoReviewState::ChangesRequested) => Ok(Some(ReviewState::ChangesRequested)),
+                Some(OctoReviewState::Commented) => Ok(Some(ReviewState::Commented)),
+                _ => Ok(None),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn ci_status(&self, pr: u64) -> Result<CiStatus, GitHubError> {
+        let (owner, repo) = self.repo().await?;
+        let octo = self.octocrab().await?;
+
+        let pr_model =
+            octo.pulls(&owner, &repo)
+                .get(pr)
+                .await
+                .map_err(|e| GitHubError::Failed {
+                    op: "ci_status",
+                    detail: format!("failed to get PR {}: {}", pr, e),
+                })?;
+        let sha = pr_model.head.sha;
+
+        let runs = octo
+            .checks(owner, repo)
+            .list_check_runs_for_git_ref(params::repos::Commitish(sha))
+            .send()
+            .await
+            .map_err(|e| GitHubError::Failed {
+                op: "ci_status",
+                detail: e.to_string(),
+            })?;
+
+        if runs.check_runs.is_empty() {
+            return Ok(CiStatus::Pending);
+        }
+
+        let mut any_failed = false;
+        let mut any_pending = false;
+
+        for run in runs.check_runs {
+            match run.conclusion.as_deref() {
+                Some("success") | Some("neutral") | Some("skipped") => {}
+                Some("failure")
+                | Some("error")
+                | Some("timed_out")
+                | Some("cancelled")
+                | Some("action_required")
+                | Some("startup_failure") => {
+                    any_failed = true;
+                }
+                None => {
+                    any_pending = true;
+                }
+                _ => {
+                    any_pending = true;
+                }
+            }
+        }
+
+        if any_failed {
+            Ok(CiStatus::Failing)
+        } else if any_pending {
+            Ok(CiStatus::Pending)
+        } else {
+            Ok(CiStatus::Passing)
         }
     }
 }

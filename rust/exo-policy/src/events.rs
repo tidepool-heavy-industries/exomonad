@@ -10,7 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::BoxFuture;
-use exo_caps::GitHub;
+pub use exo_caps::{CiStatus, GitHub, ReviewState};
 
 /// The one typed event enum. A `kind=event` ingestion entry has its body parsed into this
 /// before `on_world_event` runs; the in-process self-poll constructs one directly. There is
@@ -26,22 +26,6 @@ pub enum WorldEvent {
     CiStatus { pr: u64, status: CiStatus },
     /// No review arrived within the timeout window (≈15 min, resets on each feedback round).
     ReviewTimeout { pr: u64 },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ReviewState {
-    Approved,
-    ChangesRequested,
-    Commented,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CiStatus {
-    Passing,
-    Failing,
-    Pending,
 }
 
 /// What a world-event handler decides to do. The loop performs the IO: `InjectMessage` →
@@ -189,5 +173,20 @@ mod tests {
         } else {
             panic!("Expected InjectMessage, got {:?}", action);
         }
+    }
+
+    #[tokio::test]
+    async fn test_mock_runtime_new_methods() {
+        let ctx = MockRuntime {
+            review_state: Some(ReviewState::Approved),
+            ci_status: CiStatus::Failing,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            ctx.review_state(123).await.unwrap(),
+            Some(ReviewState::Approved)
+        );
+        assert_eq!(ctx.ci_status(123).await.unwrap(), CiStatus::Failing);
     }
 }

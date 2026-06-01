@@ -12,9 +12,9 @@
 
 use async_trait::async_trait;
 use exo_caps::{
-    Addressee, AgentName, Branch, Bus, BusError, ForkSpec, Fs, FsError, GeminiSpec, Git, GitError,
-    GitHub, GitHubError, Kv, KvError, Log, Message, PaneId, Process, ProcessError, SpawnError,
-    Spawner, Tmux, TmuxError, WorkerSpec,
+    Addressee, AgentName, Branch, Bus, BusError, CiStatus, ForkSpec, Fs, FsError, GeminiSpec, Git,
+    GitError, GitHub, GitHubError, Kv, KvError, Log, Message, PaneId, Process, ProcessError,
+    ReviewState, SpawnError, Spawner, Tmux, TmuxError, WorkerSpec,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -80,6 +80,8 @@ pub struct MockRuntime {
     pub current_branch: Branch,
     pub pr_for_branch: Option<u64>,
     pub has_unaddressed_changes: bool,
+    pub review_state: Option<ReviewState>,
+    pub ci_status: CiStatus,
     pub is_clean: bool,
     /// Next `file_pr` returns this PR number.
     pub next_pr: u64,
@@ -97,6 +99,8 @@ impl Default for MockRuntime {
             current_branch: Branch::new("dev.policy-claude".into()).unwrap(),
             pr_for_branch: None,
             has_unaddressed_changes: false,
+            review_state: None,
+            ci_status: CiStatus::Passing,
             is_clean: true,
             next_pr: 1,
             fail: Mutex::new(None),
@@ -184,6 +188,12 @@ impl GitHub for MockRuntime {
     }
     async fn has_unaddressed_changes(&self, _pr: u64) -> Result<bool, GitHubError> {
         Ok(self.has_unaddressed_changes)
+    }
+    async fn review_state(&self, _pr: u64) -> Result<Option<ReviewState>, GitHubError> {
+        Ok(self.review_state)
+    }
+    async fn ci_status(&self, _pr: u64) -> Result<CiStatus, GitHubError> {
+        Ok(self.ci_status)
     }
 }
 
