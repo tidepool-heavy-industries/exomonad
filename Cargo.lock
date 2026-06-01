@@ -1027,6 +1027,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "exo-node"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "exo-caps",
+ "exo-policy",
+ "exo-runtime",
+ "exo-scry",
+ "notify",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "exo-policy"
 version = "0.1.0"
 dependencies = [
@@ -1083,6 +1104,7 @@ dependencies = [
  "claude-teams-bridge",
  "dirs 5.0.1",
  "duct",
+ "exo-node",
  "exomonad-core",
  "exomonad-proto",
  "http-body-util",
