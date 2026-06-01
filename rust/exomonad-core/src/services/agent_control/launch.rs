@@ -23,6 +23,7 @@ pub fn escape_for_shell_command(s: &str) -> String {
 /// Build the full shell command that launches `agent_type`, sourcing its prompt from
 /// `prompt_file` (never inline). Prepends `env_vars`; wraps in `nix develop` if `cwd`
 /// contains a `flake.nix`.
+#[allow(clippy::too_many_arguments)]
 pub fn build_agent_command(
     agent_type: AgentType,
     prompt_file: Option<&Path>,
@@ -31,6 +32,9 @@ pub fn build_agent_command(
     cwd: &Path,
     claude_flags: Option<&ClaudeSpawnFlags>,
     yolo: bool,
+    // Wrap in `nix develop` when `cwd` has a flake (classic mode runs agents in the dev
+    // shell). Experimental node mode launches plain, matching its root, so passes `false`.
+    wrap_nix: bool,
 ) -> String {
     let cmd = agent_type.command();
 
@@ -101,8 +105,8 @@ pub fn build_agent_command(
         format!("{} {}", env_prefix, agent_command)
     };
 
-    // Wrap in nix develop shell if flake.nix exists in cwd
-    if cwd.join("flake.nix").exists() {
+    // Wrap in nix develop shell if requested and flake.nix exists in cwd
+    if wrap_nix && cwd.join("flake.nix").exists() {
         info!("Wrapping agent command in nix develop shell");
         let escaped = full_command.replace('\'', "'\\''");
         format!("nix develop -c sh -c '{}'", escaped)

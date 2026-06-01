@@ -389,6 +389,7 @@ impl<
     /// `prompt_file` is an absolute path to a file containing the prompt text.
     /// The prompt is read at runtime via `$(cat ...)` to avoid shell quoting issues
     /// with arbitrary prompt content (apostrophes, backticks, $(), etc.).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn build_agent_command(
         agent_type: AgentType,
         prompt_file: Option<&Path>,
@@ -398,6 +399,7 @@ impl<
         claude_flags: Option<&ClaudeSpawnFlags>,
         yolo: bool,
     ) -> String {
+        // Classic mode always wraps in nix-develop when a flake is present.
         super::launch::build_agent_command(
             agent_type,
             prompt_file,
@@ -406,6 +408,7 @@ impl<
             cwd,
             claude_flags,
             yolo,
+            true,
         )
     }
 
@@ -895,7 +898,7 @@ mod tests {
     #[test]
     fn test_escape_for_shell_command_simple() {
         assert_eq!(
-            ACS::escape_for_shell_command("hello world"),
+            crate::services::agent_control::launch::escape_for_shell_command("hello world"),
             "'hello world'"
         );
     }
@@ -905,14 +908,14 @@ mod tests {
         // Standard shell escaping: end quote, escaped quote, start quote
         // 'user'\''s issue' = 'user' + \' + 's issue'
         assert_eq!(
-            ACS::escape_for_shell_command("user's issue"),
+            crate::services::agent_control::launch::escape_for_shell_command("user's issue"),
             r"'user'\''s issue'"
         );
     }
 
     #[test]
     fn test_escape_for_shell_command_shell_chars() {
-        let result = ACS::escape_for_shell_command("Test $VAR and `code`");
+        let result = crate::services::agent_control::launch::escape_for_shell_command("Test $VAR and `code`");
         assert!(result.contains("$VAR"));
         assert!(result.contains("`code`"));
         assert_eq!(result, "'Test $VAR and `code`'");

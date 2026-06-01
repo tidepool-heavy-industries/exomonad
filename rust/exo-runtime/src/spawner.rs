@@ -287,22 +287,18 @@ impl Runtime {
         })?;
         tokio::fs::write(&papers_path, papers_json).await?;
 
-        // Every value interpolated into `launch_cmd` is pasted into a shell, so each is
-        // shell-escaped — a name/path with a space or metachar must not break the command.
-        let esc = |s: &str| shell_escape::escape(s.to_string().into()).into_owned();
+        // (f) Launch the agent via exomonad's shared launch builder (reuse over reinvent):
+        // the prompt goes in a file (.exo/tmp), never inline — so a multi-line/quote-bearing
+        // task can't break shell parsing — and the CLI/flags are the proven ones. The node
+        // self-IDs from its papers (.mcp.json → `experimental node --papers`); the only env it
+        // needs is the boot context its bootstrap reads, set explicitly (not via inherited
+        // session env). Node children launch plain (no nix wrap), matching their root.
+        let mut env_vars: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        env_vars.insert("EXOMONAD_SWARM_RUN_ID".into(), self.run_id.clone());
+        env_vars.insert("EXOMONAD_TMUX_SESSION".into(), self.tmux_session.clone());
 
-        // (f) Launch the agent.
-        // The child self-IDs from its papers (via `.mcp.json` → `experimental node --papers`),
-        // so the only env it needs is the boot context its `bootstrap` reads. Set these
-        // explicitly rather than relying on inherited session env (the set-environment-timing
-        // bug that bit the root). `EXOMONAD_AGENT_ID/ROLE` are mcp-stdio-era and unused here.
-        let mut env_prefix = format!(
-            "EXOMONAD_SWARM_RUN_ID={} EXOMONAD_TMUX_SESSION={} ",
-            esc(&self.run_id),
-            esc(&self.tmux_session),
-        );
-
-        let agent_bin = match core.agent_type {
+        let agent_type = match core.agent_type {
             AgentType::Claude => {
                 crate::node_config::write_node_agent_config(&child_dir, &papers_path)
                     .await
@@ -311,10 +307,10 @@ impl Runtime {
                         child: Some(core.name.clone()),
                         detail: e.to_string(),
                     })?;
-
-                "claude --dangerously-skip-permissions"
+                exomonad_core::services::agent_control::AgentType::Claude
             }
             AgentType::Gemini => {
+                // Gemini discovers the node MCP server via GEMINI_CLI_SYSTEM_SETTINGS_PATH.
                 let mcp_config = serde_json::json!({
                     "mcpServers": {
                         "exomonad": {
@@ -324,24 +320,21 @@ impl Runtime {
                         }
                     }
                 });
-
-                // Gemini child hooks are not wired (not supported in the same command-type way)
                 let settings_path = papers_path.with_file_name("settings.json");
-                let settings = mcp_config.clone();
                 tokio::fs::write(
                     &settings_path,
-                    serde_json::to_vec_pretty(&settings).map_err(|e| SpawnError::Failed {
+                    serde_json::to_vec_pretty(&mcp_config).map_err(|e| SpawnError::Failed {
                         op: "write_gemini_settings",
                         child: Some(core.name.clone()),
                         detail: e.to_string(),
                     })?,
                 )
                 .await?;
-                env_prefix.push_str(&format!(
-                    "GEMINI_CLI_SYSTEM_SETTINGS_PATH={} ",
-                    esc(&settings_path.to_string_lossy())
-                ));
-                "gemini --yolo"
+                env_vars.insert(
+                    "GEMINI_CLI_SYSTEM_SETTINGS_PATH".into(),
+                    settings_path.to_string_lossy().into_owned(),
+                );
+                exomonad_core::services::agent_control::AgentType::Gemini
             }
             AgentType::Shoal => {
                 return Err(SpawnError::Failed {
@@ -352,10 +345,31 @@ impl Runtime {
             }
         };
 
-        // The agent (claude/gemini) receives ONLY its task as a positional arg. Its papers
-        // reach it via `.mcp.json` (`exomonad experimental node --papers …`), NOT a CLI flag —
-        // neither `claude` nor `gemini` accepts `--papers`.
-        let launch_cmd = format!("{} {} {}\n", env_prefix, agent_bin, esc(&core.task));
+        let prompt_file = exomonad_core::services::agent_control::launch::write_prompt_file(
+            &child_dir,
+            core.name.as_str(),
+            &core.task,
+        )
+        .await
+        .map_err(|e| SpawnError::Failed {
+            op: "write_prompt_file",
+            child: Some(core.name.clone()),
+            detail: e.to_string(),
+        })?;
+
+        let launch_cmd = format!(
+            "{}\n",
+            exomonad_core::services::agent_control::launch::build_agent_command(
+                agent_type,
+                Some(&prompt_file),
+                None,         // fork_session_id
+                &env_vars,
+                &child_dir,   // cwd (flake detection only; wrap_nix=false below)
+                None,         // claude_flags
+                true,         // yolo → gemini --yolo
+                false,        // wrap_nix: node children launch plain, like the root
+            )
+        );
 
         exo_caps::Tmux::paste(self, &pane, &launch_cmd)
             .await
