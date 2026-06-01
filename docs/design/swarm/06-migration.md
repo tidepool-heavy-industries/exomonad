@@ -177,7 +177,19 @@ from existing exomonad-core services / `Spawn.hs`): 2–3 Gemini leaves, no sub-
 
 **Converge:** contract re-frozen; `cargo test` green; then fork the Node TL.
 
-## Wave 2 — The node / sidecar (binary `mcp-stdio` mode) — **Node TL**
+## Wave 2 — The node / sidecar (binary `node` mode) — **Node TL**
+
+> **Status: DONE** (`exo-node` crate). Built as a dedicated `exo-node` crate + a thin
+> `exomonad node --papers` subcommand (and `exomonad hook --papers` for N4), beside the old
+> `serve`/`mcp-stdio` path (non-destructive). Real bootstrap (papers self-ID → `NodeContext`
+> holding a live `Runtime` + `NodeKind`); the five loop modules (N1 outbound / N2a dispatch /
+> N2b inbound / N3 self-poll / N4 hook) landed as conflict-free Gemini leaves; `run_node`
+> assembles them as concurrent tokio tasks with outbound-serve as the lifetime anchor. The
+> converge e2e (`tests/converge.rs`) proves the WorldEvent "no dead variant" gate, the
+> parent-side `SiblingMerged` fan-out, and a parent↔child bus round-trip with the spoof-proof
+> `from`. `notify`-watch cursor loop implements doc-02 *Cursor & restart* exactly (byte-offset,
+> temp+rename, torn-line, at-least-once). Module layout differs from the original `05` sketch
+> (own crate, not folded into `exomonad/src/`) — cleaner isolation of the new path.
 
 **Node TL (Claude).** Depends on the Runtime TL converging + the W0 spike decision + the
 Wave-1.5 cap completion (C2 is a hard prerequisite — N3 can't construct events without it).
