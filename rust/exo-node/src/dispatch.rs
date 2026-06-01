@@ -1,21 +1,15 @@
-//! **N2a — Last-hop dispatch.** Route one consumed ingestion entry INTO this agent, by the
-//! node's own `agent_type` (= `kind.agent_type()`) + CC team membership (resolved via
-//! `exo-scry`):
+//! **N2a — Last-hop dispatch.** Routes ingestion entries into the agent based on its
+//! `agent_type` and CC team membership. This module handles the final delivery of messages
+//! to the agent's native interface.
 //!
-//! | this node | mechanism |
-//! |---|---|
-//! | CC, in a team | write the CC Teams inbox → InboxPoller → `<teammate-message>` |
-//! | CC, no team   | tmux-paste into its own pane |
-//! | gemini        | tmux-paste into its own pane |
+//! Delivery mechanisms:
+//! - **Claude Code in a team**: Writes to the CC Teams inbox, which is then picked up
+//!   by the InboxPoller and delivered as a `<teammate-message>`.
+//! - **Claude Code (no team) or Gemini**: Uses tmux injection (buffer pattern) to paste
+//!   the message directly into the agent's pane, rendered with a `[from: X, kind: Y]` header.
 //!
-//! For the tmux-paste path, render the entry with a `[from: X, kind: Y]` header (the input
-//! box *is* the receive channel for non-CC runtimes). Reuse exomonad-core's tmux injection
-//! (buffer pattern) + CC-inbox delivery — adapt, don't rewrite.
-//!
-//! **Status: stub (N2a leaf fills this).** Acceptance: a `Chat` entry delivered to a gemini
-//! node lands pasted-with-header in its pane; a CC-in-team node's entry lands in its Teams
-//! inbox. The dispatch is pure last-hop — `kind`-based routing (event/control) is N2b's job;
-//! this only does the agent-facing write for entries N2b decides to deliver.
+//! This is pure last-hop dispatch; it focuses on the agent-facing write for entries
+//! that have already been routed to this node.
 
 use std::sync::Arc;
 
@@ -172,5 +166,65 @@ mod tests {
                 to: "bob".to_string()
             }
         );
+    }
+
+    #[test]
+    fn test_decide_lasthop_claude_in_team_no_me() {
+        use exo_scry::identity::TeamName;
+        use std::path::PathBuf;
+
+        let active_team = exo_scry::ActiveTeam {
+            claude_pid: None,
+            team: TeamName("myteam".to_string()),
+            tasks_dir: PathBuf::from("/tmp"),
+            lead_inbox: Some("lead".to_string()),
+            lead_session_id: None,
+            me: None,
+        };
+
+        let hop = decide_lasthop(AgentType::Claude, Some(active_team));
+        assert_eq!(
+            hop,
+            LastHop::TeamsInbox {
+                team: "myteam".to_string(),
+                to: "lead".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_decide_lasthop_claude_in_team_no_recipients() {
+        use exo_scry::identity::TeamName;
+        use std::path::PathBuf;
+
+        let active_team = exo_scry::ActiveTeam {
+            claude_pid: None,
+            team: TeamName("myteam".to_string()),
+            tasks_dir: PathBuf::from("/tmp"),
+            lead_inbox: None,
+            lead_session_id: None,
+            me: None,
+        };
+
+        let hop = decide_lasthop(AgentType::Claude, Some(active_team));
+        assert_eq!(hop, LastHop::TmuxPaste);
+    }
+
+    #[test]
+    fn test_render_entry_event() {
+        let entry = IngestionEntry {
+            v: 1,
+            ts: Utc::now(),
+            from: Persona::Synthetic(exo_caps::SyntheticName::new("github".to_string()).unwrap()),
+            msg: Message {
+                text: MessageBody::new("PR #1 Approved".to_string()).unwrap(),
+                summary: Summary::new("[PR READY]".to_string()).unwrap(),
+                kind: MessageKind::Event,
+            },
+        };
+
+        let rendered = render_entry(&entry);
+        assert!(rendered.contains("[from: github, kind: event]"));
+        assert!(rendered.contains("\n\n[PR READY]\nPR #1 Approved"));
     }
 }

@@ -1,15 +1,12 @@
-//! **N1 — Outbound.** Serve the node's `exo-policy` tools over rmcp/stdio, and route
-//! `send_message`/`notify_parent` through `Bus::deliver` (append to the *target's* ingestion
-//! inbox — runtime-agnostic; policy never names Teams or tmux).
+//! **N1 — Outbound.** Serves the node's `exo-policy` tools over rmcp/stdio and routes
+//! communication through the node's ingestion system. This module implements the rmcp
+//! stdio server that Claude Code or other agents connect to for tool execution.
 //!
-//! Refactors the `teams-mcp` outbound server (`rust/teams-mcp/src/main.rs`): instead of
-//! writing CC Teams inboxes directly, it exposes `role_def::<Runtime>(kind).tools` and the
-//! tools' `Bus::deliver` writes the **ingestion** inbox. The rmcp `tools/list` →
-//! `Tool::schema`, `tools/call` → `Tool::call(&*ctx.runtime, args)`.
-//!
-//! **Status: stub (N1 leaf fills this).** Acceptance: `tools/list` returns the role's tool
-//! schemas; `tools/call` dispatches to `Tool::call` against the real `Runtime`; a
-//! `notify_parent` call appends one `IngestionEntry` to `ctx.parent_inbox`.
+//! It exposes tools defined in `exo_policy::role_def` for the node's specific role.
+//! Tools like `send_message` and `notify_parent` are routed through the `Bus::deliver`
+//! mechanism, which appends `IngestionEntry` objects to target inboxes (e.g., the
+//! parent's ingestion inbox), maintaining runtime-agnostic communication where the
+//! policy layer doesn't need to know about Teams or tmux.
 
 use std::sync::Arc;
 

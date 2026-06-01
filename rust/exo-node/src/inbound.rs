@@ -493,4 +493,62 @@ mod tests {
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].msg.text.as_str(), "new");
     }
+
+    #[tokio::test]
+    async fn test_cursor_durability_across_restart() {
+        let dir = tempdir().unwrap();
+        let inbox_path = dir.path().join("pane-1.jsonl");
+        let cursor_path = inbox_path.with_extension("cursor");
+        let mut offset = 0;
+
+        // 1. Process N entries
+        write_entry(&inbox_path, "one");
+        write_entry(&inbox_path, "two");
+
+        let delivered = Arc::new(Mutex::new(Vec::new()));
+        let handler = MockHandler {
+            delivered: delivered.clone(),
+            fail_on: None,
+        };
+
+        process_inbox(&handler, &inbox_path, &cursor_path, &mut offset)
+            .await
+            .unwrap();
+
+        {
+            let d = delivered.lock().unwrap();
+            assert_eq!(d.len(), 2);
+        }
+
+        // 2. Simulate restart: reload offset from cursor file
+        let mut new_offset = std::fs::read_to_string(&cursor_path)
+            .unwrap()
+            .trim()
+            .parse::<u64>()
+            .unwrap();
+        assert_eq!(new_offset, offset);
+        assert!(new_offset > 0);
+
+        // 3. Append M more entries
+        write_entry(&inbox_path, "three");
+        write_entry(&inbox_path, "four");
+
+        let delivered2 = Arc::new(Mutex::new(Vec::new()));
+        let handler2 = MockHandler {
+            delivered: delivered2.clone(),
+            fail_on: None,
+        };
+
+        // 4. Process again, should only get the M new ones
+        process_inbox(&handler2, &inbox_path, &cursor_path, &mut new_offset)
+            .await
+            .unwrap();
+
+        {
+            let d = delivered2.lock().unwrap();
+            assert_eq!(d.len(), 2);
+            assert_eq!(d[0].msg.text.as_str(), "three");
+            assert_eq!(d[1].msg.text.as_str(), "four");
+        }
+    }
 }

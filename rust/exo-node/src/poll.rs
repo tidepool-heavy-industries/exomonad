@@ -1,23 +1,16 @@
-//! **N3 — Self-poll.** The per-agent realization of the old central poller. While this node
-//! has an open PR, periodically poll its own PR/CI state, turn transitions into
-//! [`exo_policy::WorldEvent`]s, run `exo_policy::on_world_event`, and act on the result
-//! (`InjectMessage` → own inbox; `NotifyParent` → parent inbox).
+//! **N3 — Self-poll.** Implements per-agent polling of PR and CI state. When a node has an
+//! open PR, this module periodically monitors its status and translates state transitions
+//! into [`exo_policy::WorldEvent`]s.
 //!
-//! WorldEvent producers (the "no dead variant" converge gate — see `06-migration.md`):
-//! - `PrReview { state }` ← `ctx.runtime.review_state(pr)` (C2 cap).
-//! - `CiStatus { status }` ← `ctx.runtime.ci_status(pr)` (C2 cap).
-//! - `ReviewTimeout` ← when `review_state(pr).is_none()` past the ~15-min window (the window
-//!   **resets on each feedback round**). Reuse `exomonad-core/.../github_poller.rs` timeout
-//!   logic — adapt, don't rewrite.
-//! - `SiblingMerged` is NOT produced here — it's parent-side, fanned out on the parent's
-//!   merge path (it holds the child ledger). See [`crate::poll::fan_sibling_merged`].
+//! It triggers `exo_policy::on_world_event` and handles the resulting actions, such as
+//! injecting messages into the node's own inbox or notifying its parent. It monitors:
+//! - `PrReview`: Transitions in PR review state (e.g., Changes Requested, Approved).
+//! - `CiStatus`: Changes in CI build status.
+//! - `ReviewTimeout`: Detects when a review is overdue based on configurable windows.
 //!
-//! Discipline (bounds API load — no central poller): poll **every ~3 min, ONLY while an open
-//! PR exists** (no PR → no polling → a swarm is sparse). **Tracked `AbortHandle`:** abort the
-//! poll task when the PR merges/closes; a re-`file_pr` must dedup/replace, never leak a second
-//! poller (a bare `tokio::spawn` double-polls).
-//!
-//! **Status: stub (N3 leaf fills this).** Acceptance: with a mock GitHub cap returning
+//! Polling is disciplined to minimize API load, running only when an open PR exists.
+//! Polling tasks are managed via `AbortHandle` to ensure they are cleaned up when a PR
+//! is closed or merged, preventing duplicate pollers.
 //! Approved, one poll cycle emits a `PrReview{Approved}` → `NotifyParent([PR READY])` to the
 //! parent inbox; aborting closes the task with no leak.
 
