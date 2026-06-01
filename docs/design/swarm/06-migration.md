@@ -190,14 +190,26 @@ into the node. Scaffold: the node bootstrap (self-ID via `exo-scry` → build
 | N1 | **Outbound** — rmcp adapter exposing `exo-policy` `Tool`s; `send_message`/`notify_parent` via `Bus`. (Refactor teams-mcp outbound: write the *ingestion* inbox, not CC Teams directly.) |
 | N2a | **Last-hop dispatch** — route one entry by `node_kind.agent_type()`: CC-in-team → Teams inbox write (via `exo-scry` membership); else → tmux-paste. (Reuse exomonad-core delivery.) |
 | N2b | **Inbound loop** — drive the Bus read side (cursor + `notify`-watch) → per new entry match `kind`: `Chat`→dispatch(N2a), `Event`→parse `WorldEvent`→`on_world_event`→act, `Control`→shutdown self-kill. |
-| N3 | **Self-poll** — periodic own-PR/CI poll → `WorldEvent` → `on_world_event` → `InjectMessage`/`NotifyParent`. (Per-agent realization of the old central poller; reuse `github_poller` timeout logic.) **Needs a tracked `AbortHandle`**: abort the poll task when the PR merges/closes, and re-`file_pr` must not spawn a second poller (dedup/replace) — a bare `tokio::spawn` leaks and double-polls. |
+| N3 | **Self-poll** — periodic own-PR/CI poll → `WorldEvent` → `on_world_event` → `InjectMessage`/`NotifyParent`. (Per-agent realization of the old central poller; reuse `github_poller` timeout logic; reads via the C2 cap methods `review_state`/`ci_status`.) **Needs a tracked `AbortHandle`**: abort the poll task when the PR merges/closes, and re-`file_pr` must not spawn a second poller (dedup/replace) — a bare `tokio::spawn` leaks and double-polls. |
 | N4 | **`exomonad hook` mode** — CC payload → `exo-policy` `pre_tool_use`/`stop`/`session_start` → verdict. No server. |
 
 The inbound loop is split (N2a dispatch | N2b loop); the read side (cursor +
 `notify`-watch) is the `Bus` cap from Wave 1, which N2b consumes.
 
-**Converge:** N assembles the stimuli as tokio tasks in one process; e2e — spawn a
-node, round-trip a message parent↔child, fire a synthetic event.
+**Every `WorldEvent` variant must have a live producer** — `on_world_event` is a complete
+consumer (Wave 3), so the Node wave must wire each variant to a real source, with **no dead
+variant** (a case the handler matches but nothing ever emits):
+- `PrReview { state }` → **N3** self-poll, from `ctx.review_state(pr)` (C2).
+- `CiStatus { status }` → **N3** self-poll, from `ctx.ci_status(pr)` (C2).
+- `ReviewTimeout` → **N3** self-poll, when `review_state(pr).is_none()` past the ~15-min
+  window (resets on each feedback round).
+- `SiblingMerged { pr, branch }` → **the parent**, fanned out to the other siblings on its
+  merge path (it holds the child ledger), **not** self-poll.
+
+**Converge:** N assembles the stimuli as tokio tasks in one process; **every `WorldEvent`
+variant has a live producer (no dead variant)**; e2e — spawn a node, round-trip a message
+parent↔child, fire each event end-to-end (a real poll-driven `PrReview`/`CiStatus`, a
+parent-driven `SiblingMerged`), not just a synthetic injection.
 
 ---
 
