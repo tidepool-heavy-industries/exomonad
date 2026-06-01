@@ -16,6 +16,7 @@ pub mod bus;
 pub mod spawner;
 pub mod lifecycle;
 pub mod papers;
+pub mod paths;
 
 // IO caps — one trait per file (see `docs/design/swarm/05-crates-and-binary.md`).
 pub mod git;
