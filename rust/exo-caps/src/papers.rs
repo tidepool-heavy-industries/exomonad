@@ -7,7 +7,7 @@
 //! from `role` ([`NodeKind::agent_type`]). The `pane` is the universal key; `parent_inbox`
 //! is the direct up-edge for `Bus::deliver(Parent, …)` (`None` only for the root).
 
-use crate::types::{Branch, NodeKind, NodePath, PaneId};
+use crate::types::{AgentName, Branch, NodeKind, NodePath, PaneId};
 use crate::InboxPath;
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +39,21 @@ fn default_papers_version() -> u32 {
 
 impl NodePapers {
     pub const VERSION: u32 = 1;
+
+    /// Construct papers for the root node. The root has no parent (`parent_inbox` = `None`).
+    pub fn root(pane: PaneId) -> Self {
+        NodePapers {
+            v: Self::VERSION,
+            path: NodePath::new(vec![
+                AgentName::new("root".into()).expect("valid agent name")
+            ])
+            .expect("valid node path"),
+            branch: Branch::new("root".into()).expect("valid branch name"),
+            role: NodeKind::Root,
+            pane,
+            parent_inbox: None,
+        }
+    }
 
     /// Construct papers for a node being born (`v` set to the current [`VERSION`]).
     pub fn new(
@@ -106,5 +121,17 @@ mod tests {
             r#"{"path":["root"],"branch":"main","role":"root","pane":"%1","parent_inbox":null}"#;
         let papers: NodePapers = serde_json::from_str(json).unwrap();
         assert_eq!(papers.v, 1);
+    }
+
+    #[test]
+    fn root_constructor() {
+        let pane = PaneId::new("%1".into()).unwrap();
+        let papers = NodePapers::root(pane.clone());
+        assert_eq!(papers.v, NodePapers::VERSION);
+        assert_eq!(papers.role, NodeKind::Root);
+        assert!(papers.parent_inbox.is_none());
+        assert_eq!(papers.path.name().as_str(), "root");
+        assert_eq!(papers.branch.as_str(), "root");
+        assert_eq!(papers.pane, pane);
     }
 }
