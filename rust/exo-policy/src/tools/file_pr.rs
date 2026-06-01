@@ -37,9 +37,6 @@ impl FilePr {
 
         let base = Branch::new(base_name.to_string())?;
 
-        // Check for an existing PR (as per spec, although file_pr is idempotent).
-        let _existing = ctx.pr_for_branch(&current).await?;
-
         // Create or update the PR.
         let n = ctx.file_pr(&args.title, &args.body, &base).await?;
 
