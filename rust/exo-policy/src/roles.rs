@@ -10,9 +10,14 @@
 //! compiles and downstream (the sidecar) can already call `role_def`.
 
 use crate::caps::PolicyCaps;
-use crate::events::{EventAction, WorldEvent};
-use crate::hooks::{HookDecision, HookInput, SessionStartOutput, StopDecision};
+use crate::events::{on_world_event, EventAction, WorldEvent};
+use crate::hooks::{pre_tool_use, session_start, stop, HookDecision, HookInput, SessionStartOutput, StopDecision};
 use crate::tool::{BoxFuture, Tool};
+use crate::tools::file_pr::FilePr;
+use crate::tools::merge_pr::MergePr;
+use crate::tools::messaging::{NotifyParent, SendMessage};
+use crate::tools::spawn::{ForkWave, SpawnGemini, SpawnWorker};
+use crate::tools::tasks::{TaskGet, TaskList, TaskUpdate};
 use exo_caps::NodeKind;
 
 /// A hook is an async fn over the concrete runtime `R`. Stored as a plain fn-pointer so the
@@ -35,39 +40,53 @@ pub struct RoleDef<R: Send + Sync> {
     pub on_event: OnEventFn<R>,
 }
 
-// Default no-op hooks — the scaffold's wiring so the table compiles before P6/P7 supply the
-// real fns. P7 replaces these per-role with the ported guard/stop/event logic.
-fn allow_all<'a, R: PolicyCaps>(_ctx: &'a R, _input: &'a HookInput) -> BoxFuture<'a, HookDecision> {
-    Box::pin(async { HookDecision::Allow })
-}
-fn allow_stop<R: PolicyCaps>(_ctx: &R) -> BoxFuture<'_, StopDecision> {
-    Box::pin(async { StopDecision::Allow })
-}
-fn no_context<R: PolicyCaps>(_ctx: &R) -> BoxFuture<'_, SessionStartOutput> {
-    Box::pin(async { SessionStartOutput::default() })
-}
-fn no_event<'a, R: PolicyCaps>(_ctx: &'a R, _e: &'a WorldEvent) -> BoxFuture<'a, EventAction> {
-    Box::pin(async { EventAction::NoAction })
-}
-
 /// The per-role policy table. Hand-written `match` — the single place a role's tool list +
 /// hooks are named. P1–P6 add tool types to the `tools` vecs; P7 swaps the no-op hooks for
 /// the real per-role fns.
 pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
-    // Every arm currently shares the no-op hooks + an empty toolset. Distinct arms are kept
-    // so P1–P7 fill each independently without restructuring.
-    let base = || RoleDef::<R> {
-        tools: Vec::new(),
-        pre_tool_use: allow_all::<R>,
-        stop: allow_stop::<R>,
-        session_start: no_context::<R>,
-        on_event: no_event::<R>,
-    };
     match kind {
-        NodeKind::Root => base(),
-        NodeKind::Tl => base(),
-        NodeKind::Dev => base(),
-        NodeKind::Worker => base(),
+        NodeKind::Root | NodeKind::Tl => RoleDef {
+            tools: vec![
+                Box::new(ForkWave),
+                Box::new(SpawnGemini),
+                Box::new(SpawnWorker),
+                Box::new(FilePr),
+                Box::new(MergePr),
+                Box::new(NotifyParent),
+                Box::new(SendMessage),
+            ],
+            pre_tool_use,
+            stop,
+            session_start,
+            on_event: on_world_event,
+        },
+        NodeKind::Dev => RoleDef {
+            tools: vec![
+                Box::new(FilePr),
+                Box::new(NotifyParent),
+                Box::new(SendMessage),
+                Box::new(TaskList),
+                Box::new(TaskGet),
+                Box::new(TaskUpdate),
+            ],
+            pre_tool_use,
+            stop,
+            session_start,
+            on_event: on_world_event,
+        },
+        NodeKind::Worker => RoleDef {
+            tools: vec![
+                Box::new(NotifyParent),
+                Box::new(SendMessage),
+                Box::new(TaskList),
+                Box::new(TaskGet),
+                Box::new(TaskUpdate),
+            ],
+            pre_tool_use,
+            stop,
+            session_start,
+            on_event: on_world_event,
+        },
     }
 }
 
@@ -77,16 +96,33 @@ mod tests {
     use crate::testing::MockRuntime;
 
     #[tokio::test]
-    async fn every_role_builds_and_hooks_default_to_allow() {
+    async fn every_role_builds_non_empty_tools() {
         for kind in [NodeKind::Root, NodeKind::Tl, NodeKind::Dev, NodeKind::Worker] {
             let rd = role_def::<MockRuntime>(kind);
-            let ctx = MockRuntime::default();
-            let input = HookInput {
-                tool_name: "x".into(),
-                tool_input: serde_json::Value::Null,
-            };
-            assert_eq!((rd.pre_tool_use)(&ctx, &input).await, HookDecision::Allow);
-            assert_eq!((rd.stop)(&ctx).await, StopDecision::Allow);
+            assert!(!rd.tools.is_empty(), "Role {:?} should have tools", kind);
+            
+            // Verify hooks are wired (pointers are non-null by definition of fn pointers in Rust)
+            assert_eq!(rd.pre_tool_use as usize, pre_tool_use::<MockRuntime> as *const () as usize);
+            assert_eq!(rd.stop as usize, stop::<MockRuntime> as *const () as usize);
+            assert_eq!(rd.session_start as usize, session_start::<MockRuntime> as *const () as usize);
+            assert_eq!(rd.on_event as usize, on_world_event::<MockRuntime> as *const () as usize);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_role_stop_gate_blocks_when_needed() {
+        let rd = role_def::<MockRuntime>(NodeKind::Dev);
+        let ctx = MockRuntime {
+            pr_for_branch: Some(123),
+            has_unaddressed_changes: true,
+            ..Default::default()
+        };
+        
+        match (rd.stop)(&ctx).await {
+            StopDecision::Block { reason } => {
+                assert!(reason.contains("Open PR #123 has unaddressed ChangesRequested"));
+            }
+            _ => panic!("Should be blocked by unaddressed changes"),
         }
     }
 }

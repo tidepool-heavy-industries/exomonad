@@ -9,6 +9,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::BoxFuture;
+use exo_caps::GitHub;
+
 /// The one typed event enum. A `kind=event` ingestion entry has its body parsed into this
 /// before `on_world_event` runs; the in-process self-poll constructs one directly. There is
 /// **no** parallel `EventType` on the message envelope (`MessageKind::Event` is a bare tag).
@@ -62,9 +65,58 @@ pub enum EventAction {
     NoAction,
 }
 
+pub fn on_world_event<'a, R: GitHub + Send + Sync>(
+    _ctx: &'a R,
+    e: &'a WorldEvent,
+) -> BoxFuture<'a, EventAction> {
+    Box::pin(async move {
+        match e {
+            WorldEvent::PrReview { pr, state } => match state {
+                ReviewState::Approved => EventAction::NotifyParent {
+                    text: format!(
+                        "[PR READY] PR #{} approved by Copilot review. Merge with `merge_pr` tool.",
+                        pr
+                    ),
+                    summary: "[PR READY]".to_string(),
+                },
+                ReviewState::ChangesRequested | ReviewState::Commented => EventAction::NoAction,
+            },
+            WorldEvent::SiblingMerged { pr: _, branch } => {
+                let parent_branch = if let Some(last_dot) = branch.rfind('.') {
+                    &branch[..last_dot]
+                } else {
+                    "main"
+                };
+                EventAction::InjectMessage {
+                    text: format!(
+                        "[Sibling Merged] PR on branch {} was merged into {}. Rebase your branch to pick up the changes: git fetch origin && git rebase origin/{}",
+                        branch, parent_branch, parent_branch
+                    ),
+                    summary: "[Sibling Merged]".to_string(),
+                }
+            }
+            WorldEvent::CiStatus { pr, status } => match status {
+                CiStatus::Failing => EventAction::NotifyParent {
+                    text: format!("[CI FAILING] PR #{} has failing CI status.", pr),
+                    summary: "[CI FAILING]".to_string(),
+                },
+                CiStatus::Passing | CiStatus::Pending => EventAction::NoAction,
+            },
+            WorldEvent::ReviewTimeout { pr } => EventAction::NotifyParent {
+                text: format!(
+                    "[REVIEW TIMEOUT] PR #{} — no Copilot review after 15 minutes. Merge with `merge_pr` using `force: true`.",
+                    pr
+                ),
+                summary: "[REVIEW TIMEOUT]".to_string(),
+            },
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::MockRuntime;
 
     #[test]
     fn world_event_serde_round_trips() {
@@ -88,5 +140,65 @@ mod tests {
             serde_json::to_value(&a).unwrap(),
             serde_json::json!({ "action": "no_action" })
         );
+    }
+
+    #[tokio::test]
+    async fn test_on_world_event_approved() {
+        let ctx = MockRuntime::default();
+        let e = WorldEvent::PrReview {
+            pr: 123,
+            state: ReviewState::Approved,
+        };
+        let action = on_world_event(&ctx, &e).await;
+        if let EventAction::NotifyParent { text, summary } = action {
+            assert!(text.contains("[PR READY]"));
+            assert!(text.contains("123"));
+            assert_eq!(summary, "[PR READY]");
+        } else {
+            panic!("Expected NotifyParent, got {:?}", action);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_on_world_event_timeout() {
+        let ctx = MockRuntime::default();
+        let e = WorldEvent::ReviewTimeout { pr: 123 };
+        let action = on_world_event(&ctx, &e).await;
+        if let EventAction::NotifyParent { text, summary } = action {
+            assert!(text.contains("[REVIEW TIMEOUT]"));
+            assert!(text.contains("123"));
+            assert_eq!(summary, "[REVIEW TIMEOUT]");
+        } else {
+            panic!("Expected NotifyParent, got {:?}", action);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_on_world_event_changes_requested() {
+        let ctx = MockRuntime::default();
+        let e = WorldEvent::PrReview {
+            pr: 123,
+            state: ReviewState::ChangesRequested,
+        };
+        let action = on_world_event(&ctx, &e).await;
+        assert_eq!(action, EventAction::NoAction);
+    }
+
+    #[tokio::test]
+    async fn test_on_world_event_sibling_merged() {
+        let ctx = MockRuntime::default();
+        let e = WorldEvent::SiblingMerged {
+            pr: 123,
+            branch: "main.feature-a".to_string(),
+        };
+        let action = on_world_event(&ctx, &e).await;
+        if let EventAction::InjectMessage { text, summary } = action {
+            assert!(text.contains("[Sibling Merged]"));
+            assert!(text.contains("main.feature-a"));
+            assert!(text.contains("merged into main"));
+            assert_eq!(summary, "[Sibling Merged]");
+        } else {
+            panic!("Expected InjectMessage, got {:?}", action);
+        }
     }
 }

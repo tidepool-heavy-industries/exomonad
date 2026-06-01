@@ -101,10 +101,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_pr_self_merge_blocked() {
-        let mut mock = MockRuntime::default();
         let branch = Branch::new("feat.topic".into()).unwrap();
-        mock.current_branch = branch.clone();
-        mock.pr_for_branch = Some(123); // Current branch has PR 123
+        let mock = MockRuntime {
+            current_branch: branch.clone(),
+            pr_for_branch: Some(123), // Current branch has PR 123
+            ..Default::default()
+        };
 
         let args = MergePrArgs { pr: 123 }; // Trying to merge own PR 123
         let out = MergePr::run(&mock, args).await.unwrap();
@@ -123,8 +125,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_pr_unaddressed_changes_blocked() {
-        let mut mock = MockRuntime::default();
-        mock.has_unaddressed_changes = true;
+        let mock = MockRuntime {
+            has_unaddressed_changes: true,
+            ..Default::default()
+        };
 
         let args = MergePrArgs { pr: 123 };
         let out = MergePr::run(&mock, args).await.unwrap();
