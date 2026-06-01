@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::tool::BoxFuture;
-use exo_caps::{Git, GitHub};
+use exo_caps::{Git, GitHub, Log};
 
 /// A `PreToolUse` verdict. `Modify` rewrites the tool input in place (the PII-rewrite path).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,16 +90,19 @@ pub fn pre_tool_use<'a, R: Send + Sync>(
 // TODO(cap): The stop hook needs to query the PR for the current branch. Currently
 // this requires Git + GitHub bounds. If we add pr_for_current_branch() to GitHub,
 // we can drop the Git bound.
-pub fn stop<'a, R: Git + GitHub + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, StopDecision> {
+pub fn stop<'a, R: Git + GitHub + Log + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, StopDecision> {
     Box::pin(async move {
-        // The live PR-gate: block if there's an open PR with unaddressed changes.
-        // Fail closed: block on error so the agent doesn't exit on transient failures.
+        // The live PR-gate: block ONLY when there's an open PR with unaddressed changes.
+        // Fail OPEN on any error (missing token, GitHub unreachable, transient): a hook must
+        // never wedge an agent in its turn-loop — that bricks the session. Matches the
+        // documented fail-open contract; the gate is best-effort, not a hard barrier.
         let branch = match ctx.current_branch().await {
             Ok(b) => b,
             Err(e) => {
-                return StopDecision::Block {
-                    reason: format!("Failed to get current branch: {}", e),
-                }
+                ctx.error(&format!(
+                    "stop gate: could not read branch, allowing exit: {e}"
+                ));
+                return StopDecision::Allow;
             }
         };
 
@@ -107,9 +110,11 @@ pub fn stop<'a, R: Git + GitHub + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, Stop
             Ok(Some(pr)) => pr,
             Ok(None) => return StopDecision::Allow,
             Err(e) => {
-                return StopDecision::Block {
-                    reason: format!("Failed to query PR for branch '{}': {}", branch.as_str(), e),
-                }
+                ctx.error(&format!(
+                    "stop gate: could not query PR for '{}', allowing exit: {e}",
+                    branch.as_str()
+                ));
+                return StopDecision::Allow;
             }
         };
 
@@ -118,11 +123,21 @@ pub fn stop<'a, R: Git + GitHub + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, Stop
                 reason: format!("Open PR #{} has unaddressed ChangesRequested", pr),
             },
             Ok(false) => StopDecision::Allow,
-            Err(e) => StopDecision::Block {
-                reason: format!("Failed to check PR #{} changes: {}", pr, e),
-            },
+            Err(e) => {
+                ctx.error(&format!(
+                    "stop gate: could not check PR #{pr} changes, allowing exit: {e}"
+                ));
+                StopDecision::Allow
+            }
         }
     })
+}
+
+/// Stop hook for nodes that never file a PR (root, worker): always allow exit — there is
+/// nothing to gate on, and querying GitHub would be pointless (and could wedge). The root
+/// especially must never be gated: blocking it bricks the human's session.
+pub fn stop_allow<R: Send + Sync>(_ctx: &R) -> BoxFuture<'_, StopDecision> {
+    Box::pin(async move { StopDecision::Allow })
 }
 
 pub fn session_start<'a, R: Send + Sync>(_ctx: &'a R) -> BoxFuture<'a, SessionStartOutput> {

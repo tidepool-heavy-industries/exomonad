@@ -12,7 +12,8 @@
 use crate::caps::PolicyCaps;
 use crate::events::{on_world_event, EventAction, WorldEvent};
 use crate::hooks::{
-    pre_tool_use, session_start, stop, HookDecision, HookInput, SessionStartOutput, StopDecision,
+    pre_tool_use, session_start, stop, stop_allow, HookDecision, HookInput, SessionStartOutput,
+    StopDecision,
 };
 use crate::tool::{BoxFuture, Tool};
 use crate::tools::file_pr::FilePr;
@@ -58,7 +59,8 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
                 Box::new(SendMessage),
             ],
             pre_tool_use,
-            stop,
+            // Root has no upward PR — never gate its exit (blocking it bricks the session).
+            stop: stop_allow,
             session_start,
             on_event: on_world_event,
         },
@@ -101,7 +103,8 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
                 Box::new(TaskUpdate),
             ],
             pre_tool_use,
-            stop,
+            // Workers are ephemeral and file no PR — nothing to gate on.
+            stop: stop_allow,
             session_start,
             on_event: on_world_event,
         },
@@ -129,7 +132,12 @@ mod tests {
                 rd.pre_tool_use as usize,
                 pre_tool_use::<MockRuntime> as *const () as usize
             );
-            assert_eq!(rd.stop as usize, stop::<MockRuntime> as *const () as usize);
+            // Root/Worker never file a PR → no gate (stop_allow); Tl/Dev gate via `stop`.
+            let expected_stop = match kind {
+                NodeKind::Root | NodeKind::Worker => stop_allow::<MockRuntime> as *const () as usize,
+                NodeKind::Tl | NodeKind::Dev => stop::<MockRuntime> as *const () as usize,
+            };
+            assert_eq!(rd.stop as usize, expected_stop, "Role {:?} stop fn", kind);
             assert_eq!(
                 rd.session_start as usize,
                 session_start::<MockRuntime> as *const () as usize
