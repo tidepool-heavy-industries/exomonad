@@ -54,24 +54,51 @@ Node assembly (which would re-introduce the churn the freeze prevents).
 - **`merge_pr` lacks `force`.** Both its own message and the `ReviewTimeout` event tell
   agents to "use `force: true`," but `MergePrArgs` has no such field. Add it.
 
-## Open — build work (the Node TL / Wave 2, after cap-completion)
+## Open — build work (remaining)
 
+- **`exomonad experimental init` — the node-mode entry point (NOT YET BUILT).** The only
+  thing standing between "merged" and "a human can run it." Today the experimental surface
+  is child-side only (`experimental node` / `experimental hook`, which a parent writes into
+  a child's `.mcp.json`/settings). There is no command to bootstrap a node-mode *root* from
+  scratch: write the root's papers (`node.json`), an `.mcp.json` pointing CC at
+  `experimental node --papers`, the experimental hooks in settings, and launch the root
+  pane. Lighter than production `init` (no central server to stand up). Reuses the spawner's
+  config-writing logic for the root. Needs a short design pass (root papers schema, no-server
+  tmux setup) then a leaf.
 - **Per-role toolset content** ([04](04-policy.md)) — remaining Bucket-C tools/hooks/events,
-  ported one at a time as each Haskell twin retires.
-- **Sidecar concurrency** — the three stimuli (outbound MCP, inbound watch, self-poll) as
-  tokio tasks in one process; `R: Send + Sync + 'static` at the dispatch boundary.
-- **`exomonad hook` mode wiring** — CC payload → `pre_tool_use`/`stop`/`session_start`.
-- **`session_start` papers bootstrap.** Currently a `default()` no-op; the root identity
-  self-ID (papers-based, doc 01) is unported — a real N-leaf, not polish.
+  ported one at a time as each Haskell twin retires (incremental, demand-driven).
 
-## Open — known missing feature
+## Open — optional liveness feature (NOT a convergence blocker)
 
 - **Idle / presence notifications.** Native teammates emit `idle_notification` on
-  turn-end; we don't. **Required for convergence** — a sub-TL waiting on a wave can't
-  detect completion without it (it would deadlock). The sidecar emits when its agent goes
-  quiet. Not yet built; a Wave-2 prerequisite, not an optional nicety.
+  turn-end; we don't. This is a **liveness nicety, not a convergence requirement** —
+  convergence is event-driven: the N3 self-poll produces `CiStatus`/`PrReview`/`ReviewTimeout`
+  `WorldEvent`s that wake the parent (`[PR READY]`/`[FIXES PUSHED]`/`[REVIEW TIMEOUT]`), and
+  children signal completion explicitly via `notify_parent`. A TL waiting on a wave wakes on
+  those GitHub events, not on idle pings — so the fold does **not** deadlock without this.
+  Where it would help: a human watching liveness, or detecting a child that went quiet
+  without filing a PR or notifying. Undesigned; if built, the trigger is the Stop hook
+  (turn-end), emitting presence to the parent inbox. Needs a design pass before any leaf.
 
 ## Done (merged to main — Wave 1 + Wave 3)
+
+- **Cap-completion wave (#912–#914, #921).** All four gaps below closed: spawner spec
+  fields ported; `GitHub` review-state/CI-status reads added (feed the self-poll);
+  `pre_tool_use` corrected to default-allow nudges; `merge_pr` `force`. The "do BEFORE Node"
+  section above is historical.
+- **Wave 2 — `exo-node` sidecar (#920).** Three concurrent loops (outbound MCP / inbound
+  watch / self-poll) as tokio tasks with outbound-closure shutdown; `exomonad experimental
+  node` + `experimental hook` wiring; `session_start` identity bootstrap (N4 wrapper injects
+  role/branch/parent — real, not a no-op); all four `WorldEvent` variants have live producers.
+- **Experimental namespace + invocation single-source (#921, e238ceeb).** Child wiring goes
+  through `exomonad experimental node`/`hook`; the invocation strings live once in
+  `exo_caps::invocation`.
+- **Wave 1 hardening (#922, #923).** `merge_pr` now selects merge strategy + does best-effort
+  post-merge `git fetch` (agent teardown stays parent-side by design); `exo-node` gained
+  bootstrap/hook(Stop+Deny)/inbound-cursor-restart/dispatch coverage + honest module docs.
+  **Still open:** `poll_once` edge-trigger test (needs a pure-fn seam) and the
+  `exo-runtime` bus/spawner deterministic integration tests.
+
 
 - **`exo-caps`** — full contract: validated newtypes, `Message`/`IngestionEntry` split,
   `NodePapers`, per-cap errors, `fold_children` lifecycle, `Spawner`/`Bus` seam.
