@@ -1,0 +1,32 @@
+[package]
+name = "exo-node"
+version = "0.1.0"
+edition = "2021"
+description = "The per-node sidecar: assembles exo-runtime + exo-policy into the two-loop node mode (outbound MCP serve + inbound ingestion-inbox watch + self-poll)."
+
+[lib]
+name = "exo_node"
+path = "src/lib.rs"
+
+[dependencies]
+exo-caps = { path = "../exo-caps" }
+exo-runtime = { path = "../exo-runtime" }
+exo-policy = { path = "../exo-policy" }
+exo-scry = { path = "../exo-scry" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+# Outbound MCP (N1): the rmcp server, same version teams-mcp uses.
+rmcp = { version = "1.7.0", features = ["server", "transport-io"] }
+# Inbound watch (N2b): event-driven file watching — never a poll loop, never hand-rolled inotify.
+notify = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

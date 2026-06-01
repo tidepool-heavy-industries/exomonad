@@ -96,6 +96,15 @@ enum Commands {
         name: String,
     },
 
+    /// Run the swarm-sidecar node mode (Wave 2): self-ID from papers, then the two-loop
+    /// sidecar (outbound MCP serve + inbound ingestion-inbox watch + self-poll). The new
+    /// path; coexists with the WASM `serve`/`mcp-stdio` during transition.
+    Node {
+        /// Path to this node's birth papers (`node.json`), written by the parent at spawn.
+        #[arg(long)]
+        papers: std::path::PathBuf,
+    },
+
     /// Reply to a UI request
     Reply {
         /// Request ID
@@ -137,6 +146,14 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::McpStdio { ref role, ref name } => {
             return mcp_stdio::run(role, name).await;
+        }
+
+        Commands::Node { ref papers } => {
+            let cwd = std::env::current_dir().context("resolving node cwd")?;
+            let ctx = exo_node::bootstrap(papers, cwd)
+                .map(std::sync::Arc::new)
+                .context("node self-ID / bootstrap")?;
+            return exo_node::run_node(ctx).await.context("node run");
         }
 
         Commands::Recompile { ref role } => {
