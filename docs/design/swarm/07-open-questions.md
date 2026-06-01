@@ -54,14 +54,33 @@ Node assembly (which would re-introduce the churn the freeze prevents).
 - **`merge_pr` lacks `force`.** Both its own message and the `ReviewTimeout` event tell
   agents to "use `force: true`," but `MergePrArgs` has no such field. Add it.
 
+## First live smoke (2026-06-01) — core loop validated
+
+A human-run `experimental init` + `fork_wave` test confirmed the loop end-to-end: spawn →
+child MCP connect → spec injection → child `notify_parent` → parent `send_message` reply, all
+push-based (no polling). The defects it surfaced are now fixed or tracked:
+
+- **Stop hook bricked the session** (fail-closed + no token + root gating its own non-PR) —
+  **fixed**: root/worker skip the gate, the gate fails open, and the generated Stop command
+  carries a `gh auth token` fallback.
+- **Teams last-hop**: `TeamCreate` was unreachable (Teams is env-gated) so delivery fell back
+  to tmux-paste — **fixed**: node launch now sets `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
+- **tmux windows all named `claude`** — **fixed**: windows are `{emoji} {slug}`.
+- **`.exo/` runtime artifacts not gitignored** — **fixed**.
+
 ## Open — build work (remaining)
 
 - **Per-role toolset content** ([04](04-policy.md)) — remaining Bucket-C tools/hooks/events,
   ported one at a time as each Haskell twin retires (incremental, demand-driven).
-- **CC last-hop into a root pane (unverified, runtime).** `experimental init` stands up the
-  root; the one untested hop is delivering a child's message *into the root's CC conversation*
-  (Teams-inbox route needs the root to `TeamCreate`; the tmux-paste fallback into a CC pane is
-  unproven). Surfaces on first real smoke, not a build blocker.
+- **Remaining cap reuse** — Git → `GitWorktreeService`, GitHub → `GitHubService` (structured
+  errors, health/timeout/retry). Tmux-paste + agent-launch already reuse exomonad-core.
+- **`fork_wave` clean-git precondition** — docs say it requires clean+pushed state; it does
+  not enforce that. Reconcile: drop-and-document (recommended — the gate doesn't exist) or add it.
+- **Gemini quota orphan** — a rate-limited Gemini child sits at an interactive modal and never
+  self-notifies; the TL waits forever. Detect "usage limit/exhausted capacity" → auto
+  `notify_parent` failure.
+- **Teardown ledger record** — killing a child writes no record to `children.jsonl`, so the
+  spawn ledger drifts from live state. Write a `despawned` record (or reconcile from tmux).
 - **Spawner record-first-ordering integration test** — wants a pure-fn seam like `poll_once`
   got; deferred (genuinely hard to test hermetically — needs tmux+git).
 
