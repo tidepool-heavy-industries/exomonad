@@ -56,18 +56,21 @@ enum LastHop {
 }
 
 fn decide_lasthop(agent_type: AgentType, active_team: Option<exo_scry::ActiveTeam>) -> LastHop {
+    // Native `<teammate-message>` delivery only works for the team LEAD: its own CC session
+    // polls its inbox. A synthetic member (any spawned child) is not natively polled by
+    // anyone, so writing its Teams inbox would go nowhere — deliver via tmux paste, which the
+    // sidecar controls. (The sidecar separately watches a synthetic member's Teams inbox to
+    // catch native `teams-mcp` sends — see inbound.rs.)
     if agent_type == AgentType::Claude {
         if let Some(team) = active_team {
-            let to = if let Some(me) = team.me {
-                Some(me.name)
-            } else {
-                team.lead_inbox
-            };
-            if let Some(to) = to {
-                return LastHop::TeamsInbox {
-                    team: team.team.0,
-                    to,
-                };
+            if let Some(me) = &team.me {
+                let is_lead = team.lead_inbox.as_deref() == Some(me.name.as_str());
+                if is_lead {
+                    return LastHop::TeamsInbox {
+                        team: team.team.0,
+                        to: me.name.clone(),
+                    };
+                }
             }
         }
     }
@@ -134,52 +137,32 @@ mod tests {
         assert_eq!(hop, LastHop::TmuxPaste);
     }
 
-    #[test]
-    fn test_decide_lasthop_claude_in_team() {
-        use exo_scry::identity::TeamName;
-        use exo_scry::teams::Teammate;
-        use std::path::PathBuf;
-
-        let active_team = exo_scry::ActiveTeam {
-            claude_pid: None,
-            team: TeamName("myteam".to_string()),
-            tasks_dir: PathBuf::from("/tmp"),
-            lead_inbox: Some("lead".to_string()),
-            lead_session_id: None,
-            me: Some(Teammate {
-                agent_id: "agent1".to_string(),
-                name: "bob".to_string(),
-                agent_type: "worker".to_string(),
-                model: "sonnet".to_string(),
-                cwd: "/".to_string(),
-                tmux_pane_id: "%1".to_string(),
-                backend_type: "mcp".to_string(),
-                is_active: None,
-            }),
-        };
-
-        let hop = decide_lasthop(AgentType::Claude, Some(active_team));
-        assert_eq!(
-            hop,
-            LastHop::TeamsInbox {
-                team: "myteam".to_string(),
-                to: "bob".to_string()
-            }
-        );
+    fn teammate(name: &str) -> exo_scry::teams::Teammate {
+        exo_scry::teams::Teammate {
+            agent_id: format!("agent-{name}"),
+            name: name.to_string(),
+            agent_type: "worker".to_string(),
+            model: "sonnet".to_string(),
+            cwd: "/".to_string(),
+            tmux_pane_id: "%1".to_string(),
+            backend_type: "mcp".to_string(),
+            is_active: None,
+        }
     }
 
     #[test]
-    fn test_decide_lasthop_claude_in_team_no_me() {
+    fn test_decide_lasthop_claude_lead_gets_native() {
         use exo_scry::identity::TeamName;
         use std::path::PathBuf;
 
+        // me IS the lead (name matches lead_inbox) → native Teams delivery.
         let active_team = exo_scry::ActiveTeam {
             claude_pid: None,
             team: TeamName("myteam".to_string()),
             tasks_dir: PathBuf::from("/tmp"),
             lead_inbox: Some("lead".to_string()),
             lead_session_id: None,
-            me: None,
+            me: Some(teammate("lead")),
         };
 
         let hop = decide_lasthop(AgentType::Claude, Some(active_team));
@@ -190,6 +173,44 @@ mod tests {
                 to: "lead".to_string()
             }
         );
+    }
+
+    #[test]
+    fn test_decide_lasthop_claude_synthetic_member_pastes() {
+        use exo_scry::identity::TeamName;
+        use std::path::PathBuf;
+
+        // me is a non-lead (synthetic) member → not natively polled → tmux paste.
+        let active_team = exo_scry::ActiveTeam {
+            claude_pid: None,
+            team: TeamName("myteam".to_string()),
+            tasks_dir: PathBuf::from("/tmp"),
+            lead_inbox: Some("lead".to_string()),
+            lead_session_id: None,
+            me: Some(teammate("bob")),
+        };
+
+        let hop = decide_lasthop(AgentType::Claude, Some(active_team));
+        assert_eq!(hop, LastHop::TmuxPaste);
+    }
+
+    #[test]
+    fn test_decide_lasthop_claude_no_me_pastes() {
+        use exo_scry::identity::TeamName;
+        use std::path::PathBuf;
+
+        // Resolved a team but no own member entry → can't be the lead → paste.
+        let active_team = exo_scry::ActiveTeam {
+            claude_pid: None,
+            team: TeamName("myteam".to_string()),
+            tasks_dir: PathBuf::from("/tmp"),
+            lead_inbox: Some("lead".to_string()),
+            lead_session_id: None,
+            me: None,
+        };
+
+        let hop = decide_lasthop(AgentType::Claude, Some(active_team));
+        assert_eq!(hop, LastHop::TmuxPaste);
     }
 
     #[test]
