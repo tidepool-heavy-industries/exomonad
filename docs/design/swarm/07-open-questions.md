@@ -68,6 +68,17 @@ push-based (no polling). The defects it surfaced are now fixed or tracked:
 - **tmux windows all named `claude`** — **fixed**: windows are `{emoji} {slug}`.
 - **`.exo/` runtime artifacts not gitignored** — **fixed**.
 
+## Native `<teammate-message>` delivery — VALIDATED (2026-06-02)
+
+The CC last-hop is settled and **proven working** (ping/pong/ping between a root and a forked
+Claude, native teammate-messages both directions). The realization is **solo-team-per-session**:
+each Claude node `TeamCreate`s its own team (instructed via the session_start identity context),
+and `dispatch` resolves *its own* team with `exo_scry::resolve_self()` (claude-ancestor +
+inotify) and writes that team's `lead_inbox` → the agent's CC InboxPoller renders it. The
+earlier `resolve_by_pane` never fired (CC omits `tmux_pane_id`); the synthetic-member +
+parent-bridge approach was a detour and was cut. Gemini leaves (no team) get tmux paste.
+Messaging stays tree-edges (the Bus); nothing reads another node's inbox.
+
 ## Open — build work (remaining)
 
 - **Per-role toolset content** ([04](04-policy.md)) — remaining Bucket-C tools/hooks/events,
