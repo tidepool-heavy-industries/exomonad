@@ -22,9 +22,15 @@ use crate::error::{NodeError, NodeResult};
 pub async fn dispatch(ctx: &Arc<NodeContext>, entry: &IngestionEntry) -> NodeResult<()> {
     let agent_type = ctx.kind.agent_type();
 
-    // Resolve CC membership
-    let active_team = exo_scry::resolve_by_pane(ctx.own_pane.as_str())
-        .map_err(|e| NodeError::Scry(e.to_string()))?;
+    // Resolve THIS agent's own team. `resolve_self` walks from the sidecar up to its parent
+    // `claude` process and reads that process's inotify-bound `tasks/{team}` dir — so it finds
+    // the agent's own (solo) team without needing a `tmux_pane_id` (which CC never writes into
+    // its team config; that's why `resolve_by_pane` always missed and native delivery never
+    // fired). Resolution failure is non-fatal: fall back to paste rather than wedge delivery.
+    #[cfg(target_os = "linux")]
+    let active_team = exo_scry::resolve_self().unwrap_or(None);
+    #[cfg(not(target_os = "linux"))]
+    let active_team = None;
 
     match decide_lasthop(agent_type, active_team) {
         LastHop::TeamsInbox { team, to } => {
@@ -56,21 +62,19 @@ enum LastHop {
 }
 
 fn decide_lasthop(agent_type: AgentType, active_team: Option<exo_scry::ActiveTeam>) -> LastHop {
-    // A node delivers into its OWN agent's conversation. Native `<teammate-message>` only
-    // works when the node leads a team (its own CC InboxPoller services its own inbox) — so
-    // the lead writes its own Teams inbox. A node that leads no team (every spawned child)
-    // has nothing polling a Teams inbox, so the sidecar delivers via tmux paste instead.
-    // Messaging is tree-edges only (the Bus); nothing reads another node's inbox.
+    // A node delivers into its OWN agent's conversation. For a Claude node that leads a team
+    // (solo-team-per-session — `resolve_self` resolves the team the agent is bound to, where it
+    // IS the lead), write that team's lead inbox: the agent's own CC InboxPoller renders it as
+    // a native `<teammate-message>`. With no team (a Gemini leaf, or before `TeamCreate`), the
+    // sidecar tmux-pastes instead. Messaging is tree-edges only (the Bus); nothing reads
+    // another node's inbox — the lead inbox here is the agent's *own*.
     if agent_type == AgentType::Claude {
         if let Some(team) = active_team {
-            if let Some(me) = &team.me {
-                let is_lead = team.lead_inbox.as_deref() == Some(me.name.as_str());
-                if is_lead {
-                    return LastHop::TeamsInbox {
-                        team: team.team.0,
-                        to: me.name.clone(),
-                    };
-                }
+            if let Some(to) = team.lead_inbox {
+                return LastHop::TeamsInbox {
+                    team: team.team.0,
+                    to,
+                };
             }
         }
     }
@@ -137,32 +141,20 @@ mod tests {
         assert_eq!(hop, LastHop::TmuxPaste);
     }
 
-    fn teammate(name: &str) -> exo_scry::teams::Teammate {
-        exo_scry::teams::Teammate {
-            agent_id: format!("agent-{name}"),
-            name: name.to_string(),
-            agent_type: "worker".to_string(),
-            model: "sonnet".to_string(),
-            cwd: "/".to_string(),
-            tmux_pane_id: "%1".to_string(),
-            backend_type: "mcp".to_string(),
-            is_active: None,
-        }
-    }
-
+    /// `resolve_self` resolves the agent's own team with `me: None` and `lead_inbox` set →
+    /// native delivery to the agent's own (lead) inbox.
     #[test]
-    fn test_decide_lasthop_claude_lead_gets_native() {
+    fn test_decide_lasthop_claude_team_native() {
         use exo_scry::identity::TeamName;
         use std::path::PathBuf;
 
-        // me IS the lead (name matches lead_inbox) → native Teams delivery.
         let active_team = exo_scry::ActiveTeam {
             claude_pid: None,
             team: TeamName("myteam".to_string()),
             tasks_dir: PathBuf::from("/tmp"),
-            lead_inbox: Some("lead".to_string()),
+            lead_inbox: Some("myteam-lead".to_string()),
             lead_session_id: None,
-            me: Some(teammate("lead")),
+            me: None,
         };
 
         let hop = decide_lasthop(AgentType::Claude, Some(active_team));
@@ -170,51 +162,14 @@ mod tests {
             hop,
             LastHop::TeamsInbox {
                 team: "myteam".to_string(),
-                to: "lead".to_string()
+                to: "myteam-lead".to_string()
             }
         );
     }
 
+    /// A team with no lead inbox (nothing to write) → paste.
     #[test]
-    fn test_decide_lasthop_claude_synthetic_member_pastes() {
-        use exo_scry::identity::TeamName;
-        use std::path::PathBuf;
-
-        // me is a non-lead (synthetic) member → not natively polled → tmux paste.
-        let active_team = exo_scry::ActiveTeam {
-            claude_pid: None,
-            team: TeamName("myteam".to_string()),
-            tasks_dir: PathBuf::from("/tmp"),
-            lead_inbox: Some("lead".to_string()),
-            lead_session_id: None,
-            me: Some(teammate("bob")),
-        };
-
-        let hop = decide_lasthop(AgentType::Claude, Some(active_team));
-        assert_eq!(hop, LastHop::TmuxPaste);
-    }
-
-    #[test]
-    fn test_decide_lasthop_claude_no_me_pastes() {
-        use exo_scry::identity::TeamName;
-        use std::path::PathBuf;
-
-        // Resolved a team but no own member entry → can't be the lead → paste.
-        let active_team = exo_scry::ActiveTeam {
-            claude_pid: None,
-            team: TeamName("myteam".to_string()),
-            tasks_dir: PathBuf::from("/tmp"),
-            lead_inbox: Some("lead".to_string()),
-            lead_session_id: None,
-            me: None,
-        };
-
-        let hop = decide_lasthop(AgentType::Claude, Some(active_team));
-        assert_eq!(hop, LastHop::TmuxPaste);
-    }
-
-    #[test]
-    fn test_decide_lasthop_claude_in_team_no_recipients() {
+    fn test_decide_lasthop_claude_no_lead_inbox_pastes() {
         use exo_scry::identity::TeamName;
         use std::path::PathBuf;
 
