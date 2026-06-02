@@ -392,8 +392,8 @@ pub struct IngestionEntry {
 pub enum MessageKind {
     /// peer/agent message.
     Chat,
-    /// a world event — routed to `on_world_event`, which parses the body into a typed
-    /// `WorldEvent` (in `exo-policy`). Bare tag: the detail rides the plain-text body,
+    /// a notification (e.g. an external signal). Delivered to the agent like a `Chat`, tagged
+    /// `kind: event` in the last-hop header. Bare tag: the detail rides the plain-text body,
     /// not the enum (keeps the body CC-last-hop-friendly).
     Event,
     /// lifecycle (exomonad-internal) — see `ControlKind`.

@@ -177,7 +177,7 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert!(names.contains(&"file_pr"));
+        assert!(names.contains(&"task_list"));
         assert!(names.contains(&"notify_parent"));
     }
 

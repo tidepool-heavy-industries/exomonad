@@ -5,8 +5,8 @@
 //! Supported hooks:
 //! - `pre_tool_use`: Evaluates tool use against policy, providing nudges or anti-pattern
 //!   warnings.
-//! - `stop`: Implements the PR-gate, blocking session termination if there is an open PR
-//!   with unaddressed changes.
+//! - `stop`: Implements the local convergence gate, blocking session termination while the
+//!   worktree has uncommitted changes (a parent merges the branch off disk).
 //! - `session_start`: Performs the identity bootstrap, injecting context about the node's
 //!   role, path, and parent into the agent's session so it understands its place in the swarm.
 //!
@@ -240,7 +240,6 @@ mod tests {
             pre_tool_use: exo_policy::hooks::pre_tool_use,
             stop: mock_stop_block,
             session_start: exo_policy::hooks::session_start,
-            on_event: exo_policy::events::on_world_event,
         };
 
         let res = run_hook(ctx, rd, HookEvent::Stop, "").await.unwrap();
@@ -268,7 +267,6 @@ mod tests {
             pre_tool_use: mock_pre_tool_deny,
             stop: exo_policy::hooks::stop,
             session_start: exo_policy::hooks::session_start,
-            on_event: exo_policy::events::on_world_event,
         };
         let stdin = json!({
             "tool_name": "any",
@@ -303,7 +301,6 @@ mod tests {
             pre_tool_use: mock_pre_tool_modify,
             stop: exo_policy::hooks::stop,
             session_start: exo_policy::hooks::session_start,
-            on_event: exo_policy::events::on_world_event,
         };
         let stdin = json!({
             "tool_name": "any",

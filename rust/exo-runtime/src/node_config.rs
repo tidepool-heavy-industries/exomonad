@@ -32,13 +32,7 @@ pub async fn write_node_agent_config(agent_dir: &Path, papers_path: &Path) -> st
 
     let p_str = esc(&papers_path.to_string_lossy());
     use exo_caps::invocation::{hook_command, PRE_TOOL_USE, SESSION_START, STOP};
-    // The Stop hook (PR-gate) is the only one that hits GitHub. Provide a token the same way
-    // the user would: prefer $GITHUB_TOKEN, else fall back to the gh CLI's stored token. The
-    // hook itself fails open without one, but a token lets the gate actually function.
-    let stop_cmd = format!(
-        "GITHUB_TOKEN=\"${{GITHUB_TOKEN:-$(gh auth token 2>/dev/null)}}\" {}",
-        hook_command(STOP, &p_str)
-    );
+    // The Stop hook is a local convergence gate (reads `git status`); no GitHub token needed.
     let settings = serde_json::json!({
         "hooks": {
             "PreToolUse": [{
@@ -46,7 +40,7 @@ pub async fn write_node_agent_config(agent_dir: &Path, papers_path: &Path) -> st
                 "hooks": [{"type": "command", "command": hook_command(PRE_TOOL_USE, &p_str)}]
             }],
             "Stop": [{
-                "hooks": [{"type": "command", "command": stop_cmd}]
+                "hooks": [{"type": "command", "command": hook_command(STOP, &p_str)}]
             }],
             "SessionStart": [{
                 "hooks": [{"type": "command", "command": hook_command(SESSION_START, &p_str)}]

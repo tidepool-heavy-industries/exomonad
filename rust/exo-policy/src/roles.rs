@@ -10,14 +10,12 @@
 //! compiles and downstream (the sidecar) can already call `role_def`.
 
 use crate::caps::PolicyCaps;
-use crate::events::{on_world_event, EventAction, WorldEvent};
 use crate::hooks::{
     pre_tool_use, session_start, stop, stop_allow, HookDecision, HookInput, SessionStartOutput,
     StopDecision,
 };
 use crate::tool::{BoxFuture, Tool};
-use crate::tools::file_pr::FilePr;
-use crate::tools::merge_pr::MergePr;
+use crate::tools::merge::Merge;
 use crate::tools::messaging::{NotifyParent, SendMessage};
 use crate::tools::spawn::{ForkWave, SpawnGemini, SpawnWorker};
 use crate::tools::tasks::{TaskGet, TaskList, TaskUpdate};
@@ -25,13 +23,12 @@ use exo_caps::NodeKind;
 
 /// A hook is an async fn over the concrete runtime `R`. Stored as a plain fn-pointer so the
 /// role table stays a greppable struct literal; the `BoxFuture` return lets the body do
-/// async cap IO (the `stop` gate queries `GitHub` live). The generic bound lives on the
-/// fn's own definition (e.g. `fn dev_stop<R: GitHub>(…)`); here `R: PolicyCaps` guarantees
+/// async cap IO (the `stop` gate reads `git status` live). The generic bound lives on the
+/// fn's own definition (e.g. `fn stop<R: Git + Log>(…)`); here `R: PolicyCaps` guarantees
 /// every cap is present, so any role's hooks coerce to these pointer types.
 pub type PreToolUseFn<R> = for<'a> fn(&'a R, &'a HookInput) -> BoxFuture<'a, HookDecision>;
 pub type StopFn<R> = for<'a> fn(&'a R) -> BoxFuture<'a, StopDecision>;
 pub type SessionStartFn<R> = for<'a> fn(&'a R) -> BoxFuture<'a, SessionStartOutput>;
-pub type OnEventFn<R> = for<'a> fn(&'a R, &'a WorldEvent) -> BoxFuture<'a, EventAction>;
 
 /// A role: its served tools + its three shared hook fns. `dyn Tool<R>` is dyn over the
 /// CONCRETE `R`, not over `Caps`.
@@ -40,49 +37,44 @@ pub struct RoleDef<R: Send + Sync> {
     pub pre_tool_use: PreToolUseFn<R>,
     pub stop: StopFn<R>,
     pub session_start: SessionStartFn<R>,
-    pub on_event: OnEventFn<R>,
 }
 
 /// The per-role policy table. Hand-written `match` — the single place a role's tool list +
-/// hooks are named. P1–P6 add tool types to the `tools` vecs; P7 swaps the no-op hooks for
-/// the real per-role fns.
+/// hooks are named. Convergence is on-disk (v2): a TL folds a finished child with the local
+/// `merge` tool (no PR, no GitHub); leaves just commit to their branch.
 pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
     match kind {
-        // Root is the human-facing top: no parent (so no `notify_parent`) and it does not
-        // file its own PR (it merges children's). It spawns and merges; that's it.
+        // Root is the human-facing top: no parent (so no `notify_parent`). It spawns children
+        // and folds them by merging their branches locally; that's it.
         NodeKind::Root => RoleDef {
             tools: vec![
                 Box::new(ForkWave),
                 Box::new(SpawnGemini),
                 Box::new(SpawnWorker),
-                Box::new(MergePr),
+                Box::new(Merge),
                 Box::new(SendMessage),
             ],
             pre_tool_use,
-            // Root has no upward PR — never gate its exit (blocking it bricks the session).
+            // Root has nothing to fold upward — never gate its exit (blocking it bricks the session).
             stop: stop_allow,
             session_start,
-            on_event: on_world_event,
         },
-        // A spawned TL also files a PR up to its parent and notifies that parent.
+        // A spawned TL spawns + folds its own subtree, and notifies its parent when done.
         NodeKind::Tl => RoleDef {
             tools: vec![
                 Box::new(ForkWave),
                 Box::new(SpawnGemini),
                 Box::new(SpawnWorker),
-                Box::new(FilePr),
-                Box::new(MergePr),
+                Box::new(Merge),
                 Box::new(NotifyParent),
                 Box::new(SendMessage),
             ],
             pre_tool_use,
             stop,
             session_start,
-            on_event: on_world_event,
         },
         NodeKind::Dev => RoleDef {
             tools: vec![
-                Box::new(FilePr),
                 Box::new(NotifyParent),
                 Box::new(TaskList),
                 Box::new(TaskGet),
@@ -91,7 +83,6 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
             pre_tool_use,
             stop,
             session_start,
-            on_event: on_world_event,
         },
         NodeKind::Worker => RoleDef {
             tools: vec![
@@ -101,10 +92,9 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
                 Box::new(TaskUpdate),
             ],
             pre_tool_use,
-            // Workers are ephemeral and file no PR — nothing to gate on.
+            // Workers are ephemeral and commit nothing to fold — nothing to gate on.
             stop: stop_allow,
             session_start,
-            on_event: on_world_event,
         },
     }
 }
@@ -140,27 +130,22 @@ mod tests {
                 rd.session_start as usize,
                 session_start::<MockRuntime> as *const () as usize
             );
-            assert_eq!(
-                rd.on_event as usize,
-                on_world_event::<MockRuntime> as *const () as usize
-            );
         }
     }
 
     #[tokio::test]
-    async fn test_role_stop_gate_blocks_when_needed() {
+    async fn test_role_stop_gate_blocks_when_dirty() {
         let rd = role_def::<MockRuntime>(NodeKind::Dev);
         let ctx = MockRuntime {
-            pr_for_branch: Some(123),
-            has_unaddressed_changes: true,
+            is_clean: false,
             ..Default::default()
         };
 
         match (rd.stop)(&ctx).await {
             StopDecision::Block { reason } => {
-                assert!(reason.contains("Open PR #123 has unaddressed ChangesRequested"));
+                assert!(reason.contains("Uncommitted changes"));
             }
-            _ => panic!("Should be blocked by unaddressed changes"),
+            _ => panic!("Should be blocked by uncommitted changes"),
         }
     }
 }

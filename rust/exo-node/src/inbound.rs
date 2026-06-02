@@ -12,26 +12,23 @@
 //! - Parse each line as [`IngestionEntry`] (tolerant: serde defaults, no `deny_unknown_fields`).
 //!
 //! Then route each new entry by `kind`:
-//! - `Chat` → [`crate::dispatch::dispatch`] (N2a last-hop).
-//! - `Event` → parse the body into [`exo_policy::WorldEvent`] → `exo_policy::on_world_event`
-//!   → act (`InjectMessage` = append to own inbox; `NotifyParent` = append to parent inbox).
+//! - `Chat` / `Event` → [`crate::dispatch::dispatch`] (N2a last-hop): deliver to the agent's
+//!   native interface (Teams inbox or tmux paste), rendered with a `[from: X, kind: Y]` header.
 //! - `Control(Shutdown { grace_ms })` → after the grace, self-kill OWN pane (the node knows
 //!   `$TMUX_PANE`) — reaping pane + agent + sidecar in one shot.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use chrono::Utc;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
-use exo_caps::{ControlKind, IngestionEntry, Message, MessageKind, Persona, SyntheticName};
-use exo_policy::events::{on_world_event, EventAction, WorldEvent};
+use exo_caps::{ControlKind, IngestionEntry, MessageKind};
 
 use crate::bootstrap::NodeContext;
 use crate::error::NodeResult;
@@ -127,8 +124,6 @@ fn save_cursor(path: &Path, offset: u64) -> std::io::Result<()> {
 #[async_trait]
 trait InboundHandler {
     async fn handle(&self, entry: &IngestionEntry) -> NodeResult<Option<bool>>;
-    async fn append_self(&self, text: String, summary: String) -> NodeResult<()>;
-    async fn append_parent(&self, text: String, summary: String) -> NodeResult<()>;
 }
 
 struct RealHandler {
@@ -139,29 +134,9 @@ struct RealHandler {
 impl InboundHandler for RealHandler {
     async fn handle(&self, entry: &IngestionEntry) -> NodeResult<Option<bool>> {
         match &entry.msg.kind {
-            MessageKind::Chat => {
+            // Both chat and event notifications are delivered to the agent's native interface.
+            MessageKind::Chat | MessageKind::Event => {
                 crate::dispatch::dispatch(&self.ctx, entry).await?;
-                Ok(Some(false))
-            }
-            MessageKind::Event => {
-                let world_event: WorldEvent = match serde_json::from_str(entry.msg.text.as_str()) {
-                    Ok(ev) => ev,
-                    Err(e) => {
-                        warn!("failed to parse WorldEvent from entry: {}", e);
-                        return Ok(None);
-                    }
-                };
-
-                let action = on_world_event(&*self.ctx.runtime, &world_event).await;
-                match action {
-                    EventAction::InjectMessage { text, summary } => {
-                        self.append_self(text, summary).await?;
-                    }
-                    EventAction::NotifyParent { text, summary } => {
-                        self.append_parent(text, summary).await?;
-                    }
-                    EventAction::NoAction => {}
-                }
                 Ok(Some(false))
             }
             MessageKind::Control(ControlKind::Shutdown { grace_ms }) => {
@@ -174,45 +149,6 @@ impl InboundHandler for RealHandler {
             }
         }
     }
-
-    async fn append_self(&self, text: String, summary: String) -> NodeResult<()> {
-        append_to_inbox_file(self.ctx.own_inbox.as_path(), text, summary)
-    }
-
-    async fn append_parent(&self, text: String, summary: String) -> NodeResult<()> {
-        if let Some(parent_inbox) = &self.ctx.parent_inbox {
-            append_to_inbox_file(parent_inbox.as_path(), text, summary)
-        } else {
-            warn!("received NotifyParent action but no parent_inbox configured");
-            Ok(())
-        }
-    }
-}
-
-fn append_to_inbox_file(path: &Path, text: String, summary: String) -> NodeResult<()> {
-    let entry = IngestionEntry {
-        v: 1,
-        ts: Utc::now(),
-        from: Persona::Synthetic(
-            SyntheticName::new("self".to_string())
-                .map_err(|e| std::io::Error::other(e.to_string()))?,
-        ),
-        msg: Message {
-            text: exo_caps::MessageBody::new(text)
-                .map_err(|e| std::io::Error::other(e.to_string()))?,
-            summary: exo_caps::Summary::new(summary)
-                .map_err(|e| std::io::Error::other(e.to_string()))?,
-            kind: MessageKind::Chat,
-        },
-    };
-
-    let mut line = serde_json::to_vec(&entry)
-        .map_err(|e| std::io::Error::other(format!("json serialize failed: {}", e)))?;
-    line.push(b'\n');
-
-    let mut file = OpenOptions::new().append(true).create(true).open(path)?;
-    file.write_all(&line)?;
-    Ok(())
 }
 
 /// Returns true if shutdown was requested
@@ -289,7 +225,9 @@ async fn process_inbox<H: InboundHandler>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use exo_caps::{AgentName, MessageBody, Summary};
+    use chrono::Utc;
+    use exo_caps::{AgentName, Message, MessageBody, Persona, Summary};
+    use std::fs::OpenOptions;
     use std::sync::Mutex;
     use tempfile::tempdir;
 
@@ -308,12 +246,6 @@ mod tests {
             }
             self.delivered.lock().unwrap().push(entry.clone());
             Ok(Some(false))
-        }
-        async fn append_self(&self, _text: String, _summary: String) -> NodeResult<()> {
-            Ok(())
-        }
-        async fn append_parent(&self, _text: String, _summary: String) -> NodeResult<()> {
-            Ok(())
         }
     }
 

@@ -22,7 +22,6 @@ pub mod types;
 // IO caps — one trait per file (see `docs/design/swarm/05-crates-and-binary.md`).
 pub mod fs;
 pub mod git;
-pub mod github;
 pub mod kv;
 pub mod log;
 pub mod process;
@@ -32,7 +31,6 @@ pub use bus::{Addressee, Bus, BusError};
 pub use error::{CapError, CapResult};
 pub use fs::{Fs, FsError};
 pub use git::{Git, GitError};
-pub use github::{CiStatus, GitHub, GitHubError, MergeStrategy, ReviewState};
 pub use kv::{Kv, KvError};
 pub use lifecycle::{fold_children, Child, ChildLifecycle, ChildRecord};
 pub use log::Log;

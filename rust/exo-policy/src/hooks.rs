@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::tool::BoxFuture;
-use exo_caps::{Git, GitHub, Log};
+use exo_caps::{Git, Log};
 
 /// A `PreToolUse` verdict. `Modify` rewrites the tool input in place (the PII-rewrite path).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,8 +23,8 @@ pub enum HookDecision {
     Modify { input: Value },
 }
 
-/// A `Stop` verdict — the live PR-gate. `Block` keeps the agent in its turn-loop (e.g. an
-/// open PR has unaddressed `ChangesRequested`); `Allow` lets it exit.
+/// A `Stop` verdict — the local convergence gate. `Block` keeps the agent in its turn-loop
+/// (uncommitted work the parent's merge can't see); `Allow` lets it exit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "decision")]
 pub enum StopDecision {
@@ -87,45 +87,23 @@ pub fn pre_tool_use<'a, R: Send + Sync>(
     })
 }
 
-// TODO(cap): The stop hook needs to query the PR for the current branch. Currently
-// this requires Git + GitHub bounds. If we add pr_for_current_branch() to GitHub,
-// we can drop the Git bound.
-pub fn stop<'a, R: Git + GitHub + Log + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, StopDecision> {
+/// The local convergence gate (v2 — no GitHub). A parent folds a child by merging its
+/// **branch** off disk, so uncommitted work is invisible to that merge. Block exit while the
+/// worktree is dirty — the agent must commit (or discard) before it stops. Fail OPEN on any
+/// error: a hook must never wedge an agent in its turn-loop (that bricks the session).
+pub fn stop<'a, R: Git + Log + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, StopDecision> {
     Box::pin(async move {
-        // The live PR-gate: block ONLY when there's an open PR with unaddressed changes.
-        // Fail OPEN on any error (missing token, GitHub unreachable, transient): a hook must
-        // never wedge an agent in its turn-loop — that bricks the session. Matches the
-        // documented fail-open contract; the gate is best-effort, not a hard barrier.
-        let branch = match ctx.current_branch().await {
-            Ok(b) => b,
-            Err(e) => {
-                ctx.error(&format!(
-                    "stop gate: could not read branch, allowing exit: {e}"
-                ));
-                return StopDecision::Allow;
-            }
-        };
-
-        let pr = match ctx.pr_for_branch(&branch).await {
-            Ok(Some(pr)) => pr,
-            Ok(None) => return StopDecision::Allow,
-            Err(e) => {
-                ctx.error(&format!(
-                    "stop gate: could not query PR for '{}', allowing exit: {e}",
-                    branch.as_str()
-                ));
-                return StopDecision::Allow;
-            }
-        };
-
-        match ctx.has_unaddressed_changes(pr).await {
-            Ok(true) => StopDecision::Block {
-                reason: format!("Open PR #{} has unaddressed ChangesRequested", pr),
+        match ctx.is_clean().await {
+            Ok(true) => StopDecision::Allow,
+            Ok(false) => StopDecision::Block {
+                reason: "Uncommitted changes in your worktree. Commit your work (a parent merges \
+                         your branch off disk — uncommitted changes are invisible to that merge), \
+                         then stop."
+                    .into(),
             },
-            Ok(false) => StopDecision::Allow,
             Err(e) => {
                 ctx.error(&format!(
-                    "stop gate: could not check PR #{pr} changes, allowing exit: {e}"
+                    "stop gate: could not read git status, allowing exit: {e}"
                 ));
                 StopDecision::Allow
             }
@@ -247,23 +225,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stop_allow_no_pr() {
-        let ctx = MockRuntime::default();
+    async fn test_stop_allow_when_clean() {
+        let ctx = MockRuntime::default(); // is_clean = true
         assert_eq!(stop(&ctx).await, StopDecision::Allow);
     }
 
     #[tokio::test]
-    async fn test_stop_block_with_changes() {
+    async fn test_stop_block_when_dirty() {
         let ctx = MockRuntime {
-            pr_for_branch: Some(123),
-            has_unaddressed_changes: true,
+            is_clean: false,
             ..Default::default()
         };
         match stop(&ctx).await {
             StopDecision::Block { reason } => {
-                assert!(reason.contains("Open PR #123 has unaddressed ChangesRequested"));
+                assert!(reason.contains("Uncommitted changes"));
             }
-            _ => panic!("Should be Block"),
+            _ => panic!("Should be Block when worktree is dirty"),
         }
     }
 

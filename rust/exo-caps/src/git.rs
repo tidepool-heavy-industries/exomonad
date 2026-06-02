@@ -20,6 +20,8 @@ pub trait Git {
     async fn current_branch(&self) -> Result<Branch, GitError>;
     async fn is_clean(&self) -> Result<bool, GitError>;
     async fn fetch(&self) -> Result<(), GitError>;
+    /// Merge `branch` into the current branch (the local fold; no remote). Non-interactive.
+    async fn merge(&self, branch: &Branch) -> Result<(), GitError>;
     async fn worktree_add(&self, branch: &Branch, at: &Path) -> Result<(), GitError>;
     async fn worktree_remove(&self, at: &Path) -> Result<(), GitError>;
 }

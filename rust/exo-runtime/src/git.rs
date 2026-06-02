@@ -31,6 +31,13 @@ impl Git for Runtime {
         Ok(())
     }
 
+    async fn merge(&self, branch: &Branch) -> Result<(), GitError> {
+        // Local fold of a child's branch into this node's branch; non-interactive so a clean
+        // merge commit doesn't block on $EDITOR. A conflict surfaces as a git failure.
+        self.git(&["merge", "--no-edit", branch.as_str()]).await?;
+        Ok(())
+    }
+
     async fn worktree_add(&self, branch: &Branch, at: &Path) -> Result<(), GitError> {
         self.git(&[
             "worktree",

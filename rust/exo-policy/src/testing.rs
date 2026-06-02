@@ -12,9 +12,9 @@
 
 use async_trait::async_trait;
 use exo_caps::{
-    Addressee, AgentName, Branch, Bus, BusError, CiStatus, ForkSpec, Fs, FsError, GeminiSpec, Git,
-    GitError, GitHub, GitHubError, Kv, KvError, Log, MergeStrategy, Message, PaneId, Process,
-    ProcessError, ReviewState, SpawnError, Spawner, Tmux, TmuxError, WorkerSpec,
+    Addressee, AgentName, Branch, Bus, BusError, ForkSpec, Fs, FsError, GeminiSpec, Git, GitError,
+    Kv, KvError, Log, Message, PaneId, Process, ProcessError, SpawnError, Spawner, Tmux, TmuxError,
+    WorkerSpec,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -28,16 +28,10 @@ pub enum Call {
         to: Addressee,
         msg: Message,
     },
-    FilePr {
-        title: String,
-        body: String,
-        base: Branch,
-    },
-    MergePr {
-        pr: u64,
-        strategy: MergeStrategy,
-    },
     Fetch,
+    Merge {
+        branch: Branch,
+    },
     SpawnWorker {
         spec_task: String,
         step_count: usize,
@@ -78,17 +72,11 @@ pub struct MockRuntime {
     pub kv: Mutex<HashMap<String, String>>,
     pub files: Mutex<HashMap<String, Vec<u8>>>,
 
-    // canned GitHub state (the stop-gate + merge tests read these)
+    // canned git state (the stop-gate clean check + merge tests read these)
     pub current_branch: Branch,
-    pub pr_for_branch: Option<u64>,
-    pub has_unaddressed_changes: bool,
-    pub review_state: Option<ReviewState>,
-    pub ci_status: CiStatus,
     pub is_clean: bool,
-    /// Next `file_pr` returns this PR number.
-    pub next_pr: u64,
     /// If set, the named cap method returns its `*Error` instead of the happy path. Keyed by
-    /// a short op label (e.g. "merge_pr") so a test can exercise error branches.
+    /// a short op label (e.g. "merge") so a test can exercise error branches.
     pub fail: Mutex<Option<&'static str>>,
 }
 
@@ -99,12 +87,7 @@ impl Default for MockRuntime {
             kv: Mutex::new(HashMap::new()),
             files: Mutex::new(HashMap::new()),
             current_branch: Branch::new("dev.policy-claude".into()).unwrap(),
-            pr_for_branch: None,
-            has_unaddressed_changes: false,
-            review_state: None,
-            ci_status: CiStatus::Passing,
             is_clean: true,
-            next_pr: 1,
             fail: Mutex::new(None),
         }
     }
@@ -161,51 +144,23 @@ impl Git for MockRuntime {
         self.record(Call::Fetch);
         Ok(())
     }
+    async fn merge(&self, branch: &Branch) -> Result<(), GitError> {
+        if self.should_fail("merge") {
+            return Err(GitError::Failed {
+                op: "merge",
+                detail: "mock forced failure".into(),
+            });
+        }
+        self.record(Call::Merge {
+            branch: branch.clone(),
+        });
+        Ok(())
+    }
     async fn worktree_add(&self, _branch: &Branch, _at: &Path) -> Result<(), GitError> {
         Ok(())
     }
     async fn worktree_remove(&self, _at: &Path) -> Result<(), GitError> {
         Ok(())
-    }
-}
-
-#[async_trait]
-impl GitHub for MockRuntime {
-    async fn file_pr(&self, title: &str, body: &str, base: &Branch) -> Result<u64, GitHubError> {
-        if self.should_fail("file_pr") {
-            return Err(GitHubError::Failed {
-                op: "file_pr",
-                detail: "mock forced failure".into(),
-            });
-        }
-        self.record(Call::FilePr {
-            title: title.into(),
-            body: body.into(),
-            base: base.clone(),
-        });
-        Ok(self.next_pr)
-    }
-    async fn pr_for_branch(&self, _branch: &Branch) -> Result<Option<u64>, GitHubError> {
-        Ok(self.pr_for_branch)
-    }
-    async fn merge_pr(&self, pr: u64, strategy: MergeStrategy) -> Result<(), GitHubError> {
-        if self.should_fail("merge_pr") {
-            return Err(GitHubError::Failed {
-                op: "merge_pr",
-                detail: "mock forced failure".into(),
-            });
-        }
-        self.record(Call::MergePr { pr, strategy });
-        Ok(())
-    }
-    async fn has_unaddressed_changes(&self, _pr: u64) -> Result<bool, GitHubError> {
-        Ok(self.has_unaddressed_changes)
-    }
-    async fn review_state(&self, _pr: u64) -> Result<Option<ReviewState>, GitHubError> {
-        Ok(self.review_state)
-    }
-    async fn ci_status(&self, _pr: u64) -> Result<CiStatus, GitHubError> {
-        Ok(self.ci_status)
     }
 }
 
@@ -362,7 +317,8 @@ mod tests {
 
     #[tokio::test]
     async fn forced_failure_surfaces() {
-        let m = MockRuntime::failing("merge_pr");
-        assert!(m.merge_pr(3, MergeStrategy::Squash).await.is_err());
+        let m = MockRuntime::failing("merge");
+        let branch = Branch::new("dev.child".into()).unwrap();
+        assert!(m.merge(&branch).await.is_err());
     }
 }

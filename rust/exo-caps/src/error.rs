@@ -15,8 +15,6 @@ pub enum CapError {
     #[error(transparent)]
     Git(#[from] crate::git::GitError),
     #[error(transparent)]
-    GitHub(#[from] crate::github::GitHubError),
-    #[error(transparent)]
     Tmux(#[from] crate::tmux::TmuxError),
     #[error(transparent)]
     Bus(#[from] crate::bus::BusError),
