@@ -51,7 +51,10 @@ fn identity_context(ctx: &NodeContext) -> String {
     };
 
     format!(
-        "You are exomonad node '{}' (role: {}) on branch '{}'. Parent: {}.",
+        "You are exomonad node '{}' (role: {}) on branch '{}'. Parent: {}.\n\
+         If you do not already lead a team, create one now with the TeamCreate tool — that is \
+         how messages from other agents reach you, delivered as native teammate-messages. Do \
+         this before other work.",
         name.as_str(),
         role,
         branch.as_str(),
@@ -178,6 +181,7 @@ mod tests {
         assert!(id.contains("(role: dev)"));
         assert!(id.contains("on branch 'main.root.dev-node'"));
         assert!(id.contains("Parent: root"));
+        assert!(id.contains("TeamCreate"));
 
         let ctx_root = mock_ctx(NodeKind::Root, vec!["root"], "main", false);
         let id_root = identity_context(&ctx_root);
