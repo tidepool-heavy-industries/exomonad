@@ -56,11 +56,11 @@ enum LastHop {
 }
 
 fn decide_lasthop(agent_type: AgentType, active_team: Option<exo_scry::ActiveTeam>) -> LastHop {
-    // Native `<teammate-message>` delivery only works for the team LEAD: its own CC session
-    // polls its inbox. A synthetic member (any spawned child) is not natively polled by
-    // anyone, so writing its Teams inbox would go nowhere — deliver via tmux paste, which the
-    // sidecar controls. (The sidecar separately watches a synthetic member's Teams inbox to
-    // catch native `teams-mcp` sends — see inbound.rs.)
+    // A node delivers into its OWN agent's conversation. Native `<teammate-message>` only
+    // works when the node leads a team (its own CC InboxPoller services its own inbox) — so
+    // the lead writes its own Teams inbox. A node that leads no team (every spawned child)
+    // has nothing polling a Teams inbox, so the sidecar delivers via tmux paste instead.
+    // Messaging is tree-edges only (the Bus); nothing reads another node's inbox.
     if agent_type == AgentType::Claude {
         if let Some(team) = active_team {
             if let Some(me) = &team.me {

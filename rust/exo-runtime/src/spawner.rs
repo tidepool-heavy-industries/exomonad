@@ -386,28 +386,6 @@ impl Runtime {
             )
         );
 
-        // Register the child as a synthetic member of the parent's team so a teammate can
-        // address it by name via the native Teams send. Best-effort: if the parent leads no
-        // team, skip (the Bus path `send_message {worktree/inline}` still reaches the child).
-        // The child's sidecar watches its own Teams inbox (inbound.rs) to receive these.
-        if let Ok(Some(team)) = exo_scry::resolve_by_pane(self.own_pane.as_str()) {
-            let team_name = exomonad_core::domain::TeamName::from(team.team.0.as_str());
-            let member = exomonad_core::domain::AgentName::from(core.name.as_str());
-            let kind = format!("{}-node", core.role.role_str());
-            if let Err(e) = exomonad_core::services::synthetic_members::register_synthetic_member(
-                &team_name,
-                &member,
-                agent_type,
-                &kind,
-                pane.as_str(),
-            ) {
-                exo_caps::Log::error(
-                    self,
-                    &format!("failed to register synthetic member {}: {e}", core.name.as_str()),
-                );
-            }
-        }
-
         exo_caps::Tmux::paste(self, &pane, &launch_cmd)
             .await
             .map_err(|e| SpawnError::Failed {

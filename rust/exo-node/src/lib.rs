@@ -27,7 +27,6 @@ pub mod hook;
 pub mod inbound;
 pub mod outbound;
 pub mod poll;
-pub mod teams_bridge;
 
 pub use bootstrap::{bootstrap, NodeContext};
 pub use error::{NodeError, NodeResult};
@@ -35,8 +34,8 @@ pub use hook::{handle as handle_hook, HookEvent};
 
 use std::sync::Arc;
 
-/// Run the node's concurrent stimuli in one process (outbound serve + inbound watch +
-/// self-poll + parent-side Teams→Bus bridge for synthetic-member children):
+/// Run the node's three concurrent stimuli in one process (outbound serve + inbound watch
+/// + self-poll):
 /// - **outbound** ([`outbound::serve`]) — serve the role's MCP tools over stdio. This owns
 ///   stdin/stdout and returns when the stream closes (agent gone), so it is the node's
 ///   **lifetime anchor**: when it ends, the node ends.
@@ -64,14 +63,6 @@ pub async fn run_node(ctx: Arc<NodeContext>) -> NodeResult<()> {
             }
         }
     });
-    let bridge = tokio::spawn({
-        let ctx = ctx.clone();
-        async move {
-            if let Err(e) = teams_bridge::bridge_children(ctx).await {
-                tracing::error!("teams-bridge exited with error: {e}");
-            }
-        }
-    });
 
     // The outbound serve owns stdio and runs for the node's lifetime.
     let result = outbound::serve(ctx).await;
@@ -79,7 +70,6 @@ pub async fn run_node(ctx: Arc<NodeContext>) -> NodeResult<()> {
     // Agent stream closed (or serve errored) → reap the background loops.
     inbound.abort();
     poll.abort();
-    bridge.abort();
 
     result
 }
