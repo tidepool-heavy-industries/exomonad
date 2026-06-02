@@ -1,8 +1,9 @@
 # Swarm-Sidecar Architecture
 
-> **Status:** design, in progress. Built incrementally *beside* current exomonad
-> (non-destructive). Foundations (`exo-scry`, `teams-mcp`) exist and are
-> validated; the rest is being designed and built. Sections below are marked
+> **Status:** built and runnable behind `exomonad experimental`, beside current exomonad
+> (non-destructive). `exo-scry` (team/identity resolution) underpins it; `teams-mcp` was
+> the prototype testbed and has been removed now that its techniques live in
+> `exo-node` (outbound rmcp) and `exo-scry` (inbox/teams). Sections below are marked
 > **settled** or **stub**.
 
 ## The idea in one paragraph

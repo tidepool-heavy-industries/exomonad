@@ -6,7 +6,6 @@ members = [
     "rust/exomonad-core",
     "rust/exomonad",
     "rust/exo-scry",
-    "rust/teams-mcp",
     "rust/exo-caps",
     "rust/exo-runtime",
     "rust/exo-policy",

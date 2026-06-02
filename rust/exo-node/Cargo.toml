@@ -23,7 +23,7 @@ chrono = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 
-# Outbound MCP (N1): the rmcp server, same version teams-mcp uses.
+# Outbound MCP (N1): the rmcp server that exposes the role's tools over stdio.
 rmcp = { version = "1.7.0", features = ["server", "transport-io"] }
 # Inbound watch (N2b): event-driven file watching — never a poll loop, never hand-rolled inotify.
 notify = { workspace = true }
