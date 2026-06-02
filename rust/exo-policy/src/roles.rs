@@ -84,7 +84,6 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
             tools: vec![
                 Box::new(FilePr),
                 Box::new(NotifyParent),
-                Box::new(SendMessage),
                 Box::new(TaskList),
                 Box::new(TaskGet),
                 Box::new(TaskUpdate),
@@ -97,7 +96,6 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
         NodeKind::Worker => RoleDef {
             tools: vec![
                 Box::new(NotifyParent),
-                Box::new(SendMessage),
                 Box::new(TaskList),
                 Box::new(TaskGet),
                 Box::new(TaskUpdate),
