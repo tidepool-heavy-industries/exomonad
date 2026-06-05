@@ -64,7 +64,10 @@ fn pre_merge_checks<C: Process + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), Stri
                 .filter_map(|e| e.ok().map(|e| e.path()))
                 .filter(|p| p.is_file())
                 .collect(),
-            Err(_) => return Ok(()),
+            // A missing dir = no gate. Any OTHER error (permissions, IO) must NOT silently
+            // disable the gate — fail the submit.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(format!("could not read .exo/checks/pre-merge: {e}")),
         };
         scripts.sort();
         let mut failures = Vec::new();
@@ -81,11 +84,12 @@ fn pre_merge_checks<C: Process + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), Stri
             match serde_json::from_str::<CheckResult>(stdout.trim()) {
                 Ok(r) if r.pass => {}
                 Ok(r) => failures.push(format!("{path}: {}", r.detail)),
-                Err(_) => {
-                    if !out.status.success() {
-                        failures.push(format!("{path}: exited non-zero with no JSON output"));
-                    }
-                }
+                // A check that doesn't honour the `{"pass":bool,"detail":...}` contract is
+                // misconfigured/broken — fail closed rather than silently passing the gate.
+                Err(_) => failures.push(format!(
+                    "{path}: did not emit valid {{\"pass\":bool,\"detail\":...}} JSON (exit {})",
+                    out.status
+                )),
             }
         }
         if failures.is_empty() {

@@ -173,6 +173,18 @@ impl RealHandler {
         use exo_caps::SystemMessage;
         match system {
             SystemMessage::ReviewApproved { branch, sha } => {
+                // The approval must be for THIS node's branch at its CURRENT commit. A mismatched
+                // branch (with the right sha) must not escalate [READY] for my branch, and a stale
+                // sha (work committed after the review) needs a fresh review.
+                let my_branch = self.ctx.runtime.branch().clone();
+                if branch.as_str() != my_branch.as_str() {
+                    warn!(
+                        "approval names branch {} but my branch is {} — ignoring",
+                        branch.as_str(),
+                        my_branch.as_str()
+                    );
+                    return Ok(());
+                }
                 let head = exo_caps::Git::head_sha(&*self.ctx.runtime)
                     .await
                     .map_err(|e| std::io::Error::other(e.to_string()))?;
@@ -186,7 +198,6 @@ impl RealHandler {
                     return Ok(());
                 }
                 // Escalate [READY] to the parent — sidecar-side, no LLM turn.
-                let my_branch = self.ctx.runtime.branch().clone();
                 let text = format!(
                     "[READY] branch `{}` was approved by review and is ready for merge.",
                     my_branch.as_str()

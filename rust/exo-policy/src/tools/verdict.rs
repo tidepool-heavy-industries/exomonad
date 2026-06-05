@@ -54,12 +54,26 @@ impl Verdict {
                 branch,
                 sha: args.sha.clone(),
             },
-            Decision::Deny => SystemMessage::ReviewDenied {
-                branch,
-                sha: args.sha.clone(),
-                message: args.message.clone(),
-            },
+            Decision::Deny => {
+                if args.message.trim().is_empty() {
+                    return Err(CapError::invalid(
+                        "verdict",
+                        "decision=deny requires a non-empty message explaining what to fix",
+                    ));
+                }
+                SystemMessage::ReviewDenied {
+                    branch,
+                    sha: args.sha.clone(),
+                    message: args.message.clone(),
+                }
+            }
             Decision::Changes => {
+                if args.message.trim().is_empty() {
+                    return Err(CapError::invalid(
+                        "verdict",
+                        "decision=changes requires a non-empty message describing the change",
+                    ));
+                }
                 let changes_branch = match args.changes_branch.clone() {
                     Some(b) => Branch::new(b)?,
                     None => {

@@ -421,8 +421,11 @@ pub enum ControlKind {
 /// System signals carried over the bus and handled by the recipient's sidecar (see
 /// [`MessageKind::System`]). Serde-tagged on `type` (`review_approved` / `review_denied` /
 /// `review_changes`) — **granular, flat, extensible**: new node-to-node control signals are new
-/// variants here, never a churn of the core envelope. Tolerantly parsed (an unknown variant is
-/// logged + skipped), so a mixed-version swarm won't crash.
+/// variants here, never a churn of the core envelope. There is no catch-all variant: an unknown
+/// `type` fails to deserialize the whole bus line, which the inbound loop's tolerant parser then
+/// skips + logs — the swarm won't crash, but that one message is dropped. (Add a
+/// `#[serde(other)]` catch-all here if graceful per-variant forward-compat is ever needed for a
+/// mixed-version swarm.)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SystemMessage {
