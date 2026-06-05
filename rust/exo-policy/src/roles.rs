@@ -19,6 +19,7 @@ use crate::tools::merge::Merge;
 use crate::tools::messaging::{NotifyParent, SendMessage};
 use crate::tools::spawn::{ForkWave, SpawnGemini, SpawnWorker};
 use crate::tools::submit::SubmitBranch;
+use crate::tools::tree::Tree;
 use exo_caps::NodeKind;
 
 /// A hook is an async fn over the concrete runtime `R`. Stored as a plain fn-pointer so the
@@ -53,6 +54,7 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
                 Box::new(SpawnWorker),
                 Box::new(Merge),
                 Box::new(SendMessage),
+                Box::new(Tree),
             ],
             pre_tool_use,
             // Root has nothing to fold upward — never gate its exit (blocking it bricks the session).
@@ -70,6 +72,7 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
                 Box::new(NotifyParent),
                 Box::new(SendMessage),
                 Box::new(SubmitBranch),
+                Box::new(Tree),
             ],
             pre_tool_use,
             stop,

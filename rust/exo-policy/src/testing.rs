@@ -12,9 +12,9 @@
 
 use async_trait::async_trait;
 use exo_caps::{
-    Addressee, AgentName, Branch, Bus, BusError, ForkSpec, Fs, FsError, GeminiSpec, Git, GitError,
-    Kv, KvError, Log, Message, PaneId, Process, ProcessError, SpawnError, Spawner, Tmux, TmuxError,
-    WorkerSpec,
+    Addressee, AgentName, Branch, Bus, BusError, ChildKind, ForkSpec, Fs, FsError, GeminiSpec, Git,
+    GitError, Kv, KvError, Log, Message, PaneId, Process, ProcessError, SpawnError, Spawner, Tmux,
+    TmuxError, Topology, TopologyError, TopologyView, TreeNode, WorkerSpec,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -307,6 +307,30 @@ impl Log for MockRuntime {
     }
     fn error(&self, msg: &str) {
         self.record(Call::LogError { msg: msg.into() });
+    }
+}
+
+#[async_trait]
+impl Topology for MockRuntime {
+    async fn topology(&self) -> Result<TopologyView, TopologyError> {
+        // A small canned tree: self `mock` (under `mock-parent`) with one worktree child.
+        Ok(TopologyView {
+            node: TreeNode {
+                name: "mock".into(),
+                kind: None,
+                pane: "%0".into(),
+                pane_alive: true,
+                children: vec![TreeNode {
+                    name: "child-a".into(),
+                    kind: Some(ChildKind::Worktree),
+                    pane: "%1".into(),
+                    pane_alive: true,
+                    children: vec![],
+                }],
+            },
+            parent: Some("mock-parent".into()),
+            path: vec!["mock-parent".into(), "mock".into()],
+        })
     }
 }
 

@@ -28,6 +28,7 @@ The Bucket-C logic that genuinely ports from the old Haskell DSL: MCP tool defin
 | `submit_branch` | `Git`+`Bus` | tl, dev | **The done-signal** (local analogue of file_pr): runs preconditions (v1: committed), then delivers `[READY] branch X` to the parent for it to `merge`. |
 | `notify_parent` | `Bus` | tl, dev, worker | Status/failure update to `Addressee::Parent` (NOT the done-signal). |
 | `send_message` | `Bus` | root, tl | Deliver to a child (`Inline`/`Worktree`) — **tree-edges only**. |
+| `tree` | `Topology` | root, tl | Read-only: the caller's subtree (recursive ledger fold) + parent + per-node `pane_alive` liveness. |
 
 Every tool implements `Tool::description()` (added to the trait); `exo-node`'s `tools/list`
 emits it, so the toolset is self-documenting — an agent learns the local-merge loop (commit →
