@@ -202,12 +202,26 @@ impl Spawner for MockRuntime {
             .collect()
     }
     async fn reclaim_worktree(&self, child: &AgentName) -> Result<(), SpawnError> {
+        if self.should_fail("reclaim_worktree") {
+            return Err(SpawnError::Failed {
+                op: "reclaim_worktree",
+                child: Some(child.clone()),
+                detail: "mock forced failure".into(),
+            });
+        }
         self.record(Call::ReclaimWorktree {
             child: child.clone(),
         });
         Ok(())
     }
     async fn kill_pane(&self, child: &AgentName) -> Result<(), SpawnError> {
+        if self.should_fail("kill_pane") {
+            return Err(SpawnError::Failed {
+                op: "kill_pane",
+                child: Some(child.clone()),
+                detail: "mock forced failure".into(),
+            });
+        }
         self.record(Call::KillPane {
             child: child.clone(),
         });
