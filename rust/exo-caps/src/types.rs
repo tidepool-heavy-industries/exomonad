@@ -306,6 +306,10 @@ pub enum NodeKind {
     Tl,
     Dev,
     Worker,
+    /// A short-lived Gemini spawned by a submitting node to review its branch. Works in its own
+    /// worktree off the under-review code (full YOLO; its blast radius is its own branch) and
+    /// emits a `verdict`. Not a tree-building archetype — it reviews, then exits.
+    Reviewer,
 }
 
 impl NodeKind {
@@ -313,7 +317,7 @@ impl NodeKind {
     pub fn agent_type(self) -> AgentType {
         match self {
             NodeKind::Root | NodeKind::Tl => AgentType::Claude,
-            NodeKind::Dev | NodeKind::Worker => AgentType::Gemini,
+            NodeKind::Dev | NodeKind::Worker | NodeKind::Reviewer => AgentType::Gemini,
         }
     }
     /// The `role_def` key / wire string.
@@ -323,6 +327,7 @@ impl NodeKind {
             NodeKind::Tl => "tl",
             NodeKind::Dev => "dev",
             NodeKind::Worker => "worker",
+            NodeKind::Reviewer => "reviewer",
         }
     }
 }
@@ -398,6 +403,11 @@ pub enum MessageKind {
     Event,
     /// lifecycle (exomonad-internal) — see `ControlKind`.
     Control(ControlKind),
+    /// a node-to-node **system signal** — consumed by the recipient's *sidecar*, NOT rendered
+    /// into its LLM conversation unless the handler decides the agent must act. This one
+    /// envelope variant is just the sidecar-vs-LLM routing bit; the real, granular identifiers
+    /// are the [`SystemMessage`] variant tags (so `MessageKind` doesn't bloat per signal).
+    System(SystemMessage),
 }
 
 /// A directed control **message**. Lifecycle **records** (`AgentSpawned`/`AgentStarted`)
@@ -406,6 +416,33 @@ pub enum MessageKind {
 #[serde(rename_all = "snake_case")]
 pub enum ControlKind {
     Shutdown { grace_ms: u32 },
+}
+
+/// System signals carried over the bus and handled by the recipient's sidecar (see
+/// [`MessageKind::System`]). Serde-tagged on `type` (`review_approved` / `review_denied` /
+/// `review_changes`) — **granular, flat, extensible**: new node-to-node control signals are new
+/// variants here, never a churn of the core envelope. Tolerantly parsed (an unknown variant is
+/// logged + skipped), so a mixed-version swarm won't crash.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SystemMessage {
+    /// The reviewer approved `branch@sha`. The submitter's sidecar auto-escalates `[READY]`
+    /// upward (no LLM turn) iff `sha` still matches the submitter's HEAD.
+    ReviewApproved { branch: Branch, sha: String },
+    /// The reviewer rejected with feedback. Rendered + delivered to the submitter's LLM to address.
+    ReviewDenied {
+        branch: Branch,
+        sha: String,
+        message: String,
+    },
+    /// The reviewer committed a counter-proposal to `changes_branch`. Rendered + delivered to the
+    /// submitter's LLM to `merge` + re-submit.
+    ReviewChanges {
+        branch: Branch,
+        sha: String,
+        changes_branch: Branch,
+        message: String,
+    },
 }
 
 #[cfg(test)]

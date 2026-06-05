@@ -515,6 +515,30 @@ impl Spawner for Runtime {
         self.birth(core).await
     }
 
+    async fn spawn_reviewer(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError> {
+        let name = self.resolve_child_name(spec.name, "reviewer").await?;
+        let task = Self::render_spec_prompt(
+            &spec.task,
+            &spec.read_first,
+            &spec.steps,
+            &spec.verify,
+            &spec.boundary,
+            spec.context.as_ref(),
+            &spec.done_criteria,
+        );
+        // Worktree off the CURRENT branch (the under-review code), role=Reviewer. Identical
+        // machinery to `spawn_gemini`; only the role differs (drives papers/tools).
+        let core = BirthCore {
+            kind: ChildKind::Worktree,
+            agent_type: AgentType::Gemini,
+            role: NodeKind::Reviewer,
+            branch: Branch::from_path(&self.node_path().child(&name)),
+            name,
+            task,
+        };
+        self.birth(core).await
+    }
+
     async fn fork_wave(&self, specs: Vec<ForkSpec>) -> Vec<Result<AgentName, SpawnError>> {
         let mut results = Vec::with_capacity(specs.len());
         for spec in specs {

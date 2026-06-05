@@ -154,7 +154,29 @@ impl InboundHandler for RealHandler {
                     .map_err(|e| std::io::Error::other(e.to_string()))?;
                 Ok(Some(true))
             }
+            // System signals are consumed by the sidecar, never delivered to the LLM directly.
+            MessageKind::System(system) => {
+                self.handle_system(system).await?;
+                Ok(Some(false))
+            }
         }
+    }
+}
+
+impl RealHandler {
+    /// Route a [`SystemMessage`] (sidecar-side; never injected into the LLM directly).
+    ///
+    /// **Scaffold stub — leaf (c) implements the real routing:**
+    /// - `ReviewApproved { branch, sha }` & `sha == my HEAD` → deliver `[READY]` to my parent
+    ///   inbox (no LLM turn). Stale sha → ignore.
+    /// - `ReviewDenied` / `ReviewChanges` → render + deliver to the LLM (existing dispatch path),
+    ///   so the submitter wakes to fix / merge + re-submit.
+    async fn handle_system(&self, system: &exo_caps::SystemMessage) -> NodeResult<()> {
+        warn!(
+            "system-message review handler not yet implemented: {:?}",
+            system
+        );
+        Ok(())
     }
 }
 

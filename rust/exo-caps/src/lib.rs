@@ -42,4 +42,5 @@ pub use topology::{Topology, TopologyError, TopologyView, TreeNode};
 pub use types::{
     AgentName, AgentType, Branch, ChildKind, ControlKind, InboxPath, IngestionEntry, Message,
     MessageBody, MessageKind, NodeKind, NodePath, PaneId, Persona, Summary, SyntheticName,
+    SystemMessage,
 };
