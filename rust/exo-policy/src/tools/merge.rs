@@ -5,7 +5,7 @@
 //! when added, runs *before* this (gating the merge); this tool is just the fold. A merge
 //! conflict surfaces as a tool error for the TL to resolve.
 
-use exo_caps::{Branch, CapResult, Git};
+use exo_caps::{AgentName, Branch, CapResult, Git, Spawner};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -23,18 +23,35 @@ pub struct MergeArgs {
 pub struct Merge;
 
 impl Merge {
-    pub async fn run<C: Git>(ctx: &C, args: MergeArgs) -> CapResult<ToolOutput> {
+    pub async fn run<C: Git + Spawner>(ctx: &C, args: MergeArgs) -> CapResult<ToolOutput> {
         let branch = Branch::new(args.branch.clone())?;
         ctx.merge(&branch).await?;
+
+        let mut teardown = String::new();
+        if let Some(seg) = branch.as_str().rsplit('.').next() {
+            if let Ok(child) = AgentName::new(seg.to_string()) {
+                let killed = ctx.kill_pane(&child).await;
+                let reclaimed = ctx.reclaim_worktree(&child).await;
+                teardown = match (killed, reclaimed) {
+                    (Ok(_), Ok(_)) => format!(" (reclaimed {})", child.as_str()),
+                    (k, r) => format!(
+                        " (teardown best-effort: kill={:?} reclaim={:?})",
+                        k.err(),
+                        r.err()
+                    ),
+                };
+            }
+        }
+
         Ok(ToolOutput::with_data(
-            format!("merged branch {}", branch.as_str()),
+            format!("merged branch {}{}", branch.as_str(), teardown),
             json!({ "branch": branch.as_str() }),
         ))
     }
 }
 
 #[async_trait::async_trait]
-impl<R: Git + Send + Sync> Tool<R> for Merge {
+impl<R: Git + Spawner + Send + Sync> Tool<R> for Merge {
     fn name(&self) -> &str {
         "merge"
     }
@@ -73,12 +90,21 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(out.text, "merged branch main.root.feature");
+        assert_eq!(
+            out.text,
+            "merged branch main.root.feature (reclaimed feature)"
+        );
         assert_eq!(out.data, Some(json!({ "branch": "main.root.feature" })));
         let calls = mock.calls_made();
         assert!(calls.iter().any(
             |c| matches!(c, Call::Merge { branch } if branch.as_str() == "main.root.feature")
         ));
+        assert!(calls
+            .iter()
+            .any(|c| matches!(c, Call::KillPane { child } if child.as_str() == "feature")));
+        assert!(calls
+            .iter()
+            .any(|c| matches!(c, Call::ReclaimWorktree { child } if child.as_str() == "feature")));
     }
 
     #[tokio::test]
