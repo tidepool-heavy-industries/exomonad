@@ -4,7 +4,7 @@
 //! (per `.claude/rules/rust.md`). **Serde deserializes *through* the constructor**
 //! (`#[serde(try_from)]`), so a value read from disk (papers, a bus line) is validated
 //! too — there is no "transparent" hole that lets an invalid value in. Serialization is
-//! transparent (the inner value). See docs 01/03.
+//! transparent (the inner value).
 
 use crate::error::{CapError, CapResult};
 use chrono::{DateTime, Utc};
@@ -224,7 +224,7 @@ impl MessageBody {
     /// is a touch under this once the envelope is added. **Bulk content is never inlined
     /// in a message** — the sender writes a file (worktree `.exo/` or `/tmp`) and sends a
     /// small message referencing the path; the receiver reads it with its file tools.
-    /// See doc 02.
+    ///
     pub const MAX_LEN: usize = 4 * 1024;
 
     pub fn new(s: String) -> CapResult<Self> {
@@ -298,7 +298,7 @@ impl TryFrom<String> for Summary {
 
 /// A node's archetype — the **one** stored identity enum. `role` (the `role_def` key)
 /// is the variant; `agent_type` **derives**. Only the four real archetypes are
-/// representable, so `(Root, Gemini)` / `(Worker, Claude)` are unnameable. See doc 03.
+/// representable, so `(Root, Gemini)` / `(Worker, Claude)` are unnameable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NodeKind {
@@ -373,7 +373,7 @@ pub struct Message {
 /// One line of an ingestion inbox — the **wire** form. The runtime stamps `from` (the
 /// true sender; `Agent(me)` for a node send, `Synthetic(src)` for an event injection),
 /// `ts`, and the schema version `v`; the [`Message`] is flattened in, so the line is
-/// exactly `{v,ts,from,kind,summary,text}` (doc 02). **Ordering is the append order**
+/// exactly `{v,ts,from,kind,summary,text}`. **Ordering is the append order**
 /// (line order) — no message-id is carried; at-least-once redelivery may show the agent
 /// a duplicate line, which is benign. `v` defaults and unknown fields are tolerated (no
 /// `deny_unknown_fields`) — a mixed-version swarm won't crash.

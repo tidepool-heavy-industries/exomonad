@@ -1,6 +1,6 @@
 //! The `Bus` cap — runtime-agnostic message delivery (append to the target's ingestion
 //! inbox). The Teams-vs-tmux last-hop lives in the *recipient's* inbound loop, so policy
-//! never names a delivery mechanism. See docs 02/03.
+//! never names a delivery mechanism.
 
 use crate::types::{AgentName, Message};
 use async_trait::async_trait;

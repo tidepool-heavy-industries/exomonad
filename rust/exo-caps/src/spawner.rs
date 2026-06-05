@@ -3,7 +3,7 @@
 //! `birth(BirthCore)` tail (in the runtime impl) does the common sequence:
 //! append `AgentSpawned` → (`git worktree add` for a Worktree child) → `tmux new-pane` →
 //! write child papers (incl. `parent_inbox`) → launch `exomonad experimental node`
-//! (see [`crate::invocation`]). See docs 03/04.
+//! (see [`crate::invocation`]).
 
 use crate::types::AgentName;
 use async_trait::async_trait;
@@ -76,7 +76,7 @@ pub trait Spawner {
     /// that did spawn (the TL converges on what succeeded, re-decomposes the failures).
     async fn fork_wave(&self, specs: Vec<ForkSpec>) -> Vec<Result<AgentName, SpawnError>>;
 
-    /// Teardown is **two independent steps, not one reap** (see docs 03/04). Worktree
+    /// Teardown is **two independent steps, not one reap**. Worktree
     /// reclamation is parent-side, run at convergence (after the child's PR merges); an
     /// `Inline` child has no worktree to reclaim.
     async fn reclaim_worktree(&self, child: &AgentName) -> Result<(), SpawnError>;

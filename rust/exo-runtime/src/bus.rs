@@ -2,7 +2,7 @@
 //! piece** (not adapted from a service).
 //!
 //! **Leaf R4.** The bus is *a jsonl file*: append a line, read new lines from a saved
-//! byte-offset. NO queue abstraction, NO `exo-mailbox` crate. See doc 02.
+//! byte-offset. NO queue abstraction, NO `exo-mailbox` crate.
 //!
 //! `deliver` only does the **append** half:
 //! 1. Resolve `Addressee` → `InboxPath`:
@@ -35,7 +35,7 @@ use tokio::io::AsyncWriteExt;
 
 impl Runtime {
     /// Resolve a policy-facing [`Addressee`] to the concrete inbox file to append to.
-    /// Internal to the runtime — never exposed to policy (per doc 03).
+    /// Internal to the runtime — never exposed to policy.
     pub(crate) async fn resolve_inbox(&self, to: &Addressee) -> Result<InboxPath, BusError> {
         match to {
             Addressee::Parent => self
@@ -111,7 +111,7 @@ impl Bus for Runtime {
         file.write_all(line.as_bytes()).await?;
         // tokio's File buffers and does NOT flush on drop — without this the line is lost.
         // This is a kernel-buffer flush, not fsync: the bytes reach the page cache (surviving
-        // a process crash), matching the "no fsync" durability level (doc 02).
+        // a process crash), matching the "no fsync" durability level.
         file.flush().await?;
         Ok(())
     }

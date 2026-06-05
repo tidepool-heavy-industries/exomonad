@@ -4,7 +4,7 @@
 //! A tool is a **type**: an `Args` struct (deriving `Deserialize + JsonSchema`), a
 //! generic-over-caps `run` whose cap bounds *are* its least-privilege spec, and a ~6-line
 //! hand-written `Tool<R>` adapter (NO macro — the locked rule) that monomorphizes `run`
-//! at the concrete runtime `R` and erases args↔JSON. See `docs/design/swarm/04-policy.md`.
+//! at the concrete runtime `R` and erases args↔JSON.
 
 use exo_caps::{CapError, CapResult};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};

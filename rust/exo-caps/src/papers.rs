@@ -1,6 +1,6 @@
 //! Type-1 papers (`node.json`) — a node's immutable birth identity, written by the parent
 //! at spawn and read by the child's sidecar at boot. The one contract that crosses the
-//! birth → self-ID seam (Spawner writes it; Wave-2 node bootstrap reads it). See doc 01.
+//! birth → self-ID seam (Spawner writes it; Wave-2 node bootstrap reads it).
 //!
 //! Assigned-at-birth, never derived: `role`/`parent`/tree-position exist in no runtime's
 //! live state, so they are *recorded* once. `agent_type` is **not** stored — it derives

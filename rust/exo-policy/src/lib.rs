@@ -1,8 +1,8 @@
-//! `exo-policy` — the Bucket-C decision logic (tools / roles / hooks / events).
+//! `exo-policy` — the Bucket-C decision logic (tools / roles / hooks).
 //!
 //! Written generic over the [`exo_caps`] capability traits it needs (no `dyn Caps`), so
 //! least-privilege is compiler-checked and every tool is unit-testable against mock caps
-//! with zero IO. No phases, no DSL, no macros. See `docs/design/swarm/04-policy.md`.
+//! with zero IO. No phases, no DSL, no macros.
 //!
 //! ## Shape
 //! - [`tool`] — the [`Tool<R>`](tool::Tool) trait + the JSON-edge adapter helpers + [`ToolOutput`](tool::ToolOutput).

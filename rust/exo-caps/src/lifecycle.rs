@@ -6,7 +6,7 @@
 //! interesting transitions (running → exited) are driven by *external* OS events, so
 //! they're computed **live** (pane-alive), never recorded. We only type the part that is
 //! genuinely recorded: `Spawned` (parent logs the intent) then `Started` (child checks
-//! in). See docs 04/07.
+//! in).
 
 use crate::types::{AgentName, ChildKind, InboxPath, PaneId};
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 pub enum ChildRecord {
     /// Appended by the **parent**, *before* it creates the pane (so there is never an
     /// untracked process). Carries exactly what the parent needs to address + tear the
-    /// child down. Per the derivable-field rule (doc 07): `inbox` is **stored** (its
+    /// child down. Per the derivable-field rule: `inbox` is **stored** (its
     /// derivation is scheme-coupled), while the child's `path` is **not** (derivable as
     /// `parent.path ++ child`, scheme-stable, and owned by the child's papers).
     Spawned {

@@ -8,17 +8,14 @@
 //! One file per cap (`impl <Cap> for Runtime`), so cap leaves never collide. The `Runtime`
 //! struct + accessors live in [`runtime`]; every other module is a trait impl.
 //!
-//! **Cap set.** All `exo-caps` traits are implemented. The "provisional"
-//! caps from doc 03 (`Tmux`/`Fs`/`Process`/`Log`) are kept because each has a *runtime*
-//! consumer — `Bus` uses `Tmux::paste` + `Fs` side-files; `Spawner` uses `Tmux` panes +
-//! `Process`; `Log` is universal. They are runtime-internal (not policy-facing), but NOT
-//! zero-consumer, so none is cut. (Cutting one would also churn the frozen `exo-caps`
-//! contract that the Policy TL is forking from concurrently — out of scope for Wave 1.)
+//! **Cap set.** All `exo-caps` traits are implemented. The "provisional" caps
+//! (`Tmux`/`Fs`/`Process`/`Log`) are kept because each has a *runtime* consumer — `Bus` uses
+//! `Tmux::paste` + `Fs` side-files; `Spawner` uses `Tmux` panes + `Process`; `Log` is
+//! universal. They are runtime-internal (not policy-facing), but NOT zero-consumer.
 //!
-//! **Status: Wave 1 complete.** `Runtime` implements every cap (R1 git, R2 tmux,
-//! R3 fs/process/log/kv, R4 bus; Spawner S1–S3). The `Bus` append half is done here; the
-//! read/cursor/`notify`-watch half is the Wave-2 inbound loop. See
-//! `docs/design/swarm/06-migration.md`.
+//! `Runtime` implements every cap (git, tmux, fs/process/log/kv, bus, Spawner). The `Bus`
+//! append half is done here; the read/cursor/`notify`-watch half is the inbound loop
+//! (`exo-node`).
 
 mod runtime;
 

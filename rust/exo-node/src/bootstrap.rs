@@ -1,5 +1,5 @@
 //! Node self-identification + context assembly — the **real** scaffold the loop leaves
-//! build on. See `docs/design/swarm/01-identity.md`.
+//! build on.
 //!
 //! A node boots by reading its **papers** (`--papers <path>`, written by the parent at
 //! spawn — the parent never makes the child guess where they are) into [`NodePapers`], then

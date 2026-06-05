@@ -1,5 +1,5 @@
 //! `impl Spawner for Runtime` — the recursion (birth + teardown). **Race-prone; built by
-//! the Spawner sub-TL, decomposed S1/S2/S3 — never one leaf.** See docs 03/04, plan 06.
+//! the Spawner sub-TL, decomposed S1/S2/S3 — never one leaf.**
 //!
 //! Per-op methods each fix their own `(role, agent_type, kind)`; the spec carries only
 //! task content. All three ops funnel through one private `birth(BirthCore)` tail:

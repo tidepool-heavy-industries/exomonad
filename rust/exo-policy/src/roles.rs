@@ -2,7 +2,7 @@
 //! [`role_def`] is the hand-written `match NodeKind` table. A role *reads* like declarative
 //! config but is plain, greppable, unit-testable Rust: a list of tool **types** plus three
 //! fn-pointers (hooks compose by pointing several roles at the same fn). NO `dyn Caps` — the
-//! table is parameterized by the concrete runtime `R`. See `docs/design/swarm/04-policy.md`.
+//! table is parameterized by the concrete runtime `R`.
 //!
 //! **Status: Wave-3 scaffold.** The `RoleDef` shape + the fn-pointer signatures are frozen;
 //! P7 fills the `role_def` arms with real tool lists + hook wiring once P1–P6 land their

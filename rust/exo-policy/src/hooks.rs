@@ -2,7 +2,7 @@
 //! `session_start` (root identity bootstrap). These are **functions generic over the caps
 //! they need** (no `dyn Caps`); the [`RoleDef`](crate::roles::RoleDef) table stores them as
 //! `fn(&R, …) -> BoxFuture<…>` monomorphized at the concrete runtime `R`, so the generic
-//! bound *is* the per-hook least-privilege spec. See `docs/design/swarm/04-policy.md`.
+//! bound *is* the per-hook least-privilege spec.
 //!
 //! **Status: Wave-3 scaffold.** The decision enums + `HookInput` are the frozen contract;
 //! P6 fills in `pre_tool_use` / `stop` / `session_start` (one per concern) with mock-cap

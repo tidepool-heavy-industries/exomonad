@@ -3,7 +3,6 @@
 //! Policy (`exo-policy`) is written generic over these traits; the runtime
 //! (`exo-runtime`) implements them. Unlike the old WASM boundary this is NOT enforced —
 //! policy MAY drop to raw IO as an escape hatch; good caps make it rarely want to.
-//! See `docs/design/swarm/03-capabilities.md`.
 //!
 //! **Status: Wave-0 scaffold (the frozen contract).** The domain types and the
 //! `Bus`/`Spawner` seam are settled; newtype constructor *bodies* and the IO cap method
@@ -19,7 +18,7 @@ pub mod paths;
 pub mod spawner;
 pub mod types;
 
-// IO caps — one trait per file (see `docs/design/swarm/05-crates-and-binary.md`).
+// IO caps — one trait per file.
 pub mod fs;
 pub mod git;
 pub mod kv;

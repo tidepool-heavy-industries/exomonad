@@ -1,7 +1,7 @@
 //! `exo-node` — the per-node sidecar (Wave 2).
 //!
-//! Assembles the real [`exo_runtime::Runtime`] (all 9 caps) + [`exo_policy`] (tools / hooks
-//! / events / `role_def`) into a running **two-loop sidecar**, one process per agent:
+//! Assembles the real [`exo_runtime::Runtime`] (all caps) + [`exo_policy`] (tools / hooks /
+//! `role_def`) into a running **two-loop sidecar**, one process per agent:
 //!
 //! ```text
 //!   OUTBOUND (N1):  serve exo-policy Tools over rmcp/stdio; send_message → Bus::deliver.
@@ -12,9 +12,6 @@
 //!
 //! Convergence is on-disk (v2): a TL folds a finished child by merging its branch locally
 //! (the `merge` tool). There is no GitHub poller / world-event layer.
-//!
-//! See `docs/design/swarm/02-bus-and-sidecar.md` (two-loop model + cursor/restart),
-//! `05-crates-and-binary.md` (modes), `01-identity.md` (papers).
 //!
 //! **Status: Wave-2 assembled.** [`bootstrap`] self-IDs from papers; the loop modules
 //! (`outbound` N1, `dispatch` N2a, `inbound` N2b, `hook` N4) are implemented; [`run_node`]

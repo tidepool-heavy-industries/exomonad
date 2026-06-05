@@ -3,7 +3,7 @@
 //! (→ Worktree/Tl/Claude). Each is a thin wrapper type: an `Args` carrying ONLY task content
 //! (the `(role, agent_type, kind)` triple is fixed by which op, never a caller field), a
 //! generic-over-caps `run<C: Spawner>`, and a `Tool<R>` adapter. Ships mock-cap unit tests
-//! (assert the right `Spawner` method recorded) in this file. See `docs/design/swarm/03-capabilities.md`.
+//! (assert the right `Spawner` method recorded) in this file.
 
 use crate::tool::{ok_json, parse, schema_json, Tool, ToolOutput};
 use exo_caps::{AgentName, CapResult, ForkSpec, GeminiSpec, Spawner, WorkerSpec};

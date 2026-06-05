@@ -7,7 +7,7 @@
 //! `PolicyCaps` automatically — nothing manual to keep in sync.
 //!
 //! `Send + Sync + 'static` is required because the sidecar drives tools/hooks across tokio
-//! tasks (doc 07: "`R: Send + Sync + 'static` at the dispatch boundary").
+//! tasks (`R: Send + Sync + 'static` at the dispatch boundary).
 
 use exo_caps::{Bus, Fs, Git, Kv, Log, Process, Spawner, Tmux};
 

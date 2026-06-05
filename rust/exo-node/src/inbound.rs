@@ -1,6 +1,5 @@
 //! **N2b — Inbound loop.** Drive the Bus READ side of this node's own ingestion inbox — the
-//! cursor/restart half the `Bus` cap (write side) left for Wave 2. Per
-//! `docs/design/swarm/02-bus-and-sidecar.md` *Cursor & restart*, implement EXACTLY:
+//! cursor/restart half the `Bus` cap (write side) leaves to the reader. The contract:
 //!
 //! - **Cursor = byte-offset** in a sibling `pane-N.cursor`. Resume = seek + read forward, O(1).
 //! - **Watch via the `notify` crate** (event-driven, never a poll loop, never hand-rolled

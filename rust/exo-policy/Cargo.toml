@@ -2,7 +2,7 @@
 name = "exo-policy"
 version = "0.1.0"
 edition = "2021"
-description = "Bucket-C decision logic — tools, roles, hooks, events — generic over the exo-caps traits."
+description = "Bucket-C decision logic — tools, roles, hooks — generic over the exo-caps traits."
 
 [lib]
 name = "exo_policy"

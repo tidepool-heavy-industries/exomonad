@@ -94,11 +94,25 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 
 ## Workspace Members
 
+**Classic (server-based, Haskell-WASM routing):**
+
 | Crate | Type | Purpose |
 |-------|------|---------|
-| [exomonad](exomonad/CLAUDE.md) | Binary (`exomonad`) | MCP + Hook handler via WASM |
+| [exomonad](exomonad/CLAUDE.md) | Binary (`exomonad`) | MCP + Hook handler via WASM; `serve`/`mcp-stdio`/`init`/`hook` modes |
 | exomonad-core | Library | Framework, handlers, services, protocol types, UI protocol |
 | exomonad-proto | Library | Proto-generated types (prost) for FFI + effects |
+
+**Node-mode swarm (`exomonad experimental` — v2, no central server):** a per-agent
+Rust sidecar, the filesystem as the bus, the process tree as the topology. Convergence
+is on-disk (local `git merge`) — no GitHub/Copilot. Built beside classic, non-destructive.
+
+| Crate | Type | Purpose |
+|-------|------|---------|
+| [exo-caps](exo-caps/CLAUDE.md) | Library | The capability seam: trait contract + validated domain types (no IO) |
+| [exo-runtime](exo-runtime/CLAUDE.md) | Library | IO impls of every cap on one `Runtime` (reuses exomonad-core services) |
+| [exo-policy](exo-policy/CLAUDE.md) | Library | Tools / roles / hooks, generic over caps; unit-testable with zero IO |
+| [exo-node](exo-node/CLAUDE.md) | Library | The per-node sidecar: outbound MCP + inbound inbox-watch + hook mode |
+| [exo-scry](exo-scry/CLAUDE.md) | Lib + bin | Derive a CC session's active team from live OS state (native Teams delivery) |
 
 ### Feature Flags (exomonad-core)
 
