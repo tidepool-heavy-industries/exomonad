@@ -26,6 +26,8 @@ pub enum CapError {
     Process(#[from] crate::process::ProcessError),
     #[error(transparent)]
     Kv(#[from] crate::kv::KvError),
+    #[error(transparent)]
+    Topology(#[from] crate::topology::TopologyError),
 
     #[error("io: {0}")]
     Io(#[from] std::io::Error),

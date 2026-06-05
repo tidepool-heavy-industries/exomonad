@@ -29,6 +29,7 @@ mod process;
 pub mod session_boot;
 mod spawner;
 mod tmux;
+mod topology;
 
 pub use node_config::write_node_agent_config;
 pub use runtime::Runtime;

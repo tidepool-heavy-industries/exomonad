@@ -32,6 +32,7 @@ Eight caps, each one trait per file. `exo-runtime::Runtime` implements all of th
 - **`Kv`** — `get`, `set`.
 - **`Process`** — `run`.
 - **`Log`** — `info`, `error` (sync, infallible).
+- **`Topology`** — `topology()` → the caller's subtree (folded recursively from the per-node `children.jsonl` ledgers) + parent + per-node pane-liveness. Backs the `tree` tool.
 
 ## Domain types (the invariants worth knowing)
 

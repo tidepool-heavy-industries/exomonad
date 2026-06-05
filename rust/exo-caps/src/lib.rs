@@ -16,6 +16,7 @@ pub mod lifecycle;
 pub mod papers;
 pub mod paths;
 pub mod spawner;
+pub mod topology;
 pub mod types;
 
 // IO caps — one trait per file.
@@ -37,6 +38,7 @@ pub use papers::NodePapers;
 pub use process::{Process, ProcessError};
 pub use spawner::{ForkSpec, GeminiSpec, SpawnError, Spawner, WorkerSpec};
 pub use tmux::{Tmux, TmuxError};
+pub use topology::{Topology, TopologyError, TopologyView, TreeNode};
 pub use types::{
     AgentName, AgentType, Branch, ChildKind, ControlKind, InboxPath, IngestionEntry, Message,
     MessageBody, MessageKind, NodeKind, NodePath, PaneId, Persona, Summary, SyntheticName,
