@@ -25,8 +25,9 @@ The Bucket-C logic that genuinely ports from the old Haskell DSL: MCP tool defin
 | `spawn_gemini` | `Spawner` | root, tl | Spawn a Gemini dev in its own worktree. |
 | `spawn_worker` | `Spawner` | root, tl | Spawn an ephemeral Gemini worker (inline pane). |
 | `merge` | `Git` | root, tl | **The local fold:** `git merge <child-branch>`. No PR, no remote, no GitHub. |
-| `submit_branch` | `Git`+`Bus` | tl, dev | **The done-signal** (local analogue of file_pr): runs preconditions (v1: committed), then delivers `[READY] branch X` to the parent for it to `merge`. |
-| `notify_parent` | `Bus` | tl, dev, worker | Status/failure update to `Addressee::Parent` (NOT the done-signal). |
+| `submit_branch` | `Git`+`Process`+`Spawner`+`Fs` | tl, dev | **Request review.** Runs the precondition checks (committed + `.exo/checks/pre-merge/*` scripts), then spawns a **reviewer** off this branch and returns "stop & wait". It does NOT deliver `[READY]` — only the sidecar does, on an approve-verdict (the structural gate). |
+| `verdict` | `Bus` | reviewer | A reviewer's one output → a `System(SystemMessage)` to its parent: `approve` / `deny`+msg / `changes`+branch. |
+| `notify_parent` | `Bus` | tl, dev, worker, reviewer | Status/failure update to `Addressee::Parent` (NOT the done-signal). |
 | `send_message` | `Bus` | root, tl | Deliver to a child (`Inline`/`Worktree`) — **tree-edges only**. |
 | `tree` | `Topology` | root, tl | Read-only: the caller's subtree (recursive ledger fold) + parent + per-node `pane_alive` liveness. |
 
@@ -47,6 +48,21 @@ one entry.
 | **Tl** | Claude | spawns, merge, notify_parent, send_message, submit_branch | `stop` (clean-gate) |
 | **Dev** | Gemini | notify_parent, submit_branch | `stop` (clean-gate) |
 | **Worker** | Gemini | notify_parent | `stop_allow` (inline child, no own branch to submit) |
+| **Reviewer** | Gemini | verdict, notify_parent | `stop_allow` (ephemeral; reviews a branch off its own worktree, then exits) |
+
+## The review gate (how `submit_branch` → `merge` is gated)
+
+A node commits, then calls `submit_branch`. It runs the checks, then spawns a **reviewer** (a full
+Gemini in its own worktree branched off the under-review code — it can build/test freely, blast
+radius is its own branch) handed the diff + `.exo/acceptance.md` (the node's spawn prompt +
+`done_criteria`, persisted at birth). The reviewer calls `verdict`, which rides the bus as a
+`System` message to the submitter's **sidecar**:
+- **approve** & sha==HEAD → the sidecar escalates `[READY]` to the parent — *no LLM turn*.
+- **deny** / **changes** → delivered into the submitter's LLM to fix / `merge` the reviewer's
+  branch, then re-submit (new sha → fresh reviewer).
+
+`submit_branch` never delivers `[READY]` itself, so the gate is **structural** — the LLM has no
+tool that skips review. (System messages are a general sidecar-consumed primitive; see exo-caps.)
 
 ## The hooks
 
@@ -57,6 +73,6 @@ one entry.
 ## Gaps / not-yet
 
 - **No convergence teardown.** `merge` folds the branch but nothing reclaims the child's worktree or kills its pane afterward (`Spawner::reclaim_worktree`/`kill_pane` exist but no tool calls them). After a fold the child pane + worktree linger. This is the main open lifecycle gap.
-- **No reviewers.** The planned short-lived adversarial Gemini reviewer loop is not built — `merge` is an unguarded fold. The natural seam is `submit_branch`'s ordered check list (a reviewer-verdict gate) and/or a gate in `merge`.
+- **Reviewers: built** (see "The review gate" above) — `submit_branch` spawns a reviewer and only the sidecar escalates `[READY]` on approval. Follow-ups: a two-way colleague back-channel (submitter→reviewer reply needs `send_message` on dev), and review is currently always-on (no config to disable).
 - `pre_tool_use` is intentionally minimal (one nudge); classic exomonad's richer antipattern set + PII rewrite are not ported.
 - `stop`'s dirty-gate can wedge an agent that holds untracked artifacts it won't commit (mitigated only by the agent being told to commit) — watch for this in smokes.

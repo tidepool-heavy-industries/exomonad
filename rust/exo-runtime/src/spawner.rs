@@ -354,6 +354,20 @@ impl Runtime {
         })?;
         tokio::fs::write(&papers_path, papers_json).await?;
 
+        // Persist this node's spec (prompt + acceptance criteria) so the reviewer it later spawns
+        // from `submit_branch` can judge against the *original* bar. Worktree children only (an
+        // inline worker shares the parent's `.exo` and never submits). Best-effort — a write
+        // failure must not fail the spawn.
+        if core.kind == ChildKind::Worktree {
+            let acceptance_path = child_dir.join(".exo/acceptance.md");
+            if let Err(e) = tokio::fs::write(&acceptance_path, &core.task).await {
+                tracing::warn!(
+                    "failed to persist .exo/acceptance.md for {}: {e}",
+                    core.name.as_str()
+                );
+            }
+        }
+
         // (f) Launch the agent via exomonad's shared launch builder (reuse over reinvent):
         // the prompt goes in a file (.exo/tmp), never inline — so a multi-line/quote-bearing
         // task can't break shell parsing — and the CLI/flags are the proven ones. The node

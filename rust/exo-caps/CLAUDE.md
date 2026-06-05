@@ -40,7 +40,7 @@ Eight caps, each one trait per file. `exo-runtime::Runtime` implements all of th
 - **`NodePath`** — tree address as a `Vec<AgentName>`, **not** a dot-string (branch segments may contain `.`, so a joined form can't round-trip). `name()` = last segment, `parent()` = prefix, `child()` extends. `Branch::from_path` generates a *safe* branch (sanitize segments to `[A-Za-z0-9_-]`, join `.`) decoupled from the path.
 - **`NodeKind`** (`Root`/`Tl`/`Dev`/`Worker`) — the one stored archetype. `agent_type()` **derives** (`Root`/`Tl`→Claude, `Dev`/`Worker`→Gemini) — never stored separately, so `(Root, Gemini)` is unnameable.
 - **`Message`** = `{text, summary, kind}` — what *policy* builds. It carries **no `from`/`ts`/`id`**: the runtime stamps the `IngestionEntry` envelope at append, so **a tool cannot spoof its sender** (anti-spoof is structural, not convention). `Persona` = `Agent(AgentName) | Synthetic(SyntheticName)`.
-- **`MessageKind`** = `Chat | Event | Control(Shutdown{grace_ms})`. `Event` is delivered like `Chat` (tagged `kind: event` in the last-hop header) — there is no world-event handler in v2.
+- **`MessageKind`** = `Chat | Event | Control(Shutdown{grace_ms}) | System(SystemMessage)`. `Event` is delivered like `Chat`. **`System`** is the sidecar-vs-LLM routing bit: a `System` message is consumed by the recipient's *sidecar* (inbound loop), never rendered to its LLM unless the handler decides it must act. The granular, serde-tagged, extensible **`SystemMessage`** variants (`review_approved` / `review_denied` / `review_changes`, …) are the real identifiers — new node-to-node control signals are new variants there, not a churn of the envelope.
 
 ## Load-bearing principles (encoded in the types)
 
