@@ -24,9 +24,9 @@ This is the seam that replaces the old Haskell-WASM boundary. WASM *physically* 
 
 Eight caps, each one trait per file. `exo-runtime::Runtime` implements all of them; `exo-policy::testing::MockRuntime` mocks all of them.
 
-- **`Git`** — `current_branch`, `is_clean`, `fetch`, **`merge`** (the local on-disk fold — v2 convergence), `worktree_add`/`worktree_remove`. **No `GitHub` cap** — v2 convergence is local git, no PR/Copilot (cut 2026-06-01; see `reactive-github-layer-stays` memory).
+- **`Git`** — `current_branch`, `head_sha` (sha-tag review verdicts), `merge_base` (fork-point base for a reviewer's `git diff`), `is_clean`, `fetch`, **`merge`** (the local on-disk fold — v2 convergence), `worktree_add`/`worktree_remove`. **No `GitHub` cap** — v2 convergence is local git, no PR/Copilot (cut 2026-06-01; see `reactive-github-layer-stays` memory).
 - **`Bus`** — `deliver(Addressee, Message)`. The append half only; the read/cursor/watch half is the sidecar's inbound loop. Delivery mechanism (Teams vs tmux) is the *recipient's* last-hop concern — policy never names it.
-- **`Spawner`** — `spawn_worker` / `spawn_gemini` / `fork_wave` (the recursion) + `reclaim_worktree` / `kill_pane` (teardown).
+- **`Spawner`** — `spawn_worker` / `spawn_gemini` / `spawn_reviewer` / `fork_wave` (the recursion) + `reclaim_worktree` / `kill_pane` (teardown).
 - **`Tmux`** — `new_pane`, `new_window`, `paste`, `kill_pane`.
 - **`Fs`** — `read`, `write_atomic`.
 - **`Kv`** — `get`, `set`.

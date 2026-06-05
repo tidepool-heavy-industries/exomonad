@@ -25,7 +25,7 @@ The Bucket-C logic that genuinely ports from the old Haskell DSL: MCP tool defin
 | `spawn_gemini` | `Spawner` | root, tl | Spawn a Gemini dev in its own worktree. |
 | `spawn_worker` | `Spawner` | root, tl | Spawn an ephemeral Gemini worker (inline pane). |
 | `merge` | `Git` | root, tl | **The local fold:** `git merge <child-branch>`. No PR, no remote, no GitHub. |
-| `submit_branch` | `Git`+`Process`+`Spawner`+`Fs` | tl, dev | **Request review.** Runs the precondition checks (committed + `.exo/checks/pre-merge/*` scripts), then spawns a **reviewer** off this branch and returns "stop & wait". It does NOT deliver `[READY]` — only the sidecar does, on an approve-verdict (the structural gate). |
+| `submit_branch` | `Git`+`Process`+`Spawner`+`Fs`+`Bus` | tl, dev | **Request review.** Runs the precondition checks (committed + `.exo/checks/pre-merge/*` scripts), then spawns a **reviewer** off this branch (with a fork-point `git diff` base resolved via `Git::merge_base`, not a possibly-fictional branch name) and returns "stop & wait". It does NOT deliver `[READY]` — only the sidecar does, on an approve-verdict (the structural gate). Escape hatch: `dangerously_skip_reviewer: true` skips the reviewer and forwards a loudly-flagged `[READY]` straight to the parent (still not auto-merged). |
 | `verdict` | `Bus` | reviewer | A reviewer's one output → a `System(SystemMessage)` to its parent: `approve` / `deny`+msg / `changes`+branch. |
 | `notify_parent` | `Bus` | tl, dev, worker, reviewer | Status/failure update to `Addressee::Parent` (NOT the done-signal). |
 | `send_message` | `Bus` | root, tl | Deliver to a child (`Inline`/`Worktree`) — **tree-edges only**. |

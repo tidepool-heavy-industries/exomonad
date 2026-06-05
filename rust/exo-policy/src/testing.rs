@@ -85,6 +85,8 @@ pub struct MockRuntime {
     // canned git state (the stop-gate clean check + merge tests read these)
     pub current_branch: Branch,
     pub head_sha: String,
+    /// What `merge_base` returns for any refish (set `None` to exercise the submit fallback chain).
+    pub merge_base: Option<String>,
     pub is_clean: bool,
     /// If set, the named cap method returns its `*Error` instead of the happy path. Keyed by
     /// a short op label (e.g. "merge") so a test can exercise error branches.
@@ -99,6 +101,7 @@ impl Default for MockRuntime {
             files: Mutex::new(HashMap::new()),
             current_branch: Branch::new("dev.policy-claude".into()).unwrap(),
             head_sha: "0000000000000000000000000000000000000000".into(),
+            merge_base: Some("basebasebasebasebasebasebasebasebasebase".into()),
             is_clean: true,
             fail: Mutex::new(None),
         }
@@ -145,6 +148,9 @@ impl Git for MockRuntime {
     }
     async fn head_sha(&self) -> Result<String, GitError> {
         Ok(self.head_sha.clone())
+    }
+    async fn merge_base(&self, _refish: &str) -> Result<Option<String>, GitError> {
+        Ok(self.merge_base.clone())
     }
     async fn is_clean(&self) -> Result<bool, GitError> {
         Ok(self.is_clean)

@@ -160,7 +160,7 @@ impl InboundHandler for RealHandler {
             }
             // System signals are consumed by the sidecar, never delivered to the LLM directly.
             MessageKind::System(system) => {
-                self.handle_system(system).await?;
+                self.handle_system(&entry.from, system).await?;
                 Ok(Some(false))
             }
         }
@@ -168,8 +168,40 @@ impl InboundHandler for RealHandler {
 }
 
 impl RealHandler {
-    /// Route a [`SystemMessage`] (sidecar-side; never injected into the LLM directly).
-    async fn handle_system(&self, system: &exo_caps::SystemMessage) -> NodeResult<()> {
+    /// Route a [`SystemMessage`] (sidecar-side; never injected into the LLM directly), then
+    /// reclaim the sender. A review verdict comes from a one-shot reviewer that is this node's
+    /// own `Worktree` child — it's done after the verdict, and its branch never merges, so
+    /// `teardown-on-merge` would miss it. Reclaim it here, best-effort, regardless of the verdict
+    /// outcome. (Assumes the reviewer is one-shot; revisit if the two-way reviewer back-channel
+    /// from #935's follow-ups lands.)
+    async fn handle_system(
+        &self,
+        from: &Persona,
+        system: &exo_caps::SystemMessage,
+    ) -> NodeResult<()> {
+        let result = self.apply_verdict(system).await;
+
+        if let Persona::Agent(reviewer) = from {
+            if let Err(e) = exo_caps::Spawner::kill_pane(&*self.ctx.runtime, reviewer).await {
+                warn!(
+                    "reviewer teardown: kill_pane({}) failed: {e}",
+                    reviewer.as_str()
+                );
+            }
+            if let Err(e) = exo_caps::Spawner::reclaim_worktree(&*self.ctx.runtime, reviewer).await
+            {
+                warn!(
+                    "reviewer teardown: reclaim_worktree({}) failed: {e}",
+                    reviewer.as_str()
+                );
+            }
+        }
+        result
+    }
+
+    /// Act on a review verdict (escalate `[READY]` on a matching approval; wake the LLM on
+    /// deny/changes). The sender's lifecycle is handled by [`handle_system`](Self::handle_system).
+    async fn apply_verdict(&self, system: &exo_caps::SystemMessage) -> NodeResult<()> {
         use exo_caps::SystemMessage;
         match system {
             SystemMessage::ReviewApproved { branch, sha } => {

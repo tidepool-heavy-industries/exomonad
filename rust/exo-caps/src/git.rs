@@ -21,6 +21,11 @@ pub trait Git {
     /// The current `HEAD` commit sha (full 40-char). Used to sha-tag review verdicts so the
     /// sidecar only escalates an approval that still matches the committed state.
     async fn head_sha(&self) -> Result<String, GitError>;
+    /// The merge-base (common ancestor) sha of `HEAD` and `refish` — i.e. this branch's fork
+    /// point off `refish`. `Ok(None)` when `refish` doesn't resolve or shares no history (so a
+    /// caller can fall back to another base). Used to give a reviewer a real `git diff` base
+    /// instead of a branch *name* that may not be a live ref.
+    async fn merge_base(&self, refish: &str) -> Result<Option<String>, GitError>;
     async fn is_clean(&self) -> Result<bool, GitError>;
     async fn fetch(&self) -> Result<(), GitError>;
     /// Merge `branch` into the current branch (the local fold; no remote). Non-interactive.

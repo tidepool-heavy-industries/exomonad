@@ -26,6 +26,22 @@ impl Git for Runtime {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
+    async fn merge_base(&self, refish: &str) -> Result<Option<String>, GitError> {
+        // Run the command directly (not via `self.git`) so a non-zero exit — `refish` doesn't
+        // resolve, or HEAD and `refish` share no history — is `Ok(None)` (caller falls back to
+        // another base), not an error.
+        let output = Command::new("git")
+            .current_dir(self.working_dir())
+            .args(["merge-base", "HEAD", refish])
+            .output()
+            .await?;
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok((!sha.is_empty()).then_some(sha))
+    }
+
     async fn is_clean(&self) -> Result<bool, GitError> {
         let output = self.git(&["status", "--porcelain"]).await?;
         Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())

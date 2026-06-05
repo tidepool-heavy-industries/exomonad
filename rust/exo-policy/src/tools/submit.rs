@@ -8,7 +8,10 @@
 //! rewrite. v1 has a single check: the worktree must be clean (work committed), because a parent
 //! merges the BRANCH off disk and uncommitted changes would be invisible to that merge.
 
-use exo_caps::{CapError, CapResult, Fs, GeminiSpec, Git, Process, Spawner};
+use exo_caps::{
+    Addressee, Bus, CapError, CapResult, Fs, GeminiSpec, Git, Message, MessageBody, MessageKind,
+    Process, Spawner, Summary,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -27,6 +30,12 @@ struct CheckResult {
 pub struct SubmitBranchArgs {
     /// What you did / what the parent should review before merging. One or two sentences.
     pub note: String,
+    /// DANGER: skip the reviewer and forward `[READY]` straight to your parent (it will NOT be
+    /// auto-merged — your parent still decides). Only set this when you're confident the change is
+    /// trivial/safe; your parent is told the review was skipped and to be extra suspicious. Default
+    /// false (review required).
+    #[serde(default)]
+    pub dangerously_skip_reviewer: bool,
 }
 
 /// One submit precondition. Ordered; the first failure blocks the submit with its reason. A
@@ -121,12 +130,13 @@ fn checks<C: Git + Process + Sync>() -> Vec<Check<C>> {
 pub struct SubmitBranch;
 
 impl SubmitBranch {
-    pub async fn run<C: Git + Process + Spawner + Fs + Sync>(
+    pub async fn run<C: Git + Process + Spawner + Fs + Bus + Sync>(
         ctx: &C,
         args: SubmitBranchArgs,
     ) -> CapResult<ToolOutput> {
         // Run the ordered preconditions; first failure blocks (surfaced as a tool error so the
-        // agent sees the reason and can fix it before retrying).
+        // agent sees the reason and can fix it before retrying). These run regardless of whether
+        // review is skipped — committed + pre-merge checks are non-negotiable.
         for check in checks::<C>() {
             if let Err(reason) = (check.run)(ctx).await {
                 return Err(CapError::invalid(
@@ -138,13 +148,60 @@ impl SubmitBranch {
 
         let branch = ctx.current_branch().await?;
         let sha = ctx.head_sha().await?;
-        // The diff base is the parent branch (this branch minus its last dot-segment).
-        let base = branch
+
+        // Escape hatch: skip the reviewer and forward `[READY]` straight to the parent — loudly
+        // flagged as unreviewed. It is NOT auto-merged; the parent still decides (and is told to
+        // be suspicious). The structural gate holds by default; only this explicit opt-out bypasses it.
+        if args.dangerously_skip_reviewer {
+            let text = format!(
+                "[READY — REVIEWER SKIPPED] branch `{}` @ {} is committed and ready for you to \
+                 merge. The submitting node chose to skip review (dangerously_skip_reviewer): NO \
+                 reviewer vetted this. Inspect the diff yourself before merging — be more suspicious \
+                 than usual. Note from the submitter: {}",
+                branch.as_str(),
+                sha,
+                args.note
+            );
+            let msg = Message {
+                text: MessageBody::new(text)?,
+                summary: Summary::new(format!("[READY skipped] {}", branch.as_str()))?,
+                kind: MessageKind::Chat,
+            };
+            ctx.deliver(Addressee::Parent, msg).await?;
+            return Ok(ToolOutput::with_data(
+                format!(
+                    "Forwarded [READY] to your parent for branch {} WITHOUT review (reviewer \
+                     skipped). Your parent will decide whether to merge. STOP now and end your turn.",
+                    branch.as_str()
+                ),
+                json!({ "branch": branch.as_str(), "sha": sha, "reviewer_skipped": true }),
+            ));
+        }
+
+        // Resolve a REAL diff base for the reviewer: the fork point off the parent branch. The
+        // derived parent *name* may not be a live git ref (a direct child of root derives "root",
+        // which the human session never checks out), so resolve to a merge-base SHA, trying the
+        // derived parent then the repo's default branch. A SHA always resolves in `git diff`.
+        let derived_parent = branch
             .as_str()
             .rsplit_once('.')
             .map(|(p, _)| p)
-            .unwrap_or("main")
-            .to_string();
+            .unwrap_or("main");
+        let mut base_sha = None;
+        for candidate in [derived_parent, "main", "master"] {
+            if let Some(found) = ctx.merge_base(candidate).await? {
+                base_sha = Some(found);
+                break;
+            }
+        }
+        let diff_instruction = match &base_sha {
+            Some(b) => format!("Run `git diff {b}...HEAD` to see exactly what changed"),
+            None => {
+                "Inspect the change with `git log` / `git show` (no diff base could be resolved)"
+                    .to_string()
+            }
+        };
+
         // The reviewer's bar: this node's spawn prompt + acceptance criteria, persisted at birth.
         let acceptance = match ctx.read(std::path::Path::new(".exo/acceptance.md")).await {
             Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
@@ -154,13 +211,13 @@ impl SubmitBranch {
         // Spawn a reviewer in its own worktree off this branch. We do NOT deliver `[READY]` here —
         // the ONLY path that escalates is the sidecar reacting to an approve-verdict for this sha
         // (see exo-node `handle_system`). That makes the gate structural: the LLM has no tool that
-        // can skip review.
+        // can skip review (the explicit opt-out above is the one exception, and it's loud).
         let review_task = format!(
-            "You are a code reviewer. Review branch `{branch}` (commit {sha}). Run \
-             `git diff {base}...HEAD` to see exactly what changed; you may build / test / experiment \
-             freely in your own worktree (changes here never touch the reviewed code). Judge the \
-             work against the ACCEPTANCE CRITERIA below and the project's conventions, then call the \
-             `verdict` tool with branch=`{branch}`, sha=`{sha}`, and one of:\n\
+            "You are a code reviewer. Review branch `{branch}` (commit {sha}). {diff_instruction}; \
+             you may build / test / experiment freely in your own worktree (changes here never touch \
+             the reviewed code). Judge the work against the ACCEPTANCE CRITERIA below and the \
+             project's conventions, then call the `verdict` tool with branch=`{branch}`, sha=`{sha}`, \
+             and one of:\n\
              - approve  (it meets the bar)\n\
              - deny + message  (what must change)\n\
              - changes + message + changes_branch=<your own branch>  (you committed a concrete fix \
@@ -197,7 +254,7 @@ impl SubmitBranch {
 }
 
 #[async_trait::async_trait]
-impl<R: Git + Process + Spawner + Fs + Send + Sync> Tool<R> for SubmitBranch {
+impl<R: Git + Process + Spawner + Fs + Bus + Send + Sync> Tool<R> for SubmitBranch {
     fn name(&self) -> &str {
         "submit_branch"
     }
@@ -206,7 +263,9 @@ impl<R: Git + Process + Spawner + Fs + Send + Sync> Tool<R> for SubmitBranch {
          or failing `.exo/checks/pre-merge` scripts), then it spawns a reviewer of your work and \
          returns. Do NOT expect to merge yourself: on approval the sidecar escalates `[READY]` to \
          your parent automatically; on deny / changes you'll be woken with feedback to address and \
-         re-submit. After calling it, STOP and end your turn."
+         re-submit. Set `dangerously_skip_reviewer: true` ONLY for a trivial/safe change to skip \
+         review and forward `[READY]` straight to your parent (it's flagged as unreviewed; not \
+         auto-merged). After calling it, STOP and end your turn."
     }
     fn schema(&self) -> serde_json::Value {
         schema_json(schemars::schema_for!(SubmitBranchArgs))
@@ -228,6 +287,7 @@ mod tests {
             &mock,
             SubmitBranchArgs {
                 note: "did the thing".into(),
+                dangerously_skip_reviewer: false,
             },
         )
         .await
@@ -244,12 +304,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn skip_reviewer_forwards_ready_without_spawning() {
+        let mock = MockRuntime::default();
+        let out = SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "trivial typo fix".into(),
+                dangerously_skip_reviewer: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(out.text.contains("WITHOUT review"));
+        let calls = mock.calls_made();
+        // No reviewer is spawned...
+        assert!(!calls
+            .iter()
+            .any(|c| matches!(c, Call::SpawnReviewer { .. })));
+        // ...and it forwards a SKIPPED [READY] to the parent.
+        assert!(calls
+            .iter()
+            .any(|c| matches!(c, Call::BusDeliver { to, msg }
+            if *to == exo_caps::Addressee::Parent
+                && msg.summary.as_str().contains("[READY skipped]"))));
+    }
+
+    #[tokio::test]
     async fn blocks_when_dirty() {
         let mock = MockRuntime {
             is_clean: false,
             ..Default::default()
         };
-        let res = SubmitBranch::run(&mock, SubmitBranchArgs { note: "x".into() }).await;
+        let res = SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "x".into(),
+                dangerously_skip_reviewer: false,
+            },
+        )
+        .await;
         assert!(res.is_err());
         // The gate blocks BEFORE any delivery.
         assert!(!mock
