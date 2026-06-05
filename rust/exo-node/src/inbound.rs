@@ -27,7 +27,11 @@ use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
-use exo_caps::{ControlKind, IngestionEntry, MessageKind};
+use chrono::Utc;
+use exo_caps::{
+    Addressee, ControlKind, IngestionEntry, Message, MessageBody, MessageKind, Persona, Summary,
+    SyntheticName,
+};
 
 use crate::bootstrap::NodeContext;
 use crate::error::NodeResult;
@@ -165,18 +169,81 @@ impl InboundHandler for RealHandler {
 
 impl RealHandler {
     /// Route a [`SystemMessage`] (sidecar-side; never injected into the LLM directly).
-    ///
-    /// **Scaffold stub — leaf (c) implements the real routing:**
-    /// - `ReviewApproved { branch, sha }` & `sha == my HEAD` → deliver `[READY]` to my parent
-    ///   inbox (no LLM turn). Stale sha → ignore.
-    /// - `ReviewDenied` / `ReviewChanges` → render + deliver to the LLM (existing dispatch path),
-    ///   so the submitter wakes to fix / merge + re-submit.
     async fn handle_system(&self, system: &exo_caps::SystemMessage) -> NodeResult<()> {
-        warn!(
-            "system-message review handler not yet implemented: {:?}",
-            system
-        );
-        Ok(())
+        use exo_caps::SystemMessage;
+        match system {
+            SystemMessage::ReviewApproved { branch, sha } => {
+                let head = exo_caps::Git::head_sha(&*self.ctx.runtime)
+                    .await
+                    .map_err(|e| std::io::Error::other(e.to_string()))?;
+                if &head != sha {
+                    warn!(
+                        "stale approval for {} @ {} (HEAD is {}) — ignoring",
+                        branch.as_str(),
+                        sha,
+                        head
+                    );
+                    return Ok(());
+                }
+                // Escalate [READY] to the parent — sidecar-side, no LLM turn.
+                let my_branch = self.ctx.runtime.branch().clone();
+                let text = format!(
+                    "[READY] branch `{}` was approved by review and is ready for merge.",
+                    my_branch.as_str()
+                );
+                let summary = format!("[READY] {}", my_branch.as_str());
+                let msg = Message {
+                    text: MessageBody::new(text).map_err(|e| std::io::Error::other(e.to_string()))?,
+                    summary: Summary::new(summary)
+                        .map_err(|e| std::io::Error::other(e.to_string()))?,
+                    kind: MessageKind::Chat,
+                };
+                exo_caps::Bus::deliver(&*self.ctx.runtime, Addressee::Parent, msg)
+                    .await
+                    .map_err(|e| std::io::Error::other(e.to_string()))?;
+                info!(
+                    "review approved for {} — escalated [READY] to parent",
+                    my_branch.as_str()
+                );
+                Ok(())
+            }
+            SystemMessage::ReviewDenied { message, .. } => {
+                self.deliver_to_llm(&format!(
+                    "[REVIEW: changes requested] Your branch was not approved. Address this feedback, commit, then call submit_branch again:\n{}",
+                    message
+                )).await
+            }
+            SystemMessage::ReviewChanges {
+                changes_branch,
+                message,
+                ..
+            } => {
+                self.deliver_to_llm(&format!(
+                    "[REVIEW: proposed changes] The reviewer committed improvements on branch `{}`. Merge it with the `merge` tool to incorporate, then call submit_branch again:\n{}",
+                    changes_branch.as_str(), message
+                )).await
+            }
+        }
+    }
+
+    /// Inject a message into THIS node's own LLM conversation via the last-hop dispatch.
+    async fn deliver_to_llm(&self, text: &str) -> NodeResult<()> {
+        let entry = IngestionEntry {
+            v: 1,
+            ts: Utc::now(),
+            from: Persona::Synthetic(
+                SyntheticName::new("reviewer".into())
+                    .map_err(|e| std::io::Error::other(e.to_string()))?,
+            ),
+            msg: Message {
+                text: MessageBody::new(text.to_string())
+                    .map_err(|e| std::io::Error::other(e.to_string()))?,
+                summary: Summary::new("[REVIEW]".into())
+                    .map_err(|e| std::io::Error::other(e.to_string()))?,
+                kind: MessageKind::Chat,
+            },
+        };
+        crate::dispatch::dispatch(&self.ctx, &entry).await
     }
 }
 
