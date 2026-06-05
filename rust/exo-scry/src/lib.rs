@@ -72,28 +72,6 @@ pub fn resolve_by_session(session_id: &str) -> Result<Option<ActiveTeam>> {
     }))
 }
 
-/// Resolve the active team from a tmux pane id, by matching it against members'
-/// `tmuxPaneId`. This is the durable, **portable** self-key for a tmux-backed
-/// teammate (the sidecar reads its own `$TMUX_PANE`): pane ids are unique per
-/// session and survive the session-id churn that makes `CLAUDE_CODE_SESSION_ID`
-/// unreliable. Resolves *members*; the human lead isn't pane-indexed (use
-/// [`resolve_self`] / the watch for it). The result's `me` carries the matched
-/// member identity.
-pub fn resolve_by_pane(pane: &str) -> Result<Option<ActiveTeam>> {
-    let Some((team, me)) = teams::find_member_by_pane(pane)? else {
-        return Ok(None);
-    };
-    let tasks_dir = teams::tasks_root()?.join(&team.name);
-    Ok(Some(ActiveTeam {
-        claude_pid: None,
-        team: TeamName(team.name.clone()),
-        tasks_dir,
-        lead_inbox: team.lead_inbox().map(str::to_string),
-        lead_session_id: team.lead_session_id().map(str::to_string),
-        me: Some(me),
-    }))
-}
-
 /// Resolve **this process's own** active team — the entry point for a sidecar /
 /// MCP server that wants its identity without choosing a strategy. Resolve
 /// lazily per call (never cache): the process may have started before any team

@@ -4,7 +4,7 @@ use crate::error::{Result, ScryError};
 use crate::identity::{ActiveTeam, Pid, TeamName};
 use crate::signal::ActiveTeamSignal;
 use crate::target::ProbeTarget;
-use crate::{proc, teams, transcript, tmux};
+use crate::{proc, teams, tmux, transcript};
 
 /// Resolve the Claude Code process id for a target.
 fn claude_pid_for(target: &ProbeTarget) -> Result<Pid> {
@@ -33,7 +33,10 @@ pub fn resolve_via_transcript(target: ProbeTarget) -> Result<Option<ActiveTeam>>
 
     let siblings = proc::claude_pids_with_cwd(&cwd)?;
     if siblings.len() > 1 {
-        return Err(ScryError::AmbiguousCwd { cwd, pids: siblings });
+        return Err(ScryError::AmbiguousCwd {
+            cwd,
+            pids: siblings,
+        });
     }
 
     let project_dir = transcript::project_dir(&teams::projects_root()?, &cwd);
@@ -69,7 +72,9 @@ pub fn resolve_with<S: ActiveTeamSignal>(
         claude_pid: Some(claude_pid),
         team: TeamName(team_name),
         tasks_dir: dir,
-        lead_inbox: cfg.as_ref().and_then(|c| c.lead_inbox().map(str::to_string)),
+        lead_inbox: cfg
+            .as_ref()
+            .and_then(|c| c.lead_inbox().map(str::to_string)),
         lead_session_id: cfg.and_then(|c| c.lead_session_id().map(str::to_string)),
         me: None,
     }))

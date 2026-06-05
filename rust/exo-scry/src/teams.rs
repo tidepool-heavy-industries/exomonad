@@ -111,43 +111,6 @@ pub fn find_team_by_session(session_id: &str) -> Result<Option<String>> {
     find_team_by_session_in(&teams_root()?, session_id)
 }
 
-/// Find the `(team, member)` whose member `tmuxPaneId` equals `pane`.
-///
-/// The durable, unambiguous self-key for a tmux-backed teammate: pane ids are
-/// unique per session (so they disambiguate multiple sessions in one cwd) and
-/// survive session-id churn (unlike the spawn-frozen `CLAUDE_CODE_SESSION_ID`).
-/// The human lead is *not* found here — its member entry has no pane; resolve it
-/// via the live watch instead.
-pub fn find_member_by_pane(pane: &str) -> Result<Option<(Team, Teammate)>> {
-    find_member_by_pane_in(&teams_root()?, pane)
-}
-
-fn find_member_by_pane_in(teams_root: &Path, pane: &str) -> Result<Option<(Team, Teammate)>> {
-    if pane.is_empty() {
-        return Ok(None);
-    }
-    let entries = match std::fs::read_dir(teams_root) {
-        Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(ScryError::Io(e)),
-    };
-    for entry in entries {
-        let Ok(entry) = entry else { continue };
-        let Ok(team) = load_team_at(&entry.path().join("config.json")) else {
-            continue;
-        };
-        if let Some(m) = team
-            .members
-            .iter()
-            .find(|m| !m.tmux_pane_id.is_empty() && m.tmux_pane_id == pane)
-        {
-            let me = m.clone();
-            return Ok(Some((team, me)));
-        }
-    }
-    Ok(None)
-}
-
 fn find_team_by_session_in(teams_root: &Path, session_id: &str) -> Result<Option<String>> {
     let entries = match std::fs::read_dir(teams_root) {
         Ok(e) => e,
@@ -158,7 +121,9 @@ fn find_team_by_session_in(teams_root: &Path, session_id: &str) -> Result<Option
         let Ok(entry) = entry else { continue };
         let cfg = entry.path().join("config.json");
         // A malformed/half-written sibling config must not abort the scan.
-        let Ok(team) = load_team_at(&cfg) else { continue };
+        let Ok(team) = load_team_at(&cfg) else {
+            continue;
+        };
         if team.lead_session_id() == Some(session_id) {
             if let Some(name) = entry.file_name().to_str() {
                 return Ok(Some(name.to_string()));
@@ -192,7 +157,9 @@ mod tests {
         write_team(&root, "alpha", "uuid-aaa");
         write_team(&root, "beta", "uuid-bbb");
         assert_eq!(
-            find_team_by_session_in(&root, "uuid-bbb").unwrap().as_deref(),
+            find_team_by_session_in(&root, "uuid-bbb")
+                .unwrap()
+                .as_deref(),
             Some("beta")
         );
         assert_eq!(find_team_by_session_in(&root, "uuid-zzz").unwrap(), None);
@@ -204,28 +171,6 @@ mod tests {
         let root = std::env::temp_dir().join("exo-scry-teams-nonexistent-xyzzy");
         let _ = std::fs::remove_dir_all(&root);
         assert_eq!(find_team_by_session_in(&root, "any").unwrap(), None);
-    }
-
-    #[test]
-    fn finds_member_by_pane() {
-        let root = std::env::temp_dir().join(format!("exo-scry-pane-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("alpha")).unwrap();
-        std::fs::write(
-            root.join("alpha").join("config.json"),
-            r#"{"name":"alpha","leadAgentId":"lead@alpha","members":[
-                {"agentId":"lead@alpha","name":"team-lead","tmuxPaneId":""},
-                {"agentId":"scout@alpha","name":"scout","tmuxPaneId":"%312","isActive":false}
-            ]}"#,
-        )
-        .unwrap();
-        let (team, me) = find_member_by_pane_in(&root, "%312").unwrap().unwrap();
-        assert_eq!(team.name, "alpha");
-        assert_eq!(me.name, "scout");
-        // Empty pane must never match the lead's empty tmuxPaneId.
-        assert!(find_member_by_pane_in(&root, "").unwrap().is_none());
-        assert!(find_member_by_pane_in(&root, "%999").unwrap().is_none());
-        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
