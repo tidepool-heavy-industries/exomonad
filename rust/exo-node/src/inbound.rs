@@ -18,7 +18,7 @@
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -35,7 +35,8 @@ use crate::error::NodeResult;
 /// Watch the node's own ingestion inbox and route each new entry until shutdown.
 pub async fn watch(ctx: Arc<NodeContext>) -> NodeResult<()> {
     let inbox_path = ctx.own_inbox.as_path().to_path_buf();
-    let cursor_path = inbox_path.with_extension("cursor");
+    // Append rather than `with_extension` so a multi-dot inbox name can't mis-target the cursor.
+    let cursor_path = PathBuf::from(format!("{}.cursor", inbox_path.display()));
 
     // Initialize cursor
     let mut offset = if cursor_path.exists() {
@@ -54,7 +55,10 @@ pub async fn watch(ctx: Arc<NodeContext>) -> NodeResult<()> {
         }
     } else {
         let eof = get_eof(&inbox_path);
-        save_cursor(&cursor_path, eof)?;
+        // Non-fatal: failing to persist the initial cursor must not stop the node from receiving.
+        if let Err(e) = save_cursor(&cursor_path, eof) {
+            warn!("failed to persist initial cursor at {:?}: {e}", cursor_path);
+        }
         eof
     };
 
@@ -87,16 +91,20 @@ pub async fn watch(ctx: Arc<NodeContext>) -> NodeResult<()> {
 
     let handler = RealHandler { ctx: ctx.clone() };
 
-    // Initial pass to catch anything already there
-    process_inbox(&handler, &inbox_path, &cursor_path, &mut offset).await?;
+    // Initial pass to catch anything already there. A transient failure (file/cursor IO) must
+    // not stop the loop — the next notify wake re-reads from the unchanged offset.
+    if let Err(e) = process_inbox(&handler, &inbox_path, &cursor_path, &mut offset).await {
+        warn!("inbound initial pass failed (will retry on next event): {e}");
+    }
 
     while let Some(()) = rx.recv().await {
         // Drain any coalesced events
         while rx.try_recv().is_ok() {}
 
-        if process_inbox(&handler, &inbox_path, &cursor_path, &mut offset).await? {
-            // Shutdown received
-            break;
+        match process_inbox(&handler, &inbox_path, &cursor_path, &mut offset).await {
+            Ok(true) => break, // shutdown received
+            Ok(false) => {}
+            Err(e) => warn!("inbound pass failed (will retry on next event): {e}"),
         }
     }
 
@@ -111,7 +119,7 @@ fn get_eof(path: &Path) -> u64 {
 }
 
 fn save_cursor(path: &Path, offset: u64) -> std::io::Result<()> {
-    let tmp_path = path.with_extension("cursor.tmp");
+    let tmp_path = PathBuf::from(format!("{}.tmp", path.display()));
     {
         let mut f = File::create(&tmp_path)?;
         writeln!(f, "{}", offset)?;
@@ -193,7 +201,9 @@ async fn process_inbox<H: InboundHandler>(
                 warn!("failed to parse ingestion entry: {}", e);
                 // Advance past malformed line
                 *offset += line_len + 1;
-                save_cursor(cursor_path, *offset)?;
+                if let Err(e) = save_cursor(cursor_path, *offset) {
+                    warn!("failed to persist cursor (will retry next wake): {e}");
+                }
                 continue;
             }
         };
@@ -202,13 +212,17 @@ async fn process_inbox<H: InboundHandler>(
             Ok(Some(true)) => {
                 // Shutdown
                 *offset += line_len + 1;
-                save_cursor(cursor_path, *offset)?;
+                if let Err(e) = save_cursor(cursor_path, *offset) {
+                    warn!("failed to persist cursor (will retry next wake): {e}");
+                }
                 return Ok(true);
             }
             Ok(_) => {
                 // Success (or no-op), advance cursor
                 *offset += line_len + 1;
-                save_cursor(cursor_path, *offset)?;
+                if let Err(e) = save_cursor(cursor_path, *offset) {
+                    warn!("failed to persist cursor (will retry next wake): {e}");
+                }
             }
             Err(e) => {
                 error!("failed to route entry: {}. will retry on next wake", e);

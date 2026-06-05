@@ -33,9 +33,24 @@ impl Git for Runtime {
 
     async fn merge(&self, branch: &Branch) -> Result<(), GitError> {
         // Local fold of a child's branch into this node's branch; non-interactive so a clean
-        // merge commit doesn't block on $EDITOR. A conflict surfaces as a git failure.
-        self.git(&["merge", "--no-edit", branch.as_str()]).await?;
-        Ok(())
+        // merge commit doesn't block on $EDITOR.
+        match self.git(&["merge", "--no-edit", branch.as_str()]).await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                // A conflict (or other failure) leaves the worktree half-merged (MERGE_HEAD +
+                // markers), which would then wedge this node's own stop clean-gate. Restore a
+                // clean tree before surfacing the error so the parent stays un-wedged and can
+                // re-decompose. Best-effort: ignore the abort's own result.
+                let _ = self.git(&["merge", "--abort"]).await;
+                Err(match e {
+                    GitError::Failed { detail, .. } => GitError::Failed {
+                        op: "merge",
+                        detail,
+                    },
+                    other => other,
+                })
+            }
+        }
     }
 
     async fn worktree_add(&self, branch: &Branch, at: &Path) -> Result<(), GitError> {
@@ -73,5 +88,92 @@ impl Runtime {
         }
 
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use exo_caps::{AgentName, NodePath, PaneId};
+    use std::process::Command;
+    use tempfile::tempdir;
+
+    fn run_git(dir: &std::path::Path, args: &[&str]) {
+        let ok = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {:?} failed", args);
+    }
+
+    fn runtime_at(dir: &std::path::Path) -> Runtime {
+        Runtime::new(
+            NodePath::new(vec![AgentName::new("root".into()).unwrap()]).unwrap(),
+            Branch::new("main".into()).unwrap(),
+            dir.to_path_buf(),
+            None,
+            "run".into(),
+            "session".into(),
+            PaneId::new("%1".into()).unwrap(),
+        )
+    }
+
+    fn init_repo(dir: &std::path::Path) {
+        run_git(dir, &["init", "-q", "-b", "main"]);
+        run_git(dir, &["config", "user.email", "t@t"]);
+        run_git(dir, &["config", "user.name", "t"]);
+        std::fs::write(dir.join("f.txt"), "base\n").unwrap();
+        run_git(dir, &["add", "f.txt"]);
+        run_git(dir, &["commit", "-q", "-m", "base"]);
+    }
+
+    #[tokio::test]
+    async fn merge_conflict_aborts_and_leaves_clean_tree() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        // feature: conflicting change
+        run_git(p, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(p.join("f.txt"), "feature\n").unwrap();
+        run_git(p, &["commit", "-q", "-am", "feature"]);
+        // main: conflicting change
+        run_git(p, &["checkout", "-q", "main"]);
+        std::fs::write(p.join("f.txt"), "main\n").unwrap();
+        run_git(p, &["commit", "-q", "-am", "main"]);
+
+        let rt = runtime_at(p);
+        match rt.merge(&Branch::new("feature".into()).unwrap()).await {
+            Err(GitError::Failed { op, .. }) => assert_eq!(op, "merge"),
+            other => panic!("expected a labelled merge failure, got {:?}", other),
+        }
+        // The conflict was --abort'd: the worktree is clean again (stop-gate won't wedge).
+        assert!(
+            rt.is_clean().await.unwrap(),
+            "worktree should be clean after an aborted conflicting merge"
+        );
+    }
+
+    #[tokio::test]
+    async fn merge_succeeds_brings_in_branch() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        run_git(p, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(p.join("g.txt"), "new\n").unwrap();
+        run_git(p, &["add", "g.txt"]);
+        run_git(p, &["commit", "-q", "-m", "feature"]);
+        run_git(p, &["checkout", "-q", "main"]);
+
+        let rt = runtime_at(p);
+        rt.merge(&Branch::new("feature".into()).unwrap())
+            .await
+            .unwrap();
+        assert!(
+            p.join("g.txt").exists(),
+            "merge should fold in feature's file"
+        );
+        assert!(rt.is_clean().await.unwrap());
     }
 }

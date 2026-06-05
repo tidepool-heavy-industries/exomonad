@@ -52,16 +52,21 @@ impl Runtime {
                     Err(e) => return Err(BusError::Io(e)),
                 };
 
+                // Skip (don't fail on) a malformed line — a torn last record from a crash
+                // mid-append must not block delivery to EVERY child, only fail if the *target*
+                // child can't be found (handled by the lookup below). Mirrors the inbound loop's
+                // tolerant parse.
                 let mut records = Vec::new();
                 for line in data.split(|&b| b == b'\n') {
                     if line.is_empty() {
                         continue;
                     }
-                    let record: ChildRecord =
-                        serde_json::from_slice(line).map_err(|e| BusError::Append {
-                            detail: e.to_string(),
-                        })?;
-                    records.push(record);
+                    match serde_json::from_slice::<ChildRecord>(line) {
+                        Ok(record) => records.push(record),
+                        Err(e) => {
+                            tracing::warn!("skipping malformed children.jsonl line during child resolution: {e}");
+                        }
+                    }
                 }
 
                 let children = fold_children(&records);
@@ -399,5 +404,46 @@ mod tests {
         assert_eq!(entry1.msg, msg1);
         assert_eq!(entry2.msg, msg2);
         assert!(lines.next().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_child_inbox_tolerates_malformed_line() {
+        // A torn/garbage line in children.jsonl must NOT block resolution of the good children.
+        let dir = tempdir().unwrap();
+        let exo_dir = dir.path().join(".exo");
+        std::fs::create_dir_all(&exo_dir).unwrap();
+
+        let good_name = AgentName::new("kid".into()).unwrap();
+        let good_inbox = InboxPath::new(dir.path().join("kid.jsonl"));
+        let good = ChildRecord::Spawned {
+            child: good_name.clone(),
+            kind: exo_caps::ChildKind::Inline,
+            pane: PaneId::new("%1".into()).unwrap(),
+            inbox: good_inbox.clone(),
+        };
+
+        // garbage line, then a good record (mirrors a crash-torn append followed by a fresh one)
+        let content = format!(
+            "{{ not valid json\n{}\n",
+            serde_json::to_string(&good).unwrap()
+        );
+        std::fs::write(exo_dir.join("children.jsonl"), content).unwrap();
+
+        let node_path = NodePath::new(vec![AgentName::new("parent".into()).unwrap()]).unwrap();
+        let runtime = Runtime::new(
+            node_path,
+            Branch::new("main".into()).unwrap(),
+            dir.path().to_path_buf(),
+            None,
+            "run-1".into(),
+            "session-1".into(),
+            PaneId::new("%100".into()).unwrap(),
+        );
+
+        let resolved = runtime
+            .resolve_inbox(&Addressee::InlineChild(good_name))
+            .await
+            .unwrap();
+        assert_eq!(resolved, good_inbox);
     }
 }

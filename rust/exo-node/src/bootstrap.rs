@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use exo_caps::{Branch, InboxPath, NodeKind, NodePapers, NodePath, PaneId};
 use exo_runtime::Runtime;
+use tracing::warn;
 
 use crate::error::{NodeError, NodeResult};
 
@@ -78,8 +79,19 @@ pub fn bootstrap(papers_path: &Path, working_dir: PathBuf) -> NodeResult<NodeCon
     // the parent never writes and silently receive nothing. Fail loudly instead.
     let home = std::env::var("HOME").map_err(|_| NodeError::MissingContext("HOME"))?;
 
-    // The pane in papers is authoritative; `$TMUX_PANE` is the live cross-check.
+    // The pane in papers is authoritative; cross-check it against the live `$TMUX_PANE` and warn
+    // on mismatch — a stale papers file reused on a recycled pane id would otherwise have the node
+    // silently watch the wrong inbox.
     let own_pane = papers.pane.clone();
+    if let Ok(live) = std::env::var("TMUX_PANE") {
+        if live != own_pane.as_str() {
+            warn!(
+                "papers pane {} != live $TMUX_PANE {} — using papers pane (possible stale papers)",
+                own_pane.as_str(),
+                live
+            );
+        }
+    }
 
     let own_inbox = exo_caps::paths::inbox_path(Path::new(&home), &run_id, &own_pane);
 

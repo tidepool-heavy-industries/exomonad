@@ -3,11 +3,14 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Per-node runtime artifacts (`.mcp.json`, `.claude/settings.local.json`) are written into each
-/// node's worktree at spawn. They must not dirty the tree — a dirty worktree blocks `fork_wave`'s
-/// clean-state precondition and trips the `stop` clean-gate (a node can't cleanly exit). Add them
-/// to the repo's **shared** `.git/info/exclude` (in the common dir, so it covers the root and
-/// every worktree child, isn't committed, and doesn't itself dirty anything). Idempotent.
+/// Per-node runtime artifacts (`.mcp.json`, `.claude/settings.local.json`, and the whole `.exo/`
+/// runtime tree — `node.json`, `settings.json`, `children.jsonl`, `tmp/`, `worktrees/`, `logs/`)
+/// are written into each node's worktree at spawn. They must not dirty the tree — a dirty worktree
+/// blocks `fork_wave`'s clean-state precondition and trips the `stop` clean-gate (a node can't
+/// cleanly exit). Add them to the repo's **shared** `.git/info/exclude` (in the common dir, so it
+/// covers the root and every worktree child, isn't committed, and doesn't itself dirty anything).
+/// `.exo/*` + negations mirror the `exomonad new` `.gitignore`, keeping tracked config/roles/lib/
+/// rules visible. Idempotent.
 fn ensure_git_excludes(cwd: &Path) -> Result<()> {
     let out = Command::new("git")
         .arg("-C")
@@ -30,7 +33,15 @@ fn ensure_git_excludes(cwd: &Path) -> Result<()> {
     let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
 
     let marker = "# exomonad node-mode per-agent runtime artifacts (keep worktrees clean)";
-    let patterns = [".mcp.json", ".claude/settings.local.json"];
+    let patterns = [
+        ".mcp.json",
+        ".claude/settings.local.json",
+        ".exo/*",
+        "!.exo/config.toml",
+        "!.exo/roles/",
+        "!.exo/lib/",
+        "!.exo/rules/",
+    ];
     let missing: Vec<&str> = patterns
         .iter()
         .copied()
@@ -114,8 +125,13 @@ pub async fn run(config: &Config, session: Option<String>, recreate: bool) -> Re
     // `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` enables Teams (TeamCreate + the Teams inbox),
     // which is the Bus's last hop into a running CC session — without it, the root can't lead
     // a team and child messages fall back to raw tmux paste.
+    // The launch string is pasted into a shell, so shell-escape the interpolated values.
+    // `sanitize_session_name` only maps `.`→`_`, so a session name with shell metacharacters
+    // would otherwise break the launch. (run_id is a UUID, but escape it too for uniformity.)
+    let run_id_esc = shell_escape::escape(run_id.clone().into());
+    let session_esc = shell_escape::escape(session.clone().into());
     let launch = format!(
-        "EXOMONAD_SWARM_RUN_ID={run_id} EXOMONAD_TMUX_SESSION={session} CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --dangerously-skip-permissions{model_flag}"
+        "EXOMONAD_SWARM_RUN_ID={run_id_esc} EXOMONAD_TMUX_SESSION={session_esc} CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --dangerously-skip-permissions{model_flag}"
     );
 
     exomonad_core::services::tmux_ipc::TmuxIpc::new(&session)

@@ -212,6 +212,16 @@ impl Runtime {
 
 impl Runtime {
     /// The shared birth tail. **S2.** Record-first, then pane, then papers, then launch.
+    ///
+    /// Birth acquires two external resources — a git worktree (Worktree kind) and a tmux pane —
+    /// then *fills* them (record → papers → launch). Cleanup can't ride `Drop` (it's async), so
+    /// rollback is explicit **compensation**: each resource has one acquire and one best-effort,
+    /// logged release ([`birth_rollback`](Self::birth_rollback)), and a mid-birth failure releases
+    /// in reverse (pane, then worktree). The fill phase is grouped into
+    /// [`birth_finish`](Self::birth_finish) so there is a single rollback site for it. The
+    /// append-only `children.jsonl` `Spawned` record is deliberately NOT compensated — it's
+    /// event-sourced, and a stale record self-heals via the liveness (ghost-spawn) reap and
+    /// auto-incrementing child names.
     pub(crate) async fn birth(&self, core: BirthCore) -> Result<AgentName, SpawnError> {
         // (a) compute child worktree path
         let child_dir = match core.kind {
@@ -222,7 +232,7 @@ impl Runtime {
             ChildKind::Inline => self.working_dir.to_path_buf(),
         };
 
-        // (b) If core.kind == ChildKind::Worktree: call self.worktree_add
+        // (b) acquire the worktree (Worktree kind only).
         if core.kind == ChildKind::Worktree {
             exo_caps::Git::worktree_add(self, &core.branch, &child_dir)
                 .await
@@ -233,9 +243,8 @@ impl Runtime {
                 })?;
         }
 
-        // (c) Two-phase birth: open a holding shell, capture its pane id. A Worktree child
-        // gets its own window (tab — one agent per window, the triad); an Inline worker gets
-        // a split pane in the parent's window.
+        // (c) acquire a holding-shell pane (NOT the agent yet). A Worktree child gets its own
+        // window (tab — one agent per window, the triad); an Inline worker gets a split pane.
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
         // Name the window after the agent (emoji + slug), not the bare `claude`/shell process.
         let emoji = match core.agent_type {
@@ -249,20 +258,69 @@ impl Runtime {
                 exo_caps::Tmux::new_window(self, &window_name, &child_dir, &shell).await
             }
             ChildKind::Inline => exo_caps::Tmux::new_pane(self, &child_dir, &shell).await,
-        }
-        .map_err(|e| SpawnError::Failed {
-            op: "new_pane",
-            child: Some(core.name.clone()),
-            detail: e.to_string(),
-        })?;
+        };
+        let pane = match pane {
+            Ok(p) => p,
+            Err(e) => {
+                // Only the worktree was acquired — release it.
+                self.birth_rollback(&core, &child_dir, None).await;
+                return Err(SpawnError::Failed {
+                    op: "new_pane",
+                    child: Some(core.name.clone()),
+                    detail: e.to_string(),
+                });
+            }
+        };
 
-        // (d) RECORD FIRST — BEFORE launching the agent
-        let inbox = self.child_inbox_path(&pane);
+        // (d–f) fill the worktree+pane: record → papers → launch. On any failure, compensate
+        // (kill the pane, remove the worktree) before surfacing the error.
+        if let Err(e) = self.birth_finish(&core, &child_dir, &pane).await {
+            self.birth_rollback(&core, &child_dir, Some(&pane)).await;
+            return Err(e);
+        }
+
+        Ok(core.name)
+    }
+
+    /// Best-effort compensation for a failed [`birth`]: release acquired resources in reverse
+    /// (pane, then worktree). Logged, never fatal — a rollback failure must not mask the original
+    /// error. The `children.jsonl` record is intentionally not undone (see [`birth`]).
+    async fn birth_rollback(&self, core: &BirthCore, child_dir: &Path, pane: Option<&PaneId>) {
+        if let Some(p) = pane {
+            if let Err(e) = exo_caps::Tmux::kill_pane(self, p).await {
+                tracing::warn!(
+                    "birth rollback: kill_pane failed for {}: {e}",
+                    core.name.as_str()
+                );
+            }
+        }
+        if core.kind == ChildKind::Worktree {
+            if let Err(e) = exo_caps::Git::worktree_remove(self, child_dir).await {
+                tracing::warn!(
+                    "birth rollback: worktree_remove failed for {}: {e}",
+                    core.name.as_str()
+                );
+            }
+        }
+    }
+
+    /// The fill phase, steps (d)–(f): record-first, then papers, then launch. Extracted so
+    /// [`birth`] has a single rollback site for everything after the pane is acquired.
+    async fn birth_finish(
+        &self,
+        core: &BirthCore,
+        child_dir: &Path,
+        pane: &PaneId,
+    ) -> Result<(), SpawnError> {
+        // (d) RECORD FIRST — before launching the agent (the load-bearing race guard: the record
+        // precedes the *agent*, so a crash never leaves an untracked agent — the pane here is a
+        // bare holding shell).
+        let inbox = self.child_inbox_path(pane);
         let record = ChildRecord::Spawned {
             child: core.name.clone(),
             kind: core.kind,
             pane: pane.clone(),
-            inbox: inbox.clone(),
+            inbox,
         };
         self.append_child_record(&record).await?;
 
@@ -281,7 +339,7 @@ impl Runtime {
             ChildKind::Worktree => child_dir.join(".exo/node.json"),
             ChildKind::Inline => {
                 let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                exo_caps::paths::papers_path(Path::new(&home), &self.run_id, &pane)
+                exo_caps::paths::papers_path(Path::new(&home), &self.run_id, pane)
             }
         };
 
@@ -309,7 +367,7 @@ impl Runtime {
 
         let agent_type = match core.agent_type {
             AgentType::Claude => {
-                crate::node_config::write_node_agent_config(&child_dir, &papers_path)
+                crate::node_config::write_node_agent_config(child_dir, &papers_path)
                     .await
                     .map_err(|e| SpawnError::Failed {
                         op: "write_node_agent_config",
@@ -318,10 +376,7 @@ impl Runtime {
                     })?;
                 // Enable Claude Code Teams so the Bus→Teams last hop (dispatch.rs) can
                 // deliver as a native `<teammate-message>` instead of falling back to paste.
-                env_vars.insert(
-                    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".into(),
-                    "1".into(),
-                );
+                env_vars.insert("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".into(), "1".into());
                 exomonad_core::services::agent_control::AgentType::Claude
             }
             AgentType::Gemini => {
@@ -361,7 +416,7 @@ impl Runtime {
         };
 
         let prompt_file = exomonad_core::services::agent_control::launch::write_prompt_file(
-            &child_dir,
+            child_dir,
             core.name.as_str(),
             &core.task,
         )
@@ -377,16 +432,16 @@ impl Runtime {
             exomonad_core::services::agent_control::launch::build_agent_command(
                 agent_type,
                 Some(&prompt_file),
-                None,         // fork_session_id
+                None, // fork_session_id
                 &env_vars,
-                &child_dir,   // cwd (flake detection only; wrap_nix=false below)
-                None,         // claude_flags
-                true,         // yolo → gemini --yolo
-                false,        // wrap_nix: node children launch plain, like the root
+                child_dir, // cwd (flake detection only; wrap_nix=false below)
+                None,      // claude_flags
+                true,      // yolo → gemini --yolo
+                false,     // wrap_nix: node children launch plain, like the root
             )
         );
 
-        exo_caps::Tmux::paste(self, &pane, &launch_cmd)
+        exo_caps::Tmux::paste(self, pane, &launch_cmd)
             .await
             .map_err(|e| SpawnError::Failed {
                 op: "launch",
@@ -394,7 +449,7 @@ impl Runtime {
                 detail: e.to_string(),
             })?;
 
-        Ok(core.name)
+        Ok(())
     }
 }
 

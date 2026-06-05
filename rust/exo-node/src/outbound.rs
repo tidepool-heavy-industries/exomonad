@@ -15,6 +15,7 @@ use exo_policy::tool::Tool;
 use exo_runtime::Runtime;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tracing::warn;
 
 use crate::bootstrap::NodeContext;
 use crate::error::NodeResult;
@@ -33,7 +34,12 @@ pub async fn serve(ctx: Arc<NodeContext>) -> NodeResult<()> {
 
         let msg: Value = match serde_json::from_str(&line) {
             Ok(v) => v,
-            Err(_) => continue,
+            // Malformed JSON-RPC: the body won't parse, so there's no recoverable `id` to reply
+            // to (a JSON-RPC parse-error reply would carry `id: null`). Log rather than drop silently.
+            Err(e) => {
+                warn!("dropping unparseable JSON-RPC line: {e}");
+                continue;
+            }
         };
 
         if let Some(response) = handle_rpc(&tools, &ctx.runtime, msg).await {

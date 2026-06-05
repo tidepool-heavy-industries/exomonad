@@ -1120,6 +1120,7 @@ dependencies = [
  "prost 0.14.3",
  "serde",
  "serde_json",
+ "shell-escape",
  "tempfile",
  "tokio",
  "toml 0.8.23",
