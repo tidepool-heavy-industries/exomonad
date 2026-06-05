@@ -1,11 +1,68 @@
 use crate::config::Config;
 use anyhow::Result;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// Per-node runtime artifacts (`.mcp.json`, `.claude/settings.local.json`) are written into each
+/// node's worktree at spawn. They must not dirty the tree — a dirty worktree blocks `fork_wave`'s
+/// clean-state precondition and trips the `stop` clean-gate (a node can't cleanly exit). Add them
+/// to the repo's **shared** `.git/info/exclude` (in the common dir, so it covers the root and
+/// every worktree child, isn't committed, and doesn't itself dirty anything). Idempotent.
+fn ensure_git_excludes(cwd: &Path) -> Result<()> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(["rev-parse", "--git-common-dir"])
+        .output()?;
+    if !out.status.success() {
+        eprintln!("[exomonad] not a git repo (or git missing); skipping .git/info/exclude setup");
+        return Ok(());
+    }
+    let common = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let common_dir = if Path::new(&common).is_absolute() {
+        PathBuf::from(common)
+    } else {
+        cwd.join(common)
+    };
+    let info_dir = common_dir.join("info");
+    std::fs::create_dir_all(&info_dir)?;
+    let exclude = info_dir.join("exclude");
+    let existing = std::fs::read_to_string(&exclude).unwrap_or_default();
+
+    let marker = "# exomonad node-mode per-agent runtime artifacts (keep worktrees clean)";
+    let patterns = [".mcp.json", ".claude/settings.local.json"];
+    let missing: Vec<&str> = patterns
+        .iter()
+        .copied()
+        .filter(|p| !existing.lines().any(|l| l.trim() == *p))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    let mut content = existing;
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    if !content.contains(marker) {
+        content.push_str(marker);
+        content.push('\n');
+    }
+    for p in missing {
+        content.push_str(p);
+        content.push('\n');
+    }
+    std::fs::write(&exclude, content)?;
+    Ok(())
+}
 
 pub async fn run(config: &Config, session: Option<String>, recreate: bool) -> Result<()> {
     let session = session.unwrap_or_else(|| format!("{}-exp", config.tmux_session));
     let run_id = uuid::Uuid::new_v4().to_string();
     let cwd = std::env::current_dir()?;
+
+    // Keep per-node runtime artifacts from dirtying worktrees (root + all spawned children).
+    ensure_git_excludes(&cwd)?;
 
     let root_pane = exo_runtime::boot_root_session(&session, &cwd, recreate).await?;
 

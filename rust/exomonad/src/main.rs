@@ -138,7 +138,7 @@ enum ExperimentalCommands {
     },
 
     /// Run the swarm-sidecar node mode: self-ID from papers, then the two-loop
-    /// sidecar (outbound MCP serve + inbound ingestion-inbox watch + self-poll).
+    /// sidecar (outbound MCP serve + inbound ingestion-inbox watch).
     Node {
         /// Path to this node's birth papers (`node.json`), written by the parent at spawn.
         #[arg(long)]

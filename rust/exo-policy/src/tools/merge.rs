@@ -39,6 +39,12 @@ impl<R: Git + Send + Sync> Tool<R> for Merge {
         "merge"
     }
 
+    fn description(&self) -> &str {
+        "Fold a child's branch into yours with a local `git merge` (the child names it in its \
+         `submit_branch` [READY] message). Children are worktrees of the same repo, so this needs \
+         no remote, no PR. A merge conflict surfaces as an error for you to resolve."
+    }
+
     fn schema(&self) -> serde_json::Value {
         schema_json(schemars::schema_for!(MergeArgs))
     }
@@ -70,9 +76,9 @@ mod tests {
         assert_eq!(out.text, "merged branch main.root.feature");
         assert_eq!(out.data, Some(json!({ "branch": "main.root.feature" })));
         let calls = mock.calls_made();
-        assert!(calls
-            .iter()
-            .any(|c| matches!(c, Call::Merge { branch } if branch.as_str() == "main.root.feature")));
+        assert!(calls.iter().any(
+            |c| matches!(c, Call::Merge { branch } if branch.as_str() == "main.root.feature")
+        ));
     }
 
     #[tokio::test]

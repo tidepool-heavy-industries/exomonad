@@ -69,6 +69,7 @@ async fn handle_rpc(
                 .map(|t| {
                     json!({
                         "name": t.name(),
+                        "description": t.description(),
                         "inputSchema": t.schema(),
                     })
                 })
@@ -177,7 +178,7 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert!(names.contains(&"task_list"));
+        assert!(names.contains(&"submit_branch"));
         assert!(names.contains(&"notify_parent"));
     }
 

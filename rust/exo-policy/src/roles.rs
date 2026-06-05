@@ -18,7 +18,7 @@ use crate::tool::{BoxFuture, Tool};
 use crate::tools::merge::Merge;
 use crate::tools::messaging::{NotifyParent, SendMessage};
 use crate::tools::spawn::{ForkWave, SpawnGemini, SpawnWorker};
-use crate::tools::tasks::{TaskGet, TaskList, TaskUpdate};
+use crate::tools::submit::SubmitBranch;
 use exo_caps::NodeKind;
 
 /// A hook is an async fn over the concrete runtime `R`. Stored as a plain fn-pointer so the
@@ -59,7 +59,8 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
             stop: stop_allow,
             session_start,
         },
-        // A spawned TL spawns + folds its own subtree, and notifies its parent when done.
+        // A spawned TL spawns + folds its own subtree, then submits its own branch up to its
+        // parent when done (and notifies for status/failure).
         NodeKind::Tl => RoleDef {
             tools: vec![
                 Box::new(ForkWave),
@@ -68,29 +69,23 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
                 Box::new(Merge),
                 Box::new(NotifyParent),
                 Box::new(SendMessage),
+                Box::new(SubmitBranch),
             ],
             pre_tool_use,
             stop,
             session_start,
         },
+        // A dev leaf works on its own branch and submits it for the parent to merge.
         NodeKind::Dev => RoleDef {
-            tools: vec![
-                Box::new(NotifyParent),
-                Box::new(TaskList),
-                Box::new(TaskGet),
-                Box::new(TaskUpdate),
-            ],
+            tools: vec![Box::new(NotifyParent), Box::new(SubmitBranch)],
             pre_tool_use,
             stop,
             session_start,
         },
+        // A worker is an inline child sharing the parent's worktree — it has no own branch to
+        // submit, so it only reports back.
         NodeKind::Worker => RoleDef {
-            tools: vec![
-                Box::new(NotifyParent),
-                Box::new(TaskList),
-                Box::new(TaskGet),
-                Box::new(TaskUpdate),
-            ],
+            tools: vec![Box::new(NotifyParent)],
             pre_tool_use,
             // Workers are ephemeral and commit nothing to fold — nothing to gate on.
             stop: stop_allow,
@@ -122,7 +117,9 @@ mod tests {
             );
             // Root/Worker never file a PR → no gate (stop_allow); Tl/Dev gate via `stop`.
             let expected_stop = match kind {
-                NodeKind::Root | NodeKind::Worker => stop_allow::<MockRuntime> as *const () as usize,
+                NodeKind::Root | NodeKind::Worker => {
+                    stop_allow::<MockRuntime> as *const () as usize
+                }
                 NodeKind::Tl | NodeKind::Dev => stop::<MockRuntime> as *const () as usize,
             };
             assert_eq!(rd.stop as usize, expected_stop, "Role {:?} stop fn", kind);

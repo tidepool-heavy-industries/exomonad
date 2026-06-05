@@ -3,12 +3,11 @@
 //! `run` whose cap bounds *are* its least-privilege spec, and a hand-written `Tool<R>` adapter
 //! (NO macro). Each ships mock-cap unit tests in the same file.
 //!
-//! **Status: Wave-3 scaffold.** The leaves (P1–P5) populate one file each, conflict-free:
-//! `messaging` (notify_parent / send_message), `tasks` (task_list / get / update), `spawn`
-//! (the three per-op spawn tools), `merge` (the local on-disk fold). P7 wires the resulting
-//! tool types into [`role_def`](crate::roles::role_def).
+//! The tools, one file each: `messaging` (notify_parent / send_message), `spawn` (the three
+//! per-op spawn tools), `merge` (the local on-disk fold), `submit` (a leaf's done / ready-to-
+//! merge signal). They are wired into [`role_def`](crate::roles::role_def).
 
 pub mod merge;
 pub mod messaging;
 pub mod spawn;
-pub mod tasks;
+pub mod submit;

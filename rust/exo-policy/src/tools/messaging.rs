@@ -43,6 +43,11 @@ impl<R: Bus + Send + Sync> Tool<R> for NotifyParent {
     fn name(&self) -> &str {
         "notify_parent"
     }
+    fn description(&self) -> &str {
+        "Send a status or failure update to your parent. This is NOT the done-signal — when your \
+         branch is committed and ready to merge, use `submit_branch` instead. Use this for \
+         progress notes or to escalate a failure you can't resolve."
+    }
     fn schema(&self) -> serde_json::Value {
         schema_json(schemars::schema_for!(NotifyParentArgs))
     }
@@ -124,6 +129,10 @@ impl SendMessage {
 impl<R: Bus + Send + Sync> Tool<R> for SendMessage {
     fn name(&self) -> &str {
         "send_message"
+    }
+    fn description(&self) -> &str {
+        "Send a message to one of your children (a tree-edge: inline worker or worktree child). \
+         For messaging your parent use `notify_parent`."
     }
     fn schema(&self) -> serde_json::Value {
         schema_json(schemars::schema_for!(SendMessageArgs))

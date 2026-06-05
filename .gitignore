@@ -111,3 +111,6 @@ vendor/notebooklm-mcp/.exo/
 docs/design/swarm/.exo/
 docs/design/swarm/reviews/
 /plans/cut-reactive-github-layer.md
+
+# Node-mode smoke-test sandbox (its own nested git repo)
+/smoke/

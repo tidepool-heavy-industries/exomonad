@@ -25,9 +25,16 @@ The Bucket-C logic that genuinely ports from the old Haskell DSL: MCP tool defin
 | `spawn_gemini` | `Spawner` | root, tl | Spawn a Gemini dev in its own worktree. |
 | `spawn_worker` | `Spawner` | root, tl | Spawn an ephemeral Gemini worker (inline pane). |
 | `merge` | `Git` | root, tl | **The local fold:** `git merge <child-branch>`. No PR, no remote, no GitHub. |
-| `notify_parent` | `Bus` | tl, dev, worker | Deliver a `Message` to `Addressee::Parent`. |
+| `submit_branch` | `Git`+`Bus` | tl, dev | **The done-signal** (local analogue of file_pr): runs preconditions (v1: committed), then delivers `[READY] branch X` to the parent for it to `merge`. |
+| `notify_parent` | `Bus` | tl, dev, worker | Status/failure update to `Addressee::Parent` (NOT the done-signal). |
 | `send_message` | `Bus` | root, tl | Deliver to a child (`Inline`/`Worktree`) — **tree-edges only**. |
-| `task_list`/`task_get`/`task_update` | `Fs` | dev, worker | File-backed task scratch list. |
+
+Every tool implements `Tool::description()` (added to the trait); `exo-node`'s `tools/list`
+emits it, so the toolset is self-documenting — an agent learns the local-merge loop (commit →
+`submit_branch` → parent `merge`, no PR/remote) from the tools it has, not out-of-band.
+`submit_branch`'s preconditions are an **ordered, extensible fn-pointer list** (`tools/submit.rs`)
+mirroring the role hook fn-pointers — adding a gate (ahead-of-base, tests, a reviewer verdict) is
+one entry.
 
 ## Roles
 
@@ -36,9 +43,9 @@ The Bucket-C logic that genuinely ports from the old Haskell DSL: MCP tool defin
 | Role | agent | tools | stop gate |
 |------|-------|-------|-----------|
 | **Root** | Claude | fork_wave, spawn_gemini, spawn_worker, merge, send_message | `stop_allow` (never gate the human's session) |
-| **Tl** | Claude | + notify_parent (and merge/spawns) | `stop` (clean-gate) |
-| **Dev** | Gemini | notify_parent, task_* | `stop` (clean-gate) |
-| **Worker** | Gemini | notify_parent, task_* | `stop_allow` (ephemeral, commits nothing) |
+| **Tl** | Claude | spawns, merge, notify_parent, send_message, submit_branch | `stop` (clean-gate) |
+| **Dev** | Gemini | notify_parent, submit_branch | `stop` (clean-gate) |
+| **Worker** | Gemini | notify_parent | `stop_allow` (inline child, no own branch to submit) |
 
 ## The hooks
 
@@ -49,6 +56,6 @@ The Bucket-C logic that genuinely ports from the old Haskell DSL: MCP tool defin
 ## Gaps / not-yet
 
 - **No convergence teardown.** `merge` folds the branch but nothing reclaims the child's worktree or kills its pane afterward (`Spawner::reclaim_worktree`/`kill_pane` exist but no tool calls them). After a fold the child pane + worktree linger. This is the main open lifecycle gap.
-- **No reviewers.** The planned short-lived adversarial Gemini reviewer loop (gated into `merge`, round-based, reject→leaf / approve→TL) is not built — `merge` is an unguarded fold.
+- **No reviewers.** The planned short-lived adversarial Gemini reviewer loop is not built — `merge` is an unguarded fold. The natural seam is `submit_branch`'s ordered check list (a reviewer-verdict gate) and/or a gate in `merge`.
 - `pre_tool_use` is intentionally minimal (one nudge); classic exomonad's richer antipattern set + PII rewrite are not ported.
 - `stop`'s dirty-gate can wedge an agent that holds untracked artifacts it won't commit (mitigated only by the agent being told to commit) — watch for this in smokes.

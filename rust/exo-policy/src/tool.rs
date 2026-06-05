@@ -52,6 +52,11 @@ impl ToolOutput {
 pub trait Tool<R: Send + Sync>: Send + Sync {
     /// The MCP tool name (the wire identifier).
     fn name(&self) -> &str;
+    /// A one-line description of what the tool does and where it sits in the local-merge loop.
+    /// Surfaced in MCP `tools/list` so the toolset is self-documenting — an agent learns the
+    /// convergence model (commit → `submit_branch` → parent `merge`, no PR/remote) from the
+    /// tools it actually has, not from out-of-band instructions.
+    fn description(&self) -> &str;
     /// The JSON Schema for this tool's arguments — derived from `Args` (single source).
     fn schema(&self) -> Value;
     /// Dispatch: erase JSON → call the typed `run` → erase the result back to JSON.

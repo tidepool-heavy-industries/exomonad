@@ -59,6 +59,11 @@ impl<R: Spawner + Send + Sync> Tool<R> for SpawnWorker {
     fn name(&self) -> &str {
         "spawn_worker"
     }
+    fn description(&self) -> &str {
+        "Spawn an ephemeral Gemini worker in a pane inside YOUR worktree (no own branch). For \
+         research or non-conflicting in-place edits; it reports back with `notify_parent`. There \
+         is nothing to merge — for work that should land on its own branch, use `spawn_gemini`."
+    }
     fn schema(&self) -> serde_json::Value {
         schema_json(schemars::schema_for!(SpawnWorkerArgs))
     }
@@ -117,6 +122,11 @@ impl SpawnGemini {
 impl<R: Spawner + Send + Sync> Tool<R> for SpawnGemini {
     fn name(&self) -> &str {
         "spawn_gemini"
+    }
+    fn description(&self) -> &str {
+        "Spawn a Gemini dev leaf in its OWN worktree + branch with a self-contained spec. It \
+         commits its work to that branch and calls `submit_branch` when ready; you then `merge` \
+         the branch locally. No PRs, no remote — convergence is on-disk."
     }
     fn schema(&self) -> serde_json::Value {
         schema_json(schemars::schema_for!(SpawnGeminiArgs))
@@ -204,6 +214,11 @@ impl ForkWave {
 impl<R: Spawner + Send + Sync> Tool<R> for ForkWave {
     fn name(&self) -> &str {
         "fork_wave"
+    }
+    fn description(&self) -> &str {
+        "Fork a wave of Claude TL children, each in its own worktree + branch (context \
+         inherited). Each runs scaffold-fork-converge on its subtree and calls `submit_branch` \
+         when its branch is ready; you then `merge` it locally. Requires a clean worktree."
     }
     fn schema(&self) -> serde_json::Value {
         schema_json(schemars::schema_for!(ForkWaveArgs))

@@ -10,7 +10,7 @@ Assembles `exo-runtime` (all caps) + `exo-policy` (tools/hooks/roles) into a run
 
 | Module | Loop | Role |
 |--------|------|------|
-| `outbound` (N1) | serve | Serve `role_def(kind).tools` as MCP over stdio. **Owns stdin/stdout → the node's lifetime anchor** (when it closes, the node ends). |
+| `outbound` (N1) | serve | Serve `role_def(kind).tools` as MCP over stdio (`tools/list` emits each tool's `name`/`description`/`inputSchema`, so the toolset is self-documenting). **Owns stdin/stdout → the node's lifetime anchor** (when it closes, the node ends). |
 | `inbound` (N2b) | watch | Watch the node's own ingestion inbox (byte-offset cursor + `notify` watch), route each new entry. |
 | `dispatch` (N2a) | — | The **last hop**: deliver one entry into the agent's native interface (Teams inbox or tmux paste). |
 | `hook` (N4) | one-shot | `exomonad experimental hook <event>` → bootstrap from papers → run the role's `pre_tool_use`/`stop`/`session_start` → print the verdict. No server. |
