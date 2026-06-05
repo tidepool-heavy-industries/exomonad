@@ -9,13 +9,20 @@
 //! merges the BRANCH off disk and uncommitted changes would be invisible to that merge.
 
 use exo_caps::{
-    Addressee, Bus, CapError, CapResult, Git, Message, MessageBody, MessageKind, Summary,
+    Addressee, Bus, CapError, CapResult, Git, Message, MessageBody, MessageKind, Process, Summary,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::tool::{ok_json, parse, schema_json, BoxFuture, Tool, ToolOutput};
+
+#[derive(serde::Deserialize)]
+struct CheckResult {
+    pass: bool,
+    #[serde(default)]
+    detail: String,
+}
 
 /// Arguments for `submit_branch`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -48,19 +55,71 @@ fn committed<C: Git + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), String>> {
     })
 }
 
+/// Run every script in `.exo/checks/pre-merge/*` (relative to the node's worktree). Each must
+/// print a JSON line `{"pass": bool, "detail": "..."}`; any non-pass (or non-zero exit with no
+/// JSON) blocks the submit. Absent dir / no scripts = pass (no gate).
+fn pre_merge_checks<C: Process + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), String>> {
+    Box::pin(async move {
+        let dir = std::path::Path::new(".exo/checks/pre-merge");
+        let mut scripts: Vec<std::path::PathBuf> = match std::fs::read_dir(dir) {
+            Ok(rd) => rd
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.is_file())
+                .collect(),
+            Err(_) => return Ok(()),
+        };
+        scripts.sort();
+        let mut failures = Vec::new();
+        for script in scripts {
+            let path = script.to_string_lossy().to_string();
+            let out = match ctx.run(&path, &[]).await {
+                Ok(o) => o,
+                Err(e) => {
+                    failures.push(format!("{path}: failed to run: {e}"));
+                    continue;
+                }
+            };
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            match serde_json::from_str::<CheckResult>(stdout.trim()) {
+                Ok(r) if r.pass => {}
+                Ok(r) => failures.push(format!("{path}: {}", r.detail)),
+                Err(_) => {
+                    if !out.status.success() {
+                        failures.push(format!("{path}: exited non-zero with no JSON output"));
+                    }
+                }
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "pre-merge checks failed:\n- {}",
+                failures.join("\n- ")
+            ))
+        }
+    })
+}
+
 /// The ordered precondition list. Append here to add a gate.
-fn checks<C: Git + Sync>() -> Vec<Check<C>> {
-    vec![Check {
-        name: "committed",
-        run: committed::<C>,
-    }]
+fn checks<C: Git + Process + Sync>() -> Vec<Check<C>> {
+    vec![
+        Check {
+            name: "committed",
+            run: committed::<C>,
+        },
+        Check {
+            name: "pre_merge_checks",
+            run: pre_merge_checks::<C>,
+        },
+    ]
 }
 
 /// The `submit_branch` tool.
 pub struct SubmitBranch;
 
 impl SubmitBranch {
-    pub async fn run<C: Git + Bus + Sync>(
+    pub async fn run<C: Git + Bus + Process + Sync>(
         ctx: &C,
         args: SubmitBranchArgs,
     ) -> CapResult<ToolOutput> {
@@ -96,7 +155,7 @@ impl SubmitBranch {
 }
 
 #[async_trait::async_trait]
-impl<R: Git + Bus + Send + Sync> Tool<R> for SubmitBranch {
+impl<R: Git + Bus + Process + Send + Sync> Tool<R> for SubmitBranch {
     fn name(&self) -> &str {
         "submit_branch"
     }
