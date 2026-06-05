@@ -21,6 +21,11 @@ impl Git for Runtime {
         })
     }
 
+    async fn head_sha(&self) -> Result<String, GitError> {
+        let output = self.git(&["rev-parse", "HEAD"]).await?;
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
     async fn is_clean(&self) -> Result<bool, GitError> {
         let output = self.git(&["status", "--porcelain"]).await?;
         Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())

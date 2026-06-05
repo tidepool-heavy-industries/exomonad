@@ -40,6 +40,10 @@ pub enum Call {
         spec_task: String,
         step_count: usize,
     },
+    SpawnReviewer {
+        spec_task: String,
+        step_count: usize,
+    },
     ForkWave {
         n: usize,
     },
@@ -80,6 +84,7 @@ pub struct MockRuntime {
 
     // canned git state (the stop-gate clean check + merge tests read these)
     pub current_branch: Branch,
+    pub head_sha: String,
     pub is_clean: bool,
     /// If set, the named cap method returns its `*Error` instead of the happy path. Keyed by
     /// a short op label (e.g. "merge") so a test can exercise error branches.
@@ -93,6 +98,7 @@ impl Default for MockRuntime {
             kv: Mutex::new(HashMap::new()),
             files: Mutex::new(HashMap::new()),
             current_branch: Branch::new("dev.policy-claude".into()).unwrap(),
+            head_sha: "0000000000000000000000000000000000000000".into(),
             is_clean: true,
             fail: Mutex::new(None),
         }
@@ -136,6 +142,9 @@ impl Bus for MockRuntime {
 impl Git for MockRuntime {
     async fn current_branch(&self) -> Result<Branch, GitError> {
         Ok(self.current_branch.clone())
+    }
+    async fn head_sha(&self) -> Result<String, GitError> {
+        Ok(self.head_sha.clone())
     }
     async fn is_clean(&self) -> Result<bool, GitError> {
         Ok(self.is_clean)
@@ -189,6 +198,22 @@ impl Spawner for MockRuntime {
         Ok(spec
             .name
             .unwrap_or_else(|| AgentName::new("gemini-mock".into()).unwrap()))
+    }
+    async fn spawn_reviewer(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError> {
+        if self.should_fail("spawn_reviewer") {
+            return Err(SpawnError::Failed {
+                op: "spawn_reviewer",
+                child: None,
+                detail: "mock forced failure".into(),
+            });
+        }
+        self.record(Call::SpawnReviewer {
+            spec_task: spec.task.clone(),
+            step_count: spec.steps.len(),
+        });
+        Ok(spec
+            .name
+            .unwrap_or_else(|| AgentName::new("reviewer-mock".into()).unwrap()))
     }
     async fn fork_wave(&self, specs: Vec<ForkSpec>) -> Vec<Result<AgentName, SpawnError>> {
         self.record(Call::ForkWave { n: specs.len() });

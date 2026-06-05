@@ -72,6 +72,10 @@ pub struct ForkSpec {
 pub trait Spawner {
     async fn spawn_worker(&self, spec: WorkerSpec) -> Result<AgentName, SpawnError>;
     async fn spawn_gemini(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError>;
+    /// Spawn a short-lived **reviewer** of the caller's branch: a Gemini in its OWN worktree
+    /// branched off the *current* branch (the under-review code), `role = Reviewer`. Mirrors
+    /// `spawn_gemini` but fixes the role — the reviewer reads the diff, emits a `verdict`, exits.
+    async fn spawn_reviewer(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError>;
     /// Fork a wave — **per-spec results**, so one bad fork doesn't discard the children
     /// that did spawn (the TL converges on what succeeded, re-decomposes the failures).
     async fn fork_wave(&self, specs: Vec<ForkSpec>) -> Vec<Result<AgentName, SpawnError>>;

@@ -8,14 +8,19 @@
 //! rewrite. v1 has a single check: the worktree must be clean (work committed), because a parent
 //! merges the BRANCH off disk and uncommitted changes would be invisible to that merge.
 
-use exo_caps::{
-    Addressee, Bus, CapError, CapResult, Git, Message, MessageBody, MessageKind, Summary,
-};
+use exo_caps::{CapError, CapResult, Fs, GeminiSpec, Git, Process, Spawner};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::tool::{ok_json, parse, schema_json, BoxFuture, Tool, ToolOutput};
+
+#[derive(serde::Deserialize)]
+struct CheckResult {
+    pass: bool,
+    #[serde(default)]
+    detail: String,
+}
 
 /// Arguments for `submit_branch`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -48,19 +53,75 @@ fn committed<C: Git + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), String>> {
     })
 }
 
+/// Run every script in `.exo/checks/pre-merge/*` (relative to the node's worktree). Each must
+/// print a JSON line `{"pass": bool, "detail": "..."}`; any non-pass (or non-zero exit with no
+/// JSON) blocks the submit. Absent dir / no scripts = pass (no gate).
+fn pre_merge_checks<C: Process + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), String>> {
+    Box::pin(async move {
+        let dir = std::path::Path::new(".exo/checks/pre-merge");
+        let mut scripts: Vec<std::path::PathBuf> = match std::fs::read_dir(dir) {
+            Ok(rd) => rd
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.is_file())
+                .collect(),
+            // A missing dir = no gate. Any OTHER error (permissions, IO) must NOT silently
+            // disable the gate — fail the submit.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(format!("could not read .exo/checks/pre-merge: {e}")),
+        };
+        scripts.sort();
+        let mut failures = Vec::new();
+        for script in scripts {
+            let path = script.to_string_lossy().to_string();
+            let out = match ctx.run(&path, &[]).await {
+                Ok(o) => o,
+                Err(e) => {
+                    failures.push(format!("{path}: failed to run: {e}"));
+                    continue;
+                }
+            };
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            match serde_json::from_str::<CheckResult>(stdout.trim()) {
+                Ok(r) if r.pass => {}
+                Ok(r) => failures.push(format!("{path}: {}", r.detail)),
+                // A check that doesn't honour the `{"pass":bool,"detail":...}` contract is
+                // misconfigured/broken — fail closed rather than silently passing the gate.
+                Err(_) => failures.push(format!(
+                    "{path}: did not emit valid {{\"pass\":bool,\"detail\":...}} JSON (exit {})",
+                    out.status
+                )),
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "pre-merge checks failed:\n- {}",
+                failures.join("\n- ")
+            ))
+        }
+    })
+}
+
 /// The ordered precondition list. Append here to add a gate.
-fn checks<C: Git + Sync>() -> Vec<Check<C>> {
-    vec![Check {
-        name: "committed",
-        run: committed::<C>,
-    }]
+fn checks<C: Git + Process + Sync>() -> Vec<Check<C>> {
+    vec![
+        Check {
+            name: "committed",
+            run: committed::<C>,
+        },
+        Check {
+            name: "pre_merge_checks",
+            run: pre_merge_checks::<C>,
+        },
+    ]
 }
 
 /// The `submit_branch` tool.
 pub struct SubmitBranch;
 
 impl SubmitBranch {
-    pub async fn run<C: Git + Bus + Sync>(
+    pub async fn run<C: Git + Process + Spawner + Fs + Sync>(
         ctx: &C,
         args: SubmitBranchArgs,
     ) -> CapResult<ToolOutput> {
@@ -76,35 +137,76 @@ impl SubmitBranch {
         }
 
         let branch = ctx.current_branch().await?;
-        let text = format!(
-            "[READY] branch `{}` is committed and ready for review / merge. {}",
-            branch.as_str(),
-            args.note
-        );
-        let msg = Message {
-            text: MessageBody::new(text)?,
-            summary: Summary::new(format!("[READY] {}", branch.as_str()))?,
-            kind: MessageKind::Chat,
+        let sha = ctx.head_sha().await?;
+        // The diff base is the parent branch (this branch minus its last dot-segment).
+        let base = branch
+            .as_str()
+            .rsplit_once('.')
+            .map(|(p, _)| p)
+            .unwrap_or("main")
+            .to_string();
+        // The reviewer's bar: this node's spawn prompt + acceptance criteria, persisted at birth.
+        let acceptance = match ctx.read(std::path::Path::new(".exo/acceptance.md")).await {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
+            Err(_) => "(no acceptance criteria recorded for this branch)".to_string(),
         };
-        ctx.deliver(Addressee::Parent, msg).await?;
+
+        // Spawn a reviewer in its own worktree off this branch. We do NOT deliver `[READY]` here —
+        // the ONLY path that escalates is the sidecar reacting to an approve-verdict for this sha
+        // (see exo-node `handle_system`). That makes the gate structural: the LLM has no tool that
+        // can skip review.
+        let review_task = format!(
+            "You are a code reviewer. Review branch `{branch}` (commit {sha}). Run \
+             `git diff {base}...HEAD` to see exactly what changed; you may build / test / experiment \
+             freely in your own worktree (changes here never touch the reviewed code). Judge the \
+             work against the ACCEPTANCE CRITERIA below and the project's conventions, then call the \
+             `verdict` tool with branch=`{branch}`, sha=`{sha}`, and one of:\n\
+             - approve  (it meets the bar)\n\
+             - deny + message  (what must change)\n\
+             - changes + message + changes_branch=<your own branch>  (you committed a concrete fix \
+             to your own branch for the submitter to merge)\n\n\
+             Note from the submitter: {note}\n\n\
+             ACCEPTANCE CRITERIA\n{acceptance}",
+            branch = branch.as_str(),
+            note = args.note,
+        );
+        let spec = GeminiSpec {
+            name: None,
+            task: review_task,
+            steps: vec![],
+            verify: vec![],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec![],
+            read_first: vec![],
+        };
+        let reviewer = ctx.spawn_reviewer(spec).await?;
 
         Ok(ToolOutput::with_data(
-            format!("submitted branch {} for review/merge", branch.as_str()),
-            json!({ "branch": branch.as_str() }),
+            format!(
+                "Review requested for branch {branch}: reviewer `{reviewer}` spawned. STOP now — do \
+                 nothing further and end your turn. You will be woken automatically: on approval \
+                 your `[READY]` is escalated to your parent with no action from you; on deny / \
+                 changes you'll receive the reviewer's feedback to address.",
+                branch = branch.as_str(),
+                reviewer = reviewer.as_str(),
+            ),
+            json!({ "branch": branch.as_str(), "sha": sha, "reviewer": reviewer.as_str() }),
         ))
     }
 }
 
 #[async_trait::async_trait]
-impl<R: Git + Bus + Send + Sync> Tool<R> for SubmitBranch {
+impl<R: Git + Process + Spawner + Fs + Send + Sync> Tool<R> for SubmitBranch {
     fn name(&self) -> &str {
         "submit_branch"
     }
     fn description(&self) -> &str {
-        "Mark your branch DONE — committed and ready for review / merge. This is how you request \
-         your parent merge your work: the local-merge analogue of filing a PR (there is NO \
-         file_pr, no PR, no remote). Commit everything first — it refuses if your worktree has \
-         uncommitted changes. After calling it, end your turn; your parent reviews and merges."
+        "Request review of your branch. Commit everything first (it refuses on uncommitted changes \
+         or failing `.exo/checks/pre-merge` scripts), then it spawns a reviewer of your work and \
+         returns. Do NOT expect to merge yourself: on approval the sidecar escalates `[READY]` to \
+         your parent automatically; on deny / changes you'll be woken with feedback to address and \
+         re-submit. After calling it, STOP and end your turn."
     }
     fn schema(&self) -> serde_json::Value {
         schema_json(schemars::schema_for!(SubmitBranchArgs))
@@ -120,7 +222,7 @@ mod tests {
     use crate::testing::{Call, MockRuntime};
 
     #[tokio::test]
-    async fn submits_when_clean() {
+    async fn submits_spawns_reviewer_when_clean() {
         let mock = MockRuntime::default(); // is_clean = true, branch = dev.policy-claude
         let out = SubmitBranch::run(
             &mock,
@@ -133,12 +235,12 @@ mod tests {
 
         assert!(out.text.contains("dev.policy-claude"));
         let calls = mock.calls_made();
+        // It spawns a reviewer...
         assert!(calls
             .iter()
-            .any(|c| matches!(c, Call::BusDeliver { to, msg }
-            if *to == Addressee::Parent
-                && msg.summary.as_str().contains("[READY]")
-                && msg.text.as_str().contains("dev.policy-claude"))));
+            .any(|c| matches!(c, Call::SpawnReviewer { .. })));
+        // ...and NEVER delivers [READY] itself — only the sidecar does, on an approve-verdict.
+        assert!(!calls.iter().any(|c| matches!(c, Call::BusDeliver { .. })));
     }
 
     #[tokio::test]

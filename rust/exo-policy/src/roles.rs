@@ -20,6 +20,7 @@ use crate::tools::messaging::{NotifyParent, SendMessage};
 use crate::tools::spawn::{ForkWave, SpawnGemini, SpawnWorker};
 use crate::tools::submit::SubmitBranch;
 use crate::tools::tree::Tree;
+use crate::tools::verdict::Verdict;
 use exo_caps::NodeKind;
 
 /// A hook is an async fn over the concrete runtime `R`. Stored as a plain fn-pointer so the
@@ -94,6 +95,16 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
             stop: stop_allow,
             session_start,
         },
+        // A reviewer reads the under-review branch and emits a `verdict`, then exits. It does not
+        // submit or merge; `notify_parent` is its colleague back-channel ("why'd you do this?").
+        NodeKind::Reviewer => RoleDef {
+            tools: vec![Box::new(Verdict), Box::new(NotifyParent)],
+            pre_tool_use,
+            // Ephemeral; it exits after the verdict — nothing to fold, so don't gate (would only
+            // risk wedging on stray review artifacts).
+            stop: stop_allow,
+            session_start,
+        },
     }
 }
 
@@ -120,7 +131,7 @@ mod tests {
             );
             // Root/Worker never file a PR → no gate (stop_allow); Tl/Dev gate via `stop`.
             let expected_stop = match kind {
-                NodeKind::Root | NodeKind::Worker => {
+                NodeKind::Root | NodeKind::Worker | NodeKind::Reviewer => {
                     stop_allow::<MockRuntime> as *const () as usize
                 }
                 NodeKind::Tl | NodeKind::Dev => stop::<MockRuntime> as *const () as usize,
