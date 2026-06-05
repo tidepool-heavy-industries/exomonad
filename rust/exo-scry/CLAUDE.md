@@ -18,7 +18,6 @@ CC's own teammate bookkeeping desyncs — we observed phantom teammates, stale `
 | `resolve_active_team(target)` | inotify, Linux | Same, for an arbitrary `ProbeTarget` (pid / tmux pane / self). The only way to resolve a *third party's* team. |
 | `resolve_by_session(uuid)` | config scan, portable | Match a known session UUID against team configs' `leadSessionId`. For self/sidecar contexts where CC hands the process its own `session_id`; works off-Linux. |
 | `resolve_via_transcript(target)` | cwd→transcript, portable-ish | Find the session's newest transcript in its cwd's project dir → UUID → team. Fails loud (`AmbiguousCwd`) if multiple live Claudes share the cwd. |
-| `resolve_by_pane(pane)` | config scan by `tmuxPaneId` | Match a pane against members' `tmuxPaneId`. **See gap — CC omits this field for the lead.** |
 
 `ActiveTeam { team, tasks_dir, lead_inbox, lead_session_id, me, claude_pid }` is the resolved result; `lead_inbox` is the routing target `dispatch` writes.
 
@@ -30,12 +29,11 @@ CC's own teammate bookkeeping desyncs — we observed phantom teammates, stale `
 | `signal` | `ActiveTeamSignal` strategy trait + `InotifyWatchSignal`. |
 | `proc` (Linux) | Process-tree walking (`find_claude_ancestor`/`_descendant`, `self_pid`, cwd reads via `/proc`). |
 | `inotify` / `pathmap` (Linux) | Read `/proc/{pid}/fdinfo` inotify watches → watched paths. |
-| `teams` | On-disk team config discovery/loading (`tasks_root`, `find_team_by_session`, `find_member_by_pane`). |
+| `teams` | On-disk team config discovery/loading (`tasks_root`, `find_team_by_session`). |
 | `inbox` | `send_message(team, to, from, text, summary)` — write a CC Teams inbox line (the native-delivery write). |
 | `transcript` | cwd → project dir → newest session UUID. |
 | `identity` `target` `tmux` `error` | `ActiveTeam`/`Pid`/`TeamName`; `ProbeTarget`; pane→pid; `ScryError`. |
 
 ## Gaps / not-yet
 
-- **`resolve_by_pane` is effectively dead for the lead case** — CC does not write `tmuxPaneId` into team config, so a sidecar can't find *its own* team by pane. `dispatch` uses `resolve_self` for exactly this reason. The fn remains for member resolution; treat as suspect / a cut candidate.
 - The inotify path is **Linux-only**; the portable fallbacks (`resolve_by_session`, `resolve_via_transcript`) exist but the node's `dispatch` only wires `resolve_self` (Linux), so non-Linux native delivery is untested.

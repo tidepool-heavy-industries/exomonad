@@ -22,7 +22,9 @@ pub enum ScryError {
     PermissionDenied(i32),
 
     /// No Claude Code process found in the requested direction of `start`.
-    #[error("no Claude Code process found in the {direction} of pid {start} (walked {walked} hops)")]
+    #[error(
+        "no Claude Code process found in the {direction} of pid {start} (walked {walked} hops)"
+    )]
     NoClaudeProcess {
         start: i32,
         direction: &'static str,
@@ -46,7 +48,10 @@ pub enum ScryError {
 
     /// A team's `config.json` could not be read.
     #[error("failed to read team config {}: {source}", path.display())]
-    TeamConfigRead { path: PathBuf, source: std::io::Error },
+    TeamConfigRead {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 
     /// A team's `config.json` was malformed.
     #[error("malformed team config {}: {source}", path.display())]

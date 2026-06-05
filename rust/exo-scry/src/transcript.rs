@@ -67,7 +67,9 @@ mod tests {
             "-home-inanna-dev-exomonad"
         );
         assert_eq!(
-            escape_cwd(Path::new("/home/inanna/dev/exomonad/.exo/worktrees/address-type")),
+            escape_cwd(Path::new(
+                "/home/inanna/dev/exomonad/.exo/worktrees/address-type"
+            )),
             "-home-inanna-dev-exomonad--exo-worktrees-address-type"
         );
     }
@@ -79,10 +81,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         // Deterministic mtimes (no sleep): beta newer than alpha; ignore non-jsonl.
-        for (name, secs) in [("alpha.jsonl", 1000), ("beta.jsonl", 2000), ("notes.txt", 9000)] {
+        for (name, secs) in [
+            ("alpha.jsonl", 1000),
+            ("beta.jsonl", 2000),
+            ("notes.txt", 9000),
+        ] {
             std::fs::write(root.join(name), b"{}").unwrap();
-            let f = std::fs::File::options().write(true).open(root.join(name)).unwrap();
-            f.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(secs)).unwrap();
+            let f = std::fs::File::options()
+                .write(true)
+                .open(root.join(name))
+                .unwrap();
+            f.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+                .unwrap();
         }
         assert_eq!(newest_session(&root).unwrap().as_deref(), Some("beta"));
         std::fs::remove_dir_all(&root).unwrap();

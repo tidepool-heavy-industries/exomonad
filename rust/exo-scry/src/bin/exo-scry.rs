@@ -1,9 +1,9 @@
 //! exo-scry CLI — thin clap shell over the library.
 
 use clap::{Args, Parser, Subcommand};
-use exo_scry::{ActiveTeam, Result};
 #[allow(unused_imports)]
 use exo_scry::ProbeTarget;
+use exo_scry::{ActiveTeam, Result};
 
 #[derive(Parser)]
 #[command(
@@ -61,15 +61,6 @@ fn probe_team(args: ProbeArgs) -> std::process::ExitCode {
 
 #[cfg(target_os = "linux")]
 fn probe_by_target(args: &ProbeArgs) -> std::process::ExitCode {
-    // A pane id is a member's durable self-key: try matching it against
-    // members' tmuxPaneId first; fall back to walking the pane to its session.
-    if let Some(pane) = &args.pane {
-        match exo_scry::resolve_by_pane(pane) {
-            Ok(Some(team)) => return print_result(Ok(Some(team)), args.json),
-            Ok(None) => {} // not a recorded member — fall through to the watch path
-            Err(e) => return print_result(Err(e), args.json),
-        }
-    }
     let target = if let Some(pane) = &args.pane {
         ProbeTarget::TmuxPane(pane.clone())
     } else if let Some(pid) = args.pid {
@@ -98,7 +89,10 @@ fn print_result(res: Result<Option<ActiveTeam>>, json: bool) -> std::process::Ex
     match res {
         Ok(Some(team)) => {
             if json {
-                println!("{}", serde_json::to_string_pretty(&team).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&team).unwrap_or_default()
+                );
             } else {
                 println!("active team: {}", team.team);
                 if let Some(me) = &team.me {

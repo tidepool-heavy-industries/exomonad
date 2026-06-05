@@ -16,7 +16,9 @@ pub fn watched_inodes(pid: i32) -> Result<HashSet<u64>> {
     let dir = format!("/proc/{pid}/fdinfo");
     let entries = match std::fs::read_dir(&dir) {
         Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(ScryError::ProcessGone(pid)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ScryError::ProcessGone(pid))
+        }
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
             return Err(ScryError::PermissionDenied(pid))
         }
@@ -44,7 +46,9 @@ pub fn watched_inodes(pid: i32) -> Result<HashSet<u64>> {
 /// `inotify wd:1 ino:abcd sdev:800012 mask:... ...`  (`ino` is hex).
 fn parse_inotify_inode(line: &str) -> Option<u64> {
     let rest = line.strip_prefix("inotify ")?;
-    let tok = rest.split_whitespace().find_map(|t| t.strip_prefix("ino:"))?;
+    let tok = rest
+        .split_whitespace()
+        .find_map(|t| t.strip_prefix("ino:"))?;
     u64::from_str_radix(tok, 16).ok()
 }
 
