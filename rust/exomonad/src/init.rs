@@ -310,7 +310,10 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     )?;
     info!(
         "Wrote .mcp.json with {} MCP server(s)",
-        mcp_json["mcpServers"].as_object().map(|o| o.len()).unwrap_or(0)
+        mcp_json["mcpServers"]
+            .as_object()
+            .map(|o| o.len())
+            .unwrap_or(0)
     );
 
     // 2. Create session in background
@@ -444,7 +447,9 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
     wait_for_server_socket(&cwd).await?;
 
     // GC stale agents before spawning companions
-    let git_wt = std::sync::Arc::new(exomonad_core::services::GitWorktreeService::new(cwd.clone()));
+    let git_wt = std::sync::Arc::new(exomonad_core::services::GitWorktreeService::new(
+        cwd.clone(),
+    ));
     {
         use exomonad_core::services::agent_control::AgentControlService;
         use exomonad_core::services::ServicesBuilder;
@@ -457,8 +462,8 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
             Arc::new(ipc.clone()),
         )
         .build();
-        let agent_control = AgentControlService::new(Arc::new(services))
-            .with_tmux_session(session.clone());
+        let agent_control =
+            AgentControlService::new(Arc::new(services)).with_tmux_session(session.clone());
         if let Err(e) = agent_control.gc_stale_agents().await {
             warn!(error = %e, "GC stale agents failed (non-fatal)");
         }
