@@ -34,7 +34,9 @@ impl Topology for Runtime {
             name: self.name().as_str().to_string(),
             kind: None,
             pane: self.own_pane().as_str().to_string(),
-            // Self is, definitionally, alive — it's the node answering the call.
+            // Self is, definitionally, alive — it's the node answering the call. Deliberately NOT
+            // derived from the `alive` probe set: a best-effort `tmux list-panes` failure would
+            // then mis-report this node as dead, which is strictly wrong (it's clearly running).
             pane_alive: true,
             children,
         };
@@ -84,17 +86,32 @@ fn subtree(working_dir: &Path, alive: &HashSet<String>, depth: usize) -> Vec<Tre
         .collect()
 }
 
-/// Read + tolerantly parse a `children.jsonl` (missing file → empty; a malformed line is skipped,
-/// mirroring the bus/inbound tolerant parse).
+/// Read + tolerantly parse a `children.jsonl`. A **missing** file is expected (a node with no
+/// children) → empty, silently. A real IO error (permissions, etc.) and a malformed line are
+/// each `warn!`-ed and skipped — best-effort like the bus/inbound parse, but never silent about
+/// a genuine problem (which would otherwise make the topology view quietly wrong).
 fn read_records(path: &Path) -> Vec<ChildRecord> {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
-        Err(_) => return Vec::new(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(e) => {
+            tracing::warn!("topology: could not read {}: {e}", path.display());
+            return Vec::new();
+        }
     };
     content
         .lines()
         .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| serde_json::from_str::<ChildRecord>(l).ok())
+        .filter_map(|l| match serde_json::from_str::<ChildRecord>(l) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                tracing::warn!(
+                    "topology: skipping malformed children.jsonl line in {}: {e}",
+                    path.display()
+                );
+                None
+            }
+        })
         .collect()
 }
 
@@ -199,7 +216,8 @@ mod tests {
 
         let view = rt.topology().await.unwrap();
         assert_eq!(view.node.name, "me");
-        assert!(view.node.pane_alive); // self
+        assert_eq!(view.node.pane, "%9"); // self's pane id (deterministic; no tmux dependency)
+        assert!(view.node.pane_alive); // self is always alive (hardcoded, not probe-derived)
         assert_eq!(view.parent.as_deref(), Some("root"));
         assert_eq!(view.path, vec!["root".to_string(), "me".to_string()]);
         assert_eq!(view.node.children.len(), 1);
