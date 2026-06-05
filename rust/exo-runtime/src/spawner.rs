@@ -415,10 +415,18 @@ impl Runtime {
             }
         };
 
+        let worktree_prompt = format!(
+            "You are working in an ISOLATED git worktree at `{}` — this is your repo root. ALL file \
+             paths are relative to it. Do NOT read or write files outside this directory (never touch \
+             the parent repository). Commit your work to your branch here.\n\n{}",
+            child_dir.display(),
+            core.task
+        );
+
         let prompt_file = exomonad_core::services::agent_control::launch::write_prompt_file(
             child_dir,
             core.name.as_str(),
-            &core.task,
+            &worktree_prompt,
         )
         .await
         .map_err(|e| SpawnError::Failed {
