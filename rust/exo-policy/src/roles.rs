@@ -11,8 +11,8 @@
 
 use crate::caps::PolicyCaps;
 use crate::hooks::{
-    pre_tool_use, session_start, stop, stop_allow, stop_notify, HookDecision, HookInput,
-    SessionStartOutput, StopDecision,
+    pre_tool_use, session_start, stop, stop_allow, stop_notify, stop_reviewer, HookDecision,
+    HookInput, SessionStartOutput, StopDecision,
 };
 use crate::tool::{BoxFuture, Tool};
 use crate::tools::merge::Merge;
@@ -102,7 +102,7 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
             pre_tool_use,
             // Ephemeral; it exits after the verdict — nothing to fold, so don't gate (would only
             // risk wedging on stray review artifacts).
-            stop: stop_allow,
+            stop: stop_reviewer,
             session_start,
         },
     }
@@ -130,12 +130,12 @@ mod tests {
                 rd.pre_tool_use as usize,
                 pre_tool_use::<MockRuntime> as *const () as usize
             );
-            // Root/Reviewer never yield work to fold → stop_allow. Dev/Worker (Gemini) notify the
-            // parent then allow (never block). Tl keeps the dirty-gate (stop).
+            // Root never yields work to fold → stop_allow. Reviewer (Gemini) signals ReviewAborted
+            // if no verdict → stop_reviewer. Dev/Worker (Gemini) notify the parent then allow
+            // (never block). Tl keeps the dirty-gate (stop).
             let expected_stop = match kind {
-                NodeKind::Root | NodeKind::Reviewer => {
-                    stop_allow::<MockRuntime> as *const () as usize
-                }
+                NodeKind::Root => stop_allow::<MockRuntime> as *const () as usize,
+                NodeKind::Reviewer => stop_reviewer::<MockRuntime> as *const () as usize,
                 NodeKind::Dev | NodeKind::Worker => {
                     stop_notify::<MockRuntime> as *const () as usize
                 }
