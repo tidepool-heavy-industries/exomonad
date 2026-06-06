@@ -54,9 +54,21 @@ pub async fn serve(ctx: Arc<NodeContext>) -> NodeResult<()> {
 
 /// One request/response cycle. The client writes a `HookRequest` then half-closes its write side;
 /// we read to EOF, run the hook, write the `HookVerdict`, and close.
-async fn handle_conn(ctx: Arc<NodeContext>, mut stream: UnixStream) -> NodeResult<()> {
+async fn handle_conn(ctx: Arc<NodeContext>, stream: UnixStream) -> NodeResult<()> {
     let mut buf = Vec::new();
-    stream.read_to_end(&mut buf).await?;
+    // Read up to 64KB with a 2-second timeout to prevent memory exhaustion and deadlocks.
+    // The client MUST half-close its write side for us to see EOF.
+    let mut limited = stream.take(64 * 1024);
+    let read_fut = limited.read_to_end(&mut buf);
+    match tokio::time::timeout(std::time::Duration::from_secs(2), read_fut).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => return Err(e.into()),
+        Err(_) => {
+            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "hooksock: request timeout").into())
+        }
+    }
+    let mut stream = limited.into_inner();
+
     let req: HookRequest = serde_json::from_slice(&buf).map_err(|e| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -173,6 +185,7 @@ mod tests {
     #[test]
     fn allow_shape_per_agent_type() {
         assert_eq!(allow_json(AgentType::Claude), r#"{"continue":true}"#);
+        assert_eq!(allow_json(AgentType::Shoal), r#"{"continue":true}"#);
         assert_eq!(allow_json(AgentType::Gemini), "{}");
     }
 }
