@@ -51,5 +51,5 @@ Ten caps, each one trait per file. `exo-runtime::Runtime` implements all of them
 
 ## Gaps / not-yet
 
-- `reclaim_worktree` / `kill_pane` are defined here but have **no policy-facing tool** that calls them (see `exo-policy` gaps — convergence teardown is unwired).
+- `reclaim_worktree` / `kill_pane` are now called by the `merge` tool (folded-child reclaim) and the sidecar's reviewer verdict-teardown — both **best-effort** (not retried; a dirty or nested worktree can resist reclaim).
 - `ChildKind::Standalone` (fresh-repo child, a classic feature) is folded into `Worktree`; not separately represented.
