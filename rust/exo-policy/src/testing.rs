@@ -88,6 +88,9 @@ pub struct MockRuntime {
     /// What `merge_base` returns for any refish (set `None` to exercise the submit fallback chain).
     pub merge_base: Option<String>,
     pub is_clean: bool,
+    /// Liveness of the canned topology child (`child-a`). Default `true` (a live child → the
+    /// subtree-idle filter treats the node as busy); set `false` to model a quiescent subtree.
+    pub child_pane_alive: bool,
     /// If set, the named cap method returns its `*Error` instead of the happy path. Keyed by
     /// a short op label (e.g. "merge") so a test can exercise error branches.
     pub fail: Mutex<Option<&'static str>>,
@@ -103,6 +106,7 @@ impl Default for MockRuntime {
             head_sha: "0000000000000000000000000000000000000000".into(),
             merge_base: Some("basebasebasebasebasebasebasebasebasebase".into()),
             is_clean: true,
+            child_pane_alive: true,
             fail: Mutex::new(None),
         }
     }
@@ -355,7 +359,7 @@ impl Topology for MockRuntime {
                     name: "child-a".into(),
                     kind: Some(ChildKind::Worktree),
                     pane: "%1".into(),
-                    pane_alive: true,
+                    pane_alive: self.child_pane_alive,
                     children: vec![],
                 }],
             },
