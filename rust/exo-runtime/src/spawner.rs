@@ -394,32 +394,23 @@ impl Runtime {
                 exomonad_core::services::agent_control::AgentType::Claude
             }
             AgentType::Gemini => {
-                // Gemini discovers the node MCP server via GEMINI_CLI_SYSTEM_SETTINGS_PATH.
-                let mcp_config = serde_json::json!({
-                    "mcpServers": {
-                        "exomonad": {
-                            "type": "stdio",
-                            "command": "exomonad",
-                            "args": exo_caps::invocation::node_args(&papers_path.to_string_lossy())
-                        }
-                    }
-                });
-                let settings_path = papers_path.with_file_name("settings.json");
-                tokio::fs::write(
-                    &settings_path,
-                    serde_json::to_vec_pretty(&mcp_config).map_err(|e| SpawnError::Failed {
-                        op: "write_gemini_settings",
+                // Gemini discovers the node MCP server via GEMINI_CLI_SYSTEM_SETTINGS_PATH, and
+                // fires hooks through the same `exomonad experimental hook` thin client as Claude.
+                crate::node_config::write_gemini_node_config(child_dir, &papers_path)
+                    .await
+                    .map_err(|e| SpawnError::Failed {
+                        op: "write_gemini_node_config",
                         child: Some(core.name.clone()),
                         detail: e.to_string(),
-                    })?,
-                )
-                .await?;
+                    })?;
+                let settings_path = child_dir.join("settings.json");
                 env_vars.insert(
                     "GEMINI_CLI_SYSTEM_SETTINGS_PATH".into(),
                     settings_path.to_string_lossy().into_owned(),
                 );
                 exomonad_core::services::agent_control::AgentType::Gemini
             }
+
             AgentType::Shoal => {
                 return Err(SpawnError::Failed {
                     op: "launch",

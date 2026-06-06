@@ -16,8 +16,9 @@ The single concrete `Runtime` struct that implements **every** `exo-caps` trait.
 | `spawner` | `impl Spawner` — the recursion (birth + teardown). See below. |
 | `tmux` | `impl Tmux` — delegates to exomonad-core `TmuxIpc::inject_input` (hardened buffer-paste). |
 | `fs` `kv` `log` `process` | The remaining cap impls. |
-| `node_config` | `write_node_agent_config` — writes a Claude child's `.mcp.json` + `.claude/settings.local.json` (PreToolUse/Stop/SessionStart hooks via `exo_caps::invocation`). |
+| `node_config` | `write_node_agent_config` / `write_gemini_node_config` — writes child agent config (MCP + hooks). |
 | `session_boot` | `boot_root_session` — creates the detached `{session}` tmux window for the root, returns its pane. |
+
 
 ## Spawn: `birth` and record-first ordering (read before editing `spawner.rs`)
 
