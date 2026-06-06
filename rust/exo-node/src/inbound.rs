@@ -186,7 +186,9 @@ impl RealHandler {
             // the child down. (v1: no dedupe — volume is accepted; the refine-later seam is here.)
             SystemMessage::ChildIdle { summary } => self.render_child_idle(from, summary).await,
             // Review verdicts: apply, then reclaim the one-shot reviewer (verdict-only teardown).
-            _ => {
+            SystemMessage::ReviewApproved { .. }
+            | SystemMessage::ReviewDenied { .. }
+            | SystemMessage::ReviewChanges { .. } => {
                 let result = self.apply_verdict(system).await;
                 if let Persona::Agent(reviewer) = from {
                     if let Err(e) = exo_caps::Spawner::kill_pane(&*self.ctx.runtime, reviewer).await
