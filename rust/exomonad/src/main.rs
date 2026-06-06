@@ -37,7 +37,7 @@ fn fail_open_shape(papers_path: &std::path::Path) -> &'static str {
         .and_then(|b| serde_json::from_slice::<exo_caps::NodePapers>(&b).ok())
         .map(|p| p.role.agent_type());
     match agent_type {
-        Some(exo_caps::AgentType::Gemini) => r#"{"decision":"allow"}"#,
+        Some(exo_caps::AgentType::Gemini) => "{}",
         _ => r#"{"continue":true}"#,
     }
 }
@@ -242,35 +242,27 @@ async fn main() -> Result<()> {
 
                 let req = exo_caps::HookRequest {
                     event: hook_event,
-                    stdin_json: body.clone(),
+                    stdin_json: body,
                 };
 
-                // Route to socket, fallback to in-process if unreachable or times out.
-                let result = match exo_node::hooksock::client::resolve_hook_sock(&papers) {
-                    Ok(sock) => exo_node::hooksock::client::client_request(&sock, &req).await,
-                    Err(e) => Err(e),
-                };
-
-                match result {
-                    Ok(verdict) => print!("{}", verdict.stdout),
+                // Fail-open on ANY error: if the sidecar is unreachable there are no tools to
+                // gate, so never wedge the agent. Shape the allow per agent_type.
+                match exo_node::hooksock::client::resolve_hook_sock(&papers) {
+                    Ok(sock) => match exo_node::hooksock::client::client_request(&sock, &req).await
+                    {
+                        Ok(verdict) => print!("{}", verdict.stdout),
+                        Err(e) => {
+                            eprintln!(
+                                "[exomonad] node hook: socket RPC failed ({e}); failing open"
+                            );
+                            print!("{}", fail_open_shape(&papers));
+                        }
+                    },
                     Err(e) => {
                         eprintln!(
-                            "[exomonad] node hook: socket RPC failed ({e}); falling back to in-process policy"
+                            "[exomonad] node hook: cannot resolve hook socket ({e}); failing open"
                         );
-                        let node_event = match hook_event {
-                            exo_caps::HookEvent::PreToolUse => exo_node::HookEvent::PreToolUse,
-                            exo_caps::HookEvent::Stop => exo_node::HookEvent::Stop,
-                            _ => unreachable!(),
-                        };
-                        match exo_node::handle_hook(node_event, &papers, &body).await {
-                            Ok(verdict) => println!("{verdict}"),
-                            Err(fallback_e) => {
-                                eprintln!(
-                                    "[exomonad] node hook: in-process fallback also failed ({fallback_e}); failing open"
-                                );
-                                print!("{}", fail_open_shape(&papers));
-                            }
-                        }
+                        print!("{}", fail_open_shape(&papers));
                     }
                 }
                 return Ok(());
