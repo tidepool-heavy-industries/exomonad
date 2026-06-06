@@ -401,14 +401,19 @@ impl Runtime {
             AgentType::Gemini => {
                 // Gemini discovers the node MCP server via GEMINI_CLI_SYSTEM_SETTINGS_PATH, and
                 // fires hooks through the same `exomonad experimental hook` thin client as Claude.
-                crate::node_config::write_gemini_node_config(child_dir, &papers_path)
+                // Settings go to a PER-PANE path (not the child's worktree): inline siblings share
+                // the parent's worktree, so a worktree-local settings.json would clobber each
+                // other's papers pointer → identity collision (both read the last writer's papers).
+                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                let settings_path =
+                    exo_caps::paths::gemini_settings_path(Path::new(&home), &self.run_id, pane);
+                crate::node_config::write_gemini_node_config(&settings_path, &papers_path)
                     .await
                     .map_err(|e| SpawnError::Failed {
                         op: "write_gemini_node_config",
                         child: Some(core.name.clone()),
                         detail: e.to_string(),
                     })?;
-                let settings_path = child_dir.join("settings.json");
                 env_vars.insert(
                     "GEMINI_CLI_SYSTEM_SETTINGS_PATH".into(),
                     settings_path.to_string_lossy().into_owned(),

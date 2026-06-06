@@ -62,7 +62,10 @@ pub async fn write_node_agent_config(agent_dir: &Path, papers_path: &Path) -> st
 }
 
 /// Write the Gemini-specific `settings.json` (MCP + hooks) to the given agent directory.
-pub async fn write_gemini_node_config(agent_dir: &Path, papers_path: &Path) -> std::io::Result<()> {
+pub async fn write_gemini_node_config(
+    settings_path: &Path,
+    papers_path: &Path,
+) -> std::io::Result<()> {
     let p_raw = papers_path.to_string_lossy();
     let p_esc = shell_escape::escape(p_raw.clone().into_owned().into()).into_owned();
 
@@ -70,10 +73,13 @@ pub async fn write_gemini_node_config(agent_dir: &Path, papers_path: &Path) -> s
     let settings_json = serde_json::to_vec_pretty(&settings)
         .map_err(|e| std::io::Error::other(format!("gemini settings encode: {e}")))?;
 
-    // Gemini settings live in the agent root (unlike Claude's .claude/ subfolder),
-    // pointed to by GEMINI_CLI_SYSTEM_SETTINGS_PATH.
-    let settings_path = agent_dir.join("settings.json");
-    let mut f = tokio::fs::File::create(&settings_path).await?;
+    // Per-pane path (NOT the child's worktree): inline siblings share their parent's worktree,
+    // so a worktree-local settings.json would clobber each other's papers pointer. Gemini reads
+    // this via the absolute GEMINI_CLI_SYSTEM_SETTINGS_PATH env var, so location is free.
+    if let Some(parent) = settings_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let mut f = tokio::fs::File::create(settings_path).await?;
     f.write_all(&settings_json).await?;
     f.sync_all().await?;
 
