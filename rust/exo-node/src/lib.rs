@@ -31,15 +31,16 @@ pub use hook::{handle as handle_hook, HookEvent};
 
 use std::sync::Arc;
 
-/// Run the node's two concurrent stimuli in one process (outbound serve + inbound watch):
+/// Run the node's three concurrent stimuli in one process (outbound serve + inbound watch + hooksock):
 /// - **outbound** ([`outbound::serve`]) — serve the role's MCP tools over stdio. This owns
 ///   stdin/stdout and returns when the stream closes (agent gone), so it is the node's
 ///   **lifetime anchor**: when it ends, the node ends.
 /// - **inbound** ([`inbound::watch`]) — watch the ingestion inbox (cursor + notify) and route
 ///   each entry; ends on a `Control(Shutdown)`.
+/// - **hooksock** ([`hooksock::serve`]) — background hook-RPC socket (N5); also aborted when serve returns.
 ///
-/// The inbound loop is aborted when `serve` returns. `Arc<NodeContext>` satisfies the
-/// `R: Send + Sync + 'static` dispatch boundary. The background loop erroring is logged but does
+/// The background loops are aborted when `serve` returns. `Arc<NodeContext>` satisfies the
+/// `R: Send + Sync + 'static` dispatch boundary. A background loop erroring is logged but does
 /// not tear down the node — only the outbound anchor closing (or a shutdown) ends it.
 pub async fn run_node(ctx: Arc<NodeContext>) -> NodeResult<()> {
     let inbound = tokio::spawn({
@@ -51,11 +52,22 @@ pub async fn run_node(ctx: Arc<NodeContext>) -> NodeResult<()> {
         }
     });
 
+    // N5 — per-agent hook-RPC socket. Background like inbound; an error is logged, not fatal.
+    let hooksock = tokio::spawn({
+        let ctx = ctx.clone();
+        async move {
+            if let Err(e) = hooksock::serve(ctx).await {
+                tracing::error!("hooksock loop exited with error: {e}");
+            }
+        }
+    });
+
     // The outbound serve owns stdio and runs for the node's lifetime.
     let result = outbound::serve(ctx).await;
 
-    // Agent stream closed (or serve errored) → reap the background loop.
+    // Agent stream closed (or serve errored) → reap the background loops.
     inbound.abort();
+    hooksock.abort();
 
     result
 }
