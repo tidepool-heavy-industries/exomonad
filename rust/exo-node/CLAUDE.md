@@ -45,7 +45,7 @@ The bridge is **bidirectional** for Claude nodes: `dispatch` is the inbound last
 
 ## Gaps / not-yet
 
-- **Shutdown has no graceful ack.** Shutdown is now cooperative (defer-with-confirm on a live subtree; reap-on-idle; forced cascade) — but the native `shutdown_approved`/reject reply shape is not written back to the requester. The deferral is surfaced as a plain chat message, not a structured `shutdown_response`.
+- **Shutdown has structured response.** A structured `shutdown_response` is written back to the requester (status accepted/deferred + live_children + busy), and the requester's `handle_system` renders it to chat. The native CC `shutdown_request` has no force field, so a bridged request is always cooperative.
 - **Forced teardown is a hard kill.** `force:true` cascades pane-kills through the subtree with no per-node commit/wrap-up — a busy descendant loses uncommitted work. Deliberate (force = "tear it down"); revisit if it bites in dogfooding.
 - **`outbound` hand-rolls JSON-RPC** over stdio (despite the "rmcp/stdio" framing) — minimal `initialize`/`tools/list`/`tools/call`; no capability negotiation beyond that.
 - **No convergence teardown driver.** Nothing in the node calls `Spawner::reclaim_worktree`/`kill_pane` after a `merge`, so folded children's panes/worktrees linger (the `exo-policy` lifecycle gap surfaces here).

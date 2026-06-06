@@ -31,6 +31,7 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use chrono::Utc;
+use exo_caps::types::ShutdownStatus;
 use exo_caps::{
     Addressee, AgentName, ChildLiveness, ControlKind, IngestionEntry, Message, MessageBody,
     MessageKind, Persona, Summary, SyntheticName, SystemMessage, Tmux, Topology, TreeNode,
@@ -198,6 +199,16 @@ impl RealHandler {
                 try_reap(&self.ctx).await;
                 Ok(())
             }
+            // A child replied to a shutdown we sent it. Render it to our LLM; never tear it down.
+            SystemMessage::ShutdownResponse {
+                status,
+                live_children,
+                busy,
+                reason,
+            } => {
+                self.render_shutdown_response(from, status, live_children, *busy, reason)
+                    .await
+            }
             // Review verdicts: apply, then reclaim the one-shot reviewer (verdict-only teardown).
             SystemMessage::ReviewApproved { .. }
             | SystemMessage::ReviewDenied { .. }
@@ -310,9 +321,11 @@ impl RealHandler {
                     changes_branch.as_str(), message
                 )).await
             }
-            // `ChildIdle`/`ChildExited` are intercepted in `handle_system`, never routed here.
-            SystemMessage::ChildIdle { .. } | SystemMessage::ChildExited { .. } => {
-                unreachable!("ChildIdle/ChildExited handled in handle_system, never apply_verdict")
+            // `ChildIdle`/`ChildExited`/`ShutdownResponse` are intercepted in `handle_system`, never routed here.
+            SystemMessage::ChildIdle { .. }
+            | SystemMessage::ChildExited { .. }
+            | SystemMessage::ShutdownResponse { .. } => {
+                unreachable!("ChildIdle/ChildExited/ShutdownResponse handled in handle_system, never apply_verdict")
             }
         }
     }
@@ -343,14 +356,60 @@ impl RealHandler {
         crate::dispatch::dispatch(&self.ctx, &entry).await
     }
 
-    /// Deliver a chat message up to this node's parent (the shutdown requester).
-    async fn notify_parent_chat(&self, text: &str, summary: &str) -> NodeResult<()> {
+    /// Render a child's [`ShutdownResponse`](exo_caps::SystemMessage::ShutdownResponse) into THIS
+    /// node's LLM as a chat line, attributed to the child (`from`). Never tears anyone down.
+    async fn render_shutdown_response(
+        &self,
+        from: &Persona,
+        status: &ShutdownStatus,
+        live_children: &[String],
+        busy: bool,
+        reason: &str,
+    ) -> NodeResult<()> {
+        let summary = match status {
+            ShutdownStatus::Deferred => "[shutdown deferred]",
+            ShutdownStatus::Accepted => "[shutdown accepted]",
+        };
+        let entry = IngestionEntry {
+            v: 1,
+            ts: Utc::now(),
+            from: from.clone(),
+            msg: Message {
+                text: MessageBody::new(format_shutdown_response(
+                    status,
+                    live_children,
+                    busy,
+                    reason,
+                ))
+                .map_err(|e| std::io::Error::other(e.to_string()))?,
+                summary: Summary::new(summary.to_string())
+                    .map_err(|e| std::io::Error::other(e.to_string()))?,
+                kind: MessageKind::Chat,
+            },
+        };
+        crate::dispatch::dispatch(&self.ctx, &entry).await
+    }
+
+    /// Deliver a structured shutdown reply up to this node's parent (the shutdown requester). The
+    /// requester's sidecar renders it to a chat line (see `render_shutdown_response`).
+    async fn respond_shutdown(
+        &self,
+        status: ShutdownStatus,
+        live_children: Vec<String>,
+        busy: bool,
+        reason: &str,
+    ) -> NodeResult<()> {
         let msg = Message {
-            text: MessageBody::new(text.to_string())
+            text: MessageBody::new("shutdown response".to_string())
                 .map_err(|e| std::io::Error::other(e.to_string()))?,
-            summary: Summary::new(summary.to_string())
+            summary: Summary::new("[shutdown response]".to_string())
                 .map_err(|e| std::io::Error::other(e.to_string()))?,
-            kind: MessageKind::Chat,
+            kind: MessageKind::System(SystemMessage::ShutdownResponse {
+                status,
+                live_children,
+                busy,
+                reason: reason.to_string(),
+            }),
         };
         exo_caps::Bus::deliver(&*self.ctx.runtime, Addressee::Parent, msg)
             .await
@@ -364,9 +423,11 @@ impl RealHandler {
             Some(l) => l,
             None => {
                 // Couldn't read our subtree → take no destructive action; bounce to the requester.
-                self.notify_parent_chat(
-                    "[shutdown deferred] couldn't read my subtree (topology error) — not shutting down. Retry shortly.",
-                    "[shutdown deferred]",
+                self.respond_shutdown(
+                    ShutdownStatus::Deferred,
+                    vec![],
+                    false,
+                    "couldn't read my subtree (topology error) — not shutting down. Retry shortly.",
                 )
                 .await?;
                 return Ok(Some(false));
@@ -388,23 +449,15 @@ impl RealHandler {
                     "[shutdown requested] Finish your work and yield — you'll be reaped when you go idle.",
                 )
                 .await?;
+                self.respond_shutdown(ShutdownStatus::Accepted, vec![], false, "")
+                    .await?;
                 Ok(Some(false))
             }
             // Cooperative + live children — bounce an "are you sure" back to the requester.
             ShutdownAction::Defer => {
                 let busy = ChildLiveness::any_child_busy(&*self.ctx.runtime).await;
-                let work = if busy { " (some actively working)" } else { "" };
-                self.notify_parent_chat(
-                    &format!(
-                        "[shutdown deferred] I have {} live child(ren): {}{work}. They'd be orphaned. \
-                         Re-send shutdown with force:true to tear down the whole subtree, or shut them \
-                         down individually first.",
-                        live.len(),
-                        live.join(", "),
-                    ),
-                    "[shutdown deferred]",
-                )
-                .await?;
+                self.respond_shutdown(ShutdownStatus::Deferred, live.clone(), busy, "")
+                    .await?;
                 Ok(Some(false))
             }
             // Forced + live children — sidecar cascades a forced teardown, reaps self when clear.
@@ -436,6 +489,13 @@ impl RealHandler {
                         Err(e) => warn!("cascade shutdown: build message failed: {e}"),
                     }
                 }
+                self.respond_shutdown(
+                    ShutdownStatus::Accepted,
+                    vec![],
+                    false,
+                    "forced teardown of my subtree is in progress.",
+                )
+                .await?;
                 Ok(Some(false))
             }
         }
@@ -461,6 +521,40 @@ fn decide(force: bool, childless: bool) -> ShutdownAction {
         (false, true) => ShutdownAction::GracefulPending,
         (false, false) => ShutdownAction::Defer,
         (true, false) => ShutdownAction::Cascade,
+    }
+}
+
+/// Build the chat text a requester sees for a child's [`ShutdownResponse`](exo_caps::SystemMessage::ShutdownResponse).
+/// Pure (no IO) so it unit-tests like `decide`. The dispatch header already attributes the line to
+/// the child, so the wording is first-person (the child speaking).
+fn format_shutdown_response(
+    status: &ShutdownStatus,
+    live_children: &[String],
+    busy: bool,
+    reason: &str,
+) -> String {
+    match status {
+        ShutdownStatus::Deferred => {
+            if live_children.is_empty() {
+                format!("[shutdown deferred] {reason}")
+            } else {
+                let work = if busy { " (some actively working)" } else { "" };
+                format!(
+                    "[shutdown deferred] I have {} live child(ren): {}{work}. They'd be orphaned. \
+                     Re-send shutdown with force:true to tear down the whole subtree, or shut them \
+                     down individually first.",
+                    live_children.len(),
+                    live_children.join(", "),
+                )
+            }
+        }
+        ShutdownStatus::Accepted => {
+            if reason.is_empty() {
+                "[shutdown accepted] I'll finish up and reap when I go idle.".to_string()
+            } else {
+                format!("[shutdown accepted] {reason}")
+            }
+        }
     }
 }
 
@@ -639,6 +733,23 @@ mod tests {
     use exo_caps::{AgentName, Message, MessageBody, Persona, Summary};
     use std::fs::OpenOptions;
     use std::sync::Mutex;
+
+    #[test]
+    fn shutdown_response_render_text() {
+        let deferred = format_shutdown_response(
+            &ShutdownStatus::Deferred,
+            &["a".to_string(), "b".to_string()],
+            true,
+            "",
+        );
+        assert!(deferred.contains("2 live child(ren): a, b"));
+        assert!(deferred.contains("force:true"));
+        assert!(deferred.contains("actively working"));
+        let topo = format_shutdown_response(&ShutdownStatus::Deferred, &[], false, "boom");
+        assert_eq!(topo, "[shutdown deferred] boom");
+        let accepted = format_shutdown_response(&ShutdownStatus::Accepted, &[], false, "");
+        assert!(accepted.starts_with("[shutdown accepted]"));
+    }
 
     #[test]
     fn shutdown_decision_matrix() {

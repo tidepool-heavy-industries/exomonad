@@ -118,6 +118,9 @@ fn verb(s: &SystemMessage) -> &'static str {
         // The verdict tool only ever builds the three Review* variants.
         SystemMessage::ChildIdle { .. } => unreachable!("verdict never produces ChildIdle"),
         SystemMessage::ChildExited { .. } => unreachable!("verdict never produces ChildExited"),
+        SystemMessage::ShutdownResponse { .. } => {
+            unreachable!("verdict never produces ShutdownResponse")
+        }
     }
 }
 
@@ -147,6 +150,9 @@ fn render(s: &SystemMessage, args: &VerdictArgs) -> String {
         ),
         SystemMessage::ChildIdle { .. } => unreachable!("verdict never produces ChildIdle"),
         SystemMessage::ChildExited { .. } => unreachable!("verdict never produces ChildExited"),
+        SystemMessage::ShutdownResponse { .. } => {
+            unreachable!("verdict never produces ShutdownResponse")
+        }
     }
 }
 
