@@ -21,7 +21,10 @@ const MAX_DEPTH: usize = 32;
 #[async_trait]
 impl Topology for Runtime {
     async fn topology(&self) -> Result<TopologyView, TopologyError> {
-        let alive = live_panes().await;
+        // For the tree view a probe failure reads as "all panes dead" (the documented best-effort
+        // behaviour) — `None` → empty set. (The idle gate, via `ChildLiveness`, treats a probe
+        // failure differently: unknown ⇒ trust the busy-bit; see `liveness.rs`.)
+        let alive = live_panes().await.unwrap_or_default();
         let wd = self.working_dir().to_path_buf();
         let children = tokio::task::spawn_blocking(move || subtree(&wd, &alive, MAX_DEPTH))
             .await
@@ -115,22 +118,27 @@ fn read_records(path: &Path) -> Vec<ChildRecord> {
         .collect()
 }
 
-/// The set of currently-existing tmux pane ids. **Best-effort**: a tmux failure yields an empty
-/// set (every node then reads as not-alive) plus a warning — liveness is a proxy, never fatal.
-async fn live_panes() -> HashSet<String> {
+/// The set of currently-existing tmux pane ids. **Best-effort**, and the `Option` distinguishes
+/// the two outcomes a caller must treat differently: `Some(set)` is a successful probe (an empty
+/// set genuinely means "no panes exist"); `None` is a probe *failure* (liveness unknown). A
+/// failure must NOT be confused with "all panes dead" — the idle gate would then force a false
+/// idle. Each consumer applies its own default (tree view → all-dead; idle gate → trust the bit).
+pub(crate) async fn live_panes() -> Option<HashSet<String>> {
     match tokio::process::Command::new("tmux")
         .args(["list-panes", "-a", "-F", "#{pane_id}"])
         .output()
         .await
     {
-        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect(),
+        Ok(out) if out.status.success() => Some(
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect(),
+        ),
         _ => {
-            tracing::warn!("topology: `tmux list-panes` failed; reporting all nodes as not-alive");
-            HashSet::new()
+            tracing::warn!("topology: `tmux list-panes` failed; liveness unknown");
+            None
         }
     }
 }

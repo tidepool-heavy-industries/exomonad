@@ -182,9 +182,15 @@ impl RealHandler {
     ) -> NodeResult<()> {
         use exo_caps::SystemMessage;
         match system {
-            // A live child yielded control. Render a concise line for this node's LLM; never tear
-            // the child down. (v1: no dedupe — volume is accepted; the refine-later seam is here.)
-            SystemMessage::ChildIdle { summary } => self.render_child_idle(from, summary).await,
+            // A child yielded control. Flip its busy-bit to idle (the idle gate reads this), then
+            // render a concise line for this node's LLM; never tear the child down. (v1: no
+            // dedupe — volume is accepted; the refine-later seam is here.)
+            SystemMessage::ChildIdle { summary } => {
+                if let Persona::Agent(name) = from {
+                    self.ctx.runtime.mark_child_idle(name);
+                }
+                self.render_child_idle(from, summary).await
+            }
             // Review verdicts: apply, then reclaim the one-shot reviewer (verdict-only teardown).
             SystemMessage::ReviewApproved { .. }
             | SystemMessage::ReviewDenied { .. }

@@ -7,7 +7,9 @@
 //! file owns **only** the struct + its accessors, so cap leaves never collide here.
 
 use exo_caps::{AgentName, Branch, InboxPath, NodePath, PaneId};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 /// One node's runtime. Holds the node's birth identity + the ambient context the cap
 /// impls need (worktree dir, parent inbox pointer, run-id namespace, tmux session).
@@ -34,6 +36,12 @@ pub struct Runtime {
     pub(crate) tmux_session: String,
     /// This node's own tmux pane id.
     pub(crate) own_pane: PaneId,
+    /// Per-direct-child busy/idle bit (`true` = working). Seeded `true` at birth and on every
+    /// deliver down to a child (a poke that wakes it); set `false` when the child reports
+    /// `ChildIdle`. Shared across the sidecar's loops via `Arc` (the struct is `Clone`, so every
+    /// clone sees the same map). Read by the [`ChildLiveness`](exo_caps::ChildLiveness) cap, which
+    /// combines it with pane-liveness — a dead pane is idle regardless of a stale bit.
+    pub(crate) children_busy: Arc<Mutex<HashMap<AgentName, bool>>>,
 }
 
 impl Runtime {
@@ -55,7 +63,27 @@ impl Runtime {
             run_id,
             tmux_session,
             own_pane,
+            children_busy: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Mark a direct child as working — at birth, and whenever this node delivers a message down to
+    /// it (a poke that will wake it). Paired with [`mark_child_idle`](Self::mark_child_idle).
+    pub(crate) fn mark_child_busy(&self, child: &AgentName) {
+        self.children_busy
+            .lock()
+            .unwrap()
+            .insert(child.clone(), true);
+    }
+
+    /// Mark a direct child idle — it reported `ChildIdle` (its whole subtree is quiescent). Called
+    /// by the sidecar's inbound loop on a `ChildIdle` system message. Until the child is poked
+    /// again it counts as not-working.
+    pub fn mark_child_idle(&self, child: &AgentName) {
+        self.children_busy
+            .lock()
+            .unwrap()
+            .insert(child.clone(), false);
     }
 
     /// This node's own name (the `NodePath` last segment).

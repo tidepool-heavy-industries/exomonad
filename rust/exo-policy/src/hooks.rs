@@ -13,8 +13,8 @@ use serde_json::Value;
 
 use crate::tool::BoxFuture;
 use exo_caps::{
-    Addressee, Bus, CapResult, Git, Log, Message, MessageBody, MessageKind, Summary, SystemMessage,
-    Topology, TreeNode,
+    Addressee, Bus, CapResult, ChildLiveness, Git, Log, Message, MessageBody, MessageKind, Summary,
+    SystemMessage,
 };
 
 /// A `PreToolUse` verdict. `Modify` rewrites the tool input in place (the PII-rewrite path).
@@ -121,29 +121,22 @@ async fn notify_parent_idle<R: Bus + Log>(ctx: &R) {
     }
 }
 
-/// True if any descendant of the caller has a live pane — the subtree is still working. "Idle"
-/// means the whole *subtree* is quiescent, not merely that this node finished a turn, so a TL with
-/// active children must NOT signal idle (that's per-turn noise to the parent while it's mid-flow).
-/// On a topology error, assume busy (suppress): the idle signal is supplementary — the
-/// `submit_branch`/`[READY]` flow covers "done" — so the bias is against false idle pings.
-async fn subtree_busy<R: Topology>(ctx: &R) -> bool {
-    match ctx.topology().await {
-        Ok(view) => view.node.children.iter().any(has_live_node),
-        Err(_) => true,
-    }
-}
-
-fn has_live_node(n: &TreeNode) -> bool {
-    n.pane_alive || n.children.iter().any(has_live_node)
+/// True if any direct child is still working — see [`ChildLiveness::any_child_busy`]. "Idle" means
+/// the whole *subtree* is quiescent (a child reports `ChildIdle` upward only once its own subtree
+/// is), so a node with a busy child must NOT signal idle — that's per-turn noise to the parent
+/// while it's mid-flow. The cap is infallible and biases against false idle (probe failure ⇒ trust
+/// the busy-bit; the `submit_branch`/`[READY]` flow is the authoritative "done").
+async fn subtree_busy<R: ChildLiveness>(ctx: &R) -> bool {
+    ctx.any_child_busy().await
 }
 
 /// The local convergence gate for a spawned TL (v2 — no GitHub). A parent folds a child by
 /// merging its **branch** off disk, so uncommitted work is invisible to that merge: block exit
 /// while the worktree is dirty (commit or discard first). On a clean exit, notify the parent it
-/// went idle — but ONLY when the whole subtree is quiescent (no live children); a TL mid-flow with
+/// went idle — but ONLY when the whole subtree is quiescent (no busy children); a TL mid-flow with
 /// active children is not idle. Fails OPEN on any git error — a hook must never wedge an agent in
 /// its turn-loop (that bricks the session).
-pub fn stop<'a, R: Git + Log + Bus + Topology + Send + Sync>(
+pub fn stop<'a, R: Git + Log + Bus + ChildLiveness + Send + Sync>(
     ctx: &'a R,
 ) -> BoxFuture<'a, StopDecision> {
     Box::pin(async move {
@@ -214,9 +207,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_stop_notifies_parent_when_subtree_idle() {
-        // Clean worktree AND no live children → genuine subtree idle → notify.
+        // Clean worktree AND no busy children → genuine subtree idle → notify.
         let ctx = MockRuntime {
-            child_pane_alive: false,
+            child_busy: false,
             ..Default::default()
         };
         assert_eq!(stop(&ctx).await, StopDecision::Allow);
@@ -228,8 +221,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_stop_suppresses_idle_when_subtree_busy() {
-        // Clean worktree but a live child (default mock) → TL is mid-flow, NOT idle → no notify.
-        let ctx = MockRuntime::default(); // child_pane_alive = true
+        // Clean worktree but a busy child (default mock) → TL is mid-flow, NOT idle → no notify.
+        let ctx = MockRuntime::default(); // child_busy = true
         assert_eq!(stop(&ctx).await, StopDecision::Allow);
         assert!(
             !delivered_child_idle_to_parent(&ctx.calls_made()),

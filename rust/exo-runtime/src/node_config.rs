@@ -19,9 +19,8 @@ pub async fn write_node_agent_config(agent_dir: &Path, papers_path: &Path) -> st
     });
 
     let mcp_path = agent_dir.join(".mcp.json");
-    let mcp_json = serde_json::to_vec_pretty(&mcp_config).map_err(|e| {
-        std::io::Error::other(format!("mcp_config encode: {e}"))
-    })?;
+    let mcp_json = serde_json::to_vec_pretty(&mcp_config)
+        .map_err(|e| std::io::Error::other(format!("mcp_config encode: {e}")))?;
     let mut f = tokio::fs::File::create(&mcp_path).await?;
     f.write_all(&mcp_json).await?;
     f.sync_all().await?;
@@ -53,9 +52,8 @@ pub async fn write_node_agent_config(agent_dir: &Path, papers_path: &Path) -> st
     });
 
     let settings_path = claude_dir.join("settings.local.json");
-    let settings_json = serde_json::to_vec_pretty(&settings).map_err(|e| {
-        std::io::Error::other(format!("settings encode: {e}"))
-    })?;
+    let settings_json = serde_json::to_vec_pretty(&settings)
+        .map_err(|e| std::io::Error::other(format!("settings encode: {e}")))?;
     let mut f = tokio::fs::File::create(&settings_path).await?;
     f.write_all(&settings_json).await?;
     f.sync_all().await?;
@@ -69,9 +67,8 @@ pub async fn write_gemini_node_config(agent_dir: &Path, papers_path: &Path) -> s
     let p_esc = shell_escape::escape(p_raw.clone().into_owned().into()).into_owned();
 
     let settings = gemini_settings_json(&p_raw, &p_esc);
-    let settings_json = serde_json::to_vec_pretty(&settings).map_err(|e| {
-        std::io::Error::other(format!("gemini settings encode: {e}"))
-    })?;
+    let settings_json = serde_json::to_vec_pretty(&settings)
+        .map_err(|e| std::io::Error::other(format!("gemini settings encode: {e}")))?;
 
     // Gemini settings live in the agent root (unlike Claude's .claude/ subfolder),
     // pointed to by GEMINI_CLI_SYSTEM_SETTINGS_PATH.
@@ -85,8 +82,8 @@ pub async fn write_gemini_node_config(agent_dir: &Path, papers_path: &Path) -> s
 
 pub(crate) fn gemini_settings_json(papers_path: &str, p_str_escaped: &str) -> serde_json::Value {
     use exo_caps::invocation::{
-        hook_command, GEMINI_AFTER_AGENT, GEMINI_BEFORE_TOOL, GEMINI_SESSION_START,
-        PRE_TOOL_USE, SESSION_START, STOP,
+        hook_command, GEMINI_AFTER_AGENT, GEMINI_BEFORE_TOOL, GEMINI_SESSION_START, PRE_TOOL_USE,
+        SESSION_START, STOP,
     };
 
     let mut hooks = serde_json::Map::new();

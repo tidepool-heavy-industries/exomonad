@@ -12,9 +12,10 @@
 
 use async_trait::async_trait;
 use exo_caps::{
-    Addressee, AgentName, Branch, Bus, BusError, ChildKind, ForkSpec, Fs, FsError, GeminiSpec, Git,
-    GitError, Kv, KvError, Log, Message, PaneId, Process, ProcessError, SpawnError, Spawner, Tmux,
-    TmuxError, Topology, TopologyError, TopologyView, TreeNode, WorkerSpec,
+    Addressee, AgentName, Branch, Bus, BusError, ChildKind, ChildLiveness, ForkSpec, Fs, FsError,
+    GeminiSpec, Git, GitError, Kv, KvError, Log, Message, PaneId, Process, ProcessError,
+    SpawnError, Spawner, Tmux, TmuxError, Topology, TopologyError, TopologyView, TreeNode,
+    WorkerSpec,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -88,9 +89,9 @@ pub struct MockRuntime {
     /// What `merge_base` returns for any refish (set `None` to exercise the submit fallback chain).
     pub merge_base: Option<String>,
     pub is_clean: bool,
-    /// Liveness of the canned topology child (`child-a`). Default `true` (a live child → the
-    /// subtree-idle filter treats the node as busy); set `false` to model a quiescent subtree.
-    pub child_pane_alive: bool,
+    /// What [`ChildLiveness::any_child_busy`] returns. Default `true` (a working child → the
+    /// subtree-idle gate treats the node as busy); set `false` to model a quiescent subtree.
+    pub child_busy: bool,
     /// If set, the named cap method returns its `*Error` instead of the happy path. Keyed by
     /// a short op label (e.g. "merge") so a test can exercise error branches.
     pub fail: Mutex<Option<&'static str>>,
@@ -106,7 +107,7 @@ impl Default for MockRuntime {
             head_sha: "0000000000000000000000000000000000000000".into(),
             merge_base: Some("basebasebasebasebasebasebasebasebasebase".into()),
             is_clean: true,
-            child_pane_alive: true,
+            child_busy: true,
             fail: Mutex::new(None),
         }
     }
@@ -359,13 +360,22 @@ impl Topology for MockRuntime {
                     name: "child-a".into(),
                     kind: Some(ChildKind::Worktree),
                     pane: "%1".into(),
-                    pane_alive: self.child_pane_alive,
+                    // Topology reports pane *existence* only (for the `tree` tool); idle is a
+                    // separate axis, modelled by `child_busy` via the `ChildLiveness` impl below.
+                    pane_alive: true,
                     children: vec![],
                 }],
             },
             parent: Some("mock-parent".into()),
             path: vec!["mock-parent".into(), "mock".into()],
         })
+    }
+}
+
+#[async_trait]
+impl ChildLiveness for MockRuntime {
+    async fn any_child_busy(&self) -> bool {
+        self.child_busy
     }
 }
 

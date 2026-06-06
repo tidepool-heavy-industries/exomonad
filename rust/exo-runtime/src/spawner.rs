@@ -279,6 +279,11 @@ impl Runtime {
             return Err(e);
         }
 
+        // A freshly launched child starts working — seed its busy bit. The idle gate
+        // (`ChildLiveness`) combines this with pane-liveness, so a child that later dies without
+        // ever reporting `ChildIdle` still reads idle via its dead pane.
+        self.mark_child_busy(&core.name);
+
         Ok(core.name)
     }
 

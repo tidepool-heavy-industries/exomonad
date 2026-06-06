@@ -83,6 +83,13 @@ impl Runtime {
 impl Bus for Runtime {
     async fn deliver(&self, to: Addressee, msg: Message) -> Result<(), BusError> {
         let inbox = self.resolve_inbox(&to).await?;
+
+        // A delivery down to a child is a poke that will wake it — mark it busy so the idle gate
+        // doesn't treat a just-poked child as idle (paired with `mark_child_idle` on `ChildIdle`).
+        if let Addressee::InlineChild(name) | Addressee::WorktreeChild(name) = &to {
+            self.mark_child_busy(name);
+        }
+
         let entry = IngestionEntry {
             v: 1,
             ts: Utc::now(),

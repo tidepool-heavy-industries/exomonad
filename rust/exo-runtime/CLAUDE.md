@@ -15,6 +15,7 @@ The single concrete `Runtime` struct that implements **every** `exo-caps` trait.
 | `bus` | `impl Bus` — **the genuinely-new piece.** Append a line to the target's jsonl inbox; resolve `Addressee`→`InboxPath` (Parent = papers pointer; child = fold `children.jsonl`); stamp the envelope; assert line ≤ `PIPE_BUF` (4096) and **never spill**; append + flush, no fsync. |
 | `spawner` | `impl Spawner` — the recursion (birth + teardown). See below. |
 | `tmux` | `impl Tmux` — delegates to exomonad-core `TmuxIpc::inject_input` (hardened buffer-paste). |
+| `liveness` | `impl ChildLiveness` — the idle gate's read: any *direct* child still working? Combines the in-memory busy-bit map (mutated at birth in `spawner`, on child-deliver in `bus`, on `ChildIdle` in `exo-node`) with a tmux pane probe (`topology::live_panes`); a dead pane forces idle. Pure truth table split out + unit-tested. |
 | `fs` `kv` `log` `process` | The remaining cap impls. |
 | `node_config` | `write_node_agent_config` / `write_gemini_node_config` — writes child agent config (MCP + hooks). |
 | `session_boot` | `boot_root_session` — creates the detached `{session}` tmux window for the root, returns its pane. |

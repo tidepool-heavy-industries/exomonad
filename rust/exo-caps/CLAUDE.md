@@ -22,7 +22,7 @@ This is the seam that replaces the old Haskell-WASM boundary. WASM *physically* 
 
 ## The capability traits
 
-Eight caps, each one trait per file. `exo-runtime::Runtime` implements all of them; `exo-policy::testing::MockRuntime` mocks all of them.
+Ten caps, each one trait per file. `exo-runtime::Runtime` implements all of them; `exo-policy::testing::MockRuntime` mocks all of them.
 
 - **`Git`** — `current_branch`, `head_sha` (sha-tag review verdicts), `merge_base` (fork-point base for a reviewer's `git diff`), `is_clean`, `fetch`, **`merge`** (the local on-disk fold — v2 convergence), `worktree_add`/`worktree_remove`. **No `GitHub` cap** — v2 convergence is local git, no PR/Copilot (cut 2026-06-01; see `reactive-github-layer-stays` memory).
 - **`Bus`** — `deliver(Addressee, Message)`. The append half only; the read/cursor/watch half is the sidecar's inbound loop. Delivery mechanism (Teams vs tmux) is the *recipient's* last-hop concern — policy never names it.
@@ -33,6 +33,7 @@ Eight caps, each one trait per file. `exo-runtime::Runtime` implements all of th
 - **`Process`** — `run`.
 - **`Log`** — `info`, `error` (sync, infallible).
 - **`Topology`** — `topology()` → the caller's subtree (folded recursively from the per-node `children.jsonl` ledgers) + parent + per-node pane-liveness. Backs the `tree` tool.
+- **`ChildLiveness`** — `any_child_busy()` → is any *direct* child still working? Idle is tracked from messages (busy at birth + on every poke; idle on `ChildIdle`), combined with pane-death as a one-way override. Distinct from `Topology`'s pane-**existence**: a live pane ≠ busy (a Gemini child idles with its `--prompt-interactive` pane alive), but a dead pane ⇒ idle. In-memory, non-persisted (a sidecar restart re-seeds conservatively: unknown ⇒ busy if the pane is alive). Backs the `stop` idle gate.
 
 ## Domain types (the invariants worth knowing)
 
@@ -44,7 +45,7 @@ Eight caps, each one trait per file. `exo-runtime::Runtime` implements all of th
 
 ## Load-bearing principles (encoded in the types)
 
-- **Observe, don't store.** Only genuinely-recorded facts get types: `ChildRecord` is `Spawned`/`Started` only. Running-vs-exited is computed **live** (pane-alive), never written back. `fold_children` folds the append-only log into the current child set (newest `Spawned` wins; `Started` upgrades lifecycle).
+- **Observe, don't store.** Only genuinely-recorded facts get types: `ChildRecord` is `Spawned`/`Started` only. Running-vs-exited is computed **live** (pane-alive), never written back. `fold_children` folds the append-only log into the current child set (newest `Spawned` wins; `Started` upgrades lifecycle). The one piece of *live* per-child state is the `ChildLiveness` busy-bit — in-memory only, derived from observed messages, never persisted; a restart rebuilds it conservatively.
 - **Identity is assigned at birth, not derived.** `role`/`parent`/tree-position exist in no runtime's live state, so `NodePapers` records them once. Live derivation (`exo-scry`) recovers only runtime-native facts (pane, CC team).
 - **Messaging is tree-edges only.** `Addressee` = `Parent | InlineChild(name) | WorktreeChild(name)`. There is no sibling/cross-tree addressee — the messaging structure *is* the process tree. (`Pane` is an internal resolution target, not policy-facing.)
 
