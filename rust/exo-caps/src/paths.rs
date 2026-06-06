@@ -19,6 +19,17 @@ pub fn papers_path(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
         .join(format!("pane-{n}.json"))
 }
 
+/// Node's hook-RPC socket: `{home}/.claude/exo/sockets/{run_id}/pane-{n}.sock`. The sidecar
+/// binds it; the `exomonad experimental hook` client connects to it. Home-based (like inboxes),
+/// NOT under the worktree — so a live socket file can never dirty a worktree and trip the
+/// `stop` clean-gate. Both ends derive it identically from papers (run_id + own pane).
+pub fn hook_sock(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
+    let n = pane.as_str().trim_start_matches('%');
+    home.join(".claude/exo/sockets")
+        .join(run_id)
+        .join(format!("pane-{n}.sock"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

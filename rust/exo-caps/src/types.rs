@@ -446,6 +446,12 @@ pub enum SystemMessage {
         changes_branch: Branch,
         message: String,
     },
+    /// A node finished a turn and is yielding control (its stop hook fired). The envelope's
+    /// stamped `from` says *which* node; `summary` is a short human-readable note the parent may
+    /// render. Deliberately minimal: v1 just notifies on every stop. Refinement (dedupe,
+    /// richer state derived from the stop hook's payload) lands later in the parent's
+    /// `handle_system`, not by growing this variant.
+    ChildIdle { summary: String },
 }
 
 #[cfg(test)]

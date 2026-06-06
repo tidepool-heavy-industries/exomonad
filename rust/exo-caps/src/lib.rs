@@ -11,6 +11,7 @@
 
 pub mod bus;
 pub mod error;
+pub mod hook_rpc;
 pub mod invocation;
 pub mod lifecycle;
 pub mod papers;
@@ -29,6 +30,7 @@ pub mod tmux;
 
 pub use bus::{Addressee, Bus, BusError};
 pub use error::{CapError, CapResult};
+pub use hook_rpc::{HookEvent, HookRequest, HookVerdict};
 pub use fs::{Fs, FsError};
 pub use git::{Git, GitError};
 pub use kv::{Kv, KvError};

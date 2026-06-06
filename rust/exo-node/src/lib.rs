@@ -21,6 +21,7 @@ pub mod bootstrap;
 pub mod dispatch;
 pub mod error;
 pub mod hook;
+pub mod hooksock;
 pub mod inbound;
 pub mod outbound;
 

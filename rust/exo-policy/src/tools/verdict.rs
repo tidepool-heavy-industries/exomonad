@@ -115,6 +115,8 @@ fn verb(s: &SystemMessage) -> &'static str {
         SystemMessage::ReviewApproved { .. } => "approve",
         SystemMessage::ReviewDenied { .. } => "deny",
         SystemMessage::ReviewChanges { .. } => "changes",
+        // The verdict tool only ever builds the three Review* variants.
+        SystemMessage::ChildIdle { .. } => unreachable!("verdict never produces ChildIdle"),
     }
 }
 
@@ -142,6 +144,7 @@ fn render(s: &SystemMessage, args: &VerdictArgs) -> String {
             changes_branch.as_str(),
             args.message
         ),
+        SystemMessage::ChildIdle { .. } => unreachable!("verdict never produces ChildIdle"),
     }
 }
 

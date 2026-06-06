@@ -266,6 +266,12 @@ impl RealHandler {
                     changes_branch.as_str(), message
                 )).await
             }
+            // Scaffold stub: leaf B3 restructures `handle_system` so ChildIdle is routed to its
+            // own render path (and the reviewer teardown becomes verdict-only). Until then no node
+            // emits ChildIdle, so this arm is unreached; render it as a fallback rather than panic.
+            SystemMessage::ChildIdle { summary } => {
+                self.deliver_to_llm(&format!("[child idle] {summary}")).await
+            }
         }
     }
 
