@@ -15,9 +15,10 @@ The single concrete `Runtime` struct that implements **every** `exo-caps` trait.
 | `bus` | `impl Bus` — **the genuinely-new piece.** Append a line to the target's jsonl inbox; resolve `Addressee`→`InboxPath` (Parent = papers pointer; child = fold `children.jsonl`); stamp the envelope; assert line ≤ `PIPE_BUF` (4096) and **never spill**; append + flush, no fsync. |
 | `spawner` | `impl Spawner` — the recursion (birth + teardown). See below. |
 | `tmux` | `impl Tmux` — delegates to exomonad-core `TmuxIpc::inject_input` (hardened buffer-paste). |
-| `fs` `kv` `log` `process` | The remaining cap impls. |
-| `node_config` | `write_node_agent_config` — writes a Claude child's `.mcp.json` + `.claude/settings.local.json` (PreToolUse/Stop/SessionStart hooks via `exo_caps::invocation`). |
+| `process` | The remaining cap impls. |
+| `node_config` | `write_node_agent_config` — writes a Claude child's `.mcp.json` + `.claude/settings.local.json` (PreToolUse/Stop/SessionStart hooks via `exo_caps::invocation`). (Gemini equivalent BeforeTool/AfterAgent/SessionStart hooks are written inline in `spawner.rs`'s Gemini arm.) |
 | `session_boot` | `boot_root_session` — creates the detached `{session}` tmux window for the root, returns its pane. |
+
 
 ## Spawn: `birth` and record-first ordering (read before editing `spawner.rs`)
 

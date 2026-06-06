@@ -394,7 +394,38 @@ impl Runtime {
                 exomonad_core::services::agent_control::AgentType::Claude
             }
             AgentType::Gemini => {
-                // Gemini discovers the node MCP server via GEMINI_CLI_SYSTEM_SETTINGS_PATH.
+                // Gemini discovers the node MCP server via GEMINI_CLI_SYSTEM_SETTINGS_PATH, and
+                // fires hooks through the same `exomonad experimental hook` thin client as Claude.
+                // AfterAgent = turn-end (Stop equiv); BeforeTool = pre-tool. NEVER block Gemini at
+                // AfterAgent (the sidecar downgrades any Stop block to allow — gemini-cli #20426).
+                let p_str = shell_escape::escape(papers_path.to_string_lossy().into_owned().into())
+                    .into_owned();
+                use exo_caps::invocation::{
+                    hook_command, GEMINI_AFTER_AGENT, GEMINI_BEFORE_TOOL, GEMINI_SESSION_START,
+                    PRE_TOOL_USE, SESSION_START, STOP,
+                };
+                let mut hooks = serde_json::Map::new();
+                hooks.insert(
+                    GEMINI_BEFORE_TOOL.to_string(),
+                    serde_json::json!([{
+                        "matcher": ".*",
+                        "hooks": [{"type": "command", "command": hook_command(PRE_TOOL_USE, &p_str)}]
+                    }]),
+                );
+                hooks.insert(
+                    GEMINI_AFTER_AGENT.to_string(),
+                    serde_json::json!([{
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": hook_command(STOP, &p_str)}]
+                    }]),
+                );
+                hooks.insert(
+                    GEMINI_SESSION_START.to_string(),
+                    serde_json::json!([{
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": hook_command(SESSION_START, &p_str)}]
+                    }]),
+                );
                 let mcp_config = serde_json::json!({
                     "mcpServers": {
                         "exomonad": {
@@ -402,7 +433,8 @@ impl Runtime {
                             "command": "exomonad",
                             "args": exo_caps::invocation::node_args(&papers_path.to_string_lossy())
                         }
-                    }
+                    },
+                    "hooks": hooks
                 });
                 let settings_path = papers_path.with_file_name("settings.json");
                 tokio::fs::write(
