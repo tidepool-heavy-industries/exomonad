@@ -60,8 +60,10 @@ impl Runtime {
         cmd: &str,
     ) -> Result<PaneId, TmuxError> {
         let cwd_str = cwd.to_string_lossy();
-        // `-n <name>` names the window (new-window only; split-window has no window name).
-        let mut args: Vec<&str> = vec![subcmd, "-t", &self.tmux_session, "-c", &cwd_str];
+        // `-d` spawns the window/pane WITHOUT stealing focus — the human keeps typing where they
+        // are (the agent is reached by pane-id, not by being current). `-n <name>` names the
+        // window (new-window only; split-window has no window name).
+        let mut args: Vec<&str> = vec![subcmd, "-d", "-t", &self.tmux_session, "-c", &cwd_str];
         if let Some(name) = name {
             args.push("-n");
             args.push(name);
