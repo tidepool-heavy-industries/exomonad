@@ -6,7 +6,10 @@
 //! modules (`git`, `github`, `tmux`, `bus`, `spawner`, `fs`, `process`, `log`, `kv`); this
 //! file owns **only** the struct + its accessors, so cap leaves never collide here.
 
-use exo_caps::{Addressee, AgentName, Branch, ChildKind, InboxPath, NodePath, PaneId};
+use exo_caps::{
+    Addressee, AgentName, Branch, ChildKind, ChildStatus, InboxPath, NodeKind, NodePath,
+    NodeStatus, PaneId,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -133,6 +136,29 @@ impl Runtime {
                 ChildKind::Inline => Addressee::InlineChild(name.clone()),
                 ChildKind::Worktree => Addressee::WorktreeChild(name.clone()),
             })
+    }
+
+    /// Build a periodic status snapshot.
+    pub fn status_snapshot(&self, kind: NodeKind, shutdown_pending: bool) -> NodeStatus {
+        let children = self
+            .children_busy
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(name, &busy)| ChildStatus {
+                name: name.as_str().to_string(),
+                busy,
+            })
+            .collect();
+
+        NodeStatus {
+            node: self.node_path.clone(),
+            kind,
+            branch: self.branch.as_str().to_string(),
+            shutdown_pending,
+            children,
+            ts: chrono::Utc::now(),
+        }
     }
 }
 
