@@ -1,22 +1,178 @@
 //! Hook-RPC server (N5) — runs in the sidecar, sharing `ctx.runtime` with the other loops.
 
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::sync::Arc;
 
+use exo_caps::{AgentType, HookEvent, HookRequest, HookVerdict};
+use exo_policy::{role_def, HookDecision, HookInput, RoleDef, StopDecision};
+use serde_json::json;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{UnixListener, UnixStream};
+use tracing::{info, warn};
+
 use crate::bootstrap::NodeContext;
-use crate::error::NodeResult;
+use crate::error::{NodeError, NodeResult};
 
 /// Serve the per-agent hook-RPC socket. Binds `paths::hook_sock(home, run_id, own_pane)`
 /// (remove-before-bind to clear a stale socket, then `0o600`), accepts connections, and for each
 /// [`HookRequest`](exo_caps::HookRequest) runs the role's hook fn against the **live**
-/// `ctx.runtime` (NOT a fresh `bootstrap()` Runtime — sharing the live one is the whole point),
-/// then replies with a [`HookVerdict`](exo_caps::HookVerdict) whose `stdout` is already shaped
-/// for the node's `agent_type` (Claude vs Gemini; **never a Gemini Stop `deny`** — Gemini
-/// `AfterAgent` deny can infinite-loop, gemini-cli #20426).
+/// `ctx.runtime` (NOT a fresh `bootstrap()` Runtime), then replies with a
+/// [`HookVerdict`](exo_caps::HookVerdict) shaped for the node's `agent_type` — **never a Gemini
+/// Stop `deny`** (gemini-cli #20426 can infinite-loop on `AfterAgent` deny).
 ///
 /// Spawned as a background task by [`run_node`](crate::run_node) and aborted when the outbound
-/// serve loop (the lifetime anchor) returns; an error here is logged, never fatal.
-///
-/// **Status: Wave-0 stub.** Body lands in leaf A1 (reuse the `serve.rs` `UnixListener` pattern).
-pub async fn serve(_ctx: Arc<NodeContext>) -> NodeResult<()> {
-    todo!("A1: remove-before-bind hook_sock + 0o600; accept loop; per-conn read HookRequest, run role_def(ctx.kind).<event> on ctx.runtime, shape verdict per agent_type, write HookVerdict")
+/// serve loop returns; an error here is logged, never fatal.
+pub async fn serve(ctx: Arc<NodeContext>) -> NodeResult<()> {
+    let home = std::env::var("HOME").map_err(|_| NodeError::MissingContext("HOME"))?;
+    let sock = exo_caps::paths::hook_sock(Path::new(&home), &ctx.run_id, &ctx.own_pane);
+
+    if let Some(parent) = sock.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    // Remove a stale socket so bind() can't fail with EADDRINUSE. NotFound is fine.
+    match std::fs::remove_file(&sock) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
+
+    let listener = UnixListener::bind(&sock)?;
+    std::fs::set_permissions(&sock, std::fs::Permissions::from_mode(0o600))?;
+    info!(socket = %sock.display(), "hooksock: listening");
+
+    loop {
+        let (stream, _addr) = listener.accept().await?;
+        let ctx = ctx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = handle_conn(ctx, stream).await {
+                warn!("hooksock: connection handler error: {e}");
+            }
+        });
+    }
+}
+
+/// One request/response cycle. The client writes a `HookRequest` then half-closes its write side;
+/// we read to EOF, run the hook, write the `HookVerdict`, and close.
+async fn handle_conn(ctx: Arc<NodeContext>, mut stream: UnixStream) -> NodeResult<()> {
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).await?;
+    let req: HookRequest = serde_json::from_slice(&buf).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("hooksock: bad HookRequest: {e}"),
+        )
+    })?;
+
+    let verdict = run(&ctx, &req).await;
+    let out = serde_json::to_vec(&verdict)
+        .map_err(|e| std::io::Error::other(format!("hooksock: encode HookVerdict: {e}")))?;
+    stream.write_all(&out).await?;
+    stream.shutdown().await?;
+    Ok(())
+}
+
+/// Run the role's hook fn on the LIVE runtime, then shape stdout for the node's agent_type.
+async fn run(ctx: &NodeContext, req: &HookRequest) -> HookVerdict {
+    let rd = role_def::<exo_runtime::Runtime>(ctx.kind);
+    let agent_type = ctx.kind.agent_type();
+    let stdout = match req.event {
+        HookEvent::PreToolUse => {
+            shape_pre_tool_use(&rd, &ctx.runtime, &req.stdin_json, agent_type).await
+        }
+        HookEvent::Stop => shape_stop(&rd, &ctx.runtime, agent_type).await,
+        HookEvent::SessionStart => {
+            // SessionStart is handled one-shot by the client, never over the socket. A hook must
+            // never wedge an agent, so be defensive and fail-safe allow if one ever arrives.
+            warn!("hooksock: unexpected SessionStart over socket; returning allow");
+            allow_json(agent_type)
+        }
+    };
+    HookVerdict { stdout }
+}
+
+async fn shape_pre_tool_use(
+    rd: &RoleDef<exo_runtime::Runtime>,
+    rt: &exo_runtime::Runtime,
+    stdin_json: &str,
+    agent_type: AgentType,
+) -> String {
+    let input: HookInput = match serde_json::from_str(stdin_json) {
+        Ok(i) => i,
+        Err(e) => {
+            warn!("hooksock: bad PreToolUse stdin ({e}); allowing");
+            return allow_json(agent_type);
+        }
+    };
+    let decision = (rd.pre_tool_use)(rt, &input).await;
+    match agent_type {
+        AgentType::Claude | AgentType::Shoal => match decision {
+            HookDecision::Allow => json!({"continue": true}).to_string(),
+            HookDecision::Deny { reason } => {
+                json!({"continue": true, "systemMessage": reason}).to_string()
+            }
+            HookDecision::Modify { input } => json!({
+                "continue": true,
+                "hookSpecificOutput": {"hookEventName": "PreToolUse", "toolInput": input}
+            })
+            .to_string(),
+        },
+        AgentType::Gemini => match decision {
+            HookDecision::Allow => json!({}).to_string(),
+            // BeforeTool deny is safe (delivered as a tool error, no retry loop).
+            HookDecision::Deny { reason } => {
+                json!({"decision": "deny", "reason": reason}).to_string()
+            }
+            // Gemini BeforeTool has no tool-input rewrite shape; surface nothing and allow.
+            HookDecision::Modify { .. } => {
+                warn!("hooksock: dropping Gemini PreToolUse Modify (no BeforeTool rewrite shape)");
+                json!({}).to_string()
+            }
+        },
+    }
+}
+
+async fn shape_stop(
+    rd: &RoleDef<exo_runtime::Runtime>,
+    rt: &exo_runtime::Runtime,
+    agent_type: AgentType,
+) -> String {
+    let decision = (rd.stop)(rt).await;
+    match agent_type {
+        AgentType::Claude | AgentType::Shoal => match decision {
+            StopDecision::Allow => json!({"continue": true}).to_string(),
+            StopDecision::Block { reason } => {
+                json!({"decision": "block", "reason": reason}).to_string()
+            }
+        },
+        // SAFETY NET: never emit a Gemini Stop deny. `AfterAgent` deny can infinite-loop
+        // (gemini-cli #20426). Policy already must not block Gemini at stop; this downgrade is
+        // defence in depth.
+        AgentType::Gemini => match decision {
+            StopDecision::Allow => json!({}).to_string(),
+            StopDecision::Block { reason } => {
+                warn!("hooksock: downgrading Gemini Stop block to allow (gemini-cli #20426): {reason}");
+                json!({}).to_string()
+            }
+        },
+    }
+}
+
+fn allow_json(agent_type: AgentType) -> String {
+    match agent_type {
+        AgentType::Claude | AgentType::Shoal => json!({"continue": true}).to_string(),
+        AgentType::Gemini => json!({}).to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::allow_json;
+    use exo_caps::AgentType;
+
+    #[test]
+    fn allow_shape_per_agent_type() {
+        assert_eq!(allow_json(AgentType::Claude), r#"{"continue":true}"#);
+        assert_eq!(allow_json(AgentType::Gemini), "{}");
+    }
 }
