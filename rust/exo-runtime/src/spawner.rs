@@ -42,9 +42,10 @@
 use crate::runtime::Runtime;
 use async_trait::async_trait;
 use exo_caps::{
-    AgentName, AgentType, Branch, ChildKind, ChildRecord, ForkSpec, GeminiSpec, InboxPath,
-    NodeKind, NodePapers, PaneId, SpawnError, Spawner, WorkerSpec,
+    fold_children, AgentName, AgentType, Branch, Child, ChildKind, ChildRecord, ForkSpec,
+    GeminiSpec, InboxPath, NodeKind, NodePapers, PaneId, SpawnError, Spawner, WorkerSpec,
 };
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 
@@ -94,26 +95,37 @@ impl Runtime {
         Ok(())
     }
 
-    /// Read + parse the child ledger (fold with [`exo_caps::fold_children`] for the current
-    /// child set). A missing file means no children yet → empty, not an error.
+    /// Read + parse the child ledger. **Tolerant of malformed lines** — a torn last record
+    /// from a crash mid-append must not block delivery to EVERY child, only fail if the
+    /// *target* child can't be found. Mirrors the inbound loop's tolerant parse.
+    /// A missing file means no children yet → empty, not an error.
     pub(crate) async fn read_child_records(&self) -> Result<Vec<ChildRecord>, SpawnError> {
         let path = self.children_log_path();
-        let content = match tokio::fs::read_to_string(&path).await {
-            Ok(c) => c,
+        let data = match tokio::fs::read(&path).await {
+            Ok(d) => d,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(e) => return Err(e.into()),
         };
-        content
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(|l| {
-                serde_json::from_str::<ChildRecord>(l).map_err(|e| SpawnError::Failed {
-                    op: "record_decode",
-                    child: None,
-                    detail: e.to_string(),
-                })
-            })
-            .collect()
+
+        let mut records = Vec::new();
+        for line in data.split(|&b| b == b'\n') {
+            if line.is_empty() {
+                continue;
+            }
+            match serde_json::from_slice::<ChildRecord>(line) {
+                Ok(record) => records.push(record),
+                Err(e) => {
+                    tracing::warn!("skipping malformed children.jsonl line: {e}");
+                }
+            }
+        }
+        Ok(records)
+    }
+
+    /// Read + parse the child ledger, yielding the folded child set.
+    pub(crate) async fn read_children(&self) -> Result<BTreeMap<AgentName, Child>, SpawnError> {
+        let records = self.read_child_records().await?;
+        Ok(fold_children(&records))
     }
 
     /// The child's OWN ingestion inbox, derived from its pane + the run-id namespace:
@@ -129,8 +141,7 @@ impl Runtime {
         given: Option<AgentName>,
         prefix: &str,
     ) -> Result<AgentName, SpawnError> {
-        let records = self.read_child_records().await?;
-        let current_set = exo_caps::fold_children(&records);
+        let current_set = self.read_children().await?;
 
         if let Some(name) = given {
             if current_set.contains_key(&name) {
@@ -587,8 +598,7 @@ impl Spawner for Runtime {
     }
 
     async fn reclaim_worktree(&self, child: &AgentName) -> Result<(), SpawnError> {
-        let records = self.read_child_records().await?;
-        let current_set = exo_caps::fold_children(&records);
+        let current_set = self.read_children().await?;
         let record = current_set.get(child).ok_or_else(|| SpawnError::Failed {
             op: "reclaim_worktree",
             child: Some(child.clone()),
@@ -611,8 +621,7 @@ impl Spawner for Runtime {
     }
 
     async fn kill_pane(&self, child: &AgentName) -> Result<(), SpawnError> {
-        let records = self.read_child_records().await?;
-        let current_set = exo_caps::fold_children(&records);
+        let current_set = self.read_children().await?;
         let record = current_set.get(child).ok_or_else(|| SpawnError::Failed {
             op: "kill_pane",
             child: Some(child.clone()),
