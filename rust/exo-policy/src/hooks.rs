@@ -148,9 +148,9 @@ pub fn stop<'a, R: Git + Log + Bus + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, S
     })
 }
 
-/// Stop hook for nodes that never file a PR (root, worker): always allow exit — there is
-/// nothing to gate on, and querying GitHub would be pointless (and could wedge). The root
-/// especially must never be gated: blocking it bricks the human's session.
+/// Unconditional-allow stop hook (root, reviewer): nothing to fold and no parent to notify, so
+/// always allow exit. The root especially must never be gated — blocking it bricks the human's
+/// session; the reviewer's `verdict` is already its done-signal.
 pub fn stop_allow<R: Send + Sync>(_ctx: &R) -> BoxFuture<'_, StopDecision> {
     Box::pin(async move { StopDecision::Allow })
 }

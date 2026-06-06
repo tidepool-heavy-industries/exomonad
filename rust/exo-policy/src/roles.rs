@@ -120,6 +120,7 @@ mod tests {
             NodeKind::Tl,
             NodeKind::Dev,
             NodeKind::Worker,
+            NodeKind::Reviewer,
         ] {
             let rd = role_def::<MockRuntime>(kind);
             assert!(!rd.tools.is_empty(), "Role {:?} should have tools", kind);
