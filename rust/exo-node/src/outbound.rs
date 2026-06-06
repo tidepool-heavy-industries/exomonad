@@ -58,11 +58,11 @@ async fn handle_rpc(
     runtime: &Runtime,
     msg: Value,
 ) -> Option<Value> {
-    let id = msg.get("id").cloned();
-    let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
+    let req = Request::parse(&msg);
+    let id = req.id.clone();
     let is_notification = id.is_none() || id.as_ref().map(|v| v.is_null()).unwrap_or(false);
 
-    let result: Option<Result<Value, (i32, String)>> = match method {
+    let result: Option<Result<Value, (i32, String)>> = match req.method {
         "initialize" => Some(Ok(json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
@@ -82,69 +82,98 @@ async fn handle_rpc(
                 .collect();
             Some(Ok(json!({ "tools": tool_list })))
         }
-        "tools/call" => {
-            let params = msg.get("params");
-            let name = params.and_then(|p| p.get("name")).and_then(|n| n.as_str());
-            let arguments = params
-                .and_then(|p| p.get("arguments"))
-                .cloned()
-                .unwrap_or(json!({}));
-
-            if let Some(name) = name {
-                if let Some(tool) = tools.iter().find(|t| t.name() == name) {
-                    match tool.call(runtime, arguments).await {
-                        Ok(output) => {
-                            // Map ToolOutput (text, data) to MCP CallToolResult
-                            let mut content = vec![json!({
-                                "type": "text",
-                                "text": output.get("text").and_then(|t| t.as_str()).unwrap_or(""),
-                            })];
-
-                            if let Some(data) = output.get("data") {
-                                if !data.is_null() {
-                                    content.push(json!({
-                                        "type": "text",
-                                        "text": format!("Data: {}", serde_json::to_string_pretty(data).unwrap_or_default()),
-                                    }));
-                                }
-                            }
-
-                            Some(Ok(json!({ "content": content })))
-                        }
-                        Err(e) => Some(Err((-32603, e.to_string()))),
-                    }
-                } else {
-                    Some(Err((-32601, format!("Tool not found: {}", name))))
-                }
-            } else {
-                Some(Err((-32602, "Missing tool name".to_string())))
-            }
-        }
+        "tools/call" => Some(call_tool(tools, runtime, req.params).await),
         _ => {
             if is_notification {
                 None
             } else {
-                Some(Err((-32601, format!("Method not found: {}", method))))
+                Some(Err((-32601, format!("Method not found: {}", req.method))))
             }
         }
     };
 
     if let (Some(res), Some(id)) = (result, id) {
         match res {
-            Ok(val) => Some(json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": val
-            })),
-            Err((code, message)) => Some(json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": { "code": code, "message": message }
-            })),
+            Ok(val) => Some(ok_response(id, val)),
+            Err((code, message)) => Some(error_response(id, code, message)),
         }
     } else {
         None
     }
+}
+
+async fn call_tool(
+    tools: &[Box<dyn Tool<Runtime>>],
+    runtime: &Runtime,
+    params: Option<&Value>,
+) -> Result<Value, (i32, String)> {
+    let name = params.and_then(|p| p.get("name")).and_then(|n| n.as_str());
+    let arguments = params
+        .and_then(|p| p.get("arguments"))
+        .cloned()
+        .unwrap_or(json!({}));
+
+    let Some(name) = name else {
+        return Err((-32602, "Missing tool name".to_string()));
+    };
+
+    let Some(tool) = tools.iter().find(|t| t.name() == name) else {
+        return Err((-32601, format!("Tool not found: {name}")));
+    };
+
+    match tool.call(runtime, arguments).await {
+        Ok(output) => {
+            // Map ToolOutput (text, data) to MCP CallToolResult
+            let mut content = vec![json!({
+                "type": "text",
+                "text": output.get("text").and_then(|t| t.as_str()).unwrap_or(""),
+            })];
+
+            if let Some(data) = output.get("data") {
+                if !data.is_null() {
+                    content.push(json!({
+                        "type": "text",
+                        "text": format!("Data: {}", serde_json::to_string_pretty(data).unwrap_or_default()),
+                    }));
+                }
+            }
+
+            Ok(json!({ "content": content }))
+        }
+        Err(e) => Err((-32603, e.to_string())),
+    }
+}
+
+struct Request<'a> {
+    id: Option<Value>,
+    method: &'a str,
+    params: Option<&'a Value>,
+}
+
+impl<'a> Request<'a> {
+    fn parse(msg: &'a Value) -> Self {
+        Self {
+            id: msg.get("id").cloned(),
+            method: msg.get("method").and_then(|m| m.as_str()).unwrap_or(""),
+            params: msg.get("params"),
+        }
+    }
+}
+
+fn ok_response(id: Value, result: Value) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result
+    })
+}
+
+fn error_response(id: Value, code: i32, message: String) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": { "code": code, "message": message }
+    })
 }
 
 #[cfg(test)]
@@ -203,5 +232,72 @@ mod tests {
         let response = handle_rpc(&tools, &runtime, request).await.unwrap();
         assert_eq!(response["id"], "init-1");
         assert_eq!(response["result"]["serverInfo"]["name"], "exomonad-node");
+    }
+
+    #[tokio::test]
+    async fn test_handle_rpc_tools_call_happy() {
+        use exo_caps::CapResult;
+        let temp = tempfile::tempdir().unwrap();
+        let runtime = test_runtime(temp.path().to_path_buf());
+
+        // Create a dummy tool that returns a predictable result
+        struct TestTool;
+        #[async_trait::async_trait]
+        impl Tool<Runtime> for TestTool {
+            fn name(&self) -> &str {
+                "test_tool"
+            }
+            fn description(&self) -> &str {
+                "desc"
+            }
+            fn schema(&self) -> Value {
+                json!({})
+            }
+            async fn call(&self, _runtime: &Runtime, _args: Value) -> CapResult<Value> {
+                Ok(json!({ "text": "hello world", "data": { "foo": "bar" } }))
+            }
+        }
+
+        let tools: Vec<Box<dyn Tool<Runtime>>> = vec![Box::new(TestTool)];
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": "call-1",
+            "method": "tools/call",
+            "params": {
+                "name": "test_tool",
+                "arguments": {}
+            }
+        });
+
+        let response = handle_rpc(&tools, &runtime, request).await.unwrap();
+        assert_eq!(response["id"], "call-1");
+        let content = response["result"]["content"].as_array().unwrap();
+        assert_eq!(content[0]["text"], "hello world");
+        assert!(content[1]["text"]
+            .as_str()
+            .unwrap()
+            .contains("\"foo\": \"bar\""));
+    }
+
+    #[tokio::test]
+    async fn test_handle_rpc_unknown_method() {
+        let temp = tempfile::tempdir().unwrap();
+        let runtime = test_runtime(temp.path().to_path_buf());
+        let tools = vec![];
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": "err-1",
+            "method": "unknown/method"
+        });
+
+        let response = handle_rpc(&tools, &runtime, request).await.unwrap();
+        assert_eq!(response["id"], "err-1");
+        assert_eq!(response["error"]["code"], -32601);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Method not found"));
     }
 }
