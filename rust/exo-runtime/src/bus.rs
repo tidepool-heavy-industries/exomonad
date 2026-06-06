@@ -42,7 +42,9 @@ impl Runtime {
             Addressee::InlineChild(name) | Addressee::WorktreeChild(name) => {
                 let children = self.read_children().await.map_err(|e| match e {
                     SpawnError::Io(io) => BusError::Io(io),
-                    SpawnError::Failed { detail, .. } => BusError::Io(std::io::Error::other(detail)),
+                    SpawnError::Failed { detail, .. } => {
+                        BusError::Io(std::io::Error::other(detail))
+                    }
                 })?;
 
                 children
