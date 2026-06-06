@@ -428,6 +428,19 @@ pub enum ControlKind {
     },
 }
 
+/// The outcome a node reports for a `Control(Shutdown)` it received (see
+/// [`SystemMessage::ShutdownResponse`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShutdownStatus {
+    /// The node accepted the shutdown and is winding down (cooperative leaf reaping on idle, or a
+    /// forced cascade tearing its subtree down). Not yet gone — its `ChildExited` follows later.
+    Accepted,
+    /// The node refused for now: it has a live subtree that would be orphaned. The requester can
+    /// re-send with `force: true` to cascade.
+    Deferred,
+}
+
 /// System signals carried over the bus and handled by the recipient's sidecar (see
 /// [`MessageKind::System`]). Serde-tagged on `type` (`review_approved` / `review_denied` /
 /// `review_changes`) — **granular, flat, extensible**: new node-to-node control signals are new
@@ -468,11 +481,42 @@ pub enum SystemMessage {
     /// racing pane-death timing. The envelope's stamped `from` says which child; `reason` is a short
     /// note (e.g. `"shutdown"`).
     ChildExited { reason: String },
+    /// A node's structured reply to a `Control(Shutdown)` it received. The *requester's* sidecar
+    /// renders this into a chat line for its LLM (the final hop) — the responder ships structure,
+    /// the requester owns presentation. The envelope's stamped `from` says which node replied.
+    ShutdownResponse {
+        status: ShutdownStatus,
+        /// Live children that block a cooperative shutdown (empty unless `status == Deferred` for a
+        /// non-empty subtree). Names only — the requester decides whether to force.
+        #[serde(default)]
+        live_children: Vec<String>,
+        /// Whether any of those children are actively working (only meaningful when deferred).
+        #[serde(default)]
+        busy: bool,
+        /// Short free-text note (e.g. a topology-read failure, or the accepted-mode detail).
+        #[serde(default)]
+        reason: String,
+    },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shutdown_response_serde_roundtrip() {
+        let m = SystemMessage::ShutdownResponse {
+            status: ShutdownStatus::Deferred,
+            live_children: vec!["a".into(), "b".into()],
+            busy: true,
+            reason: String::new(),
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(json.contains("\"type\":\"shutdown_response\""));
+        assert!(json.contains("\"status\":\"deferred\""));
+        let back: SystemMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(m, back);
+    }
 
     #[test]
     fn node_kind_derives_runtime_and_role() {
