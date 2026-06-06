@@ -147,6 +147,7 @@ struct RealHandler {
 
 #[async_trait]
 impl InboundHandler for RealHandler {
+    #[tracing::instrument(skip(self, entry), fields(node = %self.ctx.runtime.name().as_str(), from = ?entry.from, kind = ?entry.msg.kind))]
     async fn handle(&self, entry: &IngestionEntry) -> NodeResult<Option<bool>> {
         match &entry.msg.kind {
             // Both chat and event notifications are delivered to the agent's native interface.
@@ -174,12 +175,14 @@ impl RealHandler {
     /// would miss it. Apply the verdict, then reclaim that reviewer here, best-effort, regardless
     /// of outcome. A **`ChildIdle`** comes from a LIVE child finishing a turn — render it and do
     /// NOT tear the child down.
+    #[tracing::instrument(skip(self, system), fields(node = %self.ctx.runtime.name().as_str(), from = ?from, kind = "system"))]
     async fn handle_system(&self, from: &Persona, system: &SystemMessage) -> NodeResult<()> {
         match system {
             // A child yielded control. Flip its busy-bit to idle (the idle gate reads this), then
             // render a concise line for this node's LLM; never tear the child down. (v1: no
             // dedupe — volume is accepted; the refine-later seam is here.)
             SystemMessage::ChildIdle { summary } => {
+                info!(outcome = "child_idle", summary = %summary, "handling child idle signal");
                 if let Persona::Agent(name) = from {
                     self.ctx.runtime.mark_child_idle(name);
                 }
@@ -189,6 +192,7 @@ impl RealHandler {
             // exited-set, then re-evaluate our own pending shutdown — if it was the last child, we
             // reap ourselves now (which may kill our pane and end the process).
             SystemMessage::ChildExited { .. } => {
+                info!(outcome = "child_exited", "handling child exit signal");
                 if let Persona::Agent(name) = from {
                     self.ctx
                         .exited_children
@@ -206,6 +210,7 @@ impl RealHandler {
                 busy,
                 reason,
             } => {
+                info!(outcome = "shutdown_response", status = ?status, "handling shutdown response");
                 self.render_shutdown_response(from, status, live_children, *busy, reason)
                     .await
             }
@@ -214,6 +219,10 @@ impl RealHandler {
             | SystemMessage::ReviewDenied { .. }
             | SystemMessage::ReviewChanges { .. }
             | SystemMessage::ReviewAborted { .. } => {
+                info!(
+                    outcome = "review_verdict",
+                    "applying review verdict and reclaiming reviewer"
+                );
                 let result = self.apply_verdict(system).await;
                 if let Persona::Agent(reviewer) = from {
                     if let Err(e) = exo_caps::Spawner::kill_pane(&*self.ctx.runtime, reviewer).await
@@ -258,6 +267,7 @@ impl RealHandler {
 
     /// Act on a review verdict (escalate `[READY]` on a matching approval; wake the LLM on
     /// deny/changes). The sender's lifecycle is handled by [`handle_system`](Self::handle_system).
+    #[tracing::instrument(skip(self, system), fields(node = %self.ctx.runtime.name().as_str()))]
     async fn apply_verdict(&self, system: &SystemMessage) -> NodeResult<()> {
         match system {
             SystemMessage::ReviewApproved { branch, sha } => {
@@ -292,7 +302,8 @@ impl RealHandler {
                 );
                 let summary = format!("[READY] {}", my_branch.as_str());
                 let msg = Message {
-                    text: MessageBody::new(text).map_err(|e| std::io::Error::other(e.to_string()))?,
+                    text: MessageBody::new(text)
+                        .map_err(|e| std::io::Error::other(e.to_string()))?,
                     summary: Summary::new(summary)
                         .map_err(|e| std::io::Error::other(e.to_string()))?,
                     kind: MessageKind::Chat,
@@ -301,12 +312,15 @@ impl RealHandler {
                     .await
                     .map_err(|e| std::io::Error::other(e.to_string()))?;
                 info!(
+                    outcome = "escalated_ready",
+                    branch = %my_branch.as_str(),
                     "review approved for {} — escalated [READY] to parent",
                     my_branch.as_str()
                 );
                 Ok(())
             }
             SystemMessage::ReviewDenied { message, .. } => {
+                info!(outcome = "review_denied", "delivering review denial to LLM");
                 self.deliver_to_llm(&format!(
                     "[REVIEW: changes requested] Your branch was not approved. Address this feedback, commit, then call submit_branch again:\n{}",
                     message
@@ -317,12 +331,17 @@ impl RealHandler {
                 message,
                 ..
             } => {
+                info!(
+                    outcome = "review_changes",
+                    "delivering review changes to LLM"
+                );
                 self.deliver_to_llm(&format!(
                     "[REVIEW: proposed changes] The reviewer committed improvements on branch `{}`. Merge it with the `merge` tool to incorporate, then call submit_branch again:\n{}",
                     changes_branch.as_str(), message
                 )).await
             }
             SystemMessage::ReviewAborted { reason } => {
+                info!(outcome = "review_aborted", reason = %reason, "delivering review abort to LLM");
                 self.deliver_to_llm(&format!(
                     "[REVIEW ABORTED] Your reviewer exited without producing a verdict ({reason}). No approval was recorded — re-run `submit_branch` to spawn a fresh reviewer."
                 )).await
@@ -424,11 +443,16 @@ impl RealHandler {
     }
 
     /// Handle a `Control(Shutdown)` per the cooperative/forced matrix (see [`decide`]).
+    #[tracing::instrument(skip(self), fields(node = %self.ctx.runtime.name().as_str(), grace_ms = grace_ms, force = force))]
     async fn handle_shutdown(&self, grace_ms: u32, force: bool) -> NodeResult<Option<bool>> {
         let live = match live_children(&self.ctx).await {
             Some(l) => l,
             None => {
                 // Couldn't read our subtree → take no destructive action; bounce to the requester.
+                warn!(
+                    outcome = "deferred",
+                    "couldn't read subtree; deferring shutdown"
+                );
                 self.respond_shutdown(
                     ShutdownStatus::Deferred,
                     vec![],
@@ -440,7 +464,10 @@ impl RealHandler {
             }
         };
 
-        match decide(force, live.is_empty()) {
+        let action = decide(force, live.is_empty());
+        info!(outcome = ?action, "routing shutdown request");
+
+        match action {
             // Forced leaf — reap now (grace applied in try_reap).
             ShutdownAction::ReapNow => {
                 self.ctx.set_shutdown_pending(grace_ms);
@@ -630,7 +657,7 @@ pub(crate) async fn try_reap(ctx: &Arc<NodeContext>) -> bool {
     if !remaining_live_children(ctx).await.is_empty() {
         return false; // subtree not clear yet
     }
-    info!("try_reap: shutdown pending and subtree clear — reaping self");
+    info!(node = %ctx.runtime.name().as_str(), outcome = "reaping", "try_reap: shutdown pending and subtree clear — reaping self");
     // Tell the parent we're gone (authoritative trigger for its own pending shutdown). Root has no
     // parent — that delivery just errors, which is fine.
     let exited = Message {
@@ -643,13 +670,13 @@ pub(crate) async fn try_reap(ctx: &Arc<NodeContext>) -> bool {
         }),
     };
     if let Err(e) = exo_caps::Bus::deliver(&*ctx.runtime, Addressee::Parent, exited).await {
-        warn!("try_reap: ChildExited to parent failed (ok for root): {e}");
+        warn!(node = %ctx.runtime.name().as_str(), "try_reap: ChildExited to parent failed (ok for root): {e}");
     }
     if grace_ms > 0 {
         tokio::time::sleep(Duration::from_millis(grace_ms as u64)).await;
     }
     if let Err(e) = Tmux::kill_pane(&*ctx.runtime, &ctx.own_pane).await {
-        warn!("try_reap: kill_pane failed: {e}");
+        warn!(node = %ctx.runtime.name().as_str(), "try_reap: kill_pane failed: {e}");
         return false;
     }
     true

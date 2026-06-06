@@ -54,6 +54,7 @@ pub async fn serve(ctx: Arc<NodeContext>) -> NodeResult<()> {
 
 /// One request/response cycle. The client writes a `HookRequest` then half-closes its write side;
 /// we read to EOF, run the hook, write the `HookVerdict`, and close.
+#[tracing::instrument(skip(ctx, stream), fields(node = %ctx.runtime.name().as_str()))]
 async fn handle_conn(ctx: Arc<NodeContext>, stream: UnixStream) -> NodeResult<()> {
     let mut buf = Vec::new();
     // Read up to 64KB with a 2-second timeout to prevent memory exhaustion and deadlocks.
@@ -80,6 +81,7 @@ async fn handle_conn(ctx: Arc<NodeContext>, stream: UnixStream) -> NodeResult<()
         )
     })?;
 
+    info!(event = ?req.event, "hooksock: received hook request");
     let verdict = run(&ctx, &req).await;
     let out = serde_json::to_vec(&verdict)
         .map_err(|e| std::io::Error::other(format!("hooksock: encode HookVerdict: {e}")))?;
@@ -96,6 +98,7 @@ async fn handle_conn(ctx: Arc<NodeContext>, stream: UnixStream) -> NodeResult<()
 }
 
 /// Run the role's hook fn on the LIVE runtime, then shape stdout for the node's agent_type.
+#[tracing::instrument(skip(ctx, req), fields(node = %ctx.runtime.name().as_str(), event = ?req.event))]
 async fn run(ctx: &NodeContext, req: &HookRequest) -> HookVerdict {
     let rd = role_def::<exo_runtime::Runtime>(ctx.kind);
     let agent_type = ctx.kind.agent_type();
@@ -107,10 +110,14 @@ async fn run(ctx: &NodeContext, req: &HookRequest) -> HookVerdict {
         HookEvent::SessionStart => {
             // SessionStart is handled one-shot by the client, never over the socket. A hook must
             // never wedge an agent, so be defensive and fail-safe allow if one ever arrives.
-            warn!("hooksock: unexpected SessionStart over socket; returning allow");
+            warn!(
+                outcome = "allow_fallback",
+                "hooksock: unexpected SessionStart over socket; returning allow"
+            );
             allow_json(agent_type)
         }
     };
+    info!(outcome = "success", "hooksock: hook execution complete");
     HookVerdict { stdout }
 }
 

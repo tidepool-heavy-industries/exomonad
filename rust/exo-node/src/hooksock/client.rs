@@ -16,7 +16,9 @@ use crate::error::{NodeError, NodeResult};
 ///
 /// Framing: write the request JSON, half-close the write side (EOF signals end-of-request to the
 /// server), then read the response JSON to EOF.
+#[tracing::instrument(skip(req), fields(event = ?req.event, socket = %sock.display()))]
 pub async fn client_request(sock: &Path, req: &HookRequest) -> NodeResult<HookVerdict> {
+    tracing::debug!("hook client: connecting to socket");
     let verdict = timeout(Duration::from_secs(5), async {
         let mut stream = UnixStream::connect(sock).await?;
         let bytes = serde_json::to_vec(req)
@@ -42,6 +44,7 @@ pub async fn client_request(sock: &Path, req: &HookRequest) -> NodeResult<HookVe
         )
     })??;
 
+    tracing::debug!(outcome = "success", "hook client: received verdict");
     Ok(verdict)
 }
 
