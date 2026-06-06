@@ -93,21 +93,21 @@ pub(crate) fn gemini_settings_json(papers_path: &str, p_str_escaped: &str) -> se
     hooks.insert(
         GEMINI_BEFORE_TOOL.to_string(),
         serde_json::json!([{
-            "matcher": "*",
+            "matcher": ".*",
             "hooks": [{"type": "command", "command": hook_command(PRE_TOOL_USE, p_str_escaped)}]
         }]),
     );
     hooks.insert(
         GEMINI_AFTER_AGENT.to_string(),
         serde_json::json!([{
-            "matcher": "*",
+            "matcher": "",
             "hooks": [{"type": "command", "command": hook_command(STOP, p_str_escaped)}]
         }]),
     );
     hooks.insert(
         GEMINI_SESSION_START.to_string(),
         serde_json::json!([{
-            "matcher": "*",
+            "matcher": "",
             "hooks": [{"type": "command", "command": hook_command(SESSION_START, p_str_escaped)}]
         }]),
     );
@@ -139,11 +139,11 @@ mod tests {
         let args = &json["mcpServers"]["exomonad"]["args"];
         assert_eq!(args[3], papers);
 
-        // 2. Hook keys and matchers (must be "*")
+        // 2. Hook keys and matchers (BeforeTool = regex (.*), lifecycle events = exact-string (""))
         let hooks = &json["hooks"];
-        assert_eq!(hooks[GEMINI_BEFORE_TOOL][0]["matcher"], "*");
-        assert_eq!(hooks[GEMINI_AFTER_AGENT][0]["matcher"], "*");
-        assert_eq!(hooks[GEMINI_SESSION_START][0]["matcher"], "*");
+        assert_eq!(hooks[GEMINI_BEFORE_TOOL][0]["matcher"], ".*");
+        assert_eq!(hooks[GEMINI_AFTER_AGENT][0]["matcher"], "");
+        assert_eq!(hooks[GEMINI_SESSION_START][0]["matcher"], "");
 
         // 3. Command wiring
         let cmd = hooks[GEMINI_BEFORE_TOOL][0]["hooks"][0]["command"]
