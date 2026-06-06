@@ -92,8 +92,13 @@ pub enum ToolMessageKind {
     Chat,
     /// A world event notification.
     Event,
-    /// A lifecycle control message (e.g. shutdown).
-    Shutdown { grace_ms: u32 },
+    /// A lifecycle control message. `force` defaults to `false` (cooperative: defers with an
+    /// "are you sure" if the target has live children); `force:true` cascades a subtree teardown.
+    Shutdown {
+        grace_ms: u32,
+        #[serde(default)]
+        force: bool,
+    },
 }
 
 impl From<ToolMessageKind> for MessageKind {
@@ -101,8 +106,8 @@ impl From<ToolMessageKind> for MessageKind {
         match k {
             ToolMessageKind::Chat => MessageKind::Chat,
             ToolMessageKind::Event => MessageKind::Event,
-            ToolMessageKind::Shutdown { grace_ms } => {
-                MessageKind::Control(ControlKind::Shutdown { grace_ms })
+            ToolMessageKind::Shutdown { grace_ms, force } => {
+                MessageKind::Control(ControlKind::Shutdown { grace_ms, force })
             }
         }
     }
@@ -221,7 +226,10 @@ mod tests {
             );
             assert_eq!(
                 msg.kind,
-                MessageKind::Control(ControlKind::Shutdown { grace_ms: 5000 })
+                MessageKind::Control(ControlKind::Shutdown {
+                    grace_ms: 5000,
+                    force: false
+                })
             );
         } else {
             panic!("expected BusDeliver call, got {:?}", calls[0]);

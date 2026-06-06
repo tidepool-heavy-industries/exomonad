@@ -243,8 +243,10 @@ mod linux {
             Action::Shutdown => (
                 "shutdown requested via teams".to_string(),
                 make_summary(msg, "[shutdown]"),
+                // Native CC shutdown_request has no force field → always cooperative.
                 MessageKind::Control(ControlKind::Shutdown {
                     grace_ms: SHUTDOWN_GRACE_MS,
+                    force: false,
                 }),
             ),
             Action::Skip(t) => {

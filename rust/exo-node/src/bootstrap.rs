@@ -37,6 +37,21 @@ pub struct NodeContext {
     pub parent_inbox: Option<InboxPath>,
     /// Swarm run-id namespace.
     pub run_id: String,
+    /// Cooperative-shutdown state. `None` until a `Shutdown` is accepted (a cooperative leaf, or a
+    /// forced node); `Some(grace_ms)` once pending — the sidecar reaps itself when its subtree is
+    /// clear (see `inbound::try_reap`). Read by both the inbound loop and the stop-hook path.
+    pub shutdown_pending: std::sync::Mutex<Option<u32>>,
+    /// Children (by name) that have sent `ChildExited` — the authoritative "gone" set `try_reap`
+    /// uses to decide childlessness without racing pane-death timing.
+    pub exited_children: std::sync::Mutex<std::collections::HashSet<String>>,
+}
+
+impl NodeContext {
+    /// Mark this node as shutting down (cooperative or forced); the sidecar reaps itself once its
+    /// subtree is clear. `grace_ms` is the pre-kill backstop applied at the actual reap.
+    pub fn set_shutdown_pending(&self, grace_ms: u32) {
+        *self.shutdown_pending.lock().unwrap() = Some(grace_ms);
+    }
 }
 
 impl NodeContext {
@@ -124,6 +139,8 @@ pub fn bootstrap(papers_path: &Path, working_dir: PathBuf) -> NodeResult<NodeCon
         own_inbox,
         parent_inbox,
         run_id,
+        shutdown_pending: std::sync::Mutex::new(None),
+        exited_children: std::sync::Mutex::new(std::collections::HashSet::new()),
     })
 }
 

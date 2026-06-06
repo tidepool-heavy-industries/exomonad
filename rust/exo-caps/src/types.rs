@@ -415,7 +415,17 @@ pub enum MessageKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ControlKind {
-    Shutdown { grace_ms: u32 },
+    /// Ask a node to shut down. `grace_ms` is the pre-kill backstop. `force` distinguishes the two
+    /// modes: a **cooperative** request (`force=false`) defers if the target has live children
+    /// (the target bounces an "are you sure" back to the requester); a **forced** request
+    /// (`force=true`) tears the whole subtree down — the sidecar cascades `Shutdown{force}` to every
+    /// child. `force` defaults to `false` (the native CC `shutdown_request` has no force field, so
+    /// the bridged form is always cooperative).
+    Shutdown {
+        grace_ms: u32,
+        #[serde(default)]
+        force: bool,
+    },
 }
 
 /// System signals carried over the bus and handled by the recipient's sidecar (see
@@ -452,6 +462,12 @@ pub enum SystemMessage {
     /// richer state derived from the stop hook's payload) lands later in the parent's
     /// `handle_system`, not by growing this variant.
     ChildIdle { summary: String },
+    /// A node is about to reap itself (its cooperative/forced shutdown completed and its subtree is
+    /// clear). Sent to its parent *just before* it kills its own pane. The parent uses it as the
+    /// authoritative "this child is gone" trigger — re-evaluating its own pending shutdown without
+    /// racing pane-death timing. The envelope's stamped `from` says which child; `reason` is a short
+    /// note (e.g. `"shutdown"`).
+    ChildExited { reason: String },
 }
 
 #[cfg(test)]

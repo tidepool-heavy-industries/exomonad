@@ -85,6 +85,13 @@ async fn handle_conn(ctx: Arc<NodeContext>, stream: UnixStream) -> NodeResult<()
         .map_err(|e| std::io::Error::other(format!("hooksock: encode HookVerdict: {e}")))?;
     stream.write_all(&out).await?;
     stream.shutdown().await?;
+
+    // A Stop hook means the agent just went idle. If a cooperative shutdown is pending and our
+    // subtree is now clear, this is the safe point to reap ourselves. No-op otherwise. Done AFTER
+    // replying so the agent isn't left waiting on a verdict it'll never read.
+    if req.event == HookEvent::Stop {
+        crate::inbound::try_reap(&ctx).await;
+    }
     Ok(())
 }
 

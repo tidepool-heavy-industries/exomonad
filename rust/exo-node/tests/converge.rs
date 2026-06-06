@@ -41,6 +41,8 @@ fn test_ctx(dir: &std::path::Path, parent_inbox: Option<InboxPath>) -> Arc<NodeC
         own_inbox,
         parent_inbox,
         run_id,
+        shutdown_pending: std::sync::Mutex::new(None),
+        exited_children: std::sync::Mutex::new(std::collections::HashSet::new()),
     })
 }
 

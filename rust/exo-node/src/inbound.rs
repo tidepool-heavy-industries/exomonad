@@ -13,8 +13,11 @@
 //! Then route each new entry by `kind`:
 //! - `Chat` / `Event` → [`crate::dispatch::dispatch`] (N2a last-hop): deliver to the agent's
 //!   native interface (Teams inbox or tmux paste), rendered with a `[from: X, kind: Y]` header.
-//! - `Control(Shutdown { grace_ms })` → after the grace, self-kill OWN pane (the node knows
-//!   `$TMUX_PANE`) — reaping pane + agent + sidecar in one shot.
+//! - `Control(Shutdown { grace_ms, force })` → the cooperative/forced matrix (see `decide`): a
+//!   cooperative request to a node with live children bounces an "are you sure" back to the
+//!   requester; a leaf winds down and is reaped on its next idle; a forced request cascades a
+//!   subtree teardown. The actual self-reap (`try_reap`) only fires when the subtree is clear,
+//!   signalling `ChildExited` up first. A child's `ChildExited` re-triggers its parent's reap.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -29,8 +32,8 @@ use tracing::{error, info, warn};
 
 use chrono::Utc;
 use exo_caps::{
-    Addressee, ControlKind, IngestionEntry, Message, MessageBody, MessageKind, Persona, Summary,
-    SyntheticName,
+    Addressee, AgentName, ChildLiveness, ControlKind, IngestionEntry, Message, MessageBody,
+    MessageKind, Persona, Summary, SyntheticName, SystemMessage, Tmux, Topology, TreeNode,
 };
 
 use crate::bootstrap::NodeContext;
@@ -150,13 +153,8 @@ impl InboundHandler for RealHandler {
                 crate::dispatch::dispatch(&self.ctx, entry).await?;
                 Ok(Some(false))
             }
-            MessageKind::Control(ControlKind::Shutdown { grace_ms }) => {
-                info!("shutdown received, sleeping {}ms", grace_ms);
-                tokio::time::sleep(Duration::from_millis(*grace_ms as u64)).await;
-                exo_caps::Tmux::kill_pane(&*self.ctx.runtime, &self.ctx.own_pane)
-                    .await
-                    .map_err(|e| std::io::Error::other(e.to_string()))?;
-                Ok(Some(true))
+            MessageKind::Control(ControlKind::Shutdown { grace_ms, force }) => {
+                self.handle_shutdown(*grace_ms, *force).await
             }
             // System signals are consumed by the sidecar, never delivered to the LLM directly.
             MessageKind::System(system) => {
@@ -175,12 +173,7 @@ impl RealHandler {
     /// would miss it. Apply the verdict, then reclaim that reviewer here, best-effort, regardless
     /// of outcome. A **`ChildIdle`** comes from a LIVE child finishing a turn — render it and do
     /// NOT tear the child down.
-    async fn handle_system(
-        &self,
-        from: &Persona,
-        system: &exo_caps::SystemMessage,
-    ) -> NodeResult<()> {
-        use exo_caps::SystemMessage;
+    async fn handle_system(&self, from: &Persona, system: &SystemMessage) -> NodeResult<()> {
         match system {
             // A child yielded control. Flip its busy-bit to idle (the idle gate reads this), then
             // render a concise line for this node's LLM; never tear the child down. (v1: no
@@ -190,6 +183,20 @@ impl RealHandler {
                     self.ctx.runtime.mark_child_idle(name);
                 }
                 self.render_child_idle(from, summary).await
+            }
+            // A child reaped itself (its shutdown completed). Record it in the authoritative
+            // exited-set, then re-evaluate our own pending shutdown — if it was the last child, we
+            // reap ourselves now (which may kill our pane and end the process).
+            SystemMessage::ChildExited { .. } => {
+                if let Persona::Agent(name) = from {
+                    self.ctx
+                        .exited_children
+                        .lock()
+                        .unwrap()
+                        .insert(name.as_str().to_string());
+                }
+                try_reap(&self.ctx).await;
+                Ok(())
             }
             // Review verdicts: apply, then reclaim the one-shot reviewer (verdict-only teardown).
             SystemMessage::ReviewApproved { .. }
@@ -239,8 +246,7 @@ impl RealHandler {
 
     /// Act on a review verdict (escalate `[READY]` on a matching approval; wake the LLM on
     /// deny/changes). The sender's lifecycle is handled by [`handle_system`](Self::handle_system).
-    async fn apply_verdict(&self, system: &exo_caps::SystemMessage) -> NodeResult<()> {
-        use exo_caps::SystemMessage;
+    async fn apply_verdict(&self, system: &SystemMessage) -> NodeResult<()> {
         match system {
             SystemMessage::ReviewApproved { branch, sha } => {
                 // The approval must be for THIS node's branch at its CURRENT commit. A mismatched
@@ -304,32 +310,249 @@ impl RealHandler {
                     changes_branch.as_str(), message
                 )).await
             }
-            // `ChildIdle` is intercepted in `handle_system` and never routed here.
-            SystemMessage::ChildIdle { .. } => {
-                unreachable!("ChildIdle is handled in handle_system, never reaches apply_verdict")
+            // `ChildIdle`/`ChildExited` are intercepted in `handle_system`, never routed here.
+            SystemMessage::ChildIdle { .. } | SystemMessage::ChildExited { .. } => {
+                unreachable!("ChildIdle/ChildExited handled in handle_system, never apply_verdict")
             }
         }
     }
 
-    /// Inject a message into THIS node's own LLM conversation via the last-hop dispatch.
+    /// Inject a message into THIS node's own LLM conversation via the last-hop dispatch, attributed
+    /// to a synthetic sender.
     async fn deliver_to_llm(&self, text: &str) -> NodeResult<()> {
+        self.deliver_to_self("reviewer", "[REVIEW]", text).await
+    }
+
+    /// Render `text` into THIS node's own LLM, attributed to synthetic `from` with `summary`.
+    async fn deliver_to_self(&self, from: &str, summary: &str, text: &str) -> NodeResult<()> {
         let entry = IngestionEntry {
             v: 1,
             ts: Utc::now(),
             from: Persona::Synthetic(
-                SyntheticName::new("reviewer".into())
+                SyntheticName::new(from.to_string())
                     .map_err(|e| std::io::Error::other(e.to_string()))?,
             ),
             msg: Message {
                 text: MessageBody::new(text.to_string())
                     .map_err(|e| std::io::Error::other(e.to_string()))?,
-                summary: Summary::new("[REVIEW]".into())
+                summary: Summary::new(summary.to_string())
                     .map_err(|e| std::io::Error::other(e.to_string()))?,
                 kind: MessageKind::Chat,
             },
         };
         crate::dispatch::dispatch(&self.ctx, &entry).await
     }
+
+    /// Deliver a chat message up to this node's parent (the shutdown requester).
+    async fn notify_parent_chat(&self, text: &str, summary: &str) -> NodeResult<()> {
+        let msg = Message {
+            text: MessageBody::new(text.to_string())
+                .map_err(|e| std::io::Error::other(e.to_string()))?,
+            summary: Summary::new(summary.to_string())
+                .map_err(|e| std::io::Error::other(e.to_string()))?,
+            kind: MessageKind::Chat,
+        };
+        exo_caps::Bus::deliver(&*self.ctx.runtime, Addressee::Parent, msg)
+            .await
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Handle a `Control(Shutdown)` per the cooperative/forced matrix (see [`decide`]).
+    async fn handle_shutdown(&self, grace_ms: u32, force: bool) -> NodeResult<Option<bool>> {
+        let live = match live_children(&self.ctx).await {
+            Some(l) => l,
+            None => {
+                // Couldn't read our subtree → take no destructive action; bounce to the requester.
+                self.notify_parent_chat(
+                    "[shutdown deferred] couldn't read my subtree (topology error) — not shutting down. Retry shortly.",
+                    "[shutdown deferred]",
+                )
+                .await?;
+                return Ok(Some(false));
+            }
+        };
+
+        match decide(force, live.is_empty()) {
+            // Forced leaf — reap now (grace applied in try_reap).
+            ShutdownAction::ReapNow => {
+                self.ctx.set_shutdown_pending(grace_ms);
+                Ok(Some(try_reap(&self.ctx).await))
+            }
+            // Cooperative leaf — wrap up, reap on next idle (the stop hook drives try_reap).
+            ShutdownAction::GracefulPending => {
+                self.ctx.set_shutdown_pending(grace_ms);
+                self.deliver_to_self(
+                    "shutdown",
+                    "[shutdown requested]",
+                    "[shutdown requested] Finish your work and yield — you'll be reaped when you go idle.",
+                )
+                .await?;
+                Ok(Some(false))
+            }
+            // Cooperative + live children — bounce an "are you sure" back to the requester.
+            ShutdownAction::Defer => {
+                let busy = ChildLiveness::any_child_busy(&*self.ctx.runtime).await;
+                let work = if busy { " (some actively working)" } else { "" };
+                self.notify_parent_chat(
+                    &format!(
+                        "[shutdown deferred] I have {} live child(ren): {}{work}. They'd be orphaned. \
+                         Re-send shutdown with force:true to tear down the whole subtree, or shut them \
+                         down individually first.",
+                        live.len(),
+                        live.join(", "),
+                    ),
+                    "[shutdown deferred]",
+                )
+                .await?;
+                Ok(Some(false))
+            }
+            // Forced + live children — sidecar cascades a forced teardown, reaps self when clear.
+            ShutdownAction::Cascade => {
+                self.ctx.set_shutdown_pending(grace_ms);
+                let _ = self
+                    .deliver_to_self(
+                        "shutdown",
+                        "[shutdown]",
+                        "[shutdown] Forced teardown of your subtree in progress.",
+                    )
+                    .await;
+                for name in &live {
+                    let Ok(an) = AgentName::new(name.clone()) else {
+                        continue;
+                    };
+                    let Some(addr) = self.ctx.runtime.resolve_edge(&an).await else {
+                        warn!("cascade shutdown: cannot resolve child '{name}'; skipping");
+                        continue;
+                    };
+                    match shutdown_message(grace_ms) {
+                        Ok(msg) => {
+                            if let Err(e) =
+                                exo_caps::Bus::deliver(&*self.ctx.runtime, addr, msg).await
+                            {
+                                warn!("cascade shutdown: deliver to '{name}' failed: {e}");
+                            }
+                        }
+                        Err(e) => warn!("cascade shutdown: build message failed: {e}"),
+                    }
+                }
+                Ok(Some(false))
+            }
+        }
+    }
+}
+
+/// What to do with a `Control(Shutdown)`, by `force` × whether the subtree is empty.
+#[derive(Debug, PartialEq, Eq)]
+enum ShutdownAction {
+    /// forced leaf → reap immediately.
+    ReapNow,
+    /// cooperative leaf → wrap up, reap on next idle.
+    GracefulPending,
+    /// cooperative with live children → bounce "are you sure" to the requester.
+    Defer,
+    /// forced with live children → cascade a forced teardown.
+    Cascade,
+}
+
+fn decide(force: bool, childless: bool) -> ShutdownAction {
+    match (force, childless) {
+        (true, true) => ShutdownAction::ReapNow,
+        (false, true) => ShutdownAction::GracefulPending,
+        (false, false) => ShutdownAction::Defer,
+        (true, false) => ShutdownAction::Cascade,
+    }
+}
+
+fn any_live(n: &TreeNode) -> bool {
+    n.pane_alive || n.children.iter().any(any_live)
+}
+
+/// Names of this node's direct children that still have a live pane (recursively). `None` if the
+/// topology read failed (caller must not treat that as "childless").
+async fn live_children(ctx: &Arc<NodeContext>) -> Option<Vec<String>> {
+    match ctx.runtime.topology().await {
+        Ok(view) => Some(
+            view.node
+                .children
+                .iter()
+                .filter(|c| any_live(c))
+                .map(|c| c.name.clone())
+                .collect(),
+        ),
+        Err(e) => {
+            warn!("shutdown: topology read failed: {e}");
+            None
+        }
+    }
+}
+
+/// Live direct children NOT yet known-exited (the authoritative gone-set). On a topology error,
+/// returns a non-empty sentinel so `try_reap` errs toward NOT reaping.
+async fn remaining_live_children(ctx: &Arc<NodeContext>) -> Vec<String> {
+    let exited = ctx.exited_children.lock().unwrap().clone();
+    match ctx.runtime.topology().await {
+        Ok(view) => view
+            .node
+            .children
+            .iter()
+            .filter(|c| any_live(c))
+            .map(|c| c.name.clone())
+            .filter(|n| !exited.contains(n))
+            .collect(),
+        Err(_) => vec!["<topology-error>".to_string()],
+    }
+}
+
+/// Build a forced child-shutdown message (used by the cascade).
+fn shutdown_message(grace_ms: u32) -> NodeResult<Message> {
+    Ok(Message {
+        text: MessageBody::new("forced subtree shutdown".to_string())
+            .map_err(|e| std::io::Error::other(e.to_string()))?,
+        summary: Summary::new("[shutdown]".to_string())
+            .map_err(|e| std::io::Error::other(e.to_string()))?,
+        kind: MessageKind::Control(ControlKind::Shutdown {
+            grace_ms,
+            force: true,
+        }),
+    })
+}
+
+/// Reap this node iff it's shutdown-pending and its subtree is clear: signal `ChildExited` up,
+/// wait the grace backstop, then kill its own pane (ending the process). Returns whether it
+/// reaped. Idempotent and safe to call on any stop / child-exit; a no-op when not pending or when
+/// children remain. Called from the stop-hook path (idle) and on inbound `ChildExited`.
+pub(crate) async fn try_reap(ctx: &Arc<NodeContext>) -> bool {
+    let grace = *ctx.shutdown_pending.lock().unwrap();
+    let Some(grace_ms) = grace else {
+        return false; // not shutting down
+    };
+    if !remaining_live_children(ctx).await.is_empty() {
+        return false; // subtree not clear yet
+    }
+    info!("try_reap: shutdown pending and subtree clear — reaping self");
+    // Tell the parent we're gone (authoritative trigger for its own pending shutdown). Root has no
+    // parent — that delivery just errors, which is fine.
+    let exited = Message {
+        text: MessageBody::new("[exited] shutdown".to_string())
+            .ok()
+            .unwrap_or_else(|| MessageBody::new("exited".to_string()).unwrap()),
+        summary: Summary::new("[exited]".to_string()).unwrap(),
+        kind: MessageKind::System(SystemMessage::ChildExited {
+            reason: "shutdown".to_string(),
+        }),
+    };
+    if let Err(e) = exo_caps::Bus::deliver(&*ctx.runtime, Addressee::Parent, exited).await {
+        warn!("try_reap: ChildExited to parent failed (ok for root): {e}");
+    }
+    if grace_ms > 0 {
+        tokio::time::sleep(Duration::from_millis(grace_ms as u64)).await;
+    }
+    if let Err(e) = Tmux::kill_pane(&*ctx.runtime, &ctx.own_pane).await {
+        warn!("try_reap: kill_pane failed: {e}");
+        return false;
+    }
+    true
 }
 
 /// Returns true if shutdown was requested
@@ -416,6 +639,15 @@ mod tests {
     use exo_caps::{AgentName, Message, MessageBody, Persona, Summary};
     use std::fs::OpenOptions;
     use std::sync::Mutex;
+
+    #[test]
+    fn shutdown_decision_matrix() {
+        // force × childless → action. The whole behavioural spec in one table.
+        assert_eq!(decide(false, true), ShutdownAction::GracefulPending); // polite leaf
+        assert_eq!(decide(false, false), ShutdownAction::Defer); // polite + subtree → "are you sure"
+        assert_eq!(decide(true, true), ShutdownAction::ReapNow); // forced leaf
+        assert_eq!(decide(true, false), ShutdownAction::Cascade); // forced + subtree → teardown
+    }
     use tempfile::tempdir;
 
     struct MockHandler {

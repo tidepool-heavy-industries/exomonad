@@ -26,7 +26,10 @@ Assembles `exo-runtime` (all caps) + `exo-policy` (tools/hooks/roles) into a run
 `inbound::watch` resumes from a `pane-N.cursor` byte-offset (missing cursor → start at EOF, no history replay), reads only up to the last `\n` (torn lines re-read once complete), advances the cursor **after** successful delivery (at-least-once; a duplicate line is benign), and routes by `kind`:
 
 - **`Chat` / `Event`** → `dispatch::dispatch` (last-hop deliver, rendered with a `[from: X, kind: Y]` header).
-- **`Control(Shutdown{grace_ms})`** → sleep the grace, then `Tmux::kill_pane` on the node's **own** pane — reaping pane + agent + sidecar in one shot.
+- **`Control(Shutdown{grace_ms, force})`** → the cooperative/forced matrix (`decide`):
+  - *cooperative (`force=false`)* — **leaf**: deliver a "wrap up and yield" note to the agent, mark `shutdown_pending`, and reap on its next idle (the stop hook drives `try_reap`); **has live children**: bounce a `[shutdown deferred] you have N live children — re-send force:true` message back to the requester (the parent) and do nothing else (the "are you sure").
+  - *forced (`force=true`)* — **leaf**: reap now (grace backstop); **has live children**: the sidecar cascades `Shutdown{force:true}` to every live child and reaps itself once they've all exited. Control-plane teardown — note it hard-kills the subtree (uncommitted work in a busy descendant is lost); revisit if that bites in dogfooding.
+  - The actual self-reap (`try_reap`) only fires when `shutdown_pending` AND the subtree is clear (live children minus the authoritative `exited_children` set). Before killing its own pane it sends `ChildExited` up; the parent's `handle_system(ChildExited)` re-runs *its* `try_reap`, so a forced teardown drains bottom-up.
 - **`System(SystemMessage)`** → `handle_system` (sidecar-consumed, never shown to the LLM unless it decides to act). A **review verdict** (`ReviewApproved`/`Denied`/`Changes`) from a one-shot reviewer is applied via `apply_verdict`, then that reviewer is torn down (`kill_pane` + `reclaim_worktree`) — teardown is **verdict-only**. A **`ChildIdle`** from a child finishing a turn flips that child's busy-bit to idle (`runtime.mark_child_idle` — what the `stop` idle gate reads) and is rendered as a concise line (`render_child_idle`, preserving the child's `from`); the child is **never** torn down. This render is the parent-side seam where idle-signal refinement (dedupe, richer state) will land.
 
 ## Native Teams delivery (the hard-won part)
@@ -42,6 +45,7 @@ The bridge is **bidirectional** for Claude nodes: `dispatch` is the inbound last
 
 ## Gaps / not-yet
 
-- **Shutdown has no graceful ack.** `inbound` handles `Control(Shutdown)` by kill-pane for all agent types. A Claude agent's native `shutdown_request` IS now bridged to the bus (`teamout` N6 → `Control(Shutdown)`), but the cooperative `shutdown_approved`/reject reply is not yet written back to the requester.
+- **Shutdown has no graceful ack.** Shutdown is now cooperative (defer-with-confirm on a live subtree; reap-on-idle; forced cascade) — but the native `shutdown_approved`/reject reply shape is not written back to the requester. The deferral is surfaced as a plain chat message, not a structured `shutdown_response`.
+- **Forced teardown is a hard kill.** `force:true` cascades pane-kills through the subtree with no per-node commit/wrap-up — a busy descendant loses uncommitted work. Deliberate (force = "tear it down"); revisit if it bites in dogfooding.
 - **`outbound` hand-rolls JSON-RPC** over stdio (despite the "rmcp/stdio" framing) — minimal `initialize`/`tools/list`/`tools/call`; no capability negotiation beyond that.
 - **No convergence teardown driver.** Nothing in the node calls `Spawner::reclaim_worktree`/`kill_pane` after a `merge`, so folded children's panes/worktrees linger (the `exo-policy` lifecycle gap surfaces here).

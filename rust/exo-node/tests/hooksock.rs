@@ -32,6 +32,8 @@ fn test_ctx(dir: &std::path::Path, run_id: &str) -> Arc<NodeContext> {
         own_inbox: InboxPath::new(dir.join("own-inbox.jsonl")),
         parent_inbox: None,
         run_id: run_id.to_string(),
+        shutdown_pending: std::sync::Mutex::new(None),
+        exited_children: std::sync::Mutex::new(std::collections::HashSet::new()),
     })
 }
 
