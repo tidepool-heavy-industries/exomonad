@@ -35,7 +35,7 @@ pub async fn write_node_agent_config(agent_dir: &Path, papers_path: &Path) -> st
     // The Stop hook is a local convergence gate (reads `git status`); no GitHub token needed.
     // PreToolUse + Stop route to the sidecar's hook socket via the thin client; SessionStart
     // stays one-shot in-process. (Gemini gets the equivalent BeforeTool/AfterAgent wiring in
-    // spawner.rs.)
+    // `write_gemini_node_config` below.)
     let settings = serde_json::json!({
         "hooks": {
             "PreToolUse": [{
