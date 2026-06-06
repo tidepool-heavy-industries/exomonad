@@ -18,6 +18,7 @@ pub mod liveness;
 pub mod papers;
 pub mod paths;
 pub mod spawner;
+pub mod status;
 pub mod topology;
 pub mod types;
 
@@ -41,6 +42,7 @@ pub use log::Log;
 pub use papers::NodePapers;
 pub use process::{Process, ProcessError};
 pub use spawner::{ForkSpec, GeminiSpec, SpawnError, Spawner, WorkerSpec};
+pub use status::{ChildStatus, NodeStatus};
 pub use tmux::{Tmux, TmuxError};
 pub use topology::{Topology, TopologyError, TopologyView, TreeNode};
 pub use types::{

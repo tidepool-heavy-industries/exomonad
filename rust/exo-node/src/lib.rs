@@ -76,6 +76,32 @@ pub async fn run_node(ctx: Arc<NodeContext>) -> NodeResult<()> {
         }
     });
 
+    // Periodic status publisher — writes the node's status snapshot to disk for visibility.
+    let status = tokio::spawn({
+        let ctx = ctx.clone();
+        async move {
+            let status_path = exo_caps::paths::status_path(&home(), &ctx.run_id, &ctx.own_pane);
+            // Ensure status directory exists
+            if let Some(parent) = status_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                interval.tick().await;
+                let shutdown_pending = ctx.shutdown_pending.lock().unwrap().is_some();
+                let snapshot = ctx.runtime.status_snapshot(ctx.kind, shutdown_pending);
+                if let Ok(bytes) = serde_json::to_vec(&snapshot) {
+                    if let Err(e) =
+                        exo_caps::Fs::write_atomic(&*ctx.runtime, &status_path, &bytes).await
+                    {
+                        tracing::error!("failed to write status snapshot: {e}");
+                    }
+                }
+            }
+        }
+    });
+
     // The outbound serve owns stdio and runs for the node's lifetime.
     let result = outbound::serve(ctx).await;
 
@@ -83,6 +109,13 @@ pub async fn run_node(ctx: Arc<NodeContext>) -> NodeResult<()> {
     inbound.abort();
     hooksock.abort();
     teamout.abort();
+    status.abort();
 
     result
+}
+
+fn home() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
 }

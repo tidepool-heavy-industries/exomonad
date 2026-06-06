@@ -19,6 +19,14 @@ pub fn papers_path(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
         .join(format!("pane-{n}.json"))
 }
 
+/// Child's NodeStatus path: `{home}/.claude/exo/status/{run_id}/pane-{n}.json`.
+pub fn status_path(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
+    let n = pane.as_str().trim_start_matches('%');
+    home.join(".claude/exo/status")
+        .join(run_id)
+        .join(format!("pane-{n}.json"))
+}
+
 /// A Gemini child's `settings.json`: `{home}/.claude/exo/agents/{run_id}/pane-{n}/settings.json`.
 /// Per-pane (NOT under the child's worktree) because **inline** children share their parent's
 /// worktree as cwd — writing `settings.json` there would have siblings clobber each other's
