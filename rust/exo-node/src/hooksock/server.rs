@@ -64,7 +64,11 @@ async fn handle_conn(ctx: Arc<NodeContext>, stream: UnixStream) -> NodeResult<()
         Ok(Ok(_)) => {}
         Ok(Err(e)) => return Err(e.into()),
         Err(_) => {
-            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "hooksock: request timeout").into())
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "hooksock: request timeout",
+            )
+            .into())
         }
     }
     let mut stream = limited.into_inner();
@@ -149,7 +153,12 @@ async fn shape_stop(
     rt: &exo_runtime::Runtime,
     agent_type: AgentType,
 ) -> String {
-    let decision = (rd.stop)(rt).await;
+    stop_verdict((rd.stop)(rt).await, agent_type)
+}
+
+/// Pure agent-shaping of a [`StopDecision`] (split out so the wire shapes — and the #20426 safety
+/// net — are unit-testable without a live runtime).
+fn stop_verdict(decision: StopDecision, agent_type: AgentType) -> String {
     match agent_type {
         AgentType::Claude | AgentType::Shoal => match decision {
             StopDecision::Allow => json!({"continue": true}).to_string(),
@@ -179,13 +188,50 @@ fn allow_json(agent_type: AgentType) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::allow_json;
+    use super::{allow_json, stop_verdict};
     use exo_caps::AgentType;
+    use exo_policy::StopDecision;
 
     #[test]
     fn allow_shape_per_agent_type() {
         assert_eq!(allow_json(AgentType::Claude), r#"{"continue":true}"#);
         assert_eq!(allow_json(AgentType::Shoal), r#"{"continue":true}"#);
         assert_eq!(allow_json(AgentType::Gemini), "{}");
+    }
+
+    #[test]
+    fn stop_allow_shapes_per_agent_type() {
+        assert_eq!(
+            stop_verdict(StopDecision::Allow, AgentType::Claude),
+            r#"{"continue":true}"#
+        );
+        assert_eq!(stop_verdict(StopDecision::Allow, AgentType::Gemini), "{}");
+    }
+
+    #[test]
+    fn stop_block_emits_block_for_claude() {
+        let out = stop_verdict(
+            StopDecision::Block {
+                reason: "commit first".into(),
+            },
+            AgentType::Claude,
+        );
+        assert!(out.contains(r#""decision":"block""#));
+        assert!(out.contains("commit first"));
+    }
+
+    #[test]
+    fn stop_block_is_downgraded_to_allow_for_gemini() {
+        // The #20426 safety net: a Gemini Stop block must NEVER reach the agent as `deny`
+        // (it can infinite-loop). It is downgraded to the allow shape.
+        let out = stop_verdict(
+            StopDecision::Block {
+                reason: "should be swallowed".into(),
+            },
+            AgentType::Gemini,
+        );
+        assert_eq!(out, "{}");
+        assert!(!out.contains("deny"));
+        assert!(!out.contains("should be swallowed"));
     }
 }
