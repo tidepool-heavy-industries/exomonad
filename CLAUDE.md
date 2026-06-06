@@ -1,12 +1,15 @@
 # ExoMonad
 
-Type-safe LLM agent orchestration. Haskell WASM is a typed configuration DSL — tool schemas, handlers, decision trees, hook logic, event routing — with the full power of a type system and effect system behind it. Rust executes the I/O effects that the DSL yields. tmux provides isolation and multiplexing.
+Type-safe LLM agent orchestration. ExoMonad supports two coexisting architectures: the **Classic** Haskell-WASM DSL for centralized orchestration and the **v2 Node-Mode** swarm for decentralized, sidecar-based agency. Both share the core Agent Triad and Hylomorphism model.
+
+- **Classic** (`exomonad serve`): A central MCP server; all tool/hook/event logic compiled to Haskell WASM (the typed config DSL); Rust executes the I/O effects that the DSL yields.
+- **v2 Node-Mode** (`exomonad experimental`): No central server. One Rust sidecar per agent; the filesystem is the bus; the process tree is the topology. Tool/hook/role logic is plain Rust written generic over a capability seam (`exo-caps`). Convergence is local git merge.
 
 ---
 
 ## Model
 
-ExoMonad is a **hylomorphism over context windows**. The unfold is planning + scaffolding + spawning. The fold is merging + integrating + PR-upward. The recursion scheme gives you the entire system.
+The shared conceptual framework for both architectures. ExoMonad is a **hylomorphism over context windows**. The unfold is planning + scaffolding + spawning. The fold is merging + integrating + PR-upward. The recursion scheme gives you the entire system.
 
 ### The Agent Triad
 
@@ -56,13 +59,17 @@ Always prefer failure to an undocumented heuristic or fallback.
 
 ### Single Code Path
 
-Never maintain two code paths that do the same thing. Redundant paths cause bug risk — fixes applied to one path get missed on the other. If there's a "debug mode" or "legacy mode" that duplicates a primary path, cut it.
+Never maintain two code paths that do the same thing. Redundant paths cause bug risk. Note: The Classic and v2 architectures are coexisting parallel tracks, not redundant paths; they share the core `exomonad-core` services.
 
-### All Tools and Hooks in Haskell WASM
+### All Tools and Hooks in Haskell WASM (Classic)
 
-**Never add direct Rust MCP tools.** All MCP tools and hooks are defined in Haskell WASM — tool schemas, argument parsing, dispatch logic, everything. Rust is the I/O runtime: it executes effects that the Haskell DSL yields. If a new tool needs new I/O capabilities, add a new effect handler in Rust and a corresponding effect type in Haskell. The tool itself lives in `haskell/wasm-guest/src/ExoMonad/Guest/Tools/`.
+**In the Classic architecture, never add direct Rust MCP tools.** All MCP tools and hooks are defined in Haskell WASM — tool schemas, argument parsing, dispatch logic, everything. Rust is the I/O runtime: it executes effects that the Haskell DSL yields. If a new tool needs new I/O capabilities, add a new effect handler in Rust and a corresponding effect type in Haskell. The tool itself lives in `haskell/wasm-guest/src/ExoMonad/Guest/Tools/`.
 
-This is the entire architectural premise. Haskell WASM is the single source of truth for tool definitions. Rust never defines tool schemas, never parses tool arguments, never contains tool logic.
+This is the architectural premise of Classic: Haskell WASM is the single source of truth for tool definitions. Rust never defines tool schemas, never parses tool arguments, never contains tool logic.
+
+### Capability Seam as Boundary (v2 Node-Mode)
+
+**In the v2 Node-Mode architecture, the `exo-caps` Rust crate replaces the Haskell-WASM IO boundary.** Tools, hooks, and roles are written as plain Rust in `exo-policy`, generic over the capability traits in `exo-caps`. A crate that does not link the `exo-runtime` (which implements the caps) cannot perform IO, providing the same security and testability as WASM with zero serialization cost.
 
 ### Crosscutting Rules
 
@@ -115,9 +122,11 @@ if !status.success() {
 
 **`exomonad new` is the one-time project bootstrap.** It creates `.exo/config.toml`, `.gitignore`, and copies WASM plugins and rules templates.
 
-**`exomonad init` is the idempotent entry point for development sessions.** It creates a tmux session with:
+**`exomonad init` is the idempotent entry point for Classic sessions.** It creates a tmux session with:
 - **Server window**: Runs `exomonad serve` (the MCP server, binds to `.exo/server.sock`)
 - **TL window**: Runs `nix develop` (where you launch `claude` or work directly)
+
+**`exomonad experimental init` is the entry point for v2 Node-Mode sessions.** It creates a decentralized swarm session with native Teams integration (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) and per-agent sidecars. No central server is started.
 
 The server must be running before Claude Code or Gemini can use MCP tools. Without it, every tool call fails. Init also writes `.mcp.json` (MCP server config) and `.claude/settings.local.json` (hooks and session settings).
 
@@ -286,7 +295,7 @@ Spawn heterogeneous agent teams as a recursive tree:
 
 **Standalone repo mode:** Available via the lower-level `spawn_leaf_subtree` core function with `standalone_repo=true`. Creates a fresh `git init` repo instead of a worktree. Claude's native project discovery treats the local `.git` as the boundary — the agent cannot traverse into the parent repository. Use this for information segmentation (e.g., enterprise customers with proprietary root-level IP).
 
-**Branch naming:** `{parent_branch}.{slug}-{type}` (dot separator, suffixed). PRs target parent branch, not main — merged via recursive fold up the tree.
+**Branch naming:** `{parent_branch}.{slug}-{type}` (dot separator, suffixed). Convergence occurs via recursive fold up the tree: Classic uses PRs to the parent branch; v2 Node-Mode uses local on-disk `git merge`.
 
 **Identity:** Birth-branch as session ID (immutable, deterministic). Root TL = "root". Filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/` to discover agents.
 
@@ -394,6 +403,13 @@ Human in tmux session
 - Hosts WASM plugin, executes all effects (git, GitHub API, filesystem, tmux)
 - Owns the process lifecycle
 - REST server on UDS (started by `exomonad init`), `mcp-stdio` translates MCP JSON-RPC to REST
+
+**v2 Node-Mode = Decentralized Swarm**
+- **exo-node**: Per-agent sidecar process; owns the outbound MCP and inbound inbox-watch loops.
+- **exo-caps**: The capability seam (traits + domain types); no IO.
+- **exo-runtime**: IO implementations for all capabilities; reuses `exomonad-core` services.
+- **exo-policy**: Logic for tools, hooks, and roles; generic over capabilities.
+- **exo-scry**: Native Teams discovery via live OS state.
 
 **Worktrees + tmux = Isolation/Multiplexing**
 - Git worktrees for code isolation (no Docker containers)
@@ -673,10 +689,15 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 ├── haskell/CLAUDE.md  ← Haskell package organization
 │   ├── wasm-guest/CLAUDE.md    ← MCP tool definitions (WASM guest logic)
 │   └── proto/CLAUDE.md         ← Generated Haskell types for proto
-├── rust/CLAUDE.md             ← Rust workspace overview (3 crates)
+├── rust/CLAUDE.md             ← Rust workspace overview (Classic + v2)
 │   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (binary)
-│   ├── exomonad-core/CLAUDE.md ← Unified library: framework, handlers, services, protocol, UI types
-│   └── exomonad-proto/     ← Proto-generated types (prost) for FFI + effects
+│   ├── exomonad-core/CLAUDE.md ← Unified library: framework, handlers, services
+│   ├── exomonad-proto/     ← Proto-generated types (prost) for FFI + effects
+│   ├── exo-caps/CLAUDE.md  ← v2 capability seam (traits + types)
+│   ├── exo-node/CLAUDE.md  ← v2 per-node sidecar
+│   ├── exo-runtime/        ← v2 IO implementations
+│   ├── exo-policy/         ← v2 logic (generic over caps)
+│   └── exo-scry/           ← v2 native Teams discovery
 ├── tests/e2e/                 ← E2E tests (see § E2E Test Pattern)
 │   ├── messaging/             ← Teams inbox delivery test
 │   └── hook-rewrite/          ← PII rewriting hooks test
@@ -686,13 +707,13 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | I want to... | Read this |
 |--------------|-----------|
 | Add FFI boundary types | `proto/CLAUDE.md` |
-| Understand MCP tool architecture | `rust/exomonad/CLAUDE.md` |
+| Understand MCP tool architecture (Classic) | `rust/exomonad/CLAUDE.md` |
 | Work on exomonad-core framework | `rust/exomonad-core/CLAUDE.md` |
 | Work on effect handlers or services | `rust/exomonad-core/` (handlers/, services/) |
-| Extend the effect framework | `rust/exomonad-core/` (effects/) |
-| Understand shared protocol types | `rust/exomonad-core/` (protocol/) |
-| Work with external service clients | `rust/exomonad-core/` (services/external/) |
-| Work on WASM guest (MCP tools) | `haskell/wasm-guest/CLAUDE.md` |
+| Extend the v2 Node-Mode swarm | `rust/CLAUDE.md` § Node-mode swarm |
+| Define v2 capabilities | `rust/exo-caps/CLAUDE.md` |
+| Work on v2 node sidecar logic | `rust/exo-node/CLAUDE.md` |
+| Work on WASM guest (Classic MCP tools) | `haskell/wasm-guest/CLAUDE.md` |
 | Add or modify E2E tests | `CLAUDE.md` § E2E Test Pattern + `tests/e2e/messaging/` as reference |
 | Understand architectural decisions | `docs/decisions/` |
 
