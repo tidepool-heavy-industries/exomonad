@@ -25,6 +25,7 @@ Assembles `exo-runtime` (all caps) + `exo-policy` (tools/hooks/roles) into a run
 
 - **`Chat` / `Event`** → `dispatch::dispatch` (last-hop deliver, rendered with a `[from: X, kind: Y]` header).
 - **`Control(Shutdown{grace_ms})`** → sleep the grace, then `Tmux::kill_pane` on the node's **own** pane — reaping pane + agent + sidecar in one shot.
+- **`System(SystemMessage)`** → `handle_system` (sidecar-consumed, never shown to the LLM unless it decides to act). A **review verdict** (`ReviewApproved`/`Denied`/`Changes`) from a one-shot reviewer is applied via `apply_verdict`, then that reviewer is torn down (`kill_pane` + `reclaim_worktree`) — teardown is **verdict-only**. A **`ChildIdle`** from a live child finishing a turn is rendered as a concise line (`render_child_idle`, preserving the child's `from`) and the child is **never** torn down. This render is the parent-side seam where idle-signal refinement (dedupe, richer state) will land.
 
 ## Native Teams delivery (the hard-won part)
 

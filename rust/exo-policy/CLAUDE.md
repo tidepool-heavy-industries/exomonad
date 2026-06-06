@@ -44,11 +44,11 @@ one entry.
 
 | Role | agent | tools | stop gate |
 |------|-------|-------|-----------|
-| **Root** | Claude | fork_wave, spawn_gemini, spawn_worker, merge, send_message | `stop_allow` (never gate the human's session) |
-| **Tl** | Claude | spawns, merge, notify_parent, send_message, submit_branch | `stop` (clean-gate) |
-| **Dev** | Gemini | notify_parent, submit_branch | `stop` (clean-gate) |
-| **Worker** | Gemini | notify_parent | `stop_allow` (inline child, no own branch to submit) |
-| **Reviewer** | Gemini | verdict, notify_parent | `stop_allow` (ephemeral; reviews a branch off its own worktree, then exits) |
+| **Root** | Claude | fork_wave, spawn_gemini, spawn_worker, merge, send_message | `stop_allow` (never gate the human's session; no parent to notify) |
+| **Tl** | Claude | spawns, merge, notify_parent, send_message, submit_branch | `stop` (clean-gate + notify parent on clean-allow) |
+| **Dev** | Gemini | notify_parent, submit_branch | `stop_notify` (notify parent, always allow — never block Gemini) |
+| **Worker** | Gemini | notify_parent | `stop_notify` (inline child, no branch to fold, but still signals on yield) |
+| **Reviewer** | Gemini | verdict, notify_parent | `stop_allow` (ephemeral; its `verdict` is already its done-signal) |
 
 ## The review gate (how `submit_branch` → `merge` is gated)
 
@@ -67,8 +67,12 @@ tool that skips review. (System messages are a general sidecar-consumed primitiv
 ## The hooks
 
 - **`pre_tool_use`** — default-**ALLOW** antipattern *nudge* (NOT a security gate). Currently one rule: deny `git add .` / `git add -A` (stage by path). Can `Deny` with guidance or `Modify` to rewrite.
-- **`stop`** — the **local convergence gate** (`R: Git + Log`). Blocks exit while the worktree is dirty: a parent folds a child by merging its *branch* off disk, so uncommitted work is invisible to that merge. **Fails OPEN** on any error — a hook must never wedge an agent's turn-loop (that bricks the session). Root/Worker use `stop_allow` (nothing to fold).
+- **`stop`** (tl) — the **local convergence gate** (`R: Git + Log + Bus`). Blocks exit while the worktree is dirty: a parent folds a child by merging its *branch* off disk, so uncommitted work is invisible to that merge. On a **clean** exit (Allow) it delivers a `System(ChildIdle)` to the parent — the turn-end "yielding control" signal so a TL no longer has to poke idle children. **Fails OPEN** on any git error — a hook must never wedge an agent's turn-loop (that bricks the session); the error-fallback Allow does not notify (state unknown).
+- **`stop_notify`** (dev, worker) — Gemini turn-end hook (`R: Bus + Log`): deliver `System(ChildIdle)` to the parent, then **always Allow**. **Never blocks** — Gemini's `AfterAgent` `deny` can infinite-loop (gemini-cli #20426). The committed-before-fold guarantee for a dev is enforced by `submit_branch`'s committed-check, not here.
+- **`stop_allow`** (root, reviewer) — unconditional Allow. Root has no parent; the reviewer's `verdict` is its done-signal.
 - **`session_start`** — identity bootstrap (the node-identity context is prepended by `exo-node`).
+
+The `ChildIdle` notification is deliberately minimal (v1: notify on every stop, no dedupe — volume accepted). Refinement (dedupe, richer state from the hook payload) lands parent-side in `exo-node`'s `handle_system`, not by growing the message.
 
 ## Gaps / not-yet
 
