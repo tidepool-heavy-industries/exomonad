@@ -84,6 +84,7 @@ mod linux {
         }
     }
 
+    #[tracing::instrument(skip(ctx), fields(node = %ctx.runtime.name().as_str()))]
     pub async fn run(ctx: Arc<NodeContext>) -> NodeResult<()> {
         let Some((team, lead)) = wait_for_team().await else {
             return Ok(()); // no team ever appeared — native outbound stays off, MCP tools still work

@@ -41,6 +41,7 @@ use crate::bootstrap::NodeContext;
 use crate::error::NodeResult;
 
 /// Watch the node's own ingestion inbox and route each new entry until shutdown.
+#[tracing::instrument(skip(ctx), fields(node = %ctx.runtime.name().as_str()))]
 pub async fn watch(ctx: Arc<NodeContext>) -> NodeResult<()> {
     let inbox_path = ctx.own_inbox.as_path().to_path_buf();
     // Append rather than `with_extension` so a multi-dot inbox name can't mis-target the cursor.

@@ -23,6 +23,7 @@ use crate::error::{NodeError, NodeResult};
 ///
 /// Spawned as a background task by [`run_node`](crate::run_node) and aborted when the outbound
 /// serve loop returns; an error here is logged, never fatal.
+#[tracing::instrument(skip(ctx), fields(node = %ctx.runtime.name().as_str()))]
 pub async fn serve(ctx: Arc<NodeContext>) -> NodeResult<()> {
     let home = std::env::var("HOME").map_err(|_| NodeError::MissingContext("HOME"))?;
     let sock = exo_caps::paths::hook_sock(Path::new(&home), &ctx.run_id, &ctx.own_pane);
