@@ -32,6 +32,17 @@ pub fn gemini_settings_path(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf
         .join("settings.json")
 }
 
+/// Sidecar-owned cursor for the outbound Teams watcher: a JSON map `{member → processed-count}`
+/// at `{home}/.claude/exo/teamcursor/{run_id}/pane-{n}.json`. We track our OWN high-water-mark
+/// here rather than marking CC's inbox `read` — CC is the concurrent writer of those inboxes, so
+/// we never write them. Survives a sidecar restart (no re-forwarding of already-bridged messages).
+pub fn team_cursor_path(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
+    let n = pane.as_str().trim_start_matches('%');
+    home.join(".claude/exo/teamcursor")
+        .join(run_id)
+        .join(format!("pane-{n}.json"))
+}
+
 /// Node's hook-RPC socket: `{home}/.claude/exo/sockets/{run_id}/pane-{n}.sock`. The sidecar
 /// binds it; the `exomonad experimental hook` client connects to it. Home-based (like inboxes),
 /// NOT under the worktree — so a live socket file can never dirty a worktree and trip the

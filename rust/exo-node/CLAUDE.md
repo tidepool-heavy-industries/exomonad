@@ -6,19 +6,20 @@ Assembles `exo-runtime` (all caps) + `exo-policy` (tools/hooks/roles) into a run
 
 ## The loops
 
-`run_node(ctx)` runs two concurrent stimuli; `handle_hook` is a separate short-lived mode.
+`run_node(ctx)` runs several concurrent loops; `handle_hook` is a separate short-lived mode.
 
 | Module | Loop | Role |
 |--------|------|------|
 | `outbound` (N1) | serve | Serve `role_def(kind).tools` as MCP over stdio (`tools/list` emits each tool's `name`/`description`/`inputSchema`, so the toolset is self-documenting). **Owns stdin/stdout → the node's lifetime anchor** (when it closes, the node ends). |
 | `inbound` (N2b) | watch | Watch the node's own ingestion inbox (byte-offset cursor + `notify` watch), route each new entry. |
 | `hooksock` (N5) | serve | Per-agent UDS hook-RPC channel — runs the role hook fn on the live runtime and shapes the verdict per agent_type (never a Gemini Stop deny). |
+| `teamout` (N6) | watch | **Outbound Teams bridge (Claude-only, Linux-only).** Watches this node's own CC team inboxes for messages the agent *sent* to a teammate (native `SendMessage` / `shutdown_request`), maps the recipient name → tree-edge `Addressee`, and forwards onto the bus. The reverse of `dispatch`. No roster authored (a child self-registers as a teammate when it first messages up); sidecar-owned processed-count cursor, never writes CC's inboxes. |
 | `dispatch` (N2a) | — | The **last hop**: deliver one entry into the agent's native interface (Teams inbox or tmux paste). |
 | `hook` (N4) | one-shot | `exomonad experimental hook <event>` → bootstrap from papers → run the role's `pre_tool_use`/`stop`/`session_start` → print the verdict. No server. |
 | `bootstrap` | — | Self-ID: read `--papers` → `NodePapers`, enrich with ambient env (`$TMUX_PANE`, `EXOMONAD_SWARM_RUN_ID`, `EXOMONAD_TMUX_SESSION`, `$HOME`), build `NodeContext { runtime, kind, own_inbox, parent_inbox, ... }`. |
 | `error` | — | `NodeError`. |
 
-`run_node` spawns `inbound` as a background task and awaits `outbound::serve`; when serve returns it aborts inbound. A background loop erroring is logged, not fatal.
+`run_node` spawns `inbound`, `hooksock`, and `teamout` as background tasks and awaits `outbound::serve`; when serve returns (agent gone) it aborts all three. A background loop erroring is logged, not fatal.
 
 ## The inbound → dispatch path
 
@@ -37,8 +38,10 @@ Assembles `exo-runtime` (all caps) + `exo-policy` (tools/hooks/roles) into a run
 
 Delivery always works, only degrades — Teams is a *nicety*, tmux-paste is the floor. The `SessionStart` hook tells a Claude node to `TeamCreate` if it doesn't already lead a team.
 
+The bridge is **bidirectional** for Claude nodes: `dispatch` is the inbound last hop (bus → the agent's lead inbox → native `<teammate-message>`), and `teamout` (N6) is the outbound one (the agent's native `SendMessage`/`shutdown_request` → bus → the addressed tree edge). So a Claude node can just use its native team tools to talk to its parent/children — no exomonad-specific tool required (the MCP `send_message`/`notify_parent` tools remain for Gemini, which has no team, and as a fallback).
+
 ## Gaps / not-yet
 
-- **Shutdown is the Gemini path for everyone.** `inbound` handles `Control(Shutdown)` by kill-pane for all agent types; the cooperative CC `shutdown_request` forward (graceful ack) is not implemented.
+- **Shutdown has no graceful ack.** `inbound` handles `Control(Shutdown)` by kill-pane for all agent types. A Claude agent's native `shutdown_request` IS now bridged to the bus (`teamout` N6 → `Control(Shutdown)`), but the cooperative `shutdown_approved`/reject reply is not yet written back to the requester.
 - **`outbound` hand-rolls JSON-RPC** over stdio (despite the "rmcp/stdio" framing) — minimal `initialize`/`tools/list`/`tools/call`; no capability negotiation beyond that.
 - **No convergence teardown driver.** Nothing in the node calls `Spawner::reclaim_worktree`/`kill_pane` after a `merge`, so folded children's panes/worktrees linger (the `exo-policy` lifecycle gap surfaces here).

@@ -6,7 +6,7 @@
 //! modules (`git`, `github`, `tmux`, `bus`, `spawner`, `fs`, `process`, `log`, `kv`); this
 //! file owns **only** the struct + its accessors, so cap leaves never collide here.
 
-use exo_caps::{AgentName, Branch, InboxPath, NodePath, PaneId};
+use exo_caps::{Addressee, AgentName, Branch, ChildKind, InboxPath, NodePath, PaneId};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -114,6 +114,25 @@ impl Runtime {
     /// This node's own ingestion inbox.
     pub(crate) fn own_inbox(&self) -> InboxPath {
         exo_caps::paths::inbox_path(&home(), &self.run_id, &self.own_pane)
+    }
+
+    /// Map a tree-edge agent name to its bus [`Addressee`]: this node's parent, or a current child
+    /// (by ledger [`ChildKind`]). `None` if the name is neither — the outbound Teams bridge uses
+    /// this to drop a message addressed to a non-edge (e.g. a stale teammate), since messaging is
+    /// tree-edges only.
+    pub async fn resolve_edge(&self, name: &AgentName) -> Option<Addressee> {
+        if let Some(parent) = self.node_path.parent() {
+            if &parent.name() == name {
+                return Some(Addressee::Parent);
+            }
+        }
+        let records = self.read_child_records().await.ok()?;
+        exo_caps::fold_children(&records)
+            .get(name)
+            .map(|c| match c.kind {
+                ChildKind::Inline => Addressee::InlineChild(name.clone()),
+                ChildKind::Worktree => Addressee::WorktreeChild(name.clone()),
+            })
     }
 }
 
