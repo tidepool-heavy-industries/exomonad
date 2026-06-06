@@ -469,6 +469,12 @@ pub enum SystemMessage {
         changes_branch: Branch,
         message: String,
     },
+    /// A reviewer ended its turn WITHOUT producing a verdict (e.g. it emitted the `verdict` tool
+    /// call as prose instead of invoking it — a known Gemini pathology). Sent by the reviewer's
+    /// `stop` hook to its parent (the submitter) so the failure is LOUD instead of a silent
+    /// forever-stall: the submitter renders it as a re-submit prompt and tears the dead reviewer
+    /// down. `reason` is a short human note.
+    ReviewAborted { reason: String },
     /// A node finished a turn and is yielding control (its stop hook fired). The envelope's
     /// stamped `from` says *which* node; `summary` is a short human-readable note the parent may
     /// render. Deliberately minimal: v1 just notifies on every stop. Refinement (dedupe,
@@ -502,6 +508,17 @@ pub enum SystemMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review_aborted_serde_roundtrip() {
+        let m = SystemMessage::ReviewAborted {
+            reason: "no verdict".into(),
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(json.contains("\"type\":\"review_aborted\""));
+        let back: SystemMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(m, back);
+    }
 
     #[test]
     fn shutdown_response_serde_roundtrip() {

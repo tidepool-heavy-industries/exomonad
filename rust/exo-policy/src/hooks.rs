@@ -13,8 +13,8 @@ use serde_json::Value;
 
 use crate::tool::BoxFuture;
 use exo_caps::{
-    Addressee, Bus, CapResult, ChildLiveness, Git, Log, Message, MessageBody, MessageKind, Summary,
-    SystemMessage,
+    Addressee, Bus, CapResult, ChildLiveness, Git, Kv, Log, Message, MessageBody, MessageKind,
+    Summary, SystemMessage,
 };
 
 /// A `PreToolUse` verdict. `Modify` rewrites the tool input in place (the PII-rewrite path).
@@ -182,6 +182,46 @@ pub fn stop_notify<'a, R: Bus + Log + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, 
     })
 }
 
+/// Stop hook for a reviewer (Gemini, one-shot). A reviewer's `verdict` IS its done-signal, so on
+/// the happy path (verdict produced) this stays SILENT — the sidecar already escalated `[READY]`
+/// with no LLM turn. But a reviewer that ends its turn WITHOUT a verdict (e.g. it emitted the call
+/// as prose) would otherwise vanish silently and stall the submitter forever, so deliver a loud
+/// `ReviewAborted` to the parent. ALWAYS allows exit — never block a Gemini at stop (gemini-cli
+/// #20426). Biases LOUD: a kv-read error is treated as no-verdict (a spurious re-submit beats a
+/// silent stall).
+pub fn stop_reviewer<'a, R: Bus + Kv + Log + Send + Sync>(
+    ctx: &'a R,
+) -> BoxFuture<'a, StopDecision> {
+    Box::pin(async move {
+        let produced = matches!(ctx.get("verdict_produced").await, Ok(Some(_)));
+        if !produced {
+            match (
+                MessageBody::new("reviewer exited without producing a verdict".to_string()),
+                Summary::new("[review aborted]".to_string()),
+            ) {
+                (Ok(text), Ok(summary)) => {
+                    let msg = Message {
+                        text,
+                        summary,
+                        kind: MessageKind::System(SystemMessage::ReviewAborted {
+                            reason:
+                                "exited without invoking the verdict tool (likely emitted as prose)"
+                                    .to_string(),
+                        }),
+                    };
+                    if let Err(e) = ctx.deliver(Addressee::Parent, msg).await {
+                        ctx.error(&format!(
+                            "stop_reviewer: failed to deliver ReviewAborted: {e}"
+                        ));
+                    }
+                }
+                _ => ctx.error("stop_reviewer: could not build ReviewAborted message"),
+            }
+        }
+        StopDecision::Allow
+    })
+}
+
 pub fn session_start<'a, R: Send + Sync>(_ctx: &'a R) -> BoxFuture<'a, SessionStartOutput> {
     Box::pin(async move {
         // Root identity bootstrap context injection goes here (additional_context).
@@ -203,6 +243,40 @@ mod tests {
                     if matches!(msg.kind, MessageKind::System(SystemMessage::ChildIdle { .. }))
             )
         })
+    }
+
+    fn delivered_review_aborted_to_parent(calls: &[Call]) -> bool {
+        calls.iter().any(|c| {
+            matches!(
+                c,
+                Call::BusDeliver {
+                    to: Addressee::Parent,
+                    msg
+                } if matches!(
+                    msg.kind,
+                    MessageKind::System(SystemMessage::ReviewAborted { .. })
+                )
+            )
+        })
+    }
+
+    #[tokio::test]
+    async fn test_stop_reviewer_aborts_when_no_verdict() {
+        let ctx = MockRuntime::default(); // no verdict_produced flag set
+        let res = stop_reviewer(&ctx).await;
+
+        assert_eq!(res, StopDecision::Allow);
+        assert!(delivered_review_aborted_to_parent(&ctx.calls_made()));
+    }
+
+    #[tokio::test]
+    async fn test_stop_reviewer_silent_when_verdict_produced() {
+        let ctx = MockRuntime::default();
+        ctx.set("verdict_produced", "true").await.unwrap();
+        let res = stop_reviewer(&ctx).await;
+
+        assert_eq!(res, StopDecision::Allow);
+        assert!(!delivered_review_aborted_to_parent(&ctx.calls_made()));
     }
 
     #[tokio::test]

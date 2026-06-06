@@ -5,7 +5,7 @@
 //! (approve → auto-escalate `[READY]`; deny/changes → wake the LLM). The reviewer then exits.
 
 use exo_caps::{
-    Addressee, Branch, Bus, CapError, CapResult, Message, MessageBody, MessageKind, Summary,
+    Addressee, Branch, Bus, CapError, CapResult, Kv, Message, MessageBody, MessageKind, Summary,
     SystemMessage,
 };
 use schemars::JsonSchema;
@@ -47,7 +47,7 @@ pub struct VerdictArgs {
 pub struct Verdict;
 
 impl Verdict {
-    pub async fn run<C: Bus>(ctx: &C, args: VerdictArgs) -> CapResult<ToolOutput> {
+    pub async fn run<C: Bus + Kv>(ctx: &C, args: VerdictArgs) -> CapResult<ToolOutput> {
         let branch = Branch::new(args.branch.clone())?;
         let system = match args.decision {
             Decision::Approve => SystemMessage::ReviewApproved {
@@ -103,6 +103,11 @@ impl Verdict {
         };
         ctx.deliver(Addressee::Parent, msg).await?;
 
+        // Record that a verdict was produced this turn so the reviewer's stop hook stays silent
+        // (the verdict is the done-signal). Best-effort — a kv failure at worst causes a spurious
+        // re-submit, never a silent stall.
+        let _ = ctx.set("verdict_produced", "true").await;
+
         Ok(ToolOutput::with_data(
             "verdict delivered to parent".to_string(),
             json!({ "branch": args.branch, "sha": args.sha }),
@@ -115,6 +120,7 @@ fn verb(s: &SystemMessage) -> &'static str {
         SystemMessage::ReviewApproved { .. } => "approve",
         SystemMessage::ReviewDenied { .. } => "deny",
         SystemMessage::ReviewChanges { .. } => "changes",
+        SystemMessage::ReviewAborted { .. } => unreachable!("verdict never produces ReviewAborted"),
         // The verdict tool only ever builds the three Review* variants.
         SystemMessage::ChildIdle { .. } => unreachable!("verdict never produces ChildIdle"),
         SystemMessage::ChildExited { .. } => unreachable!("verdict never produces ChildExited"),
@@ -148,6 +154,9 @@ fn render(s: &SystemMessage, args: &VerdictArgs) -> String {
             changes_branch.as_str(),
             args.message
         ),
+        SystemMessage::ReviewAborted { .. } => {
+            unreachable!("verdict never produces ReviewAborted")
+        }
         SystemMessage::ChildIdle { .. } => unreachable!("verdict never produces ChildIdle"),
         SystemMessage::ChildExited { .. } => unreachable!("verdict never produces ChildExited"),
         SystemMessage::ShutdownResponse { .. } => {
@@ -157,7 +166,7 @@ fn render(s: &SystemMessage, args: &VerdictArgs) -> String {
 }
 
 #[async_trait::async_trait]
-impl<R: Bus + Send + Sync> Tool<R> for Verdict {
+impl<R: Bus + Kv + Send + Sync> Tool<R> for Verdict {
     fn name(&self) -> &str {
         "verdict"
     }

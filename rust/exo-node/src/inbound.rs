@@ -212,7 +212,8 @@ impl RealHandler {
             // Review verdicts: apply, then reclaim the one-shot reviewer (verdict-only teardown).
             SystemMessage::ReviewApproved { .. }
             | SystemMessage::ReviewDenied { .. }
-            | SystemMessage::ReviewChanges { .. } => {
+            | SystemMessage::ReviewChanges { .. }
+            | SystemMessage::ReviewAborted { .. } => {
                 let result = self.apply_verdict(system).await;
                 if let Persona::Agent(reviewer) = from {
                     if let Err(e) = exo_caps::Spawner::kill_pane(&*self.ctx.runtime, reviewer).await
@@ -319,6 +320,11 @@ impl RealHandler {
                 self.deliver_to_llm(&format!(
                     "[REVIEW: proposed changes] The reviewer committed improvements on branch `{}`. Merge it with the `merge` tool to incorporate, then call submit_branch again:\n{}",
                     changes_branch.as_str(), message
+                )).await
+            }
+            SystemMessage::ReviewAborted { reason } => {
+                self.deliver_to_llm(&format!(
+                    "[REVIEW ABORTED] Your reviewer exited without producing a verdict ({reason}). No approval was recorded — re-run `submit_branch` to spawn a fresh reviewer."
                 )).await
             }
             // `ChildIdle`/`ChildExited`/`ShutdownResponse` are intercepted in `handle_system`, never routed here.
