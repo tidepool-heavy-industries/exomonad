@@ -11,8 +11,8 @@
 
 use crate::caps::PolicyCaps;
 use crate::hooks::{
-    pre_tool_use, session_start, stop, stop_allow, HookDecision, HookInput, SessionStartOutput,
-    StopDecision,
+    pre_tool_use, session_start, stop, stop_allow, stop_notify, HookDecision, HookInput,
+    SessionStartOutput, StopDecision,
 };
 use crate::tool::{BoxFuture, Tool};
 use crate::tools::merge::Merge;
@@ -79,20 +79,20 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
             stop,
             session_start,
         },
-        // A dev leaf works on its own branch and submits it for the parent to merge.
+        // A dev leaf works on its own branch and submits it for the parent to merge. It NEVER blocks at
+        // stop (Gemini #20426); the committed-before-fold guarantee is enforced by submit_branch.
         NodeKind::Dev => RoleDef {
             tools: vec![Box::new(NotifyParent), Box::new(SubmitBranch)],
             pre_tool_use,
-            stop,
+            stop: stop_notify,
             session_start,
         },
-        // A worker is an inline child sharing the parent's worktree — it has no own branch to
-        // submit, so it only reports back.
+        // A worker is an inline child sharing the parent's worktree — no own branch to submit, so it
+        // only reports back, but it still signals the parent when it yields control.
         NodeKind::Worker => RoleDef {
             tools: vec![Box::new(NotifyParent)],
             pre_tool_use,
-            // Workers are ephemeral and commit nothing to fold — nothing to gate on.
-            stop: stop_allow,
+            stop: stop_notify,
             session_start,
         },
         // A reviewer reads the under-review branch and emits a `verdict`, then exits. It does not
@@ -120,6 +120,7 @@ mod tests {
             NodeKind::Tl,
             NodeKind::Dev,
             NodeKind::Worker,
+            NodeKind::Reviewer,
         ] {
             let rd = role_def::<MockRuntime>(kind);
             assert!(!rd.tools.is_empty(), "Role {:?} should have tools", kind);
@@ -129,12 +130,16 @@ mod tests {
                 rd.pre_tool_use as usize,
                 pre_tool_use::<MockRuntime> as *const () as usize
             );
-            // Root/Worker never file a PR → no gate (stop_allow); Tl/Dev gate via `stop`.
+            // Root/Reviewer never yield work to fold → stop_allow. Dev/Worker (Gemini) notify the
+            // parent then allow (never block). Tl keeps the dirty-gate (stop).
             let expected_stop = match kind {
-                NodeKind::Root | NodeKind::Worker | NodeKind::Reviewer => {
+                NodeKind::Root | NodeKind::Reviewer => {
                     stop_allow::<MockRuntime> as *const () as usize
                 }
-                NodeKind::Tl | NodeKind::Dev => stop::<MockRuntime> as *const () as usize,
+                NodeKind::Dev | NodeKind::Worker => {
+                    stop_notify::<MockRuntime> as *const () as usize
+                }
+                NodeKind::Tl => stop::<MockRuntime> as *const () as usize,
             };
             assert_eq!(rd.stop as usize, expected_stop, "Role {:?} stop fn", kind);
             assert_eq!(
@@ -146,7 +151,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_role_stop_gate_blocks_when_dirty() {
-        let rd = role_def::<MockRuntime>(NodeKind::Dev);
+        let rd = role_def::<MockRuntime>(NodeKind::Tl);
         let ctx = MockRuntime {
             is_clean: false,
             ..Default::default()

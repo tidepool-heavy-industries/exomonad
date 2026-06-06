@@ -168,35 +168,67 @@ impl InboundHandler for RealHandler {
 }
 
 impl RealHandler {
-    /// Route a [`SystemMessage`] (sidecar-side; never injected into the LLM directly), then
-    /// reclaim the sender. A review verdict comes from a one-shot reviewer that is this node's
-    /// own `Worktree` child — it's done after the verdict, and its branch never merges, so
-    /// `teardown-on-merge` would miss it. Reclaim it here, best-effort, regardless of the verdict
-    /// outcome. (Assumes the reviewer is one-shot; revisit if the two-way reviewer back-channel
-    /// from #935's follow-ups lands.)
+    /// Route a [`SystemMessage`] (sidecar-side; never injected into the LLM directly).
+    ///
+    /// A **review verdict** comes from a one-shot reviewer that is this node's own `Worktree`
+    /// child — it's done after the verdict, and its branch never merges, so `teardown-on-merge`
+    /// would miss it. Apply the verdict, then reclaim that reviewer here, best-effort, regardless
+    /// of outcome. A **`ChildIdle`** comes from a LIVE child finishing a turn — render it and do
+    /// NOT tear the child down.
     async fn handle_system(
         &self,
         from: &Persona,
         system: &exo_caps::SystemMessage,
     ) -> NodeResult<()> {
-        let result = self.apply_verdict(system).await;
-
-        if let Persona::Agent(reviewer) = from {
-            if let Err(e) = exo_caps::Spawner::kill_pane(&*self.ctx.runtime, reviewer).await {
-                warn!(
-                    "reviewer teardown: kill_pane({}) failed: {e}",
-                    reviewer.as_str()
-                );
-            }
-            if let Err(e) = exo_caps::Spawner::reclaim_worktree(&*self.ctx.runtime, reviewer).await
-            {
-                warn!(
-                    "reviewer teardown: reclaim_worktree({}) failed: {e}",
-                    reviewer.as_str()
-                );
+        use exo_caps::SystemMessage;
+        match system {
+            // A live child yielded control. Render a concise line for this node's LLM; never tear
+            // the child down. (v1: no dedupe — volume is accepted; the refine-later seam is here.)
+            SystemMessage::ChildIdle { summary } => self.render_child_idle(from, summary).await,
+            // Review verdicts: apply, then reclaim the one-shot reviewer (verdict-only teardown).
+            SystemMessage::ReviewApproved { .. }
+            | SystemMessage::ReviewDenied { .. }
+            | SystemMessage::ReviewChanges { .. } => {
+                let result = self.apply_verdict(system).await;
+                if let Persona::Agent(reviewer) = from {
+                    if let Err(e) = exo_caps::Spawner::kill_pane(&*self.ctx.runtime, reviewer).await
+                    {
+                        warn!(
+                            "reviewer teardown: kill_pane({}) failed: {e}",
+                            reviewer.as_str()
+                        );
+                    }
+                    if let Err(e) =
+                        exo_caps::Spawner::reclaim_worktree(&*self.ctx.runtime, reviewer).await
+                    {
+                        warn!(
+                            "reviewer teardown: reclaim_worktree({}) failed: {e}",
+                            reviewer.as_str()
+                        );
+                    }
+                }
+                result
             }
         }
-        result
+    }
+
+    /// Render a concise \"child yielded control\" line into THIS node's LLM. The sender is a LIVE
+    /// child (not a one-shot reviewer), so it is NOT torn down. Preserves the child's identity as
+    /// `from` so the dispatch header attributes the line correctly.
+    async fn render_child_idle(&self, from: &Persona, summary: &str) -> NodeResult<()> {
+        let entry = IngestionEntry {
+            v: 1,
+            ts: Utc::now(),
+            from: from.clone(),
+            msg: Message {
+                text: MessageBody::new(format!("[child idle] {summary}"))
+                    .map_err(|e| std::io::Error::other(e.to_string()))?,
+                summary: Summary::new("[child idle]".into())
+                    .map_err(|e| std::io::Error::other(e.to_string()))?,
+                kind: MessageKind::Chat,
+            },
+        };
+        crate::dispatch::dispatch(&self.ctx, &entry).await
     }
 
     /// Act on a review verdict (escalate `[READY]` on a matching approval; wake the LLM on
@@ -266,11 +298,9 @@ impl RealHandler {
                     changes_branch.as_str(), message
                 )).await
             }
-            // Scaffold stub: leaf B3 restructures `handle_system` so ChildIdle is routed to its
-            // own render path (and the reviewer teardown becomes verdict-only). Until then no node
-            // emits ChildIdle, so this arm is unreached; render it as a fallback rather than panic.
-            SystemMessage::ChildIdle { summary } => {
-                self.deliver_to_llm(&format!("[child idle] {summary}")).await
+            // `ChildIdle` is intercepted in `handle_system` and never routed here.
+            SystemMessage::ChildIdle { .. } => {
+                unreachable!("ChildIdle is handled in handle_system, never reaches apply_verdict")
             }
         }
     }

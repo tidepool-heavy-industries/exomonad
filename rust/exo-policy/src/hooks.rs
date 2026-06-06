@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::tool::BoxFuture;
-use exo_caps::{Git, Log};
+use exo_caps::{
+    Addressee, Bus, CapResult, Git, Log, Message, MessageBody, MessageKind, Summary, SystemMessage,
+};
 
 /// A `PreToolUse` verdict. `Modify` rewrites the tool input in place (the PII-rewrite path).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,14 +89,49 @@ pub fn pre_tool_use<'a, R: Send + Sync>(
     })
 }
 
-/// The local convergence gate (v2 — no GitHub). A parent folds a child by merging its
-/// **branch** off disk, so uncommitted work is invisible to that merge. Block exit while the
-/// worktree is dirty — the agent must commit (or discard) before it stops. Fail OPEN on any
-/// error: a hook must never wedge an agent in its turn-loop (that bricks the session).
-pub fn stop<'a, R: Git + Log + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, StopDecision> {
+/// Build the [`ChildIdle`](SystemMessage::ChildIdle) a non-root node delivers to its parent at
+/// turn-end. Minimal by design (v1): a fixed human-readable summary the parent's `handle_system`
+/// renders. Refinement (dedupe, richer state from the hook payload) lands parent-side later, not
+/// by growing this message.
+fn child_idle_message() -> CapResult<Message> {
+    let summary = "finished a turn and is yielding control";
+    Ok(Message {
+        text: MessageBody::new(format!("[idle] {summary}"))?,
+        summary: Summary::new(summary.into())?,
+        kind: MessageKind::System(SystemMessage::ChildIdle {
+            summary: summary.into(),
+        }),
+    })
+}
+
+/// Best-effort turn-end signal: deliver a `ChildIdle` to the parent. Logs and swallows any error
+/// — a stop hook must never fail an agent's exit over a missed notification. Root has no parent,
+/// so it never calls this (it uses `stop_allow`).
+async fn notify_parent_idle<R: Bus + Log>(ctx: &R) {
+    match child_idle_message() {
+        Ok(msg) => {
+            if let Err(e) = ctx.deliver(Addressee::Parent, msg).await {
+                ctx.error(&format!("stop hook: failed to notify parent of idle: {e}"));
+            }
+        }
+        Err(e) => ctx.error(&format!(
+            "stop hook: could not build ChildIdle message: {e}"
+        )),
+    }
+}
+
+/// The local convergence gate for a spawned TL (v2 — no GitHub). A parent folds a child by
+/// merging its **branch** off disk, so uncommitted work is invisible to that merge: block exit
+/// while the worktree is dirty (commit or discard first). On a clean exit the node is yielding
+/// control, so notify the parent it went idle. Fails OPEN on any git error — a hook must never
+/// wedge an agent in its turn-loop (that bricks the session).
+pub fn stop<'a, R: Git + Log + Bus + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, StopDecision> {
     Box::pin(async move {
         match ctx.is_clean().await {
-            Ok(true) => StopDecision::Allow,
+            Ok(true) => {
+                notify_parent_idle(ctx).await;
+                StopDecision::Allow
+            }
             Ok(false) => StopDecision::Block {
                 reason: "Uncommitted changes in your worktree. Commit your work (a parent merges \
                          your branch off disk — uncommitted changes are invisible to that merge), \
@@ -111,11 +148,23 @@ pub fn stop<'a, R: Git + Log + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, StopDec
     })
 }
 
-/// Stop hook for nodes that never file a PR (root, worker): always allow exit — there is
-/// nothing to gate on, and querying GitHub would be pointless (and could wedge). The root
-/// especially must never be gated: blocking it bricks the human's session.
+/// Unconditional-allow stop hook (root, reviewer): nothing to fold and no parent to notify, so
+/// always allow exit. The root especially must never be gated — blocking it bricks the human's
+/// session; the reviewer's `verdict` is already its done-signal.
 pub fn stop_allow<R: Send + Sync>(_ctx: &R) -> BoxFuture<'_, StopDecision> {
     Box::pin(async move { StopDecision::Allow })
+}
+
+/// Stop hook for Gemini leaves (dev, worker): notify the parent this node yielded control, then
+/// ALWAYS allow exit. It NEVER blocks — Gemini's `AfterAgent` `deny` can infinite-loop
+/// (gemini-cli #20426), so a Gemini role must not block at stop. The committed-before-fold
+/// guarantee for a dev is enforced by `submit_branch`'s committed-check, not here; a worker is
+/// inline with no branch to fold.
+pub fn stop_notify<'a, R: Bus + Log + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, StopDecision> {
+    Box::pin(async move {
+        notify_parent_idle(ctx).await;
+        StopDecision::Allow
+    })
 }
 
 pub fn session_start<'a, R: Send + Sync>(_ctx: &'a R) -> BoxFuture<'a, SessionStartOutput> {
@@ -128,8 +177,55 @@ pub fn session_start<'a, R: Send + Sync>(_ctx: &'a R) -> BoxFuture<'a, SessionSt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::MockRuntime;
+    use crate::testing::{Call, MockRuntime};
     use serde_json::json;
+
+    fn delivered_child_idle_to_parent(calls: &[Call]) -> bool {
+        calls.iter().any(|c| {
+            matches!(
+                c,
+                Call::BusDeliver { to: Addressee::Parent, msg }
+                    if matches!(msg.kind, MessageKind::System(SystemMessage::ChildIdle { .. }))
+            )
+        })
+    }
+
+    #[tokio::test]
+    async fn test_stop_notifies_parent_on_clean_allow() {
+        let ctx = MockRuntime::default(); // is_clean = true
+        assert_eq!(stop(&ctx).await, StopDecision::Allow);
+        assert!(
+            delivered_child_idle_to_parent(&ctx.calls_made()),
+            "clean stop should notify parent of idle"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stop_block_when_dirty_does_not_notify() {
+        let ctx = MockRuntime {
+            is_clean: false,
+            ..Default::default()
+        };
+        assert!(matches!(stop(&ctx).await, StopDecision::Block { .. }));
+        assert!(
+            !delivered_child_idle_to_parent(&ctx.calls_made()),
+            "a blocked (still-working) node must not notify idle"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stop_notify_allows_and_notifies() {
+        let ctx = MockRuntime::default();
+        assert_eq!(stop_notify(&ctx).await, StopDecision::Allow);
+        assert!(delivered_child_idle_to_parent(&ctx.calls_made()));
+    }
+
+    #[tokio::test]
+    async fn test_stop_notify_never_blocks_even_if_deliver_fails() {
+        let ctx = MockRuntime::failing("deliver");
+        // Even when the bus delivery errors, a Gemini stop must allow exit (never block).
+        assert_eq!(stop_notify(&ctx).await, StopDecision::Allow);
+    }
 
     #[test]
     fn hook_decision_serde_is_tagged() {
