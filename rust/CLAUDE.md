@@ -1,12 +1,15 @@
-# Claude Code++: Human-Augmented Sessions
+# ExoMonad Rust Workspace
 
-Rust workspace for augmenting human-driven Claude Code sessions with ExoMonad integrations.
+This workspace contains two coexisting architectures for augmenting Claude Code sessions.
 
-**This is NOT a headless orchestration system.** Humans interact with Claude Code directly via TTY; this infrastructure adds superpowers.
+1. **Classic Architecture** (`exomonad serve`): A central MCP server hosting Haskell WASM plugins. Designed for interactive, human-augmented sessions.
+2. **Node-mode V2** (`exomonad experimental node`): A headless, serverless swarm where each agent has its own Rust sidecar. Designed for autonomous, distributed orchestration.
 
-## Architecture
+Both architectures share tmux isolation, git-worktree code isolation, the agent triad, and the scaffold-fork-converge lifecycle.
 
-**100% WASM routing.** All MCP tool logic lives in Haskell WASM; Rust handles I/O only.
+## Architecture: Classic
+
+**100% WASM routing.** All tool/hook logic lives in Haskell WASM; Rust handles I/O only.
 
 ```
 Claude Code (hook or MCP call)
@@ -24,14 +27,26 @@ Claude Code (hook or MCP call)
   Result marshalled back through WASM
 ```
 
-### Key Components
+### Key Components (Classic)
 
 | Component | Purpose |
 |-----------|---------|
 | **exomonad** | Rust binary with WASM plugin support (hooks + MCP) |
-| **exomonad-core** | Everything: framework, handlers, services, protocol types, UI protocol |
+| **exomonad-core** | Framework, handlers, services, protocol types, UI protocol |
 | **exomonad-proto** | Proto-generated types (prost) for FFI + effects |
-| **wasm-guest** | Haskell WASM plugin (pure logic, no I/O) |
+
+## Architecture: Node-mode (V2)
+
+**Zero-link capability seam.** Tool/hook logic is plain Rust generic over the `exo-caps` trait boundary. No central server; filesystem as the bus; process tree as the topology.
+
+| Component | Purpose |
+|-----------|---------|
+| [**exo-caps**](exo-caps/CLAUDE.md) | The capability seam: trait contract + validated domain types (no IO) |
+| [**exo-runtime**](exo-runtime/CLAUDE.md) | IO impls of every cap on one `Runtime` (reuses exomonad-core services) |
+| [**exo-policy**](exo-policy/CLAUDE.md) | Tools / roles / hooks, generic over caps; unit-testable with zero IO |
+| [**exo-node**](exo-node/CLAUDE.md) | The per-node sidecar: outbound MCP + inbound inbox-watch + hook mode |
+| [**exo-scry**](exo-scry/CLAUDE.md) | Derive a session's active team from live OS state (native Teams delivery) |
+| **claude-teams-bridge** | Read/write messages through Claude Code's Teams filesystem |
 
 ### Deployment
 
@@ -87,9 +102,16 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • External service clients: Anthropic, GitHub, Ollama, OTLP
 │   • tmux IPC (via `std::process::Command`, buffer pattern for input injection)
 │
-└── exomonad-proto/  ← Proto-generated types (prost)
-    • FFI boundary types
-    • Effect request/response messages
+├── exomonad-proto/  ← Proto-generated types (prost)
+│   • FFI boundary types
+│   • Effect request/response messages
+│
+├── exo-caps/CLAUDE.md    ← V2: The capability seam (trait contract)
+├── exo-runtime/CLAUDE.md ← V2: IO implementations of every cap
+├── exo-policy/CLAUDE.md  ← V2: Tool/role/hook logic (generic over caps)
+├── exo-node/CLAUDE.md    ← V2: The per-node sidecar binary/lib
+├── exo-scry/CLAUDE.md    ← V2: Live OS session derivation
+└── claude-teams-bridge/  ← V2: Native Teams filesystem bridge
 ```
 
 ## Workspace Members
@@ -113,6 +135,7 @@ is on-disk (local `git merge`) — no GitHub/Copilot. Built beside classic, non-
 | [exo-policy](exo-policy/CLAUDE.md) | Library | Tools / roles / hooks, generic over caps; unit-testable with zero IO |
 | [exo-node](exo-node/CLAUDE.md) | Library | The per-node sidecar: outbound MCP + inbound inbox-watch + hook mode |
 | [exo-scry](exo-scry/CLAUDE.md) | Lib + bin | Derive a CC session's active team from live OS state (native Teams delivery) |
+| claude-teams-bridge | Library | Read/write messages through Claude Code's Teams filesystem |
 
 ### Feature Flags (exomonad-core)
 
@@ -170,9 +193,9 @@ Roles are defined in Haskell WASM (`AllRoles.hs`). Adding a role is a Haskell-on
 
 At spawn time, `fork_wave`/`spawn_gemini` writes per-agent MCP config with the agent's identity flags. Identity is unforgeable and visible in logs.
 
-## MCP Tools
+## MCP Tools (Classic)
 
-All tools are defined in Haskell WASM and executed via host functions.
+All tools in the Classic architecture are defined in Haskell WASM and executed via host functions.
 
 | Tool | Role | Description |
 |------|------|-------------|
@@ -183,9 +206,9 @@ All tools are defined in Haskell WASM and executed via host functions.
 | `notify_parent` | all | Send message to parent agent (auto-routed via Teams inbox or tmux) |
 | `send_message` | all | Send message to another exomonad-spawned agent (routes via Teams inbox, UDS, or tmux) |
 
-## Effect System
+## Effect System (Classic)
 
-All WASM↔Rust communication flows through a single `yield_effect` host function. The Haskell guest sends protobuf-encoded `EffectEnvelope` messages, and the `EffectRegistry` dispatches to the appropriate handler by namespace prefix.
+All WASM↔Rust communication in the Classic architecture flows through a single `yield_effect` host function. The Haskell guest sends protobuf-encoded `EffectEnvelope` messages, and the `EffectRegistry` dispatches to the appropriate handler by namespace prefix.
 
 ```
 Haskell: runEffect @GitGetBranch request
@@ -262,17 +285,18 @@ cargo test -p exomonad-proto            # Wire format compatibility tests
 
 ## Design Decisions
 
-| Decision | Rationale |
-|----------|-----------|
-| 100% WASM routing | All logic in Haskell, Rust handles I/O only |
-| Single `yield_effect` host fn | One entry point, all effects dispatched by namespace via EffectRegistry |
-| Protobuf binary encoding | Type-safe FFI boundary, generated types on both sides |
-| `runtime` feature flag | Plugin consumers get lightweight types without heavy deps |
-| High-level effects | `SpawnAgent` not `CreateWorktree + OpenWindow` |
-| Local tmux orchestration | Git worktrees + tmux windows, no Docker containers |
-| CLI-based tmux IPC | `std::process::Command` calls to `tmux` binary |
-| Extism runtime | Mature WASM runtime with host function support |
-| File-based devswarm WASM | Single WASM for all roles, loaded from disk, hot reload in serve mode |
+| Decision | Rationale | Scope |
+|----------|-----------|-------|
+| 100% WASM routing | All logic in Haskell, Rust handles I/O only | Classic |
+| Capability Seam | Tool/hook logic in Rust, generic over IO traits | V2 |
+| Single `yield_effect` host fn | One entry point, all effects dispatched by namespace | Classic |
+| Protobuf binary encoding | Type-safe FFI boundary, generated types on both sides | Classic |
+| Filesystem as the Bus | JSONL inboxes; zero-serialization soft wall | V2 |
+| `runtime` feature flag | Plugin consumers get lightweight types without heavy deps | Classic |
+| Local tmux orchestration | Git worktrees + tmux windows, no Docker containers | Both |
+| CLI-based tmux IPC | `std::process::Command` calls to `tmux` binary | Both |
+| Extism runtime | Mature WASM runtime with host function support | Classic |
+| File-based devswarm WASM | Single WASM for all roles, loaded from disk, hot reload | Classic |
 
 ## Related Documentation
 
