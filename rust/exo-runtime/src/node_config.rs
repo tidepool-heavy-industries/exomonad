@@ -62,3 +62,94 @@ pub async fn write_node_agent_config(agent_dir: &Path, papers_path: &Path) -> st
 
     Ok(())
 }
+
+/// Write the Gemini-specific `settings.json` (MCP + hooks) to the given agent directory.
+pub async fn write_gemini_node_config(agent_dir: &Path, papers_path: &Path) -> std::io::Result<()> {
+    let p_raw = papers_path.to_string_lossy();
+    let p_esc = shell_escape::escape(p_raw.clone().into_owned().into()).into_owned();
+
+    let settings = gemini_settings_json(&p_raw, &p_esc);
+    let settings_json = serde_json::to_vec_pretty(&settings).map_err(|e| {
+        std::io::Error::other(format!("gemini settings encode: {e}"))
+    })?;
+
+    // Gemini settings live in the agent root (unlike Claude's .claude/ subfolder),
+    // pointed to by GEMINI_CLI_SYSTEM_SETTINGS_PATH.
+    let settings_path = agent_dir.join("settings.json");
+    let mut f = tokio::fs::File::create(&settings_path).await?;
+    f.write_all(&settings_json).await?;
+    f.sync_all().await?;
+
+    Ok(())
+}
+
+pub(crate) fn gemini_settings_json(papers_path: &str, p_str_escaped: &str) -> serde_json::Value {
+    use exo_caps::invocation::{
+        hook_command, GEMINI_AFTER_AGENT, GEMINI_BEFORE_TOOL, GEMINI_SESSION_START,
+        PRE_TOOL_USE, SESSION_START, STOP,
+    };
+
+    let mut hooks = serde_json::Map::new();
+    hooks.insert(
+        GEMINI_BEFORE_TOOL.to_string(),
+        serde_json::json!([{
+            "matcher": "*",
+            "hooks": [{"type": "command", "command": hook_command(PRE_TOOL_USE, p_str_escaped)}]
+        }]),
+    );
+    hooks.insert(
+        GEMINI_AFTER_AGENT.to_string(),
+        serde_json::json!([{
+            "matcher": "*",
+            "hooks": [{"type": "command", "command": hook_command(STOP, p_str_escaped)}]
+        }]),
+    );
+    hooks.insert(
+        GEMINI_SESSION_START.to_string(),
+        serde_json::json!([{
+            "matcher": "*",
+            "hooks": [{"type": "command", "command": hook_command(SESSION_START, p_str_escaped)}]
+        }]),
+    );
+
+    serde_json::json!({
+        "mcpServers": {
+            "exomonad": {
+                "type": "stdio",
+                "command": "exomonad",
+                "args": exo_caps::invocation::node_args(papers_path)
+            }
+        },
+        "hooks": hooks
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use exo_caps::invocation::{GEMINI_AFTER_AGENT, GEMINI_BEFORE_TOOL, GEMINI_SESSION_START};
+
+    #[test]
+    fn test_gemini_settings_shape() {
+        let papers = "/tmp/node.json";
+        let escaped = "'/tmp/node.json'";
+        let json = gemini_settings_json(papers, escaped);
+
+        // 1. MCP server args
+        let args = &json["mcpServers"]["exomonad"]["args"];
+        assert_eq!(args[3], papers);
+
+        // 2. Hook keys and matchers (must be "*")
+        let hooks = &json["hooks"];
+        assert_eq!(hooks[GEMINI_BEFORE_TOOL][0]["matcher"], "*");
+        assert_eq!(hooks[GEMINI_AFTER_AGENT][0]["matcher"], "*");
+        assert_eq!(hooks[GEMINI_SESSION_START][0]["matcher"], "*");
+
+        // 3. Command wiring
+        let cmd = hooks[GEMINI_BEFORE_TOOL][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+        assert!(cmd.contains("pre-tool-use"));
+        assert!(cmd.contains(escaped));
+    }
+}
