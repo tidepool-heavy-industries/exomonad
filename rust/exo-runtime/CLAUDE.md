@@ -42,4 +42,3 @@ All three spawn ops (`spawn_worker`/`spawn_gemini`/`fork_wave`) fix their own `(
 - **`birth` itself is not unit-tested** (it needs live tmux+git). Only its helpers (ledger append/read, name resolution, inbox-path derivation) and `Bus` have automated tests; the converge integration test (`exo-node/tests/converge.rs`) covers the bus round-trip end-to-end.
 - `birth` hardcodes `yolo=true` and `wrap_nix=false` (node children launch plain, like the root) — no config knob yet.
 - The inbox-path scheme is **duplicated** between `spawner.rs` and `bus.rs` (noted in-code) — a deliberate non-hoist to avoid cross-file churn during the parallel build; a converge-time cleanup that hasn't happened.
-- `reclaim_worktree`/`kill_pane` work but nothing calls them (no convergence-teardown tool — see `exo-policy`).
