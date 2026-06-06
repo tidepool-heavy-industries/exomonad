@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use exo_caps::{
-    Addressee, AgentName, Branch, Bus, IngestionEntry, InboxPath, Message, MessageBody,
+    Addressee, AgentName, Branch, Bus, InboxPath, IngestionEntry, Message, MessageBody,
     MessageKind, NodePath, PaneId, Persona, Summary,
 };
 use exo_runtime::Runtime;
