@@ -1,10 +1,12 @@
 //! Hook-RPC client — the short-lived `exomonad experimental hook` process.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use exo_caps::{HookRequest, HookVerdict, NodePapers};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
+use tokio::time::timeout;
 
 use crate::error::{NodeError, NodeResult};
 
@@ -15,20 +17,31 @@ use crate::error::{NodeError, NodeResult};
 /// Framing: write the request JSON, half-close the write side (EOF signals end-of-request to the
 /// server), then read the response JSON to EOF.
 pub async fn client_request(sock: &Path, req: &HookRequest) -> NodeResult<HookVerdict> {
-    let mut stream = UnixStream::connect(sock).await?;
-    let bytes = serde_json::to_vec(req)
-        .map_err(|e| std::io::Error::other(format!("encode HookRequest: {e}")))?;
-    stream.write_all(&bytes).await?;
-    stream.shutdown().await?;
+    let verdict = timeout(Duration::from_secs(5), async {
+        let mut stream = UnixStream::connect(sock).await?;
+        let bytes = serde_json::to_vec(req)
+            .map_err(|e| std::io::Error::other(format!("encode HookRequest: {e}")))?;
+        stream.write_all(&bytes).await?;
+        stream.shutdown().await?;
 
-    let mut resp = Vec::new();
-    stream.read_to_end(&mut resp).await?;
-    let verdict: HookVerdict = serde_json::from_slice(&resp).map_err(|e| {
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).await?;
+        let verdict: HookVerdict = serde_json::from_slice(&resp).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("decode HookVerdict: {e}"),
+            )
+        })?;
+        Ok::<HookVerdict, NodeError>(verdict)
+    })
+    .await
+    .map_err(|_| {
         std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("decode HookVerdict: {e}"),
+            std::io::ErrorKind::TimedOut,
+            format!("hook socket RPC timed out for {}", sock.display()),
         )
-    })?;
+    })??;
+
     Ok(verdict)
 }
 
