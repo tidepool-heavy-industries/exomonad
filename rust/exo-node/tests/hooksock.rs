@@ -60,6 +60,7 @@ async fn hook_rpc_round_trips_over_uds() {
 
     // Stop: Root → stop_allow → Allow → Claude allow shape.
     let v = hooksock::client_request(
+        "root",
         &sock,
         &HookRequest {
             event: HookEvent::Stop,
@@ -72,6 +73,7 @@ async fn hook_rpc_round_trips_over_uds() {
 
     // PreToolUse `git add .` → the antipattern nudge (Claude deny shape: continue + systemMessage).
     let v = hooksock::client_request(
+        "root",
         &sock,
         &HookRequest {
             event: HookEvent::PreToolUse,

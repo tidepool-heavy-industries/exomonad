@@ -99,21 +99,40 @@ pub async fn watch(ctx: Arc<NodeContext>) -> NodeResult<()> {
     }
 
     let handler = RealHandler { ctx: ctx.clone() };
+    let node = ctx.runtime.name();
 
     // Initial pass to catch anything already there. A transient failure (file/cursor IO) must
     // not stop the loop — the next notify wake re-reads from the unchanged offset.
-    if let Err(e) = process_inbox(&handler, &inbox_path, &cursor_path, &mut offset).await {
-        warn!("inbound initial pass failed (will retry on next event): {e}");
+    if let Err(e) = process_inbox(
+        node.as_str(),
+        &handler,
+        &inbox_path,
+        &cursor_path,
+        &mut offset,
+    )
+    .await
+    {
+        warn!(node = %node.as_str(), "inbound initial pass failed (will retry on next event): {e}");
     }
 
     while let Some(()) = rx.recv().await {
         // Drain any coalesced events
         while rx.try_recv().is_ok() {}
 
-        match process_inbox(&handler, &inbox_path, &cursor_path, &mut offset).await {
+        match process_inbox(
+            node.as_str(),
+            &handler,
+            &inbox_path,
+            &cursor_path,
+            &mut offset,
+        )
+        .await
+        {
             Ok(true) => break, // shutdown received
             Ok(false) => {}
-            Err(e) => warn!("inbound pass failed (will retry on next event): {e}"),
+            Err(e) => {
+                warn!(node = %node.as_str(), "inbound pass failed (will retry on next event): {e}")
+            }
         }
     }
 
@@ -685,6 +704,7 @@ pub(crate) async fn try_reap(ctx: &Arc<NodeContext>) -> bool {
 
 /// Returns true if shutdown was requested
 async fn process_inbox<H: InboundHandler>(
+    node: &str,
     handler: &H,
     inbox_path: &Path,
     cursor_path: &Path,
@@ -723,11 +743,11 @@ async fn process_inbox<H: InboundHandler>(
         let entry: IngestionEntry = match serde_json::from_slice(line_bytes) {
             Ok(e) => e,
             Err(e) => {
-                warn!("failed to parse ingestion entry: {}", e);
+                warn!(node = %node, "failed to parse ingestion entry: {}", e);
                 // Advance past malformed line
                 *offset += line_len + 1;
                 if let Err(e) = save_cursor(cursor_path, *offset) {
-                    warn!("failed to persist cursor (will retry next wake): {e}");
+                    warn!(node = %node, "failed to persist cursor (will retry next wake): {e}");
                 }
                 continue;
             }
@@ -738,7 +758,7 @@ async fn process_inbox<H: InboundHandler>(
                 // Shutdown
                 *offset += line_len + 1;
                 if let Err(e) = save_cursor(cursor_path, *offset) {
-                    warn!("failed to persist cursor (will retry next wake): {e}");
+                    warn!(node = %node, "failed to persist cursor (will retry next wake): {e}");
                 }
                 return Ok(true);
             }
@@ -746,11 +766,11 @@ async fn process_inbox<H: InboundHandler>(
                 // Success (or no-op), advance cursor
                 *offset += line_len + 1;
                 if let Err(e) = save_cursor(cursor_path, *offset) {
-                    warn!("failed to persist cursor (will retry next wake): {e}");
+                    warn!(node = %node, "failed to persist cursor (will retry next wake): {e}");
                 }
             }
             Err(e) => {
-                error!("failed to route entry: {}. will retry on next wake", e);
+                error!(node = %node, "failed to route entry: {}. will retry on next wake", e);
                 // DO NOT advance cursor. Break batch to retry later.
                 return Ok(false);
             }
@@ -851,9 +871,15 @@ mod tests {
             fail_on: None,
         };
 
-        process_inbox(&handler, &inbox_path, &cursor_path, &mut offset)
-            .await
-            .unwrap();
+        process_inbox(
+            "test-node",
+            &handler,
+            &inbox_path,
+            &cursor_path,
+            &mut offset,
+        )
+        .await
+        .unwrap();
 
         let d = delivered.lock().unwrap();
         assert_eq!(d.len(), 3);
@@ -895,9 +921,15 @@ mod tests {
             fail_on: None,
         };
 
-        process_inbox(&handler, &inbox_path, &cursor_path, &mut offset)
-            .await
-            .unwrap();
+        process_inbox(
+            "test-node",
+            &handler,
+            &inbox_path,
+            &cursor_path,
+            &mut offset,
+        )
+        .await
+        .unwrap();
 
         let d = delivered.lock().unwrap();
         assert_eq!(d.len(), 1);
@@ -925,9 +957,15 @@ mod tests {
         };
 
         // Should deliver "one", fail on "two", and NOT advance cursor past "two"
-        process_inbox(&handler, &inbox_path, &cursor_path, &mut offset)
-            .await
-            .unwrap();
+        process_inbox(
+            "test-node",
+            &handler,
+            &inbox_path,
+            &cursor_path,
+            &mut offset,
+        )
+        .await
+        .unwrap();
 
         {
             let d = delivered.lock().unwrap();
@@ -949,9 +987,15 @@ mod tests {
             delivered: delivered.clone(),
             fail_on: None,
         };
-        process_inbox(&handler2, &inbox_path, &cursor_path, &mut offset)
-            .await
-            .unwrap();
+        process_inbox(
+            "test-node",
+            &handler2,
+            &inbox_path,
+            &cursor_path,
+            &mut offset,
+        )
+        .await
+        .unwrap();
 
         {
             let d = delivered.lock().unwrap();
@@ -981,9 +1025,15 @@ mod tests {
             fail_on: None,
         };
 
-        process_inbox(&handler, &inbox_path, &cursor_path, &mut offset)
-            .await
-            .unwrap();
+        process_inbox(
+            "test-node",
+            &handler,
+            &inbox_path,
+            &cursor_path,
+            &mut offset,
+        )
+        .await
+        .unwrap();
 
         let d = delivered.lock().unwrap();
         assert_eq!(d.len(), 1);
@@ -1007,9 +1057,15 @@ mod tests {
             fail_on: None,
         };
 
-        process_inbox(&handler, &inbox_path, &cursor_path, &mut offset)
-            .await
-            .unwrap();
+        process_inbox(
+            "test-node",
+            &handler,
+            &inbox_path,
+            &cursor_path,
+            &mut offset,
+        )
+        .await
+        .unwrap();
 
         {
             let d = delivered.lock().unwrap();
@@ -1036,9 +1092,15 @@ mod tests {
         };
 
         // 4. Process again, should only get the M new ones
-        process_inbox(&handler2, &inbox_path, &cursor_path, &mut new_offset)
-            .await
-            .unwrap();
+        process_inbox(
+            "test-node",
+            &handler2,
+            &inbox_path,
+            &cursor_path,
+            &mut new_offset,
+        )
+        .await
+        .unwrap();
 
         {
             let d = delivered2.lock().unwrap();
