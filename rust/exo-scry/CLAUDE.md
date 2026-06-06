@@ -16,7 +16,7 @@ CC's own teammate bookkeeping desyncs — we observed phantom teammates, stale `
 |----|-----------|-----|
 | `resolve_self()` | inotify, Linux | **The sidecar's entry point** — its own team. Walks self→parent `claude`, reads its inotify-watched `tasks/{team}` dir. Robust when sessions share a cwd. |
 | `resolve_active_team(target)` | inotify, Linux | Same, for an arbitrary `ProbeTarget` (pid / tmux pane / self). The only way to resolve a *third party's* team. |
-| `resolve_by_session(uuid)` | config scan, portable | Match a known session UUID against team configs' `leadSessionId`. For self/sidecar contexts where CC hands the process its own `session_id`; works off-Linux. |
+| `resolve_by_session(uuid)` | config scan, portable | Match a known session UUID against team configs' `leadSessionId`. For self/sidecar contexts (portable); works off-Linux. |
 | `resolve_via_transcript(target)` | cwd→transcript, portable-ish | Find the session's newest transcript in its cwd's project dir → UUID → team. Fails loud (`AmbiguousCwd`) if multiple live Claudes share the cwd. |
 
 `ActiveTeam { team, tasks_dir, lead_inbox, lead_session_id, me, claude_pid }` is the resolved result; `lead_inbox` is the routing target `dispatch` writes.
