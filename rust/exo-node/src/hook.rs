@@ -50,15 +50,40 @@ fn identity_context(ctx: &NodeContext) -> String {
         None => "none (root)".to_string(),
     };
 
+    // Claude nodes lead a solo team so the Bus's last hop can deliver native <teammate-message>s.
+    // Team names are a GLOBAL namespace, so the agent picking its own collides across re-runs /
+    // siblings → TeamCreate fails → the node leads no team → delivery degrades to tmux paste.
+    // Mint a run-scoped unique name here instead. Gemini has no TeamCreate (it receives via
+    // paste), so it gets no team instruction.
+    let team_line = if ctx.kind.agent_type() == exo_caps::AgentType::Claude {
+        let run8: String = ctx.run_id.chars().take(8).collect();
+        let safe_name: String = name
+            .as_str()
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        format!(
+            "\nIf you do not already lead a team, create one named exactly `exo-{safe_name}-{run8}` \
+             with the TeamCreate tool — that is how messages from other agents reach you as native \
+             teammate-messages. Do this before other work."
+        )
+    } else {
+        String::new()
+    };
+
     format!(
-        "You are exomonad node '{}' (role: {}) on branch '{}'. Parent: {}.\n\
-         If you do not already lead a team, create one now with the TeamCreate tool — that is \
-         how messages from other agents reach you, delivered as native teammate-messages. Do \
-         this before other work.",
+        "You are exomonad node '{}' (role: {}) on branch '{}'. Parent: {}.{}",
         name.as_str(),
         role,
         branch.as_str(),
-        parent_str
+        parent_str,
+        team_line
     )
 }
 
@@ -181,11 +206,31 @@ mod tests {
         assert!(id.contains("(role: dev)"));
         assert!(id.contains("on branch 'main.root.dev-node'"));
         assert!(id.contains("Parent: root"));
-        assert!(id.contains("TeamCreate"));
+        // Gemini (Dev) receives via tmux paste — it must NOT be told to create a team.
+        assert!(
+            !id.contains("TeamCreate"),
+            "Gemini must get no team instruction: {id}"
+        );
+
+        // Claude (Tl) leads a solo team with a run-scoped, globally-unique name (`run-123`[..8]).
+        let ctx_tl = mock_ctx(
+            NodeKind::Tl,
+            vec!["root", "tl-node"],
+            "main.root.tl-node",
+            true,
+        );
+        let id_tl = identity_context(&ctx_tl);
+        assert!(id_tl.contains("TeamCreate"));
+        assert!(
+            id_tl.contains("exo-tl-node-run-123"),
+            "expected run-scoped team name: {id_tl}"
+        );
 
         let ctx_root = mock_ctx(NodeKind::Root, vec!["root"], "main", false);
         let id_root = identity_context(&ctx_root);
         assert!(id_root.contains("Parent: none (root)"));
+        // Root is Claude too — it leads a team so children's ChildIdle can be delivered natively.
+        assert!(id_root.contains("exo-root-run-123"));
     }
 
     #[tokio::test]
