@@ -303,3 +303,62 @@ cargo test -p exomonad-proto            # Wire format compatibility tests
 - [Root CLAUDE.md](../CLAUDE.md) - Project overview and documentation tree
 - [Haskell wasm-guest](../haskell/wasm-guest/) - Haskell WASM plugin source
 - [Haskell WASM guest](../haskell/wasm-guest/CLAUDE.md) - MCP tool definitions
+
+## Classic Infrastructure & Observability
+
+### Built Infrastructure
+
+| Feature | Status |
+|---------|--------|
+| **Teams inbox delivery** | **Live.** `notify_parent` → Teams inbox → native `<teammate-message>` in parent conversation. Full E2E verified. |
+| **HTTP-over-UDS delivery** (Shoal/custom agents) | **Built.** `notify_parent` → POST to `.exo/agents/{name}/notify.sock`. Fire-and-forget with 5s timeout. For custom binary agents that run their own HTTP server on a Unix socket. |
+| **Event router** (tmux STDIN fallback) | Built. Fallback path: `notify_parent` → `inject_input` into parent pane via tmux buffer pattern. |
+| **Event handlers** (WASM dispatch for world events) | **Built.** Third dispatch category alongside tools and hooks. GitHub poller calls `handle_event` on agent's PluginManager for PR review events (reviews, approvals, timeouts) and **sibling merge events**. Handlers return `EventAction` (InjectMessage, NotifyParent, NoAction). |
+| **GitHub poller** (PR status → events) | Built. Background service polls PR/CI status, fires WASM event handlers, and injects notifications into agent panes. Tracks `first_seen`, `last_review_state`, and `notified_parent_timeout` per PR. |
+| **OTel observability** | **Built.** Axum middleware auto-attributes every agent request span with `agent_id`, `agent.role`, `agent.parent`, `swarm.run_id`. `swarm.run_id` persisted to `.exo/run_id`, set as OTel resource attribute, propagated to children via env. Query all spans in a run: `resource.swarm.run_id = '{id}'`. Reconstruct spawn tree: `groupBy agent.parent, agent_id`. |
+| **Coordination mutexes** | Built. In-memory `MutexRegistry` with FIFO wait queues, TTL auto-expiry, idempotent acquire. Effect-only (`coordination.acquire_mutex`, `coordination.release_mutex`) — no MCP tool exposed. |
+| **Tempo observability** | **Built.** Grafana Tempo for lightweight trace storage (~100-200MB RAM). Agents query traces via `curl` + TraceQL against Tempo's HTTP API (port 3200). Optional Grafana UI at `http://localhost:3000`. |
+| **NotebookLM MCP** (optional) | **Vendored.** `vendor/notebooklm-mcp/` — stdio MCP server that automates Google NotebookLM via browser automation. Source-grounded, citation-backed answers from uploaded documentation. Opt-in via `extra_mcp_servers` in `config.toml`. |
+
+### Tempo Observability
+
+Grafana Tempo provides lightweight trace storage with TraceQL query support. Agents query traces directly via `curl` against Tempo's HTTP API — no MCP tools needed.
+
+```bash
+# Start Tempo
+docker compose -f .exo/otel/docker-compose.yml up -d
+
+# Start Tempo + Grafana UI
+docker compose -f .exo/otel/docker-compose.yml --profile grafana up -d
+
+# Set otlp_endpoint in .exo/config.toml:
+# otlp_endpoint = "http://localhost:4317"
+
+# Endpoints:
+#   OTLP:       localhost:4317 (gRPC), localhost:4318 (HTTP)
+#   Tempo API:  http://localhost:3200 (TraceQL queries)
+#   Grafana UI: http://localhost:3000 (optional, with --profile grafana)
+```
+
+**Querying traces (TraceQL via curl):**
+```bash
+# All spans in a run
+curl -s 'http://localhost:3200/api/search?q=%7B+resource.swarm.run_id+%3D+%22abc%22+%7D&limit=50&spss=100'
+
+# Find error spans for an agent
+curl -s 'http://localhost:3200/api/search?q=%7B+span.agent_id+%3D+%22my-agent%22+%26%26+span%3Astatus+%3D+error+%7D'
+
+# Parent-child structural query
+curl -s 'http://localhost:3200/api/search?q=%7B+span.agent_id+%3D+%22tl%22+%7D+%3E%3E+%7B+span.agent_id+%3D+%22worker-1%22+%7D'
+
+# Full trace by ID
+curl -s 'http://localhost:3200/api/traces/{traceID}'
+```
+
+Without Tempo running, spans still appear in stderr via the tracing fmt layer.
+
+### Key Design Decisions
+
+1. **freer-simple for effects** — Standardized on freer-simple for reified continuations (WASM yield/resume)
+2. **Haskell WASM as typed config DSL** — All tool/hook/event logic in Haskell, all I/O in Rust runners. The WASM yields effects; Rust executes them. Agents themselves have full tool access (bash, files, git).
+3. **Haskell WASM = embedded DSL** — All logic in Haskell, Rust handles I/O only
