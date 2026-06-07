@@ -26,7 +26,7 @@ lib (`lib.rs` + `tools/` + `gates.rs` + `roles.rs`) stays generic over the caps 
 | `main.rs` | The CLI dispatcher (bin): clap `Cli` → `init` / `node` / `hook`. `node` is the composition root — `exo node --papers <path>` → build the roster → `exo_node::bootstrap(papers, cwd, roster())` → `run_node`. |
 | `init.rs` | `exo init [--session <s>] [--recreate]` — bootstrap a node-mode ROOT (own tmux session, root papers, no server). Reuses `exo-runtime`/`exomonad-shared`. |
 | `hook.rs` | `exo hook <event> --papers <path>` — handle a CC/Gemini hook via the node's `exo` gate (SessionStart in-process; everything else routes to the sidecar hook socket, fail-open). |
-| `config.rs` | Minimal node-mode init config read (`tmux_session`, `model` only) — classic `exomonad` owns the full `Config`. |
+| `config.rs` | Minimal node-mode init config read (`tmux_session`, `model`, + the child-launch policy `yolo`/`wrap_nix` stamped onto the root's papers and inherited down the tree) — classic `exomonad` owns the full `Config`. |
 | `tools/` | One module per tool — a type + `Args` (derives `Deserialize + JsonSchema`) + generic-over-caps `run` + a ~6-line hand-written `Tool<R>` adapter (NO macro). Each ships mock-cap unit tests. |
 | `gates.rs` | The concrete hook bodies: `pre_tool_use` (antipattern nudges), `stop` (the convergence gate) + per-role variants (`stop_allow`/`stop_notify`/`stop_reviewer`), `session_start`. Functions generic over the caps they need. |
 | `roles.rs` | `role_def(NodeKind)` — the hand-written table (the single place a role's tool list + hooks are named) — and `roster()`, which wraps it as the `RoleRegistry` the binary injects. |

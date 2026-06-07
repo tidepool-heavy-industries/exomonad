@@ -71,7 +71,15 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Init { session, recreate } => {
             let cfg = config::discover();
-            init::run(&cfg.tmux_session, cfg.model.as_deref(), session, recreate).await
+            init::run(
+                &cfg.tmux_session,
+                cfg.model.as_deref(),
+                cfg.yolo,
+                cfg.wrap_nix,
+                session,
+                recreate,
+            )
+            .await
         }
 
         Commands::Node { papers } => {

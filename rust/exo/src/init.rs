@@ -74,6 +74,8 @@ fn ensure_git_excludes(cwd: &Path) -> Result<()> {
 pub async fn run(
     tmux_session: &str,
     model: Option<&str>,
+    yolo: bool,
+    wrap_nix: bool,
     session: Option<String>,
     recreate: bool,
 ) -> Result<()> {
@@ -112,7 +114,12 @@ pub async fn run(
         anyhow::bail!("Failed to set EXOMONAD_TMUX_SESSION in tmux session");
     }
 
-    let papers = exo_caps::NodePapers::root(root_pane.clone());
+    // Stamp the configured child-launch policy onto the root's papers. `birth` reads a node's own
+    // papers (`own_launch_policy`) and inherits the policy onto every child, so setting it on the
+    // root flows it down the whole tree. Defaults (config unset) keep launches byte-identical.
+    let mut papers = exo_caps::NodePapers::root(root_pane.clone());
+    papers.yolo = yolo;
+    papers.wrap_nix = wrap_nix;
     let papers_path = cwd.join(format!(".exo/node/{run_id}/root.json"));
     if let Some(parent) = papers_path.parent() {
         std::fs::create_dir_all(parent)?;

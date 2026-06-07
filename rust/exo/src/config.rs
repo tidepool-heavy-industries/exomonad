@@ -1,27 +1,37 @@
 //! Minimal config read for `exo init` (node-mode root bootstrap).
 //!
 //! Classic `exomonad` owns the full `Config` (17 fields, role/wasm/companions/…). The node-mode
-//! root bootstrap needs exactly two of them — `tmux_session` (the session name to attach) and
-//! `model` (the root agent's `--model` flag) — so this reads only those, with the same file
+//! root bootstrap needs a handful of them — `tmux_session` (the session name to attach), `model`
+//! (the root agent's `--model` flag), and the child-launch policy knobs (`yolo`, `wrap_nix`) that
+//! flow down the tree via the root's papers — so this reads only those, with the same file
 //! precedence (local over global) and the same session-name sanitization classic uses. It walks up
 //! from CWD for `.exo/config.toml` / `.exo/config.local.toml`; everything else falls back to a
 //! default so a config-less project still boots.
 
+use exo_caps::NodePapers;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-/// The two config fields the node-mode root bootstrap reads. (`serde(default)` on the raw form
+/// The config fields the node-mode root bootstrap reads. (`serde(default)` on the raw form
 /// ignores every other field, so this stays in sync with classic config files without naming them.)
 #[derive(Deserialize, Default)]
 struct RawInit {
     tmux_session: Option<String>,
     model: Option<String>,
+    /// Child-launch policy stamped onto the root's papers and inherited down the whole tree
+    /// (`own_launch_policy`). Absent ⇒ the behavior-preserving [`NodePapers`] defaults.
+    yolo: Option<bool>,
+    wrap_nix: Option<bool>,
 }
 
 /// Resolved node-mode init config.
 pub struct InitConfig {
     pub tmux_session: String,
     pub model: Option<String>,
+    /// Child-launch policy for the root node's papers (inherited down the tree). Defaulted to the
+    /// behavior-preserving [`NodePapers`] defaults when unset in config.
+    pub yolo: bool,
+    pub wrap_nix: bool,
 }
 
 /// Discover the node-mode init config by merging `.exo/config.local.toml` over `.exo/config.toml`,
@@ -45,10 +55,20 @@ pub fn discover() -> InitConfig {
     let tmux_session = sanitize_session_name(tmux_session);
 
     let model = local.model.or(global.model);
+    let yolo = local
+        .yolo
+        .or(global.yolo)
+        .unwrap_or(NodePapers::DEFAULT_YOLO);
+    let wrap_nix = local
+        .wrap_nix
+        .or(global.wrap_nix)
+        .unwrap_or(NodePapers::DEFAULT_WRAP_NIX);
 
     InitConfig {
         tmux_session,
         model,
+        yolo,
+        wrap_nix,
     }
 }
 
