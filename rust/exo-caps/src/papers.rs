@@ -31,14 +31,37 @@ pub struct NodePapers {
     pub pane: PaneId,
     /// Path to the parent's ingestion inbox (the up-edge). `None` for the root.
     pub parent_inbox: Option<InboxPath>,
+    /// Launch policy for this node's CHILDREN, inherited down the tree: a spawning node
+    /// stamps each child's papers with its own policy and reads these back to decide how to
+    /// launch the next generation. Defaulted on read so papers written by an older binary
+    /// preserve today's behavior. `yolo` → pass `--yolo` to Gemini children (auto-approve).
+    #[serde(default = "default_yolo")]
+    pub yolo: bool,
+    /// Wrap a child's launch command in `nix develop` when its cwd has a `flake.nix`.
+    /// Defaulted `false` — node children launch plain, matching the root.
+    #[serde(default = "default_wrap_nix")]
+    pub wrap_nix: bool,
 }
 
 fn default_papers_version() -> u32 {
     1
 }
 
+fn default_yolo() -> bool {
+    NodePapers::DEFAULT_YOLO
+}
+
+fn default_wrap_nix() -> bool {
+    NodePapers::DEFAULT_WRAP_NIX
+}
+
 impl NodePapers {
     pub const VERSION: u32 = 1;
+    /// Behavior-preserving launch defaults: node children launch yolo + non-nix-wrapped,
+    /// matching the root. Single source of truth for both papers defaulting and the
+    /// spawner's fallback when a node has no readable papers.
+    pub const DEFAULT_YOLO: bool = true;
+    pub const DEFAULT_WRAP_NIX: bool = false;
 
     /// Construct papers for the root node. The root has no parent (`parent_inbox` = `None`).
     pub fn root(pane: PaneId) -> Self {
@@ -52,16 +75,21 @@ impl NodePapers {
             role: NodeKind::Root,
             pane,
             parent_inbox: None,
+            yolo: Self::DEFAULT_YOLO,
+            wrap_nix: Self::DEFAULT_WRAP_NIX,
         }
     }
 
-    /// Construct papers for a node being born (`v` set to the current [`VERSION`]).
+    /// Construct papers for a node being born (`v` set to the current [`VERSION`]). `yolo` /
+    /// `wrap_nix` are the launch policy stamped onto the child (inherited from the parent).
     pub fn new(
         path: NodePath,
         branch: Branch,
         role: NodeKind,
         pane: PaneId,
         parent_inbox: Option<InboxPath>,
+        yolo: bool,
+        wrap_nix: bool,
     ) -> Self {
         NodePapers {
             v: Self::VERSION,
@@ -70,6 +98,8 @@ impl NodePapers {
             role,
             pane,
             parent_inbox,
+            yolo,
+            wrap_nix,
         }
     }
 }
@@ -93,6 +123,8 @@ mod tests {
             Some(InboxPath::new(
                 "/home/u/.claude/exo/inboxes/run-1/pane-311.jsonl".into(),
             )),
+            NodePapers::DEFAULT_YOLO,
+            NodePapers::DEFAULT_WRAP_NIX,
         );
         let json = serde_json::to_string(&papers).unwrap();
         // role serializes as the lowercase NodeKind variant
@@ -109,6 +141,8 @@ mod tests {
             NodeKind::Root,
             PaneId::new("%1".into()).unwrap(),
             None,
+            NodePapers::DEFAULT_YOLO,
+            NodePapers::DEFAULT_WRAP_NIX,
         );
         let json = serde_json::to_string(&papers).unwrap();
         assert!(json.contains(r#""parent_inbox":null"#));
@@ -121,6 +155,9 @@ mod tests {
             r#"{"path":["root"],"branch":"main","role":"root","pane":"%1","parent_inbox":null}"#;
         let papers: NodePapers = serde_json::from_str(json).unwrap();
         assert_eq!(papers.v, 1);
+        // The launch-policy fields, absent from older papers, default to today's behavior.
+        assert_eq!(papers.yolo, NodePapers::DEFAULT_YOLO);
+        assert_eq!(papers.wrap_nix, NodePapers::DEFAULT_WRAP_NIX);
     }
 
     #[test]
