@@ -61,11 +61,11 @@ Always prefer failure to an undocumented heuristic or fallback.
 
 ### Single Code Path
 
-Never maintain two code paths that do the same thing. Redundant paths cause bug risk. Note: The Classic and v2 architectures are coexisting parallel tracks, not redundant paths; they share the core `exomonad-core` services.
+Never maintain two code paths that do the same thing. Redundant paths cause bug risk. Note: The Classic and v2 architectures are coexisting parallel tracks, not redundant paths; the v2 track builds on the lean `exomonad-shared` crate, while Classic keeps the heavier `exomonad-core`.
 
 ### Capability Seam as Boundary (v2 Node-Mode)
 
-**In the v2 Node-Mode architecture, the `exo-caps` Rust crate is the IO boundary.** Tools, hooks, and roles are written as plain Rust in `exo-policy`, generic over the capability traits in `exo-caps`. A crate that does not link the `exo-runtime` (which implements the caps) cannot perform IO, providing security and testability via the crate graph with zero serialization cost.
+**In the v2 Node-Mode architecture, the `exo-caps` Rust crate is the IO boundary.** Tools, hooks, and roles are written as plain Rust in the `exo` domain crate (concrete tools/roles/gates) over the `exo-framework` abstractions, generic over the capability traits in `exo-caps`. A crate that does not link the `exo-runtime` (which implements the caps) cannot perform IO, providing security and testability via the crate graph with zero serialization cost.
 
 The Classic counterpart — *all* MCP tools and hooks defined in Haskell WASM, Rust as the I/O runtime — lives in [`haskell/wasm-guest/CLAUDE.md`](haskell/wasm-guest/CLAUDE.md).
 
