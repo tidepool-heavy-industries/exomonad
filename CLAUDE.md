@@ -1,15 +1,17 @@
 # ExoMonad
 
-Type-safe LLM agent orchestration. ExoMonad supports two coexisting architectures: the **Classic** Haskell-WASM DSL for centralized orchestration and the **v2 Node-Mode** swarm for decentralized, sidecar-based agency. Both share the core Agent Triad and Hylomorphism model.
+Type-safe LLM agent orchestration over a tree of context windows. Two coexisting architectures share one model:
 
-- **Classic** (`exomonad serve`): A central MCP server; all tool/hook/event logic compiled to Haskell WASM (the typed config DSL); Rust executes the I/O effects that the DSL yields.
-- **v2 Node-Mode** (`exomonad experimental`): No central server. One Rust sidecar per agent; the filesystem is the bus; the process tree is the topology. Tool/hook/role logic is plain Rust written generic over a capability seam (`exo-caps`). Convergence is local git merge.
+- **v2 Node-Mode** (`exomonad experimental`) — the active track. No central server: one Rust sidecar per agent, the filesystem is the bus, the process tree is the topology. Tool/hook/role logic is plain Rust over a capability seam (`exo-caps`). Convergence is local `git merge`.
+- **Classic** (`exomonad serve`) — **deprecated, still supported.** A central MCP server; all tool/hook/event logic compiled to Haskell WASM (a typed config DSL); Rust executes the I/O effects the DSL yields.
+
+This file is a **router**: the shared model below, then pointers into the nested `CLAUDE.md` tree where the per-component detail now lives.
 
 ---
 
 ## Model
 
-The shared conceptual framework for both architectures. ExoMonad is a **hylomorphism over context windows**. The unfold is planning + scaffolding + spawning. The fold is merging + integrating + PR-upward. The recursion scheme gives you the entire system.
+ExoMonad is a **hylomorphism over context windows**. The unfold is plan + scaffold + spawn; the fold is merge + integrate + surface-upward. That recursion scheme is the whole system.
 
 ### The Agent Triad
 
@@ -23,11 +25,11 @@ These are 1:1:1. You cannot have a worktree without a context window to operate 
 
 ### The Hylomorphism
 
-**Unfold (coalgebra = the scaffold commit).** A TL plans one level down, commits the shared foundation (types, interfaces, stubs, CLAUDE.md), and spawns children. The scaffold commit is the coalgebra — it defines the shape of the decomposition. This is the most important thing a TL does. Children fork from this commit and cannot see each other.
+**Unfold — the scaffold commit.** A TL plans one level down, commits the shared foundation (types, interfaces, stubs, CLAUDE.md), and spawns children. The scaffold commit defines the shape of the decomposition — the most important thing a TL does. Children fork from it and cannot see each other.
 
-**Fold (algebra = merge + integrate).** As children complete, the TL merges their PRs, wires outputs together, and writes an integration commit. Each merge is paramorphic — the TL accumulates understanding from what children produced. This accumulated context informs the next wave's specs. After all waves are folded, the TL files a PR upward, and its parent folds it in turn.
+**Fold — merge + integrate.** As children complete, the TL merges their branches, wires outputs together, and writes an integration commit — accumulating understanding from what children produced to sharpen the next wave's specs. After all waves fold, the TL surfaces its result to its parent, which folds it in turn.
 
-The operational realization is **Scaffold-Fork-Converge** (see [Tech Lead Praxis](#scaffold-fork-converge)).
+The operational realization is **Scaffold-Fork-Converge** (see [Tech Lead Praxis](#tech-lead-praxis-essence)).
 
 ### Depth over Breadth
 
@@ -41,7 +43,7 @@ Within a single TL's scope, work proceeds in waves. Wave N produces merged code.
 
 ### Branch Naming as Coordinate System
 
-`{parent}.{name}` (dot separator) encodes tree address, where `name = {slug}-{type}` (e.g., `auth-claude`, `oauth-provider-gemini`). `dev.auth-claude.oauth-provider-gemini` tells you: root is `dev`, first-level TL is `auth` (Claude), leaf is `oauth-provider` (Gemini). The last dot-segment IS the `AgentName` — one namespace, zero translation. PRs target the parent branch, not main — merged via recursive fold up the tree. The git DAG IS the computation trace.
+`{parent}.{name}` (dot separator) encodes tree address, where `name = {slug}-{type}` (e.g., `auth-claude`, `oauth-provider-gemini`). `dev.auth-claude.oauth-provider-gemini` tells you: root is `dev`, first-level TL is `auth` (Claude), leaf is `oauth-provider` (Gemini). The last dot-segment IS the `AgentName` — one namespace, zero translation. Branches converge to the parent branch, not main — folded up the tree (v2: local `git merge`; Classic: PR). The git DAG IS the computation trace.
 
 ---
 
@@ -61,15 +63,11 @@ Always prefer failure to an undocumented heuristic or fallback.
 
 Never maintain two code paths that do the same thing. Redundant paths cause bug risk. Note: The Classic and v2 architectures are coexisting parallel tracks, not redundant paths; they share the core `exomonad-core` services.
 
-### All Tools and Hooks in Haskell WASM (Classic)
-
-**In the Classic architecture, never add direct Rust MCP tools.** All MCP tools and hooks are defined in Haskell WASM — tool schemas, argument parsing, dispatch logic, everything. Rust is the I/O runtime: it executes effects that the Haskell DSL yields. If a new tool needs new I/O capabilities, add a new effect handler in Rust and a corresponding effect type in Haskell. The tool itself lives in `haskell/wasm-guest/src/ExoMonad/Guest/Tools/`.
-
-This is the architectural premise of Classic: Haskell WASM is the single source of truth for tool definitions. Rust never defines tool schemas, never parses tool arguments, never contains tool logic.
-
 ### Capability Seam as Boundary (v2 Node-Mode)
 
-**In the v2 Node-Mode architecture, the `exo-caps` Rust crate replaces the Haskell-WASM IO boundary.** Tools, hooks, and roles are written as plain Rust in `exo-policy`, generic over the capability traits in `exo-caps`. A crate that does not link the `exo-runtime` (which implements the caps) cannot perform IO, providing the same security and testability as WASM with zero serialization cost.
+**In the v2 Node-Mode architecture, the `exo-caps` Rust crate is the IO boundary.** Tools, hooks, and roles are written as plain Rust in `exo-policy`, generic over the capability traits in `exo-caps`. A crate that does not link the `exo-runtime` (which implements the caps) cannot perform IO, providing security and testability via the crate graph with zero serialization cost.
+
+The Classic counterpart — *all* MCP tools and hooks defined in Haskell WASM, Rust as the I/O runtime — lives in [`haskell/wasm-guest/CLAUDE.md`](haskell/wasm-guest/CLAUDE.md).
 
 ### Crosscutting Rules
 
@@ -87,22 +85,7 @@ paths:
 
 ### Logging
 
-Silent failures are unacceptable. When code shells out to subprocesses, calls external services, or crosses process/container boundaries, **log aggressively**:
-
-1. **Before the call**: Log what you're about to do (command, key parameters)
-2. **After the call**: Log exit code, status, response size
-3. **On error**: Log stderr, error messages, enough context to debug without reproducing
-4. **On success**: Log the result summary (e.g., `button=submit`, `items=5`)
-
-**Haskell pattern:**
-```haskell
-logInfo logger $ "[Component] Starting operation: " <> summary
-(exitCode, stdout, stderr) <- readProcessWithExitCode cmd args ""
-logInfo logger $ "[Component] Exit code: " <> T.pack (show exitCode)
-case exitCode of
-  ExitFailure code -> logError logger $ "[Component] FAILED: " <> T.pack stderr
-  ExitSuccess -> logInfo logger $ "[Component] Success: " <> resultSummary
-```
+Silent failures are unacceptable. When code shells out to subprocesses, calls external services, or crosses process/container boundaries, **log aggressively**: before the call (command, key params), after (exit code, status, size), on error (stderr, enough context to debug without reproducing), on success (result summary).
 
 **Rust pattern:**
 ```rust
@@ -114,614 +97,110 @@ if !status.success() {
 }
 ```
 
+The Haskell/WASM logging pattern is in [`haskell/wasm-guest/CLAUDE.md`](haskell/wasm-guest/CLAUDE.md).
+
 ---
 
 ## Getting Started
 
-### Session Entry Point
-
-**`exomonad new` is the one-time project bootstrap.** It creates `.exo/config.toml`, `.gitignore`, and copies WASM plugins and rules templates.
-
-**`exomonad init` is the idempotent entry point for Classic sessions.** It creates a tmux session with:
-- **Server window**: Runs `exomonad serve` (the MCP server, binds to `.exo/server.sock`)
-- **TL window**: Runs `nix develop` (where you launch `claude` or work directly)
-
-**`exomonad experimental init` is the entry point for v2 Node-Mode sessions.** It creates a decentralized swarm session with native Teams integration (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) and per-agent sidecars. No central server is started.
-
-The server must be running before Claude Code or Gemini can use MCP tools. Without it, every tool call fails. Init also writes `.mcp.json` (MCP server config) and `.claude/settings.local.json` (hooks and session settings).
-
+**v2 Node-Mode (active):**
 ```bash
-cd exomonad/                  # Run from the project root
-exomonad new                  # One-time setup: creates config, WASM, rules
-exomonad init                 # Creates tmux session, starts server
-# Then in the TL window:
-claude                        # MCP tools available immediately
+exomonad new                  # one-time: .exo/config.toml, .gitignore, rules templates
+exomonad experimental init    # decentralized swarm session (per-agent sidecars, native Teams)
 ```
 
-Use `--recreate` to tear down and rebuild the session (e.g., after binary updates).
+**Classic (deprecated):** `exomonad init` creates a central-server tmux session. Full classic getting-started, MCP registration, config, and companions → [`rust/exomonad/CLAUDE.md`](rust/exomonad/CLAUDE.md).
 
-**Project setup:**
+**Build / install:**
 ```bash
-exomonad new                     # Bootstrap new project (.exo/config.toml, WASM, rules)
+just install-all-dev          # debug build → ~/.cargo/bin/exomonad (fast iteration)
+just install-all              # release build
 ```
-
-**Server management:**
-```bash
-exomonad reload                  # Clear WASM plugin cache (next call loads fresh from disk)
-exomonad shutdown                # Gracefully shut down the running server
-```
-
-### MCP Registration
-
-`exomonad init` automatically registers the Claude MCP server. For Gemini, register manually via stdio:
-```bash
-gemini mcp add exomonad --command "exomonad mcp-stdio"
-```
-
-### Zero-Config for Consuming Repos
-
-After running `just install-all` (which installs WASM to `~/.exo/wasm/`), any project works out of the box:
-
-```bash
-cd ~/new-project && git init
-exomonad new                  # Creates .exo/config.toml, copies WASM from ~/.exo/wasm/
-exomonad init                 # Starts server, registers Claude MCP, creates tmux session
-```
-
-For custom roles, copy `.exo/roles/` and `.exo/lib/` from exomonad and `exomonad new` will build WASM from source instead.
-
-### Building
-
-```bash
-# One-command install (recommended - uses debug build for fast iteration)
-just install-all-dev
-
-# Or install release build (optimized, slower compile)
-just install-all
-
-# WASM builds (two equivalent options)
-just wasm-all                     # Build all WASM via nix
-exomonad recompile --role devswarm # Build specific role's WASM via nix
-# Both are standalone CLI commands — neither requires the server to be running.
-# Output: .exo/wasm/wasm-guest-devswarm.wasm
-
-# Rust sidecar only
-cargo build -p exomonad
-
-# Hot reload: server checks WASM mtime per tool call, so after recompile
-# the next MCP call picks up the new WASM automatically.
-# For immediate reload: `exomonad reload` clears the plugin cache explicitly.
-```
-
-**What `just install-all-dev` does:**
-1. Builds devswarm WASM plugin via nix
-2. Builds exomonad Rust binary (debug mode)
-3. Copies binary to `~/.cargo/bin/exomonad`
-
-**WASM build pipeline:**
-1. Role configs in `.exo/roles/devswarm/` define tool composition per role (`RootRole.hs`, `TLRole.hs`, `DevRole.hs`, `WorkerRole.hs`)
-2. `AllRoles.hs` registers all roles; `Main.hs` provides FFI exports
-3. `cabal.project.wasm` lists the devswarm package alongside `wasm-guest` SDK
-4. `just wasm-all` builds via `nix develop .#wasm -c wasm32-wasi-cabal build ...`
-5. Compiled WASM copied to `.exo/wasm/wasm-guest-devswarm.wasm`
-6. `exomonad serve` loads devswarm WASM from `.exo/wasm/` at runtime (hot reload via mtime check)
-
-### Configuration
-
-**Bootstrap:** `exomonad new` auto-creates `.exo/config.toml` (empty, all defaults) and `.gitignore` entries if missing. Works in any project directory. All fields are optional — auto-detection handles the common case. **Claude rules:** `exomonad new` copies `.exo/rules/exomonad.md` → `.claude/rules/exomonad.md` (if the template exists and the destination doesn't). Template resolution: project-local `.exo/rules/` → global `~/.exo/rules/`. This gives fresh Claude instances automatic knowledge of exomonad MCP tools.
-
-```toml
-# All fields below are optional — shown with their auto-detected defaults
-default_role = "tl"          # auto-detected from .exo/roles/ if exactly one role exists
-project_dir = "."
-shell_command = "nix develop" # environment wrapper for TL tab + server
-wasm_dir = ".exo/wasm"       # project-local (default), override for shared installs
-wasm_name = "devswarm"       # auto-detected from .exo/roles/ if exactly one role exists
-model = "sonnet"             # optional — passed as --model flag to root TL agent
-poll_interval = 60           # optional — GitHub poll cycle in seconds (default: 60)
-
-# Extra MCP servers (HTTP or stdio). Included in .mcp.json for all agents.
-[extra_mcp_servers.metacog]
-type = "http"
-url = "http://localhost:8080"
-
-[extra_mcp_servers.notebooklm]
-type = "stdio"
-command = "notebooklm-mcp"
-args = []
-
-# Companion agents spawned alongside the root TL during init.
-[[companions]]
-name = "sleeptime"
-agent_type = "claude"          # claude | gemini | shoal | process
-role = "sleeptime"             # WASM role for MCP tools (default: "worker")
-command = "claude --dangerously-skip-permissions"
-task = "You are sleeptime"     # optional — omit for interactive session
-model = "haiku"                # optional — passed as --model flag to companion
-
-[[companions]]
-name = "mock-github"
-agent_type = "process"         # plain process: no MCP, no worktree, no agent identity
-command = "python3 tests/e2e/mock_github.py --port 9876"
-```
-
-**Config hierarchy:**
-- `config.toml` uses `default_role` (project-wide default)
-- `config.local.toml` uses `role` (worktree-specific override)
-- Resolution: `local.role > global.default_role`
-- WASM: `wasm_dir` in config > `.exo/wasm/` (project-local)
-
-**Hook configuration** is auto-generated in two places:
-- **`exomonad init`**: Writes `.claude/settings.local.json` with all hooks (SessionStart, PreToolUse, etc.) for the root TL session
-- **`fork_wave`**: Writes `.claude/settings.local.json` into each spawned Claude worktree
-
-The `SessionStart` hook is critical — it registers the Claude session UUID in `ClaudeSessionRegistry`, which `fork_wave` reads to pass `--resume <uuid> --fork-session` for context inheritance. Without it, spawned subtrees start with no context.
-
-Gemini agents get settings via `GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var (NOT `.gemini/settings.json`).
-
-**Claude Code settings help:** We have a Claude Code configuration specialist (preloaded with official documentation) available as an oracle for hook syntax, settings structure, MCP setup, and debugging.
-
-### Companion Agents
-
-Companion agents are persistent agents spawned alongside the root TL during `exomonad init`. Claude companions get their own git worktree at `.exo/companions/{name}/` on branch `companion/{name}`, providing isolated `.mcp.json` discovery via CWD — the same mechanism that makes `fork_wave` reliable.
-
-Each Claude companion worktree contains:
-- `.mcp.json` — MCP config with the companion's role/name identity
-- `.claude/settings.local.json` — hooks (SessionStart, PreToolUse, etc.)
-- `.exo/server.sock` — symlink to project root's server socket
-- `.git` — worktree git file pointing to the main repo
-
-Worktrees persist across `--recreate` (only the tmux session is torn down). Gemini/Shoal companions use their existing env-var/flag-based config approach.
-
-**Process companions** (`agent_type = "process"`) are plain long-running processes — no MCP config, no agent identity, no worktree, no hooks. Just a command in a tmux window. Use for mock servers, log tailers, or any background process that should live alongside the session.
+WASM build pipeline → [`haskell/wasm-guest/CLAUDE.md`](haskell/wasm-guest/CLAUDE.md). Use `--recreate` on `init` to rebuild a session after binary updates.
 
 ---
 
-## Capabilities
+## Orchestration & Coordination
 
-What you can do with exomonad right now, end-to-end.
+Spawn a recursive tree of heterogeneous agents:
 
-### Orchestration
+- **`fork_wave`** — N parallel Claude TL children, each in its own worktree + branch, context inherited by default.
+- **`spawn_gemini`** — Gemini dev leaf in its own worktree + branch with a self-contained spec; commits and calls `submit_branch` when ready.
+- **`spawn_worker`** — ephemeral Gemini worker in a tmux pane (no branch, no merge); reports via `notify_parent`.
+- **`merge`** — fold a child's submitted branch into yours (v2: local `git merge`; Classic: PR via `merge_pr`).
 
-Spawn heterogeneous agent teams as a recursive tree:
+**Agent types:** Claude 🤖, Gemini 💎, Shoal 🌊 (custom binary agents over rmcp + HTTP-over-UDS). **Identity** = birth-branch (immutable, deterministic); root = `root`. The filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/`.
 
-- **`fork_wave`** — Fork N parallel Claude agents, each in its own worktree. Context inherited by default (`fork_session` defaults to `true`); set `false` for fresh-start children. Requires clean git state (committed and pushed).
-- **`spawn_gemini`** — Spawn Gemini agent in own worktree+branch. Files PR when done. Structured spec fields (steps, verify, boundary, context, read_first).
-- **`spawn_worker`** — Spawn ephemeral Gemini worker in tmux pane. No branch, no PR. Just name + task.
+**Coordination is push-based** via the Claude Code Teams inbox: a child calls `notify_parent` (or `send_message` for peer-to-peer), the message lands in the parent's inbox and arrives as a native `<teammate-message>` between turns. The TL idles — no polling, no blocking. Fallback is tmux STDIN injection.
 
-**Agent Types:** `Claude` (🤖), `Gemini` (💎), `Shoal` (🌊). Shoal is for custom binary agents that connect via rmcp MCP client and receive notifications via HTTP-over-Unix-domain-socket at `.exo/agents/{name}/notify.sock`.
-
-**Multi-WASM:** The server loads multiple WASM modules from `.exo/wasm/`. Convention: if `wasm-guest-{role}.wasm` exists, it's used for that role; otherwise falls back to `wasm-guest-{wasm_name}.wasm` (default). Drop a WASM file, it's available.
-
-**Standalone repo mode:** Available via the lower-level `spawn_leaf_subtree` core function with `standalone_repo=true`. Creates a fresh `git init` repo instead of a worktree. Claude's native project discovery treats the local `.git` as the boundary — the agent cannot traverse into the parent repository. Use this for information segmentation (e.g., enterprise customers with proprietary root-level IP).
-
-**Branch naming:** `{parent_branch}.{slug}-{type}` (dot separator, suffixed). Convergence occurs via recursive fold up the tree: Classic uses PRs to the parent branch; v2 Node-Mode uses local on-disk `git merge`.
-
-**Identity:** Birth-branch as session ID (immutable, deterministic). Root TL = "root". Filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/` to discover agents.
-
-### Coordination
-
-Push-based parallel worker coordination via **Claude Code Teams inbox**:
-
-1. TL spawns workers and **returns** (no blocking wait)
-2. Each worker gets `EXOMONAD_SESSION_ID` env var (parent's birth-branch)
-3. When worker completes, it calls `notify_parent`
-4. Server resolves parent agent from caller identity, writes to the parent's Teams inbox (`~/.claude/teams/{name}/inboxes/{inbox}.json`)
-5. Claude Code's InboxPoller detects the new message and delivers it as a native `<teammate-message>` in the parent's conversation
-6. TL sees the message and wakes up — no polling, no hacks
-
-This is **native Claude Code Teams integration**. Messages from child agents arrive exactly like messages from Claude Code teammates — structured, attributed, and delivered through the official inbox mechanism. The TL doesn't poll, doesn't block, and doesn't parse raw text. It gets a proper teammate notification.
-
-**Pipeline:** `notify_parent` → server resolves parent via `TeamRegistry` → `teams_mailbox::write_to_inbox()` → CC InboxPoller → `<teammate-message>` delivered to parent conversation.
-
-**Bidirectional Messaging:** The `send_message` tool enables arbitrary bidirectional messaging between any exomonad-spawned agents, routing via Teams inbox, UDS, or tmux fallback depending on the target agent's type and connection status.
-
-**Fallback:** If Teams inbox delivery fails (no team registered, inbox write error), falls back to tmux STDIN injection via buffer pattern (`load-buffer` + `paste-buffer`).
-
-### PR Workflow
-
-- **`file_pr`** — Create or update a PR for the current branch. Auto-detects base branch from dot-separated naming convention.
-- **`merge_pr`** — Merge a child's PR (`gh pr merge` + `git fetch` for auto-rebase). TL role only.
-
-### Built Infrastructure
-
-| Feature | Status |
-|---------|--------|
-| **Teams inbox delivery** | **Live.** `notify_parent` → Teams inbox → native `<teammate-message>` in parent conversation. Full E2E verified. |
-| **HTTP-over-UDS delivery** (Shoal/custom agents) | **Built.** `notify_parent` → POST to `.exo/agents/{name}/notify.sock`. Fire-and-forget with 5s timeout. For custom binary agents that run their own HTTP server on a Unix socket. |
-| **Event router** (tmux STDIN fallback) | Built. Fallback path: `notify_parent` → `inject_input` into parent pane via tmux buffer pattern. |
-| **Event handlers** (WASM dispatch for world events) | **Built.** Third dispatch category alongside tools and hooks. GitHub poller calls `handle_event` on agent's PluginManager for PR review events (reviews, approvals, timeouts) and **sibling merge events**. Handlers return `EventAction` (InjectMessage, NotifyParent, NoAction). |
-| **GitHub poller** (PR status → events) | Built. Background service polls PR/CI status, fires WASM event handlers, and injects notifications into agent panes. Tracks `first_seen`, `last_review_state`, and `notified_parent_timeout` per PR. |
-| **OTel observability** | **Built.** Axum middleware auto-attributes every agent request span with `agent_id`, `agent.role`, `agent.parent`, `swarm.run_id`. `swarm.run_id` persisted to `.exo/run_id`, set as OTel resource attribute, propagated to children via env. Query all spans in a run: `resource.swarm.run_id = '{id}'`. Reconstruct spawn tree: `groupBy agent.parent, agent_id`. |
-| **Coordination mutexes** | Built. In-memory `MutexRegistry` with FIFO wait queues, TTL auto-expiry, idempotent acquire. Effect-only (`coordination.acquire_mutex`, `coordination.release_mutex`) — no MCP tool exposed. |
-| **Tempo observability** | **Built.** Grafana Tempo for lightweight trace storage (~100-200MB RAM). Agents query traces via `curl` + TraceQL against Tempo's HTTP API (port 3200). Optional Grafana UI at `http://localhost:3000`. |
-| **NotebookLM MCP** (optional) | **Vendored.** `vendor/notebooklm-mcp/` — stdio MCP server that automates Google NotebookLM via browser automation. Source-grounded, citation-backed answers from uploaded documentation. Opt-in via `extra_mcp_servers` in `config.toml`. |
-
-### Tempo Observability
-
-Grafana Tempo provides lightweight trace storage with TraceQL query support. Agents query traces directly via `curl` against Tempo's HTTP API — no MCP tools needed.
-
-```bash
-# Start Tempo
-docker compose -f .exo/otel/docker-compose.yml up -d
-
-# Start Tempo + Grafana UI
-docker compose -f .exo/otel/docker-compose.yml --profile grafana up -d
-
-# Set otlp_endpoint in .exo/config.toml:
-# otlp_endpoint = "http://localhost:4317"
-
-# Endpoints:
-#   OTLP:       localhost:4317 (gRPC), localhost:4318 (HTTP)
-#   Tempo API:  http://localhost:3200 (TraceQL queries)
-#   Grafana UI: http://localhost:3000 (optional, with --profile grafana)
-```
-
-**Querying traces (TraceQL via curl):**
-```bash
-# All spans in a run
-curl -s 'http://localhost:3200/api/search?q=%7B+resource.swarm.run_id+%3D+%22abc%22+%7D&limit=50&spss=100'
-
-# Find error spans for an agent
-curl -s 'http://localhost:3200/api/search?q=%7B+span.agent_id+%3D+%22my-agent%22+%26%26+span%3Astatus+%3D+error+%7D'
-
-# Parent-child structural query
-curl -s 'http://localhost:3200/api/search?q=%7B+span.agent_id+%3D+%22tl%22+%7D+%3E%3E+%7B+span.agent_id+%3D+%22worker-1%22+%7D'
-
-# Full trace by ID
-curl -s 'http://localhost:3200/api/traces/{traceID}'
-```
-
-Without Tempo running, spans still appear in stderr via the tracing fmt layer.
+Tool/role matrix → [`.claude/rules/exomonad.md`](.claude/rules/exomonad.md). Root protocol → `.exo/roles/devswarm/context/root.md`.
 
 ---
 
 ## Architecture
 
-### Components
+Two tracks over shared `exomonad-core` services. Isolation = git worktrees (no Docker); multiplexing = tmux windows (Claude subtrees) and panes (Gemini workers). Each agent = worktree + window/pane, managed by the Rust runtime.
 
-```
-Human in tmux session
-    └── Claude Code + exomonad (Rust + Haskell WASM)
-            ├── MCP tools via WASM (fork_wave, spawn_gemini, spawn_worker, etc.)
-            └── Agent tree:
-                ├── worktree: dev.feature-a (TL role, can spawn children)
-                │   ├── worker: rust-impl (Gemini, in-place pane)
-                │   └── worker: haskell-impl (Gemini, in-place pane)
-                └── worktree: dev.feature-b (TL role)
-                    └── ...
-```
+- **v2 Node-Mode crates:** `exo-caps` (capability seam — traits + types, no IO), `exo-node` (per-agent sidecar; outbound MCP + inbound inbox-watch loops), `exo-runtime` (IO implementations), `exo-policy` (tool/hook/role logic, generic over caps), `exo-scry` (native Teams discovery from live OS state).
+- **Classic:** the `exomonad` binary (MCP server + hook handler) hosting Haskell WASM; Rust executes the effects the WASM yields.
 
-**Haskell WASM = Embedded DSL**
-- Defines tool schemas, handlers, decision logic
-- Yields typed effects (no I/O)
-- Compiled to WASM32-WASI, loaded via Extism
-- Single source of truth for MCP tools
-- Hot reload: serve mode checks mtime per tool call
-
-**Rust = Runtime**
-- Hosts WASM plugin, executes all effects (git, GitHub API, filesystem, tmux)
-- Owns the process lifecycle
-- REST server on UDS (started by `exomonad init`), `mcp-stdio` translates MCP JSON-RPC to REST
-
-**v2 Node-Mode = Decentralized Swarm**
-- **exo-node**: Per-agent sidecar process; owns the outbound MCP and inbound inbox-watch loops.
-- **exo-caps**: The capability seam (traits + domain types); no IO.
-- **exo-runtime**: IO implementations for all capabilities; reuses `exomonad-core` services.
-- **exo-policy**: Logic for tools, hooks, and roles; generic over capabilities.
-- **exo-scry**: Native Teams discovery via live OS state.
-
-**Worktrees + tmux = Isolation/Multiplexing**
-- Git worktrees for code isolation (no Docker containers)
-- tmux windows for Claude subtrees, panes for Gemini workers
-- Each agent = worktree + window (or pane), managed by Rust runtime
-
-### Data Flows
-
-**MCP Tool Call:**
-```
-Claude Code → stdio (JSON-RPC) → exomonad mcp-stdio (translates JSON-RPC → REST)
-→ UDS GET /agents/{role}/{name}/tools (list) or POST /agents/{role}/{name}/tools/call (call)
-→ exomonad serve REST handler → WASM handle_list_tools / handle_mcp_call
-→ Haskell dispatches to tool handler → yields effects
-→ Rust executes effects via host functions → result returned
-→ mcp-stdio translates REST response → JSON-RPC → stdout → Claude Code
-```
-
-**Hook Call:**
-
-*Legacy (production, server-based):*
-Claude Code → exomonad hook pre-tool-use (reads stdin JSON)
-→ UDS request to server → WASM handle_pre_tool_use
-→ Haskell decides allow/deny → HookEnvelope { stdout, exit_code }
-→ Claude Code proceeds or blocks
-
-*Experimental (Wave 2, node-based):*
-Claude Code → exomonad experimental hook pre-tool-use --papers node.json
-→ bootstrap NodeContext from papers
-→ run exo-policy hook directly (no server)
-→ stdout verdict
-
-```
-
-**Session Start:**
-```
-Claude Code starts → exomonad hook session-start
-→ WASM yields SessionRegister effect with claude_session_id
-→ Server stores in ClaudeSessionRegistry
-→ fork_wave uses this ID for --fork-session
-```
-
-**Event Handler Call:**
-```
-GitHub poller detects world event (Copilot review, CI status, timeout)
-→ Poller resolves agent's PluginManager from plugins map
-→ Calls WASM handle_event with { role, event_type, payload }
-→ Haskell dispatches to EventHandlerConfig handler → returns EventAction
-→ Rust acts on EventAction: InjectMessage (deliver to agent pane) or NotifyParent (deliver to parent)
-```
-
-**Fail-open:** If the server is unreachable, `exomonad hook` prints `{"continue":true}` and exits 0.
-
-### MCP Tools Reference
-
-All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/Tools/`):
-
-| Tool | Role | Description |
-|------|------|-------------|
-| `fork_wave` | root, tl | Fork N parallel Claude agents, each in its own worktree. Context inherited by default (`fork_session` defaults to `true`). |
-| `spawn_gemini` | root, tl | Spawn Gemini agent in own worktree+branch. Structured spec fields: steps, verify, boundary, context, read_first. |
-| `spawn_worker` | root, tl | Spawn ephemeral Gemini worker in tmux pane (no branch, no PR). Just name + task. |
-| `file_pr` | tl, dev | Create/update PR (auto-detects base branch from naming) |
-| `merge_pr` | root, tl | Merge child PR (gh merge + git fetch) |
-| `notify_parent` | tl, dev, worker | Send message to parent agent. Auto-routed via Teams inbox (primary) or tmux STDIN (fallback) |
-| `send_message` | all | Send message to another exomonad-spawned agent (routes via Teams inbox, UDS, or tmux) |
-| `task_list` | dev, worker | List tasks from the shared Claude Code task list (auto-resolves team from TeamRegistry) |
-| `task_get` | dev, worker | Get a task by ID from the shared task list |
-| `task_update` | dev, worker | Update task status, owner, or activeForm in the shared task list |
-
-**Note**: Git operations (`git status`, `git log`, etc.) and GitHub operations (`gh pr list`, etc.) use the Bash tool with `git` and `gh` commands, not MCP tools.
+Per-architecture detail: classic components + data flows → [`rust/exomonad/CLAUDE.md`](rust/exomonad/CLAUDE.md); WASM guest, MCP tool definitions, DSL → [`haskell/wasm-guest/CLAUDE.md`](haskell/wasm-guest/CLAUDE.md); v2 swarm + observability → [`rust/CLAUDE.md`](rust/CLAUDE.md) and the `exo-*` crate docs. The classic/experimental crate-split plan → [`docs/decisions/classic-shared-crate-split.md`](docs/decisions/classic-shared-crate-split.md).
 
 ---
 
-## Developing ExoMonad
+## Tech Lead Praxis (essence)
 
-### Package Inventory
+The TL drives the recursion at each node: unfold (scaffold + spawn), idle while children work, fold (merge + integrate + surface up). It decomposes and specs; it never implements directly and never manually reviews intermediate output.
 
-All Haskell packages live under `haskell/`. See `haskell/CLAUDE.md` for full details.
+- **Depth over breadth** — more than ~4 independent leaves ⇒ interpose a sub-TL. Root reasons about decomposition + integration points, not implementation detail.
+- **Intelligence gradient** — expensive context decomposes; cheap leaves implement; review converges. Every line the TL writes is expensive code, every review cycle it runs is an expensive cycle.
+- **Fire-and-forget** — decompose → spec → spawn → idle until messages arrive. Convergence is leaf + review, not the TL.
+- **Spec quality (one shot)** — anti-patterns FIRST (known failure modes as DO-NOT rules), read-first files, numbered steps, exact verify commands, done criteria. Self-contained, full paths, complete snippets.
+- **Escalation not iteration** — a leaf that fails repeatedly notifies failure; the TL re-decomposes or escalates, never hand-fixes a leaf's code.
 
-| Package | Purpose |
-|---------|---------|
-| `haskell/wasm-guest` | WASM guest with MCP tool definitions (freer-simple) |
-| `haskell/proto` | Generated Haskell proto types |
-| `haskell/vendor/ginger` | Typed Jinja templates (vendored) |
-| `haskell/vendor/freer-simple` | Effect system (vendored, GHC 9.12 patches) |
-| `haskell/vendor/exomonad-pdk` | Extism PDK (vendored) |
-| `haskell/vendor/proto3-runtime` | Protobuf runtime (vendored) |
-
-### Where Things Go
-
-| Thing | Location |
-|-------|----------|
-| New MCP tool | `haskell/wasm-guest/src/ExoMonad/Guest/Tools/` |
-| New WASM effect | `haskell/wasm-guest/src/ExoMonad/Guest/Effects/` |
-| New Rust effect handler | `rust/exomonad-core/src/handlers/` |
-| New proto type | `proto/` + `rust/exomonad-proto/proto/` |
-| New event handler | `haskell/wasm-guest/src/ExoMonad/Guest/Events.hs` (types), `.exo/lib/` (handlers) |
-
-### Building & Testing
-
-```bash
-cabal build all            # Build Haskell
-cargo test --workspace     # Rust tests (from repo root)
-just pre-commit            # Run all checks
-cabal test all             # Haskell tests
-
-# E2E tests (interactive — launches tmux session, you observe)
-just e2e-messaging         # Teams inbox delivery pipeline
-just e2e-hook-rewrite      # BeforeModel/AfterModel PII rewriting
-```
-
-### E2E Test Pattern
-
-All E2E tests live in `tests/e2e/{name}/` and follow the same structure:
-
-**Files:**
-| File | Purpose |
-|------|---------|
-| `run.sh` | Setup script: creates temp repo, configures companions, runs `exomonad init` |
-| `testrunner.md` | Test plan for the Claude testrunner companion (copied to `.exo/roles/devswarm/context/testrunner.md`) |
-| `e2e-test.md` | Root TL rules for this test (copied to `.claude/rules/e2e-test.md`) |
-
-**Structure of `run.sh`:**
-1. **Preconditions** — Check `exomonad` binary, WASM plugins, `tmux`, `git`
-2. **Temp environment** — `mktemp -d`, bare remote, working repo, `exomonad new`, symlink WASM
-3. **Config** — Write `config.toml` with `yolo = true`, companions for the test scenario
-4. **`exomonad init`** — Last line of the script. Creates tmux session, starts server, spawns companions, attaches.
-
-**Companion roles:**
-- **Test subject** — The agent being tested (e.g., Gemini with dev role for hook rewriting)
-- **Testrunner** — Claude (haiku) companion with `testrunner` role. Observes results via bash (read-only), reports via `notify_parent`
-
-**Key conventions:**
-- `shell_command = "bash"` (not nix develop — temp env has no flake)
-- `yolo = true` (skip interactive prompts)
-- `export GITHUB_TOKEN="test-token-e2e"` (dummy token to avoid auth errors)
-- Cleanup via `trap cleanup EXIT` (kills tmux session, removes temp dir)
-- Testrunner uses only `notify_parent` MCP tool + read-only bash observation
-- Root TL creates a team and idles
-
-**Adding a new E2E test:**
-1. Create `tests/e2e/{name}/run.sh` following the pattern above
-2. Create `testrunner.md` with the test plan (phases, assertions, report format)
-3. Create `e2e-test.md` with root TL rules (usually: create team, idle)
-4. Add `just e2e-{name}` recipe to `justfile`
-
-### Task Tracking
-
-GitHub Issues. Branch naming: `gh-{number}/{description}`. Reference issue in commits (`[#123] ...`). Issues closed via PR merges (`Closes #123`).
-
-### Key Design Decisions
-
-1. **freer-simple for effects** — Standardized on freer-simple for reified continuations (WASM yield/resume)
-2. **Haskell WASM as typed config DSL** — All tool/hook/event logic in Haskell, all I/O in Rust runners. The WASM yields effects; Rust executes them. Agents themselves have full tool access (bash, files, git).
-3. **Haskell WASM = embedded DSL** — All logic in Haskell, Rust handles I/O only
-
----
-
-## Tech Lead Praxis
-
-The operational manual for executing the hylomorphism (see [Model](#model)). The TL is the recursion's driver at each node: it performs the unfold (scaffold + spawn), idles while children work, then performs the fold (merge + integrate + PR upward). Everything below is how to do that well.
-
-### Depth over Breadth
-
-Use sub-TLs to keep each context window sharp. If a task decomposes into more than ~4 independent leaves, interpose a sub-TL. The root should never reason about implementation details — only about the decomposition structure and integration points. Sub-TLs absorb complexity; root sees summaries.
-
-### Intelligence Gradient
-
-Claude (Opus) decomposes and dispatches. Gemini implements. Copilot reviews. The TL never implements directly and never manually reviews intermediate output.
-
-**Cost model:** Opus tokens are 10-30x Gemini tokens. Every line of code the TL writes is expensive code. Every review cycle the TL performs is an expensive review cycle. The TL's job is producing specs sharp enough that the leaf + Copilot convergence loop handles quality without TL involvement.
-
-### Fire-and-Forget Execution
-
-The TL's workflow is: **decompose → spec → spawn → move on**. The TL does not wait, poll, review intermediate output, or re-spec. It spawns all leaves it can, then idles until messages arrive.
-
-**Convergence is leaf + Copilot + event handlers, not TL:**
-1. TL writes spec, spawns leaf (Gemini), returns immediately
-2. Leaf works → commits → files PR
-3. GitHub poller detects Copilot review comments → fires `handle_event(PRReview::ReviewReceived)` → handler injects comments into leaf's pane
-4. Leaf reads Copilot feedback, fixes, pushes
-5. Poller detects SHA change after `ChangesRequested` → fires `handle_event(PRReview::FixesPushed)` → handler sends `[FIXES PUSHED]` to TL
-6. TL sees `[from: leaf-id] [FIXES PUSHED] PR #N — CI passing. Ready to merge.` → merges the PR
-
-**Note:** Copilot's first review is automatic (triggered on PR creation). Subsequent reviews after pushing fixes are NOT — Copilot does not re-review. The `FixesPushed` event is the system's signal that the iteration loop completed.
-
-**Alternative paths:**
-- **Copilot approves first time** → poller fires `handle_event(PRReview::Approved)` → handler sends `[PR READY]` to TL → TL merges
-- **No Copilot review after timeout** → poller fires `handle_event(PRReview::ReviewTimeout)` → handler sends `[REVIEW TIMEOUT]` to TL → TL merges if CI passes (15 min initial, 5 min after addressing changes)
-- **Leaf sends status updates** → `notify_parent` delivers `[from: leaf-id] message` to TL → informational, TL reads but does not auto-merge
-- **Leaf fails** → `notify_parent` with `failure` status → delivers `[FAILED: leaf-id] message` to TL → TL re-decomposes
-
-**Escalation, not iteration.** If a leaf fails after 3+ Copilot rounds, it calls `notify_parent` with `failure` status. The TL then decides: re-decompose, try a different approach, or flag for human intervention. The TL never manually fixes a leaf's code.
-
-### Spec Quality (You Only Get One Shot)
-
-Since the TL doesn't iterate on specs, the v1 spec must be production-quality. Every spec follows this structure:
-
-```
-1. ANTI-PATTERNS      — Known Gemini failure modes as explicit "DO NOT" rules (FIRST)
-2. READ FIRST         — Exact files to read (CLAUDE.md, source files, proto files)
-3. STEPS              — Numbered, each step = one concrete action with code snippets
-4. VERIFY             — Exact build/test commands with env vars (PROTOC path, etc.)
-5. DONE CRITERIA      — What "done" looks like (tests pass, PR filed)
-```
-
-**Anti-patterns section is mandatory and comes first.** These are known Gemini failure modes — front-load them so the agent reads them before touching code:
-
-| Known Failure Mode | Anti-Pattern Rule |
-|---|---|
-| Adds unnecessary dependencies | "ZERO external dependencies. Do NOT add serde/tokio/etc." |
-| Invents escape hatches | "No `todo!()`, `Raw(String)`, `Other(Box<dyn Any>)` variants" |
-| Writes thinking-out-loud comments | "No stream-of-consciousness comments. Doc comments only." |
-| Renames types/variants to "simpler" names | "Use EXACT type signatures below. Do not rename." |
-| Makes architectural decisions | "Do not change the module structure. Files listed below are exhaustive." |
-| Overengineers | "This is N lines in M files, not a new module/framework." |
-
-**Key rules:**
-- **One agent = one focused change.** If it touches >3 files or requires architectural decisions, split it.
-- **Include complete code.** Don't describe what to write — show the exact code. Gemini executes better from examples than descriptions.
-- **Include exact commands.** Not "run the tests" but `PROTOC=/nix/store/... cargo test --workspace`.
-- **Name every file.** Not "update the proto" but "edit `proto/effects/agent.proto` AND `rust/exomonad-proto/proto/effects/agent.proto`".
-- **Specs are self-contained.** The leaf has no context from previous attempts. Every spec must stand alone with complete code snippets and full file paths.
-
-### Scaffold-Fork-Converge
-
-The recursive execution pattern. Every TL at every level follows this protocol:
-
-1. **Scaffold** — Before spawning children, commit the shared foundation:
-   - Types/interfaces that children implement against
-   - Test harness/fixtures children will use
-   - Stub files showing where children put their code
-   - CLAUDE.md additions scoping this TL's domain
-   - Commit and push. Children fork from this commit.
-
-2. **Fork** — Spawn wave N children. Zero deps between siblings in the same wave.
-   - Sub-TLs: `fork_wave` (Claude, context inherited by default) — they already know the plan
-   - Devs: `spawn_gemini` (Gemini, worktree+PR) — they get CLAUDE.md from scaffolding
-   - Workers: `spawn_worker` (Gemini, ephemeral pane) — research or non-conflicting edits
-
-3. **Converge** — Wait for child notifications. Merge their PRs. Write an integration commit:
-   - Wire children's outputs together
-   - Run integration tests, fix integration bugs
-
-4. **Next wave** — If wave N+1 exists, repeat from step 2. Wave N+1 depends on merged wave N.
-
-5. **PR to parent** — After all waves merged and integrated, file PR to parent's branch.
-
-This is recursive — sub-TLs follow the same pattern. A 4-level-deep tree means 4 levels of scaffold-fork-converge, each TL independently managing its subtree.
-
-### Parallelization
-
-Spawn multiple leaves when tasks are independent (no file conflicts, no ordering dependency). The TL spawns a wave, returns, and gets poked as each leaf completes. Examples:
-- Proto plumbing + nix shell wrapping — independent, parallel.
-- Haskell tool changes + Rust handler changes — often dependent (proto-gen first), sequential.
-
-### When TL Gets Notified
-
-The TL is idle between spawning and receiving notifications. It wakes up for:
-- **`[FIXES PUSHED]`** (event handler) — leaf addressed Copilot review comments and pushed fixes. Copilot does NOT re-review, so this is the actionable signal. TL merges if CI passes.
-- **`[PR READY]`** (event handler) — Copilot approved a leaf's PR on first review. TL merges and verifies the result builds cleanly. Multiple leaves landing in parallel may interact.
-- **`[REVIEW TIMEOUT]`** (event handler) — no Copilot review after timeout (15 min initial, 5 min after addressing changes). TL merges if CI passes.
-- **`[from: agent-id]`** (agent message) — informational update from a leaf. Do not auto-merge; read the message.
-- **`[FAILED: agent-id]`** — leaf exhausted retries. TL re-decomposes or escalates.
-- GitHub poller notifications (CI status, PR merge conflicts).
-
-The TL does NOT wake up for intermediate progress, Copilot comments, or partial results. The convergence loop (leaf + Copilot) runs without TL involvement.
+Full operational manual — Scaffold-Fork-Converge protocol, convergence loop, spec template, notification vocabulary → [`.claude/rules/exomonad.md`](.claude/rules/exomonad.md) and `.exo/roles/devswarm/context/root.md`.
 
 ---
 
 ## Documentation Tree
 
 ```
-CLAUDE.md  ← YOU ARE HERE (project overview)
-├── proto/CLAUDE.md    ← Protocol buffers (FFI boundary types)
-├── haskell/CLAUDE.md  ← Haskell package organization
-│   ├── wasm-guest/CLAUDE.md    ← MCP tool definitions (WASM guest logic)
+CLAUDE.md  ← YOU ARE HERE (router + model)
+├── proto/CLAUDE.md             ← Protocol buffers (FFI boundary types)
+├── haskell/CLAUDE.md           ← Haskell package inventory, build/test
+│   ├── wasm-guest/CLAUDE.md    ← Classic: MCP tool defs, WASM-as-DSL, build pipeline, tools reference
 │   └── proto/CLAUDE.md         ← Generated Haskell types for proto
-├── rust/CLAUDE.md             ← Rust workspace overview (Classic + v2)
-│   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (binary)
-│   ├── exomonad-core/CLAUDE.md ← Unified library: framework, handlers, services
-│   ├── exomonad-proto/     ← Proto-generated types (prost) for FFI + effects
-│   ├── exo-caps/CLAUDE.md  ← v2 capability seam (traits + types)
-│   ├── exo-node/CLAUDE.md  ← v2 per-node sidecar
-│   ├── exo-runtime/        ← v2 IO implementations
-│   ├── exo-policy/         ← v2 logic (generic over caps)
-│   └── exo-scry/           ← v2 native Teams discovery
-├── tests/e2e/                 ← E2E tests (see § E2E Test Pattern)
-│   ├── messaging/             ← Teams inbox delivery test
-│   └── hook-rewrite/          ← PII rewriting hooks test
-└── docs/decisions/            ← Architecture decision records (living docs)
+├── rust/CLAUDE.md              ← Rust workspace overview (Classic + v2), observability, design decisions
+│   ├── exomonad/CLAUDE.md      ← Classic: MCP server + hook handler, getting-started, config, data flows
+│   ├── exomonad-core/CLAUDE.md ← Shared library: framework, handlers, services
+│   ├── exomonad-proto/CLAUDE.md ← Proto-generated types (prost)
+│   ├── exo-caps/CLAUDE.md      ← v2 capability seam (traits + types)
+│   ├── exo-node/CLAUDE.md      ← v2 per-node sidecar
+│   ├── exo-runtime/CLAUDE.md   ← v2 IO implementations
+│   ├── exo-policy/CLAUDE.md    ← v2 logic (generic over caps)
+│   └── exo-scry/CLAUDE.md      ← v2 native Teams discovery
+├── tests/e2e/CLAUDE.md         ← E2E test pattern + harness conventions
+└── docs/decisions/             ← Architecture decision records (living docs)
 ```
 
 | I want to... | Read this |
 |--------------|-----------|
-| Add FFI boundary types | `proto/CLAUDE.md` |
-| Understand MCP tool architecture (Classic) | `rust/exomonad/CLAUDE.md` |
-| Work on exomonad-core framework | `rust/exomonad-core/CLAUDE.md` |
-| Work on effect handlers or services | `rust/exomonad-core/` (handlers/, services/) |
-| Extend the v2 Node-Mode swarm | `rust/CLAUDE.md` § Node-mode swarm |
+| Spawn/orchestrate agents (tool + role matrix) | `.claude/rules/exomonad.md` |
+| Understand the Classic server + data flows | `rust/exomonad/CLAUDE.md` |
+| Work on the WASM guest / Classic MCP tools | `haskell/wasm-guest/CLAUDE.md` |
+| Work on `exomonad-core` framework/services | `rust/exomonad-core/CLAUDE.md` |
+| Extend the v2 Node-Mode swarm | `rust/CLAUDE.md` + the `exo-*` crate docs |
 | Define v2 capabilities | `rust/exo-caps/CLAUDE.md` |
 | Work on v2 node sidecar logic | `rust/exo-node/CLAUDE.md` |
-| Work on WASM guest (Classic MCP tools) | `haskell/wasm-guest/CLAUDE.md` |
-| Add or modify E2E tests | `CLAUDE.md` § E2E Test Pattern + `tests/e2e/messaging/` as reference |
+| Add or modify E2E tests | `tests/e2e/CLAUDE.md` |
+| Add FFI boundary types | `proto/CLAUDE.md` |
 | Understand architectural decisions | `docs/decisions/` |
 
 ---
 
 ## References
 
-- [rust/exomonad/CLAUDE.md](rust/exomonad/CLAUDE.md) — MCP server + WASM host
-- [haskell/wasm-guest/CLAUDE.md](haskell/wasm-guest/CLAUDE.md) — MCP tool definitions
-- [freer-simple](https://hackage.haskell.org/package/freer-simple) — Effect system
+- [`rust/CLAUDE.md`](rust/CLAUDE.md) — Rust workspace (Classic + v2 swarm)
+- [`haskell/wasm-guest/CLAUDE.md`](haskell/wasm-guest/CLAUDE.md) — Classic MCP tool definitions
+- [freer-simple](https://hackage.haskell.org/package/freer-simple) — Effect system (Classic WASM guest)
 - [Anthropic tool use](https://docs.anthropic.com/en/docs/tool-use)
