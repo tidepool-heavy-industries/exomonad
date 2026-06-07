@@ -9,7 +9,8 @@ members = [
     "rust/exo-scry",
     "rust/exo-caps",
     "rust/exo-runtime",
-    "rust/exo-policy",
+    "rust/exo-framework",
+    "rust/exo",
     "rust/exo-node",
 ]
 

@@ -16,7 +16,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::tool::{ok_json, parse, schema_json, BoxFuture, Tool, ToolOutput};
+use exo_framework::{ok_json, parse, schema_json, BoxFuture, Tool, ToolOutput};
 
 #[derive(serde::Deserialize)]
 struct CheckResult {

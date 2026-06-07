@@ -202,7 +202,7 @@ async fn main() -> Result<()> {
             }
             ExperimentalCommands::Node { papers } => {
                 let cwd = std::env::current_dir().context("resolving node cwd")?;
-                let ctx = exo_node::bootstrap(&papers, cwd)
+                let ctx = exo_node::bootstrap(&papers, cwd, exo::roster())
                     .map(std::sync::Arc::new)
                     .context("node self-ID / bootstrap")?;
                 return exo_node::run_node(ctx).await.context("node run");
@@ -219,10 +219,14 @@ async fn main() -> Result<()> {
                 // SessionStart stays one-shot in-process: it needs no live state and must survive
                 // a cold-start race before the sidecar socket is listening.
                 if event == HookEventType::SessionStart {
-                    let verdict =
-                        exo_node::handle_hook(exo_node::HookEvent::SessionStart, &papers, &body)
-                            .await
-                            .context("node session-start hook")?;
+                    let verdict = exo_node::handle_hook(
+                        exo_node::HookEvent::SessionStart,
+                        &papers,
+                        &body,
+                        exo::roster(),
+                    )
+                    .await
+                    .context("node session-start hook")?;
                     println!("{verdict}");
                     return Ok(());
                 }

@@ -4,10 +4,10 @@
 //! hand-written `Tool<R>` adapter. Ships mock-cap unit tests (assert `Bus::deliver` recorded
 //! with the right `Addressee`/`Message`) in this file.
 
-use crate::tool::{ok_json, parse, schema_json, Tool, ToolOutput};
 use exo_caps::{
     Addressee, AgentName, Bus, CapResult, ControlKind, Message, MessageBody, MessageKind, Summary,
 };
+use exo_framework::{ok_json, parse, schema_json, Tool, ToolOutput};
 use schemars::JsonSchema;
 use serde::Deserialize;
 

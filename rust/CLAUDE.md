@@ -44,8 +44,9 @@ Claude Code (hook or MCP call)
 |-----------|---------|
 | [**exo-caps**](exo-caps/CLAUDE.md) | The capability seam: trait contract + validated domain types (no IO) |
 | [**exo-runtime**](exo-runtime/CLAUDE.md) | IO impls of every cap on one `Runtime` (reuses `exomonad-shared` services; **never links classic core**) |
-| [**exo-policy**](exo-policy/CLAUDE.md) | Tools / roles / hooks, generic over caps; unit-testable with zero IO |
-| [**exo-node**](exo-node/CLAUDE.md) | The per-node sidecar: outbound MCP + inbound inbox-watch + hook mode |
+| [**exo-framework**](exo-framework/CLAUDE.md) | The reusable engine abstractions: `Tool`/`RoleDef`/hook contract + `PolicyCaps` + `RoleRegistry`, generic over caps; no concrete tools/roles/gates |
+| [**exo**](exo/CLAUDE.md) | The domain (bin+lib): concrete tools / roles / gates + the `roster()` the binary injects; thin `main.rs` node entrypoint |
+| [**exo-node**](exo-node/CLAUDE.md) | The per-node sidecar: outbound MCP + inbound inbox-watch + hook mode (resolves roles through an injected `RoleRegistry`, never depends on the domain) |
 | [**exo-scry**](exo-scry/CLAUDE.md) | Derive a session's active team from live OS state (native Teams delivery) |
 | **claude-teams-bridge** | Read/write messages through Claude Code's Teams filesystem |
 
@@ -112,12 +113,13 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • FFI boundary types
 │   • Effect request/response messages
 │
-├── exo-caps/CLAUDE.md    ← V2: The capability seam (trait contract)
-├── exo-runtime/CLAUDE.md ← V2: IO implementations of every cap
-├── exo-policy/CLAUDE.md  ← V2: Tool/role/hook logic (generic over caps)
-├── exo-node/CLAUDE.md    ← V2: The per-node sidecar binary/lib
-├── exo-scry/CLAUDE.md    ← V2: Live OS session derivation
-└── claude-teams-bridge/  ← V2: Native Teams filesystem bridge
+├── exo-caps/CLAUDE.md      ← V2: The capability seam (trait contract)
+├── exo-runtime/CLAUDE.md   ← V2: IO implementations of every cap
+├── exo-framework/CLAUDE.md ← V2: Reusable engine abstractions (Tool/RoleDef/hook contract + RoleRegistry)
+├── exo/CLAUDE.md           ← V2: The domain (tools/roles/gates/roster) + thin node entrypoint
+├── exo-node/CLAUDE.md      ← V2: The per-node sidecar binary/lib
+├── exo-scry/CLAUDE.md      ← V2: Live OS session derivation
+└── claude-teams-bridge/    ← V2: Native Teams filesystem bridge
 ```
 
 ## Workspace Members
@@ -139,8 +141,9 @@ is on-disk (local `git merge`) — no GitHub/Copilot. Built beside classic, non-
 |-------|------|---------|
 | [exo-caps](exo-caps/CLAUDE.md) | Library | The capability seam: trait contract + validated domain types (no IO) |
 | [exo-runtime](exo-runtime/CLAUDE.md) | Library | IO impls of every cap on one `Runtime` (reuses `exomonad-shared` services; never links classic core) |
-| [exo-policy](exo-policy/CLAUDE.md) | Library | Tools / roles / hooks, generic over caps; unit-testable with zero IO |
-| [exo-node](exo-node/CLAUDE.md) | Library | The per-node sidecar: outbound MCP + inbound inbox-watch + hook mode |
+| [exo-framework](exo-framework/CLAUDE.md) | Library | Reusable engine abstractions: `Tool`/`RoleDef`/hook contract + `PolicyCaps` + `RoleRegistry`, generic over caps; no concrete tools/roles/gates |
+| [exo](exo/CLAUDE.md) | Lib + bin | The domain: concrete tools / roles / gates + `roster()` (the injected registry); thin `main.rs` node entrypoint |
+| [exo-node](exo-node/CLAUDE.md) | Library | The per-node sidecar: outbound MCP + inbound inbox-watch + hook mode; resolves roles through an injected `RoleRegistry` (never depends on the domain) |
 | [exo-scry](exo-scry/CLAUDE.md) | Lib + bin | Derive a CC session's active team from live OS state (native Teams delivery) |
 | claude-teams-bridge | Library | Read/write messages through Claude Code's Teams filesystem |
 

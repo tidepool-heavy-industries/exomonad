@@ -1016,6 +1016,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "exo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "exo-caps",
+ "exo-framework",
+ "exo-node",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "exo-caps"
 version = "0.1.0"
 dependencies = [
@@ -1027,6 +1042,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "exo-framework"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "exo-caps",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "exo-node"
 version = "0.1.0"
 dependencies = [
@@ -1034,7 +1060,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "exo-caps",
- "exo-policy",
+ "exo-framework",
  "exo-runtime",
  "exo-scry",
  "notify",
@@ -1042,21 +1068,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "exo-policy"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "exo-caps",
- "schemars 0.8.22",
- "serde",
- "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1103,6 +1114,7 @@ dependencies = [
  "claude-teams-bridge",
  "dirs 5.0.1",
  "duct",
+ "exo",
  "exo-caps",
  "exo-node",
  "exo-runtime",

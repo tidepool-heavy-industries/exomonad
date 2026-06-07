@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use exo_caps::{AgentType, HookEvent, HookRequest, HookVerdict};
-use exo_policy::{role_def, HookDecision, HookInput, RoleDef, StopDecision};
+use exo_framework::{HookDecision, HookInput, RoleDef, StopDecision};
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
@@ -101,7 +101,7 @@ async fn handle_conn(ctx: Arc<NodeContext>, stream: UnixStream) -> NodeResult<()
 /// Run the role's hook fn on the LIVE runtime, then shape stdout for the node's agent_type.
 #[tracing::instrument(skip(ctx, req), fields(node = %ctx.runtime.name().as_str(), event = ?req.event))]
 async fn run(ctx: &NodeContext, req: &HookRequest) -> HookVerdict {
-    let rd = role_def::<exo_runtime::Runtime>(ctx.kind);
+    let rd = ctx.registry.role_def(ctx.kind);
     let agent_type = ctx.kind.agent_type();
     let stdout = match req.event {
         HookEvent::PreToolUse => {
@@ -205,7 +205,7 @@ fn allow_json(agent_type: AgentType) -> String {
 mod tests {
     use super::{allow_json, stop_verdict};
     use exo_caps::AgentType;
-    use exo_policy::StopDecision;
+    use exo_framework::StopDecision;
 
     #[test]
     fn allow_shape_per_agent_type() {

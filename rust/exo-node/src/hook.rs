@@ -10,13 +10,14 @@
 //! - `session_start`: Performs the identity bootstrap, injecting context about the node's
 //!   role, path, and parent into the agent's session so it understands its place in the swarm.
 //!
-//! Policy logic is dynamically resolved from `exo_policy::role_def` based on the node's role.
+//! Policy logic is resolved from the injected [`RoleRegistry`] based on the node's role.
 
 use std::path::Path;
 
 use crate::bootstrap::{bootstrap, NodeContext};
 use crate::error::NodeResult;
-use exo_policy::{role_def, HookDecision, HookInput, StopDecision};
+use exo_framework::{HookDecision, HookInput, RoleRegistry, StopDecision};
+use exo_runtime::Runtime;
 use serde_json::json;
 
 /// The CC hook events this mode handles (mirrors the policy hook fns).
@@ -29,12 +30,17 @@ pub enum HookEvent {
 
 /// Handle one CC hook invocation: read stdin payload, self-ID via `papers_path`, run the
 /// role's policy hook, write the verdict JSON to stdout.
-pub async fn handle(event: HookEvent, papers_path: &Path, stdin_json: &str) -> NodeResult<String> {
-    // 1. Self-ID: call crate::bootstrap::bootstrap
-    let ctx = bootstrap(papers_path, std::env::current_dir()?)?;
+pub async fn handle(
+    event: HookEvent,
+    papers_path: &Path,
+    stdin_json: &str,
+    registry: RoleRegistry<Runtime>,
+) -> NodeResult<String> {
+    // 1. Self-ID: bootstrap with the injected domain roster.
+    let ctx = bootstrap(papers_path, std::env::current_dir()?, registry)?;
 
-    // 2. Get the role's hook fns: let rd = exo_policy::role_def::<exo_runtime::Runtime>(ctx.kind);
-    let rd = role_def::<exo_runtime::Runtime>(ctx.kind);
+    // 2. Resolve the role's hook fns from the injected registry.
+    let rd = ctx.registry.role_def(ctx.kind);
 
     run_hook(ctx, rd, event, stdin_json).await
 }
@@ -89,7 +95,7 @@ fn identity_context(ctx: &NodeContext) -> String {
 
 async fn run_hook(
     ctx: NodeContext,
-    rd: exo_policy::RoleDef<exo_runtime::Runtime>,
+    rd: exo_framework::RoleDef<Runtime>,
     event: HookEvent,
     stdin_json: &str,
 ) -> NodeResult<String> {
@@ -153,8 +159,9 @@ async fn run_hook(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{test_pre_tool_use, test_roster, test_session_start, test_stop};
     use exo_caps::{AgentName, Branch, NodeKind, NodePath, PaneId};
-    use exo_policy::{HookDecision, HookInput, RoleDef, StopDecision};
+    use exo_framework::{BoxFuture, HookDecision, HookInput, RoleDef, StopDecision};
     use exo_runtime::Runtime;
     use serde_json::{json, Value};
     use std::sync::Arc;
@@ -185,6 +192,7 @@ mod tests {
 
         NodeContext {
             runtime: Arc::new(runtime),
+            registry: test_roster(),
             kind,
             own_pane: PaneId::new("%1".into()).unwrap(),
             own_inbox: exo_caps::InboxPath::new("/tmp/own".into()),
@@ -238,7 +246,7 @@ mod tests {
     #[tokio::test]
     async fn test_run_hook_pre_tool_use_unrecognized() {
         let ctx = mock_ctx(NodeKind::Dev, vec!["root", "dev-node"], "main", false);
-        let rd = role_def::<exo_runtime::Runtime>(NodeKind::Dev);
+        let rd = crate::test_support::test_role_def(NodeKind::Dev);
         let stdin = json!({
             "tool_name": "unrecognized_tool",
             "tool_input": {}
@@ -255,7 +263,7 @@ mod tests {
     #[tokio::test]
     async fn test_run_hook_session_start() {
         let ctx = mock_ctx(NodeKind::Dev, vec!["root", "dev-node"], "main", false);
-        let rd = role_def::<exo_runtime::Runtime>(NodeKind::Dev);
+        let rd = crate::test_support::test_role_def(NodeKind::Dev);
 
         let res = run_hook(ctx, rd, HookEvent::SessionStart, "")
             .await
@@ -269,9 +277,7 @@ mod tests {
         assert!(add_ctx.contains("role: dev"));
     }
 
-    fn mock_stop_block<'a>(
-        _: &'a exo_runtime::Runtime,
-    ) -> exo_policy::tool::BoxFuture<'a, StopDecision> {
+    fn mock_stop_block<'a>(_: &'a exo_runtime::Runtime) -> BoxFuture<'a, StopDecision> {
         Box::pin(async {
             StopDecision::Block {
                 reason: "test reason".into(),
@@ -284,9 +290,9 @@ mod tests {
         let ctx = mock_ctx(NodeKind::Dev, vec!["root", "dev"], "main", false);
         let rd = RoleDef {
             tools: vec![],
-            pre_tool_use: exo_policy::hooks::pre_tool_use,
+            pre_tool_use: test_pre_tool_use,
             stop: mock_stop_block,
-            session_start: exo_policy::hooks::session_start,
+            session_start: test_session_start,
         };
 
         let res = run_hook(ctx, rd, HookEvent::Stop, "").await.unwrap();
@@ -298,7 +304,7 @@ mod tests {
     fn mock_pre_tool_deny<'a>(
         _: &'a exo_runtime::Runtime,
         _: &'a HookInput,
-    ) -> exo_policy::tool::BoxFuture<'a, HookDecision> {
+    ) -> BoxFuture<'a, HookDecision> {
         Box::pin(async {
             HookDecision::Deny {
                 reason: "test deny".into(),
@@ -312,8 +318,8 @@ mod tests {
         let rd = RoleDef {
             tools: vec![],
             pre_tool_use: mock_pre_tool_deny,
-            stop: exo_policy::hooks::stop,
-            session_start: exo_policy::hooks::session_start,
+            stop: test_stop,
+            session_start: test_session_start,
         };
         let stdin = json!({
             "tool_name": "any",
@@ -332,7 +338,7 @@ mod tests {
     fn mock_pre_tool_modify<'a>(
         _: &'a exo_runtime::Runtime,
         _: &'a HookInput,
-    ) -> exo_policy::tool::BoxFuture<'a, HookDecision> {
+    ) -> BoxFuture<'a, HookDecision> {
         Box::pin(async {
             HookDecision::Modify {
                 input: json!({"modified": true}),
@@ -346,8 +352,8 @@ mod tests {
         let rd = RoleDef {
             tools: vec![],
             pre_tool_use: mock_pre_tool_modify,
-            stop: exo_policy::hooks::stop,
-            session_start: exo_policy::hooks::session_start,
+            stop: test_stop,
+            session_start: test_session_start,
         };
         let stdin = json!({
             "tool_name": "any",

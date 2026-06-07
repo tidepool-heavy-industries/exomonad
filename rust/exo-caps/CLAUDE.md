@@ -1,6 +1,6 @@
 # exo-caps — the capability seam
 
-The trait/type contract that the node-mode swarm forks from. Policy (`exo-policy`) is written **generic over these traits**; the runtime (`exo-runtime`) implements them. This crate has **no IO** — only trait definitions, validated domain newtypes, and the message/identity vocabulary.
+The trait/type contract that the node-mode swarm forks from. The engine abstractions (`exo-framework`) and the domain (`exo`) are written **generic over these traits**; the runtime (`exo-runtime`) implements them. This crate has **no IO** — only trait definitions, validated domain newtypes, and the message/identity vocabulary.
 
 This is the seam that replaces the old Haskell-WASM boundary. WASM *physically* prevented the policy layer from doing IO; a crate that simply doesn't link the runtime gets the same separation at zero runtime cost — **except** the wall is soft: policy *may* drop to raw IO as an escape hatch. Good caps make it rarely want to.
 
@@ -22,7 +22,7 @@ This is the seam that replaces the old Haskell-WASM boundary. WASM *physically* 
 
 ## The capability traits
 
-Ten caps, each one trait per file. `exo-runtime::Runtime` implements all of them; `exo-policy::testing::MockRuntime` mocks all of them.
+Ten caps, each one trait per file. `exo-runtime::Runtime` implements all of them; `exo::testing::MockRuntime` mocks all of them.
 
 - **`Git`** — `current_branch`, `head_sha` (sha-tag review verdicts), `merge_base` (fork-point base for a reviewer's `git diff`), `is_clean`, `fetch`, **`merge`** (the local on-disk fold — v2 convergence), `worktree_add`/`worktree_remove`. **No `GitHub` cap** — v2 convergence is local git, no PR/Copilot (cut 2026-06-01; see `reactive-github-layer-stays` memory).
 - **`Bus`** — `deliver(Addressee, Message)`. The append half only; the read/cursor/watch half is the sidecar's inbound loop. Delivery mechanism (Teams vs tmux) is the *recipient's* last-hop concern — policy never names it.

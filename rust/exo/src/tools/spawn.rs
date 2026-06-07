@@ -5,8 +5,8 @@
 //! generic-over-caps `run<C: Spawner>`, and a `Tool<R>` adapter. Ships mock-cap unit tests
 //! (assert the right `Spawner` method recorded) in this file.
 
-use crate::tool::{ok_json, parse, schema_json, Tool, ToolOutput};
 use exo_caps::{AgentName, CapResult, ForkSpec, GeminiSpec, Spawner, WorkerSpec};
+use exo_framework::{ok_json, parse, schema_json, Tool, ToolOutput};
 use schemars::JsonSchema;
 use serde::Deserialize;
 

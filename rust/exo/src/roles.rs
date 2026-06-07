@@ -1,20 +1,12 @@
-//! Roles — [`RoleDef<R>`] bundles a role's tools + its three shared hook fns, and
-//! [`role_def`] is the hand-written `match NodeKind` table. A role *reads* like declarative
-//! config but is plain, greppable, unit-testable Rust: a list of tool **types** plus three
-//! fn-pointers (hooks compose by pointing several roles at the same fn). NO `dyn Caps` — the
-//! table is parameterized by the concrete runtime `R`.
-//!
-//! **Status: Wave-3 scaffold.** The `RoleDef` shape + the fn-pointer signatures are frozen;
-//! P7 fills the `role_def` arms with real tool lists + hook wiring once P1–P6 land their
-//! tool/hook types. Until then each arm returns an empty-but-valid `RoleDef` so the crate
-//! compiles and downstream (the sidecar) can already call `role_def`.
+//! Roles — the concrete roster. [`role_def`] is the hand-written `match NodeKind` table (the
+//! single place a role's tool list + hooks are named), and [`roster`] wraps it as the
+//! [`RoleRegistry`](exo_framework::RoleRegistry) the binary injects into the engine. A role
+//! *reads* like declarative config but is plain, greppable, unit-testable Rust: a list of tool
+//! **types** plus three fn-pointers (hooks compose by pointing several roles at the same fn). NO
+//! `dyn Caps` — the table is parameterized by the concrete runtime `R`. The [`RoleDef<R>`] shape
+//! and the fn-pointer aliases are the framework contract ([`exo_framework::roles`]).
 
-use crate::caps::PolicyCaps;
-use crate::hooks::{
-    pre_tool_use, session_start, stop, stop_allow, stop_notify, stop_reviewer, HookDecision,
-    HookInput, SessionStartOutput, StopDecision,
-};
-use crate::tool::{BoxFuture, Tool};
+use crate::gates::{pre_tool_use, session_start, stop, stop_allow, stop_notify, stop_reviewer};
 use crate::tools::merge::Merge;
 use crate::tools::messaging::{NotifyParent, SendMessage};
 use crate::tools::spawn::{ForkWave, SpawnGemini, SpawnWorker};
@@ -22,23 +14,12 @@ use crate::tools::submit::SubmitBranch;
 use crate::tools::tree::Tree;
 use crate::tools::verdict::Verdict;
 use exo_caps::NodeKind;
+use exo_framework::{PolicyCaps, RoleDef, RoleRegistry};
 
-/// A hook is an async fn over the concrete runtime `R`. Stored as a plain fn-pointer so the
-/// role table stays a greppable struct literal; the `BoxFuture` return lets the body do
-/// async cap IO (the `stop` gate reads `git status` live). The generic bound lives on the
-/// fn's own definition (e.g. `fn stop<R: Git + Log>(…)`); here `R: PolicyCaps` guarantees
-/// every cap is present, so any role's hooks coerce to these pointer types.
-pub type PreToolUseFn<R> = for<'a> fn(&'a R, &'a HookInput) -> BoxFuture<'a, HookDecision>;
-pub type StopFn<R> = for<'a> fn(&'a R) -> BoxFuture<'a, StopDecision>;
-pub type SessionStartFn<R> = for<'a> fn(&'a R) -> BoxFuture<'a, SessionStartOutput>;
-
-/// A role: its served tools + its three shared hook fns. `dyn Tool<R>` is dyn over the
-/// CONCRETE `R`, not over `Caps`.
-pub struct RoleDef<R: Send + Sync> {
-    pub tools: Vec<Box<dyn Tool<R>>>,
-    pub pre_tool_use: PreToolUseFn<R>,
-    pub stop: StopFn<R>,
-    pub session_start: SessionStartFn<R>,
+/// Build the [`RoleRegistry`] the binary injects into the engine — the domain's whole
+/// public surface to `exo-node`. Monomorphized at the binary's concrete runtime `R`.
+pub fn roster<R: PolicyCaps>() -> RoleRegistry<R> {
+    RoleRegistry::new(role_def::<R>)
 }
 
 /// The per-role policy table. Hand-written `match` — the single place a role's tool list +
@@ -112,6 +93,7 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
 mod tests {
     use super::*;
     use crate::testing::MockRuntime;
+    use exo_framework::StopDecision;
 
     #[tokio::test]
     async fn every_role_builds_non_empty_tools() {

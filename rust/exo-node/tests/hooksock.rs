@@ -2,9 +2,9 @@
 //!
 //! Exercises the actual socket plumbing end-to-end over a tempdir: the sidecar's server binds its
 //! per-agent socket, runs the role's hook fn on the live runtime, and shapes the verdict; the thin
-//! client connects, sends a `HookRequest`, and reads the `HookVerdict` back. Uses `NodeKind::Root`
-//! so the stop path is `stop_allow` (no git/bus dependency — this asserts the transport + shaping,
-//! not the policy decisions, which are unit-tested in exo-policy).
+//! client connects, sends a `HookRequest`, and reads the `HookVerdict` back. The injected test
+//! roster's hooks allow/default (no git/bus dependency — this asserts the transport + shaping,
+//! not the policy decisions, which are unit-tested in `exo`).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,6 +13,8 @@ use exo_caps::{AgentName, Branch, HookEvent, HookRequest, InboxPath, NodeKind, N
 use exo_node::bootstrap::NodeContext;
 use exo_node::hooksock;
 use exo_runtime::Runtime;
+
+mod common;
 
 fn test_ctx(dir: &std::path::Path, run_id: &str) -> Arc<NodeContext> {
     let own_pane = PaneId::new("%7".into()).unwrap();
@@ -27,6 +29,7 @@ fn test_ctx(dir: &std::path::Path, run_id: &str) -> Arc<NodeContext> {
     );
     Arc::new(NodeContext {
         runtime: Arc::new(runtime),
+        registry: common::test_roster(),
         kind: NodeKind::Root,
         own_pane,
         own_inbox: InboxPath::new(dir.join("own-inbox.jsonl")),
@@ -71,7 +74,9 @@ async fn hook_rpc_round_trips_over_uds() {
     .expect("stop round-trip");
     assert_eq!(v.stdout, r#"{"continue":true}"#);
 
-    // PreToolUse `git add .` → the antipattern nudge (Claude deny shape: continue + systemMessage).
+    // PreToolUse on a shell call → the injected gate's `Deny`, shaped for Claude as a nudge
+    // (continue + systemMessage). Asserts the transport's `Deny → nudge` shaping; the concrete
+    // antipattern rules are unit-tested in `exo`.
     let v = hooksock::client_request(
         "root",
         &sock,
@@ -88,7 +93,7 @@ async fn hook_rpc_round_trips_over_uds() {
     .expect("pre_tool_use round-trip");
     assert!(
         v.stdout.contains(r#""continue":true"#) && v.stdout.contains("systemMessage"),
-        "expected git-add nudge, got {}",
+        "expected deny nudge shape, got {}",
         v.stdout
     );
 

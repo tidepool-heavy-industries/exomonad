@@ -12,7 +12,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::tool::{ok_json, parse, schema_json, Tool, ToolOutput};
+use exo_framework::{ok_json, parse, schema_json, Tool, ToolOutput};
 
 /// The reviewer's decision.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

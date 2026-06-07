@@ -1,8 +1,8 @@
-//! **N1 — Outbound.** Serves the node's `exo-policy` tools over rmcp/stdio and routes
+//! **N1 — Outbound.** Serves the node's role tools (from the injected roster) over rmcp/stdio and routes
 //! communication through the node's ingestion system. This module implements the rmcp
 //! stdio server that Claude Code or other agents connect to for tool execution.
 //!
-//! It exposes tools defined in `exo_policy::role_def` for the node's specific role.
+//! It exposes the tools from the injected `RoleRegistry` for the node's specific role.
 //! Tools like `send_message` and `notify_parent` are routed through the `Bus::deliver`
 //! mechanism, which appends `IngestionEntry` objects to target inboxes (e.g., the
 //! parent's ingestion inbox), maintaining runtime-agnostic communication where the
@@ -10,8 +10,7 @@
 
 use std::sync::Arc;
 
-use exo_policy::role_def;
-use exo_policy::tool::Tool;
+use exo_framework::Tool;
 use exo_runtime::Runtime;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -22,7 +21,7 @@ use crate::error::NodeResult;
 
 /// Serve the policy toolset over rmcp/stdio until the stream closes.
 pub async fn serve(ctx: Arc<NodeContext>) -> NodeResult<()> {
-    let tools = role_def::<Runtime>(ctx.kind).tools;
+    let tools = ctx.registry.role_def(ctx.kind).tools;
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin).lines();
     let mut stdout = tokio::io::stdout();
@@ -179,7 +178,7 @@ fn error_response(id: Value, code: i32, message: String) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use exo_caps::{AgentName, Branch, NodeKind, NodePath, PaneId};
+    use exo_caps::{AgentName, Branch, NodePath, PaneId};
 
     fn test_runtime(temp_path: std::path::PathBuf) -> Runtime {
         Runtime::new(
@@ -195,10 +194,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_rpc_tools_list() {
-        // Build a minimal Runtime for testing
+        use exo_caps::CapResult;
         let temp = tempfile::tempdir().unwrap();
         let runtime = test_runtime(temp.path().to_path_buf());
-        let tools = role_def::<Runtime>(NodeKind::Dev).tools;
+
+        // A node serves whatever tools its injected roster provides; the concrete roster is the
+        // domain's concern (tested in `exo`). Here a single named tool stands in for any roster.
+        struct ListTestTool;
+        #[async_trait::async_trait]
+        impl Tool<Runtime> for ListTestTool {
+            fn name(&self) -> &str {
+                "list_test_tool"
+            }
+            fn description(&self) -> &str {
+                "desc"
+            }
+            fn schema(&self) -> Value {
+                json!({})
+            }
+            async fn call(&self, _runtime: &Runtime, _args: Value) -> CapResult<Value> {
+                Ok(json!({ "text": "" }))
+            }
+        }
+        let tools: Vec<Box<dyn Tool<Runtime>>> = vec![Box::new(ListTestTool)];
 
         let request = json!({
             "jsonrpc": "2.0",
@@ -213,8 +231,7 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
-        assert!(names.contains(&"submit_branch"));
-        assert!(names.contains(&"notify_parent"));
+        assert!(names.contains(&"list_test_tool"));
     }
 
     #[tokio::test]

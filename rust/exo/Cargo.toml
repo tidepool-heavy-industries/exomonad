@@ -1,0 +1,28 @@
+[package]
+name = "exo"
+version = "0.1.0"
+edition = "2021"
+description = "The minimal domain usage of exo-framework: concrete tools, roles, gates, and the roster the node binary injects into the engine."
+
+[lib]
+name = "exo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "exo"
+path = "src/main.rs"
+
+[dependencies]
+exo-caps = { path = "../exo-caps" }
+exo-framework = { path = "../exo-framework" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+schemars = { workspace = true }
+tokio = { workspace = true }
+
+# Bin (the node entrypoint) only: assemble the engine sidecar with the domain roster injected.
+# The lib stays generic over the cap traits and never references these.
+exo-node = { path = "../exo-node" }
+anyhow = { workspace = true }

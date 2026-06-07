@@ -2,7 +2,7 @@
 name = "exo-caps"
 version = "0.1.0"
 edition = "2021"
-description = "Capability traits + domain types — the seam between exo-policy (decision logic) and exo-runtime (IO)."
+description = "Capability traits + domain types — the seam between exo-framework/exo (decision logic) and exo-runtime (IO)."
 
 [lib]
 name = "exo_caps"

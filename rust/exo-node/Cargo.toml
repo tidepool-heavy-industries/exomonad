@@ -2,7 +2,7 @@
 name = "exo-node"
 version = "0.1.0"
 edition = "2021"
-description = "The per-node sidecar: assembles exo-runtime + exo-policy into the two-loop node mode (outbound MCP serve + inbound ingestion-inbox watch)."
+description = "The per-node sidecar: assembles exo-runtime + exo-framework (with an injected domain roster) into the two-loop node mode (outbound MCP serve + inbound ingestion-inbox watch)."
 
 [lib]
 name = "exo_node"
@@ -11,7 +11,7 @@ path = "src/lib.rs"
 [dependencies]
 exo-caps = { path = "../exo-caps" }
 exo-runtime = { path = "../exo-runtime" }
-exo-policy = { path = "../exo-policy" }
+exo-framework = { path = "../exo-framework" }
 exo-scry = { path = "../exo-scry" }
 
 serde = { workspace = true }

@@ -1,0 +1,19 @@
+[package]
+name = "exo-framework"
+version = "0.1.0"
+edition = "2021"
+description = "The reusable node-mode engine abstractions — Tool/RoleDef/Hook contract + RoleRegistry, generic over the exo-caps traits. No concrete tools/roles/gates."
+
+[lib]
+name = "exo_framework"
+path = "src/lib.rs"
+
+[dependencies]
+exo-caps = { path = "../exo-caps" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+
+# `Args` derives its MCP schema via JsonSchema; the schema helper lives in `tool`.
+schemars = { workspace = true }

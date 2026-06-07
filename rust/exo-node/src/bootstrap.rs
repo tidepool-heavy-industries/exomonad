@@ -5,28 +5,32 @@
 //! spawn — the parent never makes the child guess where they are) into [`NodePapers`], then
 //! enriching with the ambient run context (`$TMUX_PANE`, `EXOMONAD_SWARM_RUN_ID`,
 //! `EXOMONAD_TMUX_SESSION`) and, lazily, CC team membership via `exo-scry`. The result is a
-//! [`NodeContext`] holding a real [`Runtime`] (the `R` policy monomorphizes against) plus the
-//! [`NodeKind`] needed to pick the role's toolset/hooks via [`exo_policy::role_def`].
+//! [`NodeContext`] holding a real [`Runtime`] (the `R` policy monomorphizes against), the
+//! injected [`RoleRegistry`], plus the [`NodeKind`] needed to pick the role's toolset/hooks.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use exo_caps::{Branch, InboxPath, NodeKind, NodePapers, NodePath, PaneId};
+use exo_framework::RoleRegistry;
 use exo_runtime::Runtime;
 use tracing::warn;
 
 use crate::error::{NodeError, NodeResult};
 
-/// Everything a running node needs: its identity, the concrete [`Runtime`] (all caps), and
-/// the ambient context the loops read. `Runtime` does not itself store the [`NodeKind`]
-/// (its identity is the tree address + branch), so the context carries it for
-/// [`exo_policy::role_def`].
+/// Everything a running node needs: its identity, the concrete [`Runtime`] (all caps), the
+/// injected [`RoleRegistry`], and the ambient context the loops read. `Runtime` does not itself
+/// store the [`NodeKind`] (its identity is the tree address + branch), so the context carries it
+/// for role resolution.
 #[derive(Debug)]
 pub struct NodeContext {
     /// The concrete runtime — implements every `exo-caps` capability. Policy monomorphizes
-    /// against this `R`; the outbound loop serves `role_def::<Runtime>(kind).tools`.
+    /// against this `R`; the outbound loop serves `registry.role_def(kind).tools`.
     pub runtime: Arc<Runtime>,
-    /// This node's archetype (from papers). Drives `role_def` + the last-hop agent_type.
+    /// The domain roster, **injected by the binary** (`exo::roster()`). The engine resolves a
+    /// role's tools/hooks through this — it never names a concrete role itself.
+    pub registry: RoleRegistry<Runtime>,
+    /// This node's archetype (from papers). Drives the role resolution + the last-hop agent_type.
     pub kind: NodeKind,
     /// This node's own pane — the inbox key + the tmux-paste target for self-injection.
     pub own_pane: PaneId,
@@ -82,7 +86,11 @@ fn load_papers(papers_path: &Path) -> NodeResult<NodePapers> {
 ///
 /// Ambient (env): `$TMUX_PANE` (the universal key — must agree with papers.pane),
 /// `EXOMONAD_SWARM_RUN_ID`, `EXOMONAD_TMUX_SESSION`, `$HOME`.
-pub fn bootstrap(papers_path: &Path, working_dir: PathBuf) -> NodeResult<NodeContext> {
+pub fn bootstrap(
+    papers_path: &Path,
+    working_dir: PathBuf,
+    registry: RoleRegistry<Runtime>,
+) -> NodeResult<NodeContext> {
     let papers = load_papers(papers_path)?;
 
     let run_id = std::env::var("EXOMONAD_SWARM_RUN_ID")
@@ -134,6 +142,7 @@ pub fn bootstrap(papers_path: &Path, working_dir: PathBuf) -> NodeResult<NodeCon
 
     Ok(NodeContext {
         runtime: Arc::new(runtime),
+        registry,
         kind,
         own_pane,
         own_inbox,
@@ -186,7 +195,12 @@ mod tests {
         std::env::set_var("EXOMONAD_TMUX_SESSION", "test-session");
         std::env::set_var("HOME", dir.path().to_str().unwrap());
 
-        let ctx = bootstrap(&papers_path, working_dir.clone()).unwrap();
+        let ctx = bootstrap(
+            &papers_path,
+            working_dir.clone(),
+            crate::test_support::test_roster(),
+        )
+        .unwrap();
 
         assert_eq!(ctx.kind, NodeKind::Tl);
         assert_eq!(ctx.own_pane, own_pane);
@@ -196,7 +210,11 @@ mod tests {
 
         // 2. Missing env case
         std::env::remove_var("EXOMONAD_SWARM_RUN_ID");
-        let res = bootstrap(&papers_path, working_dir.clone());
+        let res = bootstrap(
+            &papers_path,
+            working_dir.clone(),
+            crate::test_support::test_roster(),
+        );
         assert!(res.is_err());
 
         // Cleanup env

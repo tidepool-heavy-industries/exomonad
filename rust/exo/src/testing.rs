@@ -382,7 +382,7 @@ impl ChildLiveness for MockRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::caps::PolicyCaps;
+    use exo_framework::PolicyCaps;
 
     fn assert_policy_caps<T: PolicyCaps>() {}
 

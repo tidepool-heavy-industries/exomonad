@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::tool::{ok_json, parse, schema_json, Tool, ToolOutput};
+use exo_framework::{ok_json, parse, schema_json, Tool, ToolOutput};
 
 /// Arguments for the `tree` tool — none; it reports the caller's own position.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
