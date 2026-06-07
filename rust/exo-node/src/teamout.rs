@@ -58,9 +58,10 @@ mod linux {
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::mpsc;
-    use tracing::{info, warn};
+    use tracing::{debug, info, warn};
 
     /// How the outbound bridge handles one teammate message.
+    #[derive(Debug)]
     enum Action {
         /// Plain message → bus `Chat`.
         Chat,
@@ -83,8 +84,10 @@ mod linux {
         }
     }
 
+    #[tracing::instrument(skip(ctx), fields(node = %ctx.runtime.name().as_str()))]
     pub async fn run(ctx: Arc<NodeContext>) -> NodeResult<()> {
-        let Some((team, lead)) = wait_for_team().await else {
+        let node = ctx.runtime.name();
+        let Some((team, lead)) = wait_for_team(node.as_str()).await else {
             return Ok(()); // no team ever appeared — native outbound stays off, MCP tools still work
         };
 
@@ -118,6 +121,7 @@ mod linux {
             .map_err(std::io::Error::other)?;
 
         // Initial pass for anything already present (respecting the persisted cursor).
+        info!(node = %ctx.runtime.name().as_str(), team = %team, "teamout: starting initial bridge reconciliation");
         reconcile(
             &ctx,
             &team,
@@ -130,6 +134,7 @@ mod linux {
 
         while let Some(()) = rx.recv().await {
             while rx.try_recv().is_ok() {} // drain coalesced events
+            debug!(node = %ctx.runtime.name().as_str(), "teamout: notify wake; reconciling inboxes");
             reconcile(
                 &ctx,
                 &team,
@@ -146,23 +151,28 @@ mod linux {
     /// Poll `resolve_self` until our team exists (the agent runs `TeamCreate` shortly after boot).
     /// Returns `(team_name, lead_member_name)`. Gives up after ~10 min so a node that never makes a
     /// team doesn't spin forever.
-    async fn wait_for_team() -> Option<(String, Option<String>)> {
+    async fn wait_for_team(node: &str) -> Option<(String, Option<String>)> {
         for attempt in 0..200u32 {
             match exo_scry::resolve_self() {
                 Ok(Some(t)) => {
                     info!(
+                        node = %node,
+                        team = %t.team.0,
                         "teamout: resolved own team '{}' (attempt {attempt})",
                         t.team.0
                     );
                     return Some((t.team.0, t.lead_inbox));
                 }
                 Ok(None) => {}
-                Err(e) if attempt == 0 => warn!("teamout: resolve_self error (will retry): {e}"),
+                Err(e) if attempt == 0 => {
+                    warn!(node = %node, "teamout: resolve_self error (will retry): {e}")
+                }
                 Err(_) => {}
             }
             tokio::time::sleep(Duration::from_secs(3)).await;
         }
         warn!(
+            node = %node,
             "teamout: no team resolved after waiting; native Teams outbound disabled for this node"
         );
         None
@@ -180,7 +190,7 @@ mod linux {
         let entries = match std::fs::read_dir(inboxes_dir) {
             Ok(e) => e,
             Err(e) => {
-                warn!("teamout: read_dir {} failed: {e}", inboxes_dir.display());
+                warn!(node = %ctx.runtime.name().as_str(), "teamout: read_dir {} failed: {e}", inboxes_dir.display());
                 return;
             }
         };
@@ -203,7 +213,7 @@ mod linux {
             let msgs = match exo_scry::inbox::read_inbox(team, &member) {
                 Ok(m) => m,
                 Err(e) => {
-                    warn!("teamout: read_inbox {member} failed: {e}");
+                    warn!(node = %ctx.runtime.name().as_str(), member = %member, "teamout: read_inbox failed: {e}");
                     continue;
                 }
             };
@@ -211,6 +221,7 @@ mod linux {
             if msgs.len() <= start {
                 continue;
             }
+            debug!(node = %ctx.runtime.name().as_str(), member = %member, count = msgs.len() - start, "teamout: forwarding new messages from inbox");
             for msg in &msgs[start..] {
                 forward(ctx, &member, msg).await;
             }
@@ -224,17 +235,25 @@ mod linux {
 
     /// Bridge one teammate message onto the bus. Always advances the cursor (caller side) — a
     /// message we can't deliver is dropped with a warning rather than retried forever.
+    #[tracing::instrument(skip(ctx, msg), fields(node = %ctx.runtime.name().as_str(), to = %member))]
     async fn forward(ctx: &Arc<NodeContext>, member: &str, msg: &InboxMessage) {
         let Ok(name) = AgentName::new(member.to_string()) else {
-            warn!("teamout: invalid teammate name '{member}'; dropping");
+            warn!(
+                outcome = "dropped_invalid_name",
+                "teamout: invalid teammate name; dropping"
+            );
             return;
         };
         let Some(addressee) = ctx.runtime.resolve_edge(&name).await else {
-            warn!("teamout: '{member}' is not a tree edge (child/parent); dropping");
+            warn!(
+                outcome = "dropped_not_edge",
+                "teamout: not a tree edge (child/parent); dropping"
+            );
             return;
         };
 
-        let (text, summary, kind) = match classify(&msg.text) {
+        let action = classify(&msg.text);
+        let (text, summary, kind) = match action {
             Action::Chat => (
                 msg.text.clone(),
                 make_summary(msg, "(teams message)"),
@@ -250,7 +269,7 @@ mod linux {
                 }),
             ),
             Action::Skip(t) => {
-                warn!("teamout: unhandled teams message type '{t}' to '{member}'; dropping");
+                warn!(outcome = "skipped", kind = %t, "teamout: unhandled teams message type; dropping");
                 return;
             }
         };
@@ -258,7 +277,10 @@ mod linux {
         let body = match MessageBody::new(text) {
             Ok(b) => b,
             Err(e) => {
-                warn!("teamout: message body invalid for '{member}' ({e}); dropping");
+                warn!(
+                    outcome = "error_body",
+                    "teamout: message body invalid ({e}); dropping"
+                );
                 return;
             }
         };
@@ -267,8 +289,11 @@ mod linux {
             summary,
             kind,
         };
-        if let Err(e) = Bus::deliver(&*ctx.runtime, addressee, message).await {
-            warn!("teamout: bus deliver to '{member}' failed: {e}");
+        match Bus::deliver(&*ctx.runtime, addressee, message).await {
+            Ok(_) => {
+                info!(outcome = "forwarded", action = ?classify(&msg.text), "teamout: message bridged to bus")
+            }
+            Err(e) => warn!(outcome = "error_bus", "teamout: bus deliver failed: {e}"),
         }
     }
 

@@ -248,16 +248,17 @@ async fn main() -> Result<()> {
                 // Fail-open on ANY error: if the sidecar is unreachable there are no tools to
                 // gate, so never wedge the agent. Shape the allow per agent_type.
                 match exo_node::hooksock::client::resolve_hook_sock(&papers) {
-                    Ok(sock) => match exo_node::hooksock::client::client_request(&sock, &req).await
-                    {
-                        Ok(verdict) => print!("{}", verdict.stdout),
-                        Err(e) => {
-                            eprintln!(
-                                "[exomonad] node hook: socket RPC failed ({e}); failing open"
-                            );
-                            print!("{}", fail_open_shape(&papers));
+                    Ok((sock, node)) => {
+                        match exo_node::hooksock::client::client_request(&node, &sock, &req).await {
+                            Ok(verdict) => print!("{}", verdict.stdout),
+                            Err(e) => {
+                                eprintln!(
+                                    "[exomonad] node hook: socket RPC failed ({e}); failing open"
+                                );
+                                print!("{}", fail_open_shape(&papers));
+                            }
                         }
-                    },
+                    }
                     Err(e) => {
                         eprintln!(
                             "[exomonad] node hook: cannot resolve hook socket ({e}); failing open"

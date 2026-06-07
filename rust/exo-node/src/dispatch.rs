@@ -14,12 +14,13 @@
 use std::sync::Arc;
 
 use exo_caps::{AgentType, IngestionEntry, MessageKind, Persona, Tmux};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::bootstrap::NodeContext;
 use crate::error::{NodeError, NodeResult};
 
 /// Deliver one ingestion entry into this node's own agent (the runtime-specific last hop).
+#[tracing::instrument(skip(ctx, entry), fields(node = %ctx.runtime.name().as_str(), from = ?entry.from, kind = ?entry.msg.kind))]
 pub async fn dispatch(ctx: &Arc<NodeContext>, entry: &IngestionEntry) -> NodeResult<()> {
     let agent_type = ctx.kind.agent_type();
 
@@ -34,15 +35,17 @@ pub async fn dispatch(ctx: &Arc<NodeContext>, entry: &IngestionEntry) -> NodeRes
     let active_team = match exo_scry::resolve_self() {
         Ok(team) => team,
         Err(e) => {
-            warn!("resolve_self failed; falling back to tmux paste for this delivery: {e}");
+            warn!(node = %ctx.runtime.name().as_str(), "resolve_self failed; falling back to tmux paste for this delivery: {e}");
             None
         }
     };
     #[cfg(not(target_os = "linux"))]
     let active_team = None;
 
-    match decide_lasthop(agent_type, active_team) {
+    let lasthop = decide_lasthop(agent_type, active_team);
+    match lasthop {
         LastHop::TeamsInbox { team, to } => {
+            info!(outcome = "teams_inbox", team = %team, to = %to, "dispatching via Teams inbox");
             let persona_str = render_persona(&entry.from);
             exo_scry::inbox::send_message(
                 &team,
@@ -55,6 +58,7 @@ pub async fn dispatch(ctx: &Arc<NodeContext>, entry: &IngestionEntry) -> NodeRes
             Ok(())
         }
         LastHop::TmuxPaste => {
+            info!(outcome = "tmux_paste", "dispatching via tmux paste");
             let rendered = render_entry(entry);
             Tmux::paste(&*ctx.runtime, &ctx.own_pane, &rendered)
                 .await

@@ -16,7 +16,9 @@ use crate::error::{NodeError, NodeResult};
 ///
 /// Framing: write the request JSON, half-close the write side (EOF signals end-of-request to the
 /// server), then read the response JSON to EOF.
-pub async fn client_request(sock: &Path, req: &HookRequest) -> NodeResult<HookVerdict> {
+#[tracing::instrument(skip(req), fields(node = %node, event = ?req.event, socket = %sock.display()))]
+pub async fn client_request(node: &str, sock: &Path, req: &HookRequest) -> NodeResult<HookVerdict> {
+    tracing::debug!(node = %node, "hook client: connecting to socket");
     let verdict = timeout(Duration::from_secs(5), async {
         let mut stream = UnixStream::connect(sock).await?;
         let bytes = serde_json::to_vec(req)
@@ -42,13 +44,14 @@ pub async fn client_request(sock: &Path, req: &HookRequest) -> NodeResult<HookVe
         )
     })??;
 
+    tracing::debug!(node = %node, outcome = "success", "hook client: received verdict");
     Ok(verdict)
 }
 
-/// Resolve this node's hook socket path from its papers + ambient run env, identically to how the
-/// sidecar's server binds it (both go through [`exo_caps::paths::hook_sock`], so they always
-/// agree). The pane comes from papers; the run-id and home from the env the parent set at spawn.
-pub fn resolve_hook_sock(papers_path: &Path) -> NodeResult<PathBuf> {
+/// Resolve this node's hook socket path and its name from its papers + ambient run env, identically
+/// to how the sidecar's server binds it. Both go through [`exo_caps::paths::hook_sock`], so they
+/// always agree. The pane comes from papers; the run-id and home from the env the parent set at spawn.
+pub fn resolve_hook_sock(papers_path: &Path) -> NodeResult<(PathBuf, String)> {
     let bytes = std::fs::read(papers_path)?;
     let papers: NodePapers = serde_json::from_slice(&bytes).map_err(|e| {
         std::io::Error::new(
@@ -59,9 +62,7 @@ pub fn resolve_hook_sock(papers_path: &Path) -> NodeResult<PathBuf> {
     let run_id = std::env::var("EXOMONAD_SWARM_RUN_ID")
         .map_err(|_| NodeError::MissingContext("EXOMONAD_SWARM_RUN_ID"))?;
     let home = std::env::var("HOME").map_err(|_| NodeError::MissingContext("HOME"))?;
-    Ok(exo_caps::paths::hook_sock(
-        Path::new(&home),
-        &run_id,
-        &papers.pane,
-    ))
+    let sock = exo_caps::paths::hook_sock(Path::new(&home), &run_id, &papers.pane);
+    let name = papers.path.name().as_str().to_string();
+    Ok((sock, name))
 }
