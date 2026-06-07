@@ -130,8 +130,12 @@ pub async fn run(config: &Config, session: Option<String>, recreate: bool) -> Re
     // would otherwise break the launch. (run_id is a UUID, but escape it too for uniformity.)
     let run_id_esc = shell_escape::escape(run_id.clone().into());
     let session_esc = shell_escape::escape(session.clone().into());
+    // On `--recreate` (e.g. restarting after a binary update), continue the prior root
+    // conversation so the restart doesn't discard the human's context — `claude --continue`
+    // resumes the most recent conversation in this cwd. A fresh `init` has nothing to continue.
+    let continue_flag = if recreate { " --continue" } else { "" };
     let launch = format!(
-        "EXOMONAD_SWARM_RUN_ID={run_id_esc} EXOMONAD_TMUX_SESSION={session_esc} CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --dangerously-skip-permissions{model_flag}"
+        "EXOMONAD_SWARM_RUN_ID={run_id_esc} EXOMONAD_TMUX_SESSION={session_esc} CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude{continue_flag} --dangerously-skip-permissions{model_flag}"
     );
 
     exomonad_core::services::tmux_ipc::TmuxIpc::new(&session)
