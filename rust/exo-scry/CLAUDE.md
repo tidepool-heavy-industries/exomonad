@@ -18,6 +18,7 @@ CC's own teammate bookkeeping desyncs — we observed phantom teammates, stale `
 | `resolve_active_team(target)` | inotify, Linux | Same, for an arbitrary `ProbeTarget` (pid / tmux pane / self). The only way to resolve a *third party's* team. |
 | `resolve_by_session(uuid)` | config scan, portable | Match a known session UUID against team configs' `leadSessionId`. For self/sidecar contexts (portable); works off-Linux. |
 | `resolve_via_transcript(target)` | cwd→transcript, portable-ish | Find the session's newest transcript in its cwd's project dir → UUID → team. Fails loud (`AmbiguousCwd`) if multiple live Claudes share the cwd. |
+| `resolve_self_or_portable()` | inotify → cwd→transcript | **The sidecar dispatch entry point.** `resolve_self()` first (primary); on no-team/transient-error, falls back to the portable `resolve_via_transcript(SelfProcess)` (which ends in `resolve_by_session`). Off-Linux the portable cwd reader is absent, so it yields `None`. |
 
 `ActiveTeam { team, tasks_dir, lead_inbox, lead_session_id, me, claude_pid }` is the resolved result; `lead_inbox` is the routing target `dispatch` writes.
 
@@ -36,4 +37,4 @@ CC's own teammate bookkeeping desyncs — we observed phantom teammates, stale `
 
 ## Gaps / not-yet
 
-- The inotify path is **Linux-only**; the portable fallbacks (`resolve_by_session`, `resolve_via_transcript`) exist but the node's `dispatch` only wires `resolve_self` (Linux), so non-Linux native delivery is untested.
+- The inotify path is **Linux-only**. The node's `dispatch` now resolves via `resolve_self_or_portable()`, which falls back to the portable `resolve_via_transcript` path (→ `resolve_by_session`) when the inotify signal finds nothing or errors transiently. **Wired, but UNTESTED on non-Linux:** the portable path is portable *by design* (cwd→transcript→config-scan, no inotify), but its cwd reader is currently Linux-only, so on non-Linux `resolve_self_or_portable()` yields `None` and native delivery there has never run. On Linux the fallback rung itself is exercised only when `resolve_self` fails, which doesn't happen in the common case — so it too is effectively untested in practice.

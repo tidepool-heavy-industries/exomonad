@@ -24,23 +24,22 @@ use crate::error::{NodeError, NodeResult};
 pub async fn dispatch(ctx: &Arc<NodeContext>, entry: &IngestionEntry) -> NodeResult<()> {
     let agent_type = ctx.kind.agent_type();
 
-    // Resolve THIS agent's own team. `resolve_self` walks from the sidecar up to its parent
-    // `claude` process and reads that process's inotify-bound `tasks/{team}` dir — so it finds
-    // the agent's own (solo) team without needing a `tmux_pane_id` (which CC never writes into
-    // its team config; that's why `resolve_by_pane` always missed and native delivery never
-    // fired). Resolution failure is non-fatal: fall back to paste rather than wedge delivery —
-    // but a transient error (a `/proc` race, a half-written team config) is NOT the same as
-    // "no team": log it, so a Claude node silently degrading to paste is visible, not a mystery.
-    #[cfg(target_os = "linux")]
-    let active_team = match exo_scry::resolve_self() {
+    // Resolve THIS agent's own team. `resolve_self_or_portable` tries `resolve_self` first — it
+    // walks from the sidecar up to its parent `claude` process and reads that process's
+    // inotify-bound `tasks/{team}` dir, finding the agent's own (solo) team without needing a
+    // `tmux_pane_id` (which CC never writes into its team config; that's why `resolve_by_pane`
+    // always missed and native delivery never fired). On its failure (no team, or a transient
+    // `/proc`/config race) it falls back to the portable cwd→transcript path before giving up.
+    // On non-Linux the portable cwd reader is unavailable, so this yields `None` (wired but
+    // untested off-Linux). Resolution failure is non-fatal: fall back to paste rather than wedge
+    // delivery — but log it, so a Claude node silently degrading to paste is visible, not a mystery.
+    let active_team = match exo_scry::resolve_self_or_portable() {
         Ok(team) => team,
         Err(e) => {
-            warn!(node = %ctx.runtime.name().as_str(), "resolve_self failed; falling back to tmux paste for this delivery: {e}");
+            warn!(node = %ctx.runtime.name().as_str(), "team resolution failed; falling back to tmux paste for this delivery: {e}");
             None
         }
     };
-    #[cfg(not(target_os = "linux"))]
-    let active_team = None;
 
     let lasthop = decide_lasthop(agent_type, active_team);
     match lasthop {

@@ -98,3 +98,33 @@ pub fn resolve_active_team(target: ProbeTarget) -> Result<Option<ActiveTeam>> {
 pub fn resolve_via_transcript(target: ProbeTarget) -> Result<Option<ActiveTeam>> {
     resolve::resolve_via_transcript(target)
 }
+
+/// Resolve **this process's own** active team, trying the most robust signal
+/// first and falling back to the portable path before giving up — the entry
+/// point for a sidecar's last-hop dispatch.
+///
+/// 1. **Inotify watch signal** ([`resolve_self`], Linux) — the primary path,
+///    robust even when several sessions share a cwd.
+/// 2. **Portable cwd→transcript fallback** ([`resolve_via_transcript`], which
+///    itself ends in the portable [`resolve_by_session`] config scan) — tried
+///    only when the watch signal yields no team or errors transiently. This is
+///    the rung that lets a non-inotify build still find the team.
+///
+/// The fallback is portable *by design* (cwd→transcript→config-scan, no
+/// inotify), but its cwd reader is currently Linux-only, so on non-Linux this
+/// resolves to `None`: that path is **wired but untested**.
+pub fn resolve_self_or_portable() -> Result<Option<ActiveTeam>> {
+    #[cfg(target_os = "linux")]
+    {
+        // resolve_self stays the primary path; the portable fallback runs only on
+        // its failure (no team found, or a transient `/proc`/config race).
+        match resolve_self() {
+            Ok(Some(team)) => Ok(Some(team)),
+            Ok(None) | Err(_) => resolve_via_transcript(ProbeTarget::SelfProcess),
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(None)
+    }
+}
