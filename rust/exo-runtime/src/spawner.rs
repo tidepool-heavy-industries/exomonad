@@ -63,9 +63,9 @@ pub(crate) struct BirthCore {
 
 // ── Shared ledger + inbox-scheme helpers (Spawner-TL scaffold) ───────────────────────────
 // Used by S2 (`birth` appends `Spawned`) and S3 (`reclaim_worktree`/`kill_pane` read+fold).
-// Self-contained in this file so leaves edit only `spawner.rs`. The inbox-path scheme is
-// duplicated by the `Bus` leaf (R4) for resolution; hoisting to a shared module is a
-// Runtime-TL converge concern, deliberately not done here (would touch a sibling's file).
+// The ledger helpers are self-contained here. The inbox-path scheme is the canonical
+// `exo_caps::paths::inbox_path` (see `child_inbox_path`); `Bus` resolution reads stored
+// `InboxPath`s off the ledger/papers, so the derivation lives in exactly one place.
 impl Runtime {
     /// This node's parent-local child ledger (`{working_dir}/.exo/children.jsonl`).
     pub(crate) fn children_log_path(&self) -> PathBuf {
