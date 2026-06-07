@@ -11,6 +11,7 @@ This is the seam that replaces the old Haskell-WASM boundary. WASM *physically* 
 | Module | Contents |
 |--------|----------|
 | `types` | Validated domain newtypes + the identity/messaging vocabulary (see below) |
+| `domain` | The **domain seam** traits the engine is generic over: `RoleKind` (domain role enum), `SpawnSpec` (spawn intent), `DomainSystem` (inter-node payload, blanket-impl'd for any serde type). Rooted here (not `exo-framework`) because `Spawner`/`NodePapers`/`MessageKind` reference them and `exo-caps` can't depend on `exo-framework`. The `Exomonad` trait that ties them together lives in `exo-framework`. See [`docs/decisions/exo-trait-refactor.md`](../../docs/decisions/exo-trait-refactor.md). |
 | `error` | `CapError` — source-preserving (`#[from]` per-cap errors), `CapResult` |
 | `bus` | `Bus` trait + `Addressee` (tree-edges only) + `BusError` |
 | `spawner` | `Spawner` trait + the per-op specs (`WorkerSpec`/`GeminiSpec`/`ForkSpec`) |

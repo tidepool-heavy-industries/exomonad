@@ -332,6 +332,27 @@ impl NodeKind {
     }
 }
 
+/// The default-domain role enum implements the engine's [`RoleKind`](crate::RoleKind) seam by
+/// delegating to its inherent methods. (The `exo` domain swaps `NodeKind` for its own `ExoRole`
+/// in a later phase; this impl is what proves the seam fits the existing archetype set.)
+impl crate::RoleKind for NodeKind {
+    fn all() -> &'static [Self] {
+        &[
+            NodeKind::Root,
+            NodeKind::Tl,
+            NodeKind::Dev,
+            NodeKind::Worker,
+            NodeKind::Reviewer,
+        ]
+    }
+    fn agent_type(&self) -> AgentType {
+        (*self).agent_type()
+    }
+    fn role_str(&self) -> &'static str {
+        (*self).role_str()
+    }
+}
+
 /// Runtime — used by the **delivery last-hop only** (the Claude/Gemini/Shoal switch).
 /// For a tree node it equals `node_kind.agent_type()`. Shoal is a companion /
 /// external-rmcp participant, **not** a per-op spawn archetype.
@@ -500,6 +521,34 @@ pub enum SystemMessage {
         #[serde(default)]
         busy: bool,
         /// Short free-text note (e.g. a topology-read failure, or the accepted-mode detail).
+        #[serde(default)]
+        reason: String,
+    },
+}
+
+/// Engine-owned **lifecycle** signals — the closed, typed set of node-to-node control signals the
+/// sidecar acts on *itself* (mark a child idle, reap on exit, render a shutdown reply), distinct
+/// from a domain's [`DomainSystem`](crate::DomainSystem) payload. Carried by
+/// [`MessageKind::Lifecycle`]; the engine matches it exhaustively, so a domain cannot add a
+/// lifecycle variant (the documented IoC — lifecycle is the engine's concern). Serde-tagged on
+/// `type`, tolerant of unknown fields.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Lifecycle {
+    /// A node finished a turn and is yielding control (its stop hook fired). The envelope's
+    /// stamped `from` says which node; `summary` is a short human note the parent may render.
+    ChildIdle { summary: String },
+    /// A node is about to reap itself (its shutdown completed and its subtree is clear). Sent to
+    /// its parent just before it kills its own pane — the authoritative "this child is gone".
+    ChildExited { reason: String },
+    /// A node's structured reply to a [`ControlKind::Shutdown`] it received. The requester's
+    /// sidecar renders it into a chat line for its LLM.
+    ShutdownResponse {
+        status: ShutdownStatus,
+        #[serde(default)]
+        live_children: Vec<String>,
+        #[serde(default)]
+        busy: bool,
         #[serde(default)]
         reason: String,
     },

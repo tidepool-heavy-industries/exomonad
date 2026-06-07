@@ -10,6 +10,7 @@
 //! `cargo check`s — that is the Wave-0 gate everything forks from.
 
 pub mod bus;
+pub mod domain;
 pub mod error;
 pub mod hook_rpc;
 pub mod invocation;
@@ -30,6 +31,7 @@ pub mod process;
 pub mod tmux;
 
 pub use bus::{Addressee, Bus, BusError};
+pub use domain::{DomainSystem, RoleKind, SpawnSpec};
 pub use error::{CapError, CapResult};
 pub use fs::{Fs, FsError};
 pub use git::{Git, GitError};
@@ -45,6 +47,6 @@ pub use tmux::{Tmux, TmuxError};
 pub use topology::{Topology, TopologyError, TopologyView, TreeNode};
 pub use types::{
     AgentName, AgentType, Branch, ChildKind, ChildStatus, ControlKind, InboxPath, IngestionEntry,
-    Message, MessageBody, MessageKind, NodeKind, NodePath, NodeStatus, PaneId, Persona, Summary,
-    SyntheticName, SystemMessage,
+    Lifecycle, Message, MessageBody, MessageKind, NodeKind, NodePath, NodeStatus, PaneId, Persona,
+    ShutdownStatus, Summary, SyntheticName, SystemMessage,
 };

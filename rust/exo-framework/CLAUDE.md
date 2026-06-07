@@ -19,7 +19,8 @@ Classic's Haskell-WASM DSL / Rust-host split). See [`docs/decisions/exo-framewor
 | `hooks` | The hook **contract**: the decision enums (`HookDecision`, `StopDecision`, `SessionStartOutput`) + the parsed `HookInput`. The concrete gate bodies that produce them are domain code. |
 | `roles` | `RoleDef<R>` (a role's tools + its three hook fn-pointers) + the fn-pointer type aliases (`PreToolUseFn`/`StopFn`/`SessionStartFn`). |
 | `caps` | `PolicyCaps` — a static bound-**union** for the dispatch boundary. NOT a god-trait: tools still declare their own narrow per-cap bounds. A blanket impl makes any all-caps type (`Runtime`, a test mock) `PolicyCaps` automatically. |
-| `registry` | `RoleRegistry<R>` — the injected role resolver. |
+| `registry` | `RoleRegistry<R>` — the injected role resolver. **Being superseded by `exomonad`** (deleted in P2 of the trait refactor). |
+| `exomonad` | `Exomonad` — the engine-as-generic-machinery trait: four associated types (`Caps`/`Role`/`System`/`Spawn`) + `role_def` + `handle_system`. `SystemCtx` (the engine context a domain's `handle_system` operates through) + `SystemOutcome` (the lifecycle action the engine still owns, e.g. `ReclaimSender` for reviewer teardown). The seam traits the associated types are bound by (`RoleKind`/`SpawnSpec`/`DomainSystem`) live in `exo-caps`. See [`docs/decisions/exo-trait-refactor.md`](../../docs/decisions/exo-trait-refactor.md). |
 
 ## The load-bearing piece: `RoleRegistry` (dependency inversion)
 
