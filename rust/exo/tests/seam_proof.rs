@@ -1,0 +1,292 @@
+//! **The acceptance proof for the `Exomonad` trait refactor.**
+//!
+//! This file defines a SECOND, entirely independent domain (`ProofDomain`) — distinct from the
+//! shipping `exo::ExoDomain` — using **only** the engine's public API (`exo-caps` / `exo-framework`
+//! / `exo-node` / `exo-runtime`). It exercises all four extensibility seams the refactor closed:
+//!
+//! 1. **a new role / backend mapping** (`ProofRole`, incl. a **Claude** reviewer — `exo`'s reviewer
+//!    is Gemini — and a brand-new `Auditor` archetype absent from `exo`),
+//! 2. **a novel inter-node System payload** (`ProofSystem::AuditComplete`),
+//! 3. **a novel inter-node tool** (`SubmitAudit`, which emits that payload via `deliver_domain`),
+//! 4. **a domain spawn intent** (`ProofSpawn`).
+//!
+//! The proof is that this compiles and links `exo-node` (`run_node::<ProofDomain>` typechecks) with
+//! **ZERO edits** to `exo-framework` / `exo-caps` / `exo-node` / `exo-runtime`. Adding a whole new
+//! domain is a downstream-only change — exactly the property the refactor set out to guarantee.
+
+use async_trait::async_trait;
+use exo_caps::{
+    deliver_domain, Addressee, AgentName, AgentType, Branch, Bus, CapResult, ChildKind, Message,
+    Persona, RoleKind, SpawnSpec,
+};
+use exo_framework::{
+    BoxFuture, Exomonad, ok_json, parse, schema_json, RoleDef, SystemCtx, SystemOutcome, Tool,
+    ToolOutput,
+};
+use exo_runtime::Runtime;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+// ── seam #1: a brand-new role set with its own role→backend mapping ──────────────────────────
+
+/// A role set that is NOT `exo::ExoRole`: it has a novel `Auditor` archetype and maps its reviewer
+/// to the **Claude** backend (vs `exo`'s Gemini reviewer) — proving a domain owns both the role
+/// enum (leak #1) and the role→backend mapping (leak #2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ProofRole {
+    Overseer,
+    /// A brand-new archetype with no analogue in `exo`.
+    Auditor,
+    /// A reviewer mapped to Claude (not Gemini).
+    ClaudeReviewer,
+}
+
+impl RoleKind for ProofRole {
+    fn all() -> &'static [Self] {
+        &[
+            ProofRole::Overseer,
+            ProofRole::Auditor,
+            ProofRole::ClaudeReviewer,
+        ]
+    }
+    fn agent_type(&self) -> AgentType {
+        match self {
+            // The overseer + the Claude reviewer run on Claude; the auditor on Gemini.
+            ProofRole::Overseer | ProofRole::ClaudeReviewer => AgentType::Claude,
+            ProofRole::Auditor => AgentType::Gemini,
+        }
+    }
+    fn role_str(&self) -> &'static str {
+        match self {
+            ProofRole::Overseer => "overseer",
+            ProofRole::Auditor => "auditor",
+            ProofRole::ClaudeReviewer => "claude-reviewer",
+        }
+    }
+}
+
+// ── seam #2: a novel inter-node System payload ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ProofSystem {
+    /// A signal no other domain has: an audit finished with a score.
+    AuditComplete { score: u32, note: String },
+}
+
+// ── seam #3: a novel inter-node tool emitting that payload ───────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SubmitAuditArgs {
+    score: u32,
+    note: String,
+}
+
+struct SubmitAudit;
+
+impl SubmitAudit {
+    async fn run<C: Bus>(ctx: &C, args: SubmitAuditArgs) -> CapResult<ToolOutput> {
+        // The free `deliver_domain` helper keeps least-privilege: this tool names `ProofSystem`
+        // but needs only `C: Bus` — not `C: Bus<ProofSystem>`.
+        deliver_domain(
+            ctx,
+            Addressee::Parent,
+            "[audit]",
+            "audit complete",
+            &ProofSystem::AuditComplete {
+                score: args.score,
+                note: args.note,
+            },
+        )
+        .await?;
+        Ok(ToolOutput::text("audit submitted"))
+    }
+}
+
+#[async_trait]
+impl<R: Bus + Send + Sync> Tool<R> for SubmitAudit {
+    fn name(&self) -> &str {
+        "submit_audit"
+    }
+    fn description(&self) -> &str {
+        "Emit an AuditComplete system signal to the parent."
+    }
+    fn schema(&self) -> serde_json::Value {
+        schema_json(schemars::schema_for!(SubmitAuditArgs))
+    }
+    async fn call(&self, ctx: &R, j: serde_json::Value) -> CapResult<serde_json::Value> {
+        ok_json(Self::run(ctx, parse(j)?).await?)
+    }
+}
+
+// ── seam #4: a domain spawn intent ───────────────────────────────────────────────────────────
+
+struct ProofSpawn {
+    role: ProofRole,
+}
+
+impl SpawnSpec for ProofSpawn {
+    type Role = ProofRole;
+    fn role(&self) -> ProofRole {
+        self.role
+    }
+    fn child_kind(&self) -> ChildKind {
+        ChildKind::Worktree
+    }
+    fn name(&self) -> Option<AgentName> {
+        None
+    }
+    fn name_prefix(&self) -> &str {
+        "audit"
+    }
+    fn fork_session(&self) -> bool {
+        false
+    }
+    fn into_task(self) -> String {
+        "audit the branch".into()
+    }
+}
+
+// ── the domain: ties the four seams together ─────────────────────────────────────────────────
+
+// Trivial hooks (the engine only needs the fn-pointer shapes).
+fn pre<'a>(
+    _: &'a Runtime,
+    _: &'a exo_framework::HookInput,
+) -> BoxFuture<'a, exo_framework::HookDecision> {
+    Box::pin(async { exo_framework::HookDecision::Allow })
+}
+fn stop(_: &Runtime) -> BoxFuture<'_, exo_framework::StopDecision> {
+    Box::pin(async { exo_framework::StopDecision::Allow })
+}
+fn session(_: &Runtime) -> BoxFuture<'_, exo_framework::SessionStartOutput> {
+    Box::pin(async { exo_framework::SessionStartOutput::default() })
+}
+
+struct ProofDomain;
+
+impl Exomonad for ProofDomain {
+    type Caps = Runtime;
+    type Role = ProofRole;
+    type System = ProofSystem;
+    type Spawn = ProofSpawn;
+
+    fn role_def(role: ProofRole) -> RoleDef<Runtime> {
+        // Every role gets the novel tool — direct construction in a match (struct-first).
+        let tools: Vec<Box<dyn Tool<Runtime>>> = match role {
+            ProofRole::Overseer | ProofRole::Auditor | ProofRole::ClaudeReviewer => {
+                vec![Box::new(SubmitAudit)]
+            }
+        };
+        RoleDef {
+            tools,
+            pre_tool_use: pre,
+            stop,
+            session_start: session,
+        }
+    }
+
+    fn handle_system<'a, C: SystemCtx>(
+        ctx: &'a C,
+        _from: &'a Persona,
+        system: &'a ProofSystem,
+    ) -> BoxFuture<'a, CapResult<SystemOutcome>> {
+        Box::pin(async move {
+            match system {
+                ProofSystem::AuditComplete { score, note } => {
+                    // A domain reacts to its own novel signal through the engine's SystemCtx seam.
+                    ctx.deliver_to_self(
+                        "auditor",
+                        "[audit]",
+                        &format!("audit score {score}: {note}"),
+                    )
+                    .await?;
+                    Ok(SystemOutcome::Done)
+                }
+            }
+        })
+    }
+}
+
+// ── the proof itself ─────────────────────────────────────────────────────────────────────────
+
+/// THE acceptance assertion: the engine's generic entrypoints accept `ProofDomain`. If this
+/// type-checks, a brand-new domain links `exo-node` with zero edits to the engine crates.
+#[test]
+fn engine_accepts_a_brand_new_domain() {
+    // Naming the monomorphized engine fns forces the `D: Exomonad<Caps = Runtime>` bound check.
+    let _bootstrap = exo_node::bootstrap::<ProofDomain>;
+    let _run = exo_node::run_node::<ProofDomain>;
+
+    // The domain's role table resolves and includes the novel tool.
+    for role in ProofRole::all() {
+        let rd = ProofDomain::role_def(*role);
+        assert!(rd.tools.iter().any(|t| t.name() == "submit_audit"));
+    }
+    // The role→backend mapping is the domain's: a Claude reviewer, a new Gemini archetype.
+    assert_eq!(ProofRole::ClaudeReviewer.agent_type(), AgentType::Claude);
+    assert_eq!(ProofRole::Auditor.agent_type(), AgentType::Gemini);
+    assert_eq!(ProofRole::all().len(), 3);
+}
+
+/// The novel System payload round-trips through the erased wire (`deliver_domain` → raw JSON →
+/// `D::System`), the exact path the inbound loop's Domain arm walks.
+#[test]
+fn novel_system_round_trips_through_the_erased_wire() {
+    let sys = ProofSystem::AuditComplete {
+        score: 9,
+        note: "looks good".into(),
+    };
+    let raw = serde_json::value::to_raw_value(&sys).unwrap();
+    let back: ProofSystem = serde_json::from_str(raw.get()).unwrap();
+    assert_eq!(sys, back);
+}
+
+/// The domain's `handle_system` runs through a mock `SystemCtx` — proving the relocated gate seam
+/// works for an arbitrary domain, not just `exo`'s review gate.
+#[tokio::test]
+async fn handle_system_runs_through_the_seam() {
+    use std::sync::Mutex;
+
+    struct MockCtx {
+        branch: Branch,
+        delivered: Mutex<Vec<String>>,
+    }
+    #[async_trait]
+    impl SystemCtx for MockCtx {
+        fn own_branch(&self) -> &Branch {
+            &self.branch
+        }
+        async fn head_sha(&self) -> CapResult<String> {
+            Ok("deadbeef".into())
+        }
+        async fn deliver_parent(&self, _msg: Message) -> CapResult<()> {
+            Ok(())
+        }
+        async fn deliver_to_self(&self, _from: &str, _summary: &str, text: &str) -> CapResult<()> {
+            self.delivered.lock().unwrap().push(text.to_string());
+            Ok(())
+        }
+    }
+
+    let ctx = MockCtx {
+        branch: Branch::new("proof.audit-0".into()).unwrap(),
+        delivered: Mutex::new(vec![]),
+    };
+    let from = Persona::Agent(AgentName::new("audit-0".into()).unwrap());
+    let sys = ProofSystem::AuditComplete {
+        score: 7,
+        note: "ok".into(),
+    };
+    let outcome = ProofDomain::handle_system(&ctx, &from, &sys).await.unwrap();
+    assert_eq!(outcome, SystemOutcome::Done);
+    assert!(ctx.delivered.lock().unwrap()[0].contains("audit score 7"));
+
+    // A spawn intent for the new archetype is constructible + readable by the engine's seam.
+    let spec = ProofSpawn {
+        role: ProofRole::Auditor,
+    };
+    assert_eq!(spec.role(), ProofRole::Auditor);
+    assert_eq!(spec.child_kind(), ChildKind::Worktree);
+}

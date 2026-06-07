@@ -1,6 +1,7 @@
 # The `Exomonad` trait — engine as generic machinery over a domain type
 
-Status: in progress (phased migration, see "Phases"). Supersedes the fn-pointer `RoleRegistry`.
+Status: implemented (P0–P6 landed; the `AgentType`-config enrichment is a documented follow-on, see
+"Deferred"). Supersedes the fn-pointer `RoleRegistry`.
 
 ## Context
 
@@ -88,21 +89,36 @@ an exhaustive `handle_system` match.
   launch params.
 - **Classic untouched** — `exomonad-core` / `exomonad serve` build + behave identically throughout.
 
-## Phases
+## Phases (all DONE)
 
-- **P0** (additive, zero behavior change): add `RoleKind`/`SpawnSpec`/`DomainSystem`/`Lifecycle` to
+- **P0** ✅ (additive, zero behavior change): add `RoleKind`/`SpawnSpec`/`DomainSystem`/`Lifecycle` to
   `exo-caps`, `Exomonad`/`SystemCtx`/`SystemOutcome` to `exo-framework`, `impl RoleKind for
-  NodeKind`. (`deliver_domain` + the wire variants land in P1, where `MessageKind::Domain` exists.)
-- **P1**: split `MessageKind::System` → `Lifecycle(Lifecycle)` + `Domain(Box<RawValue>)`; route
+  NodeKind`. (`deliver_domain` + the wire variants landed in P1, where `MessageKind::Domain` exists.)
+- **P1** ✅: split `MessageKind::System` → `Lifecycle(Lifecycle)` + `Domain(DomainPayload)`; route
   `Review*` through `Domain`; add `deliver_domain`.
-- **P2**: introduce `impl Exomonad for ExoDomain`; make `NodeContext<D>`/`run_node<D>`/`bootstrap`
-  generic; relocate the review gate into `ExoDomain::handle_system`; delete `RoleRegistry`; binary
-  → `run_node::<ExoDomain>`.
-- **P4**: collapse `Spawner` to one generic `spawn(D::Spawn)` + a `fork_wave` wrapper; relocate the
-  `.exo/acceptance.md` write into `submit_branch`.
-- **P5**: swap `Role = NodeKind` → domain `ExoRole`; delete `NodeKind` from `exo-caps`; the
-  `AgentType` sum-type-with-config enrichment.
-- **P6**: the `TestDomain` acceptance proof.
+- **P2** ✅ (folds in P3): introduce `impl Exomonad for ExoDomain`; make `NodeContext<D>` /
+  `run_node<D>` / `bootstrap` generic; relocate the review gate into `ExoDomain::handle_system`
+  (`exo::review`); delete `RoleRegistry`; binary → `run_node::<ExoDomain>`. (P3's gate relocation is
+  folded in here — a stub `handle_system` between P2 and P3 would break the review e2e.)
+- **P4** ✅: collapse `Spawner` to one generic `spawn(D::Spawn)` + a `fork_wave` default wrapper;
+  move prompt rendering into the domain; relocate the `.exo/acceptance.md` write into the domain
+  spawn tools via the `Fs` cap (the runtime no longer names the review-gate filename).
+- **P5** ✅: swap the closed `NodeKind` → domain-owned `exo::ExoRole`; delete `NodeKind` from
+  `exo-caps`. Papers record the role **erased** (`RoleRecord(Box<RawValue>)`), typed back to
+  `D::Role` by bootstrap (its one typed reader) — same validate-on-read invariant as a fully-typed
+  papers struct, but keeps `NodePapers` non-generic (avoids `NodePapers<R>` rippling through every
+  reader). `NodeStatus.kind` serializes as `role_str`.
+- **P6** ✅: the acceptance proof — `rust/exo/tests/seam_proof.rs` defines a `ProofDomain` (a Claude
+  reviewer, a brand-new `Auditor` archetype, a novel `ProofSystem` variant, a novel `submit_audit`
+  tool) using only the engine's public API. `run_node::<ProofDomain>` typechecks with **zero edits**
+  to `exo-framework`/`exo-caps`/`exo-node`/`exo-runtime` — all four leaks closed.
 
-(Original plan numbered the gate relocation P3; it is folded into P2 here to avoid a broken
-intermediate — a stub `handle_system` between P2 and P3 would break the review e2e.)
+### Deferred (not a leak; does not gate the acceptance)
+
+The **`AgentType` sum-type-with-config enrichment** (each `AgentType` variant carrying per-backend
+launch config — model/flags — + an optional per-instance `agent_config` on papers) was scoped into
+P5 by the plan but is a *sharpening*, not a leak closure: `RoleKind::agent_type` already lets a
+domain map any role onto the engine-owned `Claude|Gemini|Shoal` backend set (leak #2 is closed —
+the P6 `ProofDomain` maps a reviewer to Claude). The enrichment adds per-backend *configuration*; it
+is a clean follow-on (blast radius: `exomonad-shared`'s `AgentType` + `build_agent_command` + the
+spawner birth match + an optional papers field). Left out to keep P5 to the role swap.
