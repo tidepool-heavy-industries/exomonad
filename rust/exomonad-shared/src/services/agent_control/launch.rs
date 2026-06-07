@@ -87,7 +87,10 @@ pub fn build_agent_command(
             if flag.is_empty() {
                 format!("{}{} \"$(cat {})\"", cmd, perms_flags, escaped_path)
             } else {
-                format!("{}{} {} \"$(cat {})\"", cmd, perms_flags, flag, escaped_path)
+                format!(
+                    "{}{} {} \"$(cat {})\"",
+                    cmd, perms_flags, flag, escaped_path
+                )
             }
         }
         _ => format!("{}{}", cmd, perms_flags),

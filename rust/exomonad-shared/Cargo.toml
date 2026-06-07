@@ -1,0 +1,40 @@
+[package]
+name = "exomonad-shared"
+version = "0.1.0"
+edition = "2021"
+description = "ExoMonad shared seam: domain types, protocol, and plumbing used by both classic (exomonad-core) and node-mode (exo-*)"
+license = "BSD-3-Clause"
+repository = "https://github.com/tidepool-heavy-industries/exomonad"
+homepage = "https://github.com/tidepool-heavy-industries/exomonad"
+keywords = ["agent", "mcp", "automation"]
+categories = ["development-tools"]
+
+[features]
+# Exposes the `IsolatedTmux` test fixture (and the test-only `TmuxIpc` helpers it
+# needs) to downstream crates' test builds. `#[cfg(test)]` alone can't cross the
+# crate boundary, so consumers enable this in their dev-dependencies.
+test-support = []
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+duct = { workspace = true }
+strum = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"] }
+shell-escape = "0.1"
+
+[dev-dependencies]
+proptest = "1.4"
+tokio = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+
+[lib]
+path = "src/lib.rs"

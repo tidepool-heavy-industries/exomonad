@@ -501,7 +501,7 @@ impl Runtime {
                 // Enable Claude Code Teams so the Bus→Teams last hop (dispatch.rs) can
                 // deliver as a native `<teammate-message>` instead of falling back to paste.
                 env_vars.insert("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".into(), "1".into());
-                exomonad_core::services::agent_control::AgentType::Claude
+                exomonad_shared::services::agent_control::AgentType::Claude
             }
             AgentType::Gemini => {
                 // Gemini discovers the node MCP server via GEMINI_CLI_SYSTEM_SETTINGS_PATH, and
@@ -523,7 +523,7 @@ impl Runtime {
                     "GEMINI_CLI_SYSTEM_SETTINGS_PATH".into(),
                     settings_path.to_string_lossy().into_owned(),
                 );
-                exomonad_core::services::agent_control::AgentType::Gemini
+                exomonad_shared::services::agent_control::AgentType::Gemini
             }
 
             AgentType::Shoal => {
@@ -551,7 +551,7 @@ impl Runtime {
 
         let worktree_prompt = format!("{}{}", preamble, core.task);
 
-        let prompt_file = exomonad_core::services::agent_control::launch::write_prompt_file(
+        let prompt_file = exomonad_shared::services::agent_control::launch::write_prompt_file(
             child_dir,
             core.name.as_str(),
             &worktree_prompt,
@@ -565,7 +565,7 @@ impl Runtime {
 
         let launch_cmd = format!(
             "{}\n",
-            exomonad_core::services::agent_control::launch::build_agent_command(
+            exomonad_shared::services::agent_control::launch::build_agent_command(
                 agent_type,
                 Some(&prompt_file),
                 None, // fork_session_id

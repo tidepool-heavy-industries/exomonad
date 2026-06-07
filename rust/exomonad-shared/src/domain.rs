@@ -9,9 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-#[cfg(feature = "runtime")]
 use anyhow::Result;
-#[cfg(feature = "runtime")]
 use tokio::fs;
 
 // ============================================================================
@@ -852,14 +850,12 @@ impl RoutingInfo {
         }
     }
 
-    #[cfg(feature = "runtime")]
     pub async fn write_to_dir(&self, dir: &Path) -> Result<()> {
         let json = serde_json::to_string_pretty(self)?;
         fs::write(dir.join("routing.json"), json).await?;
         Ok(())
     }
 
-    #[cfg(feature = "runtime")]
     pub async fn read_from_dir(dir: &Path) -> Result<Self> {
         let content = fs::read_to_string(dir.join("routing.json")).await?;
         Ok(serde_json::from_str(&content)?)

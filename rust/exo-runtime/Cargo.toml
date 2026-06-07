@@ -11,9 +11,10 @@ path = "src/lib.rs"
 [dependencies]
 exo-caps = { path = "../exo-caps" }
 exo-scry = { path = "../exo-scry" }
-# Reuse exomonad's proven capability implementations (TmuxIpc, GitWorktreeService,
-# GitHubService, agent-launch) behind the exo-caps traits, rather than reimplementing.
-exomonad-core = { path = "../exomonad-core", version = "0.1.0" }
+# Reuse exomonad's proven, classic-free capability code (TmuxIpc, agent-launch
+# builder, domain/protocol types) behind the exo-caps traits, rather than
+# reimplementing. The shared crate never links classic, so neither does exo-runtime.
+exomonad-shared = { path = "../exomonad-shared", version = "0.1.0" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

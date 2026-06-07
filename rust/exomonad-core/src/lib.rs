@@ -53,21 +53,10 @@ pub mod mcp;
 #[cfg(feature = "runtime")]
 pub mod plugin_manager;
 
-// === Shared types and utilities (requires runtime feature) ===
+// === Shared seam (extracted to exomonad-shared; re-exported at the historical
+//     paths so classic code keeps resolving `crate::domain::X`, etc. unchanged) ===
 #[cfg(feature = "runtime")]
-pub mod domain;
-#[cfg(feature = "runtime")]
-pub mod error;
-#[cfg(feature = "runtime")]
-pub mod ffi;
-#[cfg(feature = "runtime")]
-pub mod hooks;
-#[cfg(feature = "runtime")]
-pub mod logging;
-#[cfg(feature = "runtime")]
-pub mod protocol;
-#[cfg(feature = "runtime")]
-pub mod util;
+pub use exomonad_shared::{domain, error, ffi, hooks, logging, protocol, util};
 
 // === Handlers and services (requires runtime feature) ===
 #[cfg(feature = "runtime")]

@@ -70,6 +70,8 @@ rust/.exomonad/
 rust/.exo/
 rust/exomonad/.exomonad/
 rust/exomonad/.exo/
+# Sidecar log artifacts written into a crate's cwd when running cargo under a node
+**/.exo/logs/
 
 # Temporary task files for worktree dispatch
 *.md.tmp

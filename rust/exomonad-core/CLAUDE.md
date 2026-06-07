@@ -1,6 +1,16 @@
-# exomonad-core — Unified Library
+# exomonad-core — Classic Library
 
-ExoMonad core is the unified library providing the effect system framework, WASM hosting via Extism, and built-in effect handlers and services for git, GitHub, agent orchestration, and more. It defines the FFI boundary using protobuf.
+ExoMonad core is the **classic** library: the effect system framework, WASM hosting via Extism, and built-in effect handlers and services for git, GitHub, agent orchestration, and more. It defines the FFI boundary using protobuf.
+
+## Relationship to `exomonad-shared`
+
+The lean seam both architectures need — `domain`, `protocol`, `error`/`util`/`ffi`/`hooks`/`logging`, and `services::{tmux_ipc, resilience, agent_control::{AgentType, ClaudeSpawnFlags, launch}}` — was extracted into the **`exomonad-shared`** crate (which never links classic). `exomonad-core` depends on it and **re-exports those modules at their historical paths**, so classic code keeps resolving `crate::domain::X`, `crate::protocol::Y`, `crate::services::tmux_ipc::…`, `crate::services::agent_control::{AgentType, launch}`, etc. unchanged:
+
+- `lib.rs`: `pub use exomonad_shared::{domain, error, ffi, hooks, logging, protocol, util};`
+- `services/mod.rs`: `pub use exomonad_shared::services::{resilience, tmux_ipc};`
+- `services/agent_control/mod.rs`: `pub use exomonad_shared::services::agent_control::{launch, AgentType, ClaudeSpawnFlags};`
+
+The `IsolatedTmux` test fixture lives in `exomonad-shared`; classic enables it via the shared `test-support` dev-dependency feature (`#[cfg(test)]` can't cross the crate boundary).
 
 ## Module Structure
 
@@ -8,10 +18,10 @@ ExoMonad core is the unified library providing the effect system framework, WASM
 |-----------|---------|
 | `effects/` | EffectHandler trait, EffectRegistry, dispatch, error helpers |
 | `handlers/` | Effect handler implementations (git, github, log, agent, fs, etc.) |
-| `services/` | Business logic services (git, github, agent_control, event_queue, etc.) |
+| `services/` | Classic business logic services (git, github, agent_control orchestration, event_queue, etc.) |
 | `services/external/` | External API clients (anthropic, github/octocrab, ollama, otel) |
 | `mcp/` | MCP types (ToolDefinition) and tools module |
-| `protocol/` | Wire format types (hook, mcp, service) |
+| `ui_protocol.rs` | Lightweight agent event/telemetry types (always available) |
 
 ## Feature Flags
 

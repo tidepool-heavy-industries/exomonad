@@ -17,14 +17,15 @@ pub struct MergePROutput {
     pub branch_name: BranchName,
 }
 
-impl MergeStrategy {
-    /// Convert domain merge strategy to octocrab's MergeMethod.
-    pub fn as_merge_method(&self) -> MergeMethod {
-        match self {
-            Self::Squash => MergeMethod::Squash,
-            Self::Merge => MergeMethod::Merge,
-            Self::Rebase => MergeMethod::Rebase,
-        }
+/// Convert domain merge strategy to octocrab's MergeMethod.
+///
+/// A free fn (not an inherent method): `MergeStrategy` lives in `exomonad-shared`,
+/// and `MergeMethod` is a classic-only octocrab type, so the conversion belongs here.
+fn as_merge_method(strategy: &MergeStrategy) -> MergeMethod {
+    match strategy {
+        MergeStrategy::Squash => MergeMethod::Squash,
+        MergeStrategy::Merge => MergeMethod::Merge,
+        MergeStrategy::Rebase => MergeMethod::Rebase,
     }
 }
 
@@ -85,7 +86,7 @@ pub async fn merge_pr_async(
     };
 
     // Step 1: merge PR
-    let merge_method = strategy.as_merge_method();
+    let merge_method = as_merge_method(strategy);
 
     let result = tokio::time::timeout(
         MERGE_TIMEOUT,
@@ -161,15 +162,15 @@ mod tests {
     #[test]
     fn test_merge_strategy_as_merge_method() {
         assert!(matches!(
-            MergeStrategy::Squash.as_merge_method(),
+            as_merge_method(&MergeStrategy::Squash),
             MergeMethod::Squash
         ));
         assert!(matches!(
-            MergeStrategy::Merge.as_merge_method(),
+            as_merge_method(&MergeStrategy::Merge),
             MergeMethod::Merge
         ));
         assert!(matches!(
-            MergeStrategy::Rebase.as_merge_method(),
+            as_merge_method(&MergeStrategy::Rebase),
             MergeMethod::Rebase
         ));
     }
