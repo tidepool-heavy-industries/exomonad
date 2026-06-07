@@ -32,7 +32,8 @@ Claude Code (hook or MCP call)
 | Component | Purpose |
 |-----------|---------|
 | **exomonad** | Rust binary with WASM plugin support (hooks + MCP) |
-| **exomonad-core** | Framework, handlers, services, protocol types, UI protocol |
+| **exomonad-core** | Classic framework, handlers, services, UI protocol; depends on `exomonad-shared` |
+| **exomonad-shared** | The lean seam both architectures share: `domain`, `protocol`, `error`/`util`/`ffi`/`hooks`/`logging`, `services::{tmux_ipc, resilience, agent_control}` (no classic link) |
 | **exomonad-proto** | Proto-generated types (prost) for FFI + effects |
 
 ## Architecture: Node-mode (V2)
@@ -42,7 +43,7 @@ Claude Code (hook or MCP call)
 | Component | Purpose |
 |-----------|---------|
 | [**exo-caps**](exo-caps/CLAUDE.md) | The capability seam: trait contract + validated domain types (no IO) |
-| [**exo-runtime**](exo-runtime/CLAUDE.md) | IO impls of every cap on one `Runtime` (reuses exomonad-core services) |
+| [**exo-runtime**](exo-runtime/CLAUDE.md) | IO impls of every cap on one `Runtime` (reuses `exomonad-shared` services; **never links classic core**) |
 | [**exo-policy**](exo-policy/CLAUDE.md) | Tools / roles / hooks, generic over caps; unit-testable with zero IO |
 | [**exo-node**](exo-node/CLAUDE.md) | The per-node sidecar: outbound MCP + inbound inbox-watch + hook mode |
 | [**exo-scry**](exo-scry/CLAUDE.md) | Derive a session's active team from live OS state (native Teams delivery) |
@@ -91,7 +92,12 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • Binary: exomonad
 │   • hook subcommand: handles CC hooks via WASM
 │
-├── exomonad-core/  ← Unified library (publishable)
+├── exomonad-shared/  ← Shared seam (classic + node-mode, no classic link)
+│   • domain (validated newtypes), protocol (Runtime, HookEventType, hook/mcp/service)
+│   • error / util / ffi / hooks / logging plumbing
+│   • services::{tmux_ipc, resilience, agent_control::{AgentType, ClaudeSpawnFlags, launch}}
+│
+├── exomonad-core/  ← Classic library (publishable); depends on exomonad-shared
 │   • Framework: EffectHandler trait, EffectRegistry, RuntimeBuilder, Runtime
 │   • PluginManager (single host fn: yield_effect)
 │   • MCP types (ToolDefinition, tools module)
@@ -121,7 +127,8 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 | Crate | Type | Purpose |
 |-------|------|---------|
 | [exomonad](exomonad/CLAUDE.md) | Binary (`exomonad`) | MCP + Hook handler via WASM; `serve`/`mcp-stdio`/`init`/`hook` modes |
-| exomonad-core | Library | Framework, handlers, services, protocol types, UI protocol |
+| exomonad-core | Library | Classic framework, handlers, services, UI protocol; depends on `exomonad-shared` |
+| exomonad-shared | Library | Shared seam: domain, protocol, error/util/ffi/hooks/logging, `services::{tmux_ipc, resilience, agent_control}`. No classic link; consumed by both `exomonad-core` and `exo-runtime` |
 | exomonad-proto | Library | Proto-generated types (prost) for FFI + effects |
 
 **Node-mode swarm (`exomonad experimental` — v2, no central server):** a per-agent
@@ -131,7 +138,7 @@ is on-disk (local `git merge`) — no GitHub/Copilot. Built beside classic, non-
 | Crate | Type | Purpose |
 |-------|------|---------|
 | [exo-caps](exo-caps/CLAUDE.md) | Library | The capability seam: trait contract + validated domain types (no IO) |
-| [exo-runtime](exo-runtime/CLAUDE.md) | Library | IO impls of every cap on one `Runtime` (reuses exomonad-core services) |
+| [exo-runtime](exo-runtime/CLAUDE.md) | Library | IO impls of every cap on one `Runtime` (reuses `exomonad-shared` services; never links classic core) |
 | [exo-policy](exo-policy/CLAUDE.md) | Library | Tools / roles / hooks, generic over caps; unit-testable with zero IO |
 | [exo-node](exo-node/CLAUDE.md) | Library | The per-node sidecar: outbound MCP + inbound inbox-watch + hook mode |
 | [exo-scry](exo-scry/CLAUDE.md) | Lib + bin | Derive a CC session's active team from live OS state (native Teams delivery) |

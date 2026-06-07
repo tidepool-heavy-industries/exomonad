@@ -192,7 +192,7 @@ impl TmuxIpc {
         cmd
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     fn tmux_cmd_sync(&self) -> std::process::Command {
         let mut cmd = std::process::Command::new("tmux");
         if let Some(socket) = &self.socket_name {
@@ -201,7 +201,7 @@ impl TmuxIpc {
         cmd
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub async fn run_tmux_command(&self, args: &[&str]) -> Result<String> {
         let output = self
             .tmux_cmd()
@@ -778,12 +778,12 @@ impl TmuxIpc {
 
     /// Check if a target (pane_id, window_id, or display name) exists in this session.
     pub async fn target_alive(&self, target: &str) -> bool {
-        let qualified = if target.starts_with('%') || target.starts_with('@') || target.contains(':')
-        {
-            target.to_string()
-        } else {
-            format!("{}:{}", self.session_name, target)
-        };
+        let qualified =
+            if target.starts_with('%') || target.starts_with('@') || target.contains(':') {
+                target.to_string()
+            } else {
+                format!("{}:{}", self.session_name, target)
+            };
 
         // Use list-panes for pane_id (%N) and list-windows for window_id (@N)
         // For general names, list-panes with -t session:name will fail if not found.
@@ -814,14 +814,14 @@ impl TmuxIpc {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub struct IsolatedTmux {
     socket: String,
     pub session: String,
     pub ipc: TmuxIpc,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl IsolatedTmux {
     /// Check if tmux is available in the current environment.
     pub async fn is_available() -> bool {
@@ -868,7 +868,7 @@ impl IsolatedTmux {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl Drop for IsolatedTmux {
     fn drop(&mut self) {
         // Kill the isolated server. Best-effort — use std::process so Drop is sync.
@@ -1161,7 +1161,10 @@ mod tests {
             "session:window"
         );
         // Names without '.' resolve correctly without lookup
-        assert_eq!(ipc.resolve_target("plain-name").await.unwrap(), "plain-name");
+        assert_eq!(
+            ipc.resolve_target("plain-name").await.unwrap(),
+            "plain-name"
+        );
     }
 
     #[tokio::test]

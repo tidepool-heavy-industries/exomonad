@@ -20,12 +20,14 @@ pub mod log;
 pub mod merge_pr;
 pub mod mutex_registry;
 pub mod repo;
-pub mod resilience;
 pub mod secrets;
 pub mod supervisor_registry;
 pub mod synthetic_members;
 pub mod tmux_events;
-pub mod tmux_ipc;
+
+// Moved to exomonad-shared; re-exported at the historical paths so classic code
+// keeps resolving `crate::services::{tmux_ipc, resilience}::…` unchanged.
+pub use exomonad_shared::services::{resilience, tmux_ipc};
 
 pub use self::agent_control::{
     resolve_role_context_path, resolve_working_dir, resolve_worktree_from_tab, AgentControlService,

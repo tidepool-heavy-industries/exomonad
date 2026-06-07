@@ -1070,7 +1070,7 @@ dependencies = [
  "chrono",
  "exo-caps",
  "exo-scry",
- "exomonad-core",
+ "exomonad-shared",
  "serde",
  "serde_json",
  "shell-escape",
@@ -1146,6 +1146,7 @@ dependencies = [
  "dirs 5.0.1",
  "duct",
  "exomonad-proto",
+ "exomonad-shared",
  "extism",
  "extism-convert",
  "futures-util",
@@ -1187,6 +1188,27 @@ dependencies = [
  "prost-build",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "exomonad-shared"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "duct",
+ "exomonad-proto",
+ "proptest",
+ "serde",
+ "serde_json",
+ "shell-escape",
+ "strum",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

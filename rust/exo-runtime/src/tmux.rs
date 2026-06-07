@@ -32,7 +32,7 @@ impl Tmux for Runtime {
         // Delegate to exomonad's hardened injection: per-target lock, copy/scroll-mode
         // cancel, 150ms debounce, and Enter-retry — the machinery that prevents the silent
         // paste failures a hand-rolled `load-buffer`/`send-keys` is prone to.
-        exomonad_core::services::tmux_ipc::TmuxIpc::new(&self.tmux_session)
+        exomonad_shared::services::tmux_ipc::TmuxIpc::new(&self.tmux_session)
             .inject_input(pane.as_str(), text)
             .await
             .map_err(|e| TmuxError::Failed {
