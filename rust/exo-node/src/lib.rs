@@ -8,7 +8,7 @@
 //!   OUTBOUND (N1):  serve the role's Tools (from the injected roster) over rmcp/stdio; send_message → Bus::deliver.
 //!   INBOUND  (N2):  watch own ingestion inbox (cursor + notify-watch, N2b) → per entry,
 //!                   last-hop dispatch (N2a) by agent_type: CC-in-team → Teams inbox; else tmux-paste.
-//!   HOOK (N4):      `exomonad experimental hook` → the role's pre_tool_use / stop / session_start.
+//!   HOOK (N4):      `exo hook` → the role's pre_tool_use / stop / session_start.
 //! ```
 //!
 //! Convergence is on-disk (v2): a TL folds a finished child by merging its branch locally

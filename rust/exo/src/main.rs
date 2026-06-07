@@ -6,7 +6,7 @@
 //! ```text
 //!   exo init [--session <s>] [--recreate]   # bootstrap a node-mode ROOT (own tmux session, no server)
 //!   exo node --papers <path>                # run the node-mode sidecar for the node described by <path>
-//!   exo hook <event> --papers <path>        # handle a CC/Gemini hook via the node's exo-policy gates
+//!   exo hook <event> --papers <path>        # handle a CC/Gemini hook via the node's exo gates
 //! ```
 
 mod config;
@@ -48,7 +48,7 @@ enum Commands {
         papers: std::path::PathBuf,
     },
 
-    /// Handle a hook via `exo-policy` against a node's papers, with NO central server.
+    /// Handle a hook via `exo` against a node's papers, with NO central server.
     Hook {
         /// The hook event type to handle
         #[arg(value_enum)]

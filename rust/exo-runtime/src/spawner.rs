@@ -7,7 +7,7 @@
 //!   → (`git worktree add` for a Worktree child — Inline shares the parent's cwd)
 //!   → `tmux new_pane`
 //!   → write child papers (`node.json`, incl. `parent_inbox` = my inbox)
-//!   → launch `exomonad experimental node --papers <node.json>` in the pane.
+//!   → launch `exo node --papers <node.json>` in the pane.
 //!
 //! Decomposition:
 //!   - **S1**: safe branch-gen (`Branch::from_path`) + `git worktree add` (Worktree only).
@@ -32,7 +32,7 @@
 //!   3. Append `Spawned { child, kind, pane: %N, inbox }` to `children.jsonl`. ← THE GUARD.
 //!   4. Write the child's `node.json` papers (`parent_inbox` = *my* inbox).
 //!   5. `Tmux::paste(%N, "<launch cmd>\n")` — inject the agent command into the holding
-//!      shell, starting `claude`/`gemini` (+ its `exomonad experimental node` sidecar via .mcp.json).
+//!      shell, starting `claude`/`gemini` (+ its `exo node` sidecar via .mcp.json).
 //!
 //! The record precedes the **agent** launch (step 3 before step 5). The holding shell
 //! (step 2) carries no agent, so a crash before step 5 leaves only a bare shell — nothing
@@ -505,7 +505,7 @@ impl Runtime {
             }
             AgentType::Gemini => {
                 // Gemini discovers the node MCP server via GEMINI_CLI_SYSTEM_SETTINGS_PATH, and
-                // fires hooks through the same `exomonad experimental hook` thin client as Claude.
+                // fires hooks through the same `exo hook` thin client as Claude.
                 // Settings go to a PER-PANE path (not the child's worktree): inline siblings share
                 // the parent's worktree, so a worktree-local settings.json would clobber each
                 // other's papers pointer → identity collision (both read the last writer's papers).

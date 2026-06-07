@@ -4,7 +4,7 @@ The trait/type contract that the node-mode swarm forks from. The engine abstract
 
 This is the seam that replaces the old Haskell-WASM boundary. WASM *physically* prevented the policy layer from doing IO; a crate that simply doesn't link the runtime gets the same separation at zero runtime cost — **except** the wall is soft: policy *may* drop to raw IO as an escape hatch. Good caps make it rarely want to.
 
-> Part of the v2 node-mode swarm (`exomonad experimental`), built beside classic exomonad-core. See `rust/CLAUDE.md` for how the node-mode crates relate.
+> Part of the v2 node-mode swarm (`exo`), built beside classic exomonad-core. See `rust/CLAUDE.md` for how the node-mode crates relate.
 
 ## What lives here
 
@@ -17,7 +17,7 @@ This is the seam that replaces the old Haskell-WASM boundary. WASM *physically* 
 | `lifecycle` | `ChildRecord` (append-only `Spawned`/`Started`) + `fold_children` |
 | `papers` | `NodePapers` (`node.json`) — a node's immutable birth identity |
 | `paths` | Inbox/papers path scheme (`~/.claude/exo/inboxes/{run_id}/pane-N.jsonl`) |
-| `invocation` | Single source of truth for a child's `exomonad experimental node/hook` argv |
+| `invocation` | Single source of truth for a child's `exo node/hook` argv |
 | `git` `tmux` `fs` `kv` `process` `log` | The IO capability traits (signatures only) |
 
 ## The capability traits

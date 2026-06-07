@@ -9,7 +9,7 @@ domain (the actual tool set, roster, and gates) lives in the [`exo`](../exo/CLAU
 This is the "big reusable framework" half of the framework/domain split (the Rust analog of
 Classic's Haskell-WASM DSL / Rust-host split). See [`docs/decisions/exo-framework-domain-split.md`](../../docs/decisions/exo-framework-domain-split.md).
 
-> Part of the v2 node-mode swarm (`exomonad experimental`). See `rust/CLAUDE.md`.
+> Part of the v2 node-mode swarm (`exo`). See `rust/CLAUDE.md`.
 
 ## What lives here
 
@@ -39,7 +39,7 @@ impl<R: Send + Sync> RoleRegistry<R> {
 The `exo` usage crate builds it from its roster (`RoleRegistry::new(exo::role_def::<R>)`), and the
 binary injects it into `exo-node` via `bootstrap(papers, cwd, exo::roster())`. After this,
 `exo-node` depends only on `exo-framework` for these types and **never on the domain crate**
-(`cargo tree -p exo-node` shows neither `exo-policy` — deleted — nor `exo`). The registry is a thin
+(`cargo tree -p exo-node` does not list `exo`). The registry is a thin
 `fn`-pointer wrapper (monomorphized at the binary's concrete `R`), so it is `Copy` and stateless.
 
 ## A tool's cap bounds *are* its least-privilege spec

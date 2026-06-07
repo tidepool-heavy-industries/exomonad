@@ -1,4 +1,4 @@
-//! `exo hook <event> --papers <path>` — handle a CC/Gemini hook via the node's `exo-policy` gates
+//! `exo hook <event> --papers <path>` — handle a CC/Gemini hook via the node's `exo` gates
 //! against its papers, with NO central server.
 //!
 //! SessionStart runs one-shot in-process (it must survive a cold-start race before the sidecar

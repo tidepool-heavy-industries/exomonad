@@ -1,8 +1,7 @@
 # exo — the v2 node-mode binary (CLI) + the domain (tools / roles / gates)
 
 `exo` is the **standalone v2 node-mode binary** — it owns the whole node-mode CLI surface
-(`exo init` / `exo node` / `exo hook`; classic `exomonad` is server-only and no longer carries an
-`experimental` subcommand). The lib half is the minimal **domain usage** of
+(`exo init` / `exo node` / `exo hook`; classic `exomonad` is server-only). The lib half is the minimal **domain usage** of
 [`exo-framework`](../exo-framework/CLAUDE.md): the genuinely domain-specific Bucket-C logic that
 ports from the old Haskell DSL — the MCP tool set, the per-role roster, and the CC hook gates. This
 is the "small usage" half of the framework/domain split (the Rust analog of Classic's Haskell-WASM
@@ -26,7 +25,7 @@ lib (`lib.rs` + `tools/` + `gates.rs` + `roles.rs`) stays generic over the caps 
 | `lib.rs` | Re-exports `role_def` / `roster`. Generic over `R`, depends only on `exo-framework` + `exo-caps`. |
 | `main.rs` | The CLI dispatcher (bin): clap `Cli` → `init` / `node` / `hook`. `node` is the composition root — `exo node --papers <path>` → build the roster → `exo_node::bootstrap(papers, cwd, roster())` → `run_node`. |
 | `init.rs` | `exo init [--session <s>] [--recreate]` — bootstrap a node-mode ROOT (own tmux session, root papers, no server). Reuses `exo-runtime`/`exomonad-shared`. |
-| `hook.rs` | `exo hook <event> --papers <path>` — handle a CC/Gemini hook via the node's `exo-policy` gate (SessionStart in-process; everything else routes to the sidecar hook socket, fail-open). |
+| `hook.rs` | `exo hook <event> --papers <path>` — handle a CC/Gemini hook via the node's `exo` gate (SessionStart in-process; everything else routes to the sidecar hook socket, fail-open). |
 | `config.rs` | Minimal node-mode init config read (`tmux_session`, `model` only) — classic `exomonad` owns the full `Config`. |
 | `tools/` | One module per tool — a type + `Args` (derives `Deserialize + JsonSchema`) + generic-over-caps `run` + a ~6-line hand-written `Tool<R>` adapter (NO macro). Each ships mock-cap unit tests. |
 | `gates.rs` | The concrete hook bodies: `pre_tool_use` (antipattern nudges), `stop` (the convergence gate) + per-role variants (`stop_allow`/`stop_notify`/`stop_reviewer`), `session_start`. Functions generic over the caps they need. |
@@ -95,4 +94,4 @@ tool that skips review. The reviewer is torn down (best-effort) as soon as the `
 - **Reviewers:** review is currently always-on (no config to disable); a two-way colleague back-channel (submitter→reviewer reply) needs `send_message` on dev.
 - `pre_tool_use` is intentionally minimal (one nudge); classic exomonad's richer antipattern set + PII rewrite are not ported.
 - `stop`'s dirty-gate can wedge an agent that holds untracked artifacts it won't commit.
-- **Phases / authoring-DSL polish** are a deliberate follow-on (the `rust/exo-dsl-spike/` evidence is banked) — `RoleDef<R>` is relocated as-is, not yet reshaped into a builder/trait.
+- **Phases / authoring-DSL polish** are a deliberate follow-on — `RoleDef<R>` is relocated as-is, not yet reshaped into a builder/trait.

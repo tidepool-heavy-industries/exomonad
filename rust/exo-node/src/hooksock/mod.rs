@@ -2,7 +2,7 @@
 //!
 //! The third sidecar loop. The sidecar binds `paths::hook_sock` and serves hook invocations
 //! against its **live** [`Runtime`](exo_runtime::Runtime); the short-lived
-//! `exomonad experimental hook` client connects and forwards `{event, stdin}`, gets back the
+//! `exo hook` client connects and forwards `{event, stdin}`, gets back the
 //! exact verdict stdout. Synchronous request/response — the dual of the async jsonl bus.
 //!
 //! This is the **generic** hook abstraction: a new hook is a new

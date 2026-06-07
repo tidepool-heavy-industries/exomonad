@@ -1,4 +1,4 @@
-//! **N4 — Hook mode.** Implements the `exomonad experimental hook` interface for Claude Code.
+//! **N4 — Hook mode.** Implements the `exo hook` interface for Claude Code.
 //! This module handles hook events by performing a papers-based identity bootstrap and
 //! executing policy hooks directly in a short-lived process, without requiring a central server.
 //!

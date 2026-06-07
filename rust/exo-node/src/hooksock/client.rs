@@ -1,4 +1,4 @@
-//! Hook-RPC client — the short-lived `exomonad experimental hook` process.
+//! Hook-RPC client — the short-lived `exo hook` process.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

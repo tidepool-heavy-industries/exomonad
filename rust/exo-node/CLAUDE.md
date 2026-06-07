@@ -1,6 +1,6 @@
 # exo-node — the per-node sidecar
 
-Assembles `exo-runtime` (all caps) + an **injected `RoleRegistry`** (the domain's tools/hooks/roles, built by the binary via `exo::roster()`) into a running **sidecar, one process per agent**. This is the binary's `exomonad experimental node` and `exomonad experimental hook` modes — there is **no central server**: each agent has its own sidecar, the filesystem is the bus, the process tree is the topology.
+Assembles `exo-runtime` (all caps) + an **injected `RoleRegistry`** (the domain's tools/hooks/roles, built by the binary via `exo::roster()`) into a running **sidecar, one process per agent**. This is the binary's `exo node` and `exo hook` modes — there is **no central server**: each agent has its own sidecar, the filesystem is the bus, the process tree is the topology.
 
 **Dependency inversion:** `exo-node` resolves a role's tools/hooks through the `RoleRegistry<Runtime>` carried in `NodeContext` (injected at `bootstrap(papers, cwd, registry)`), so it depends only on [`exo-framework`](../exo-framework/CLAUDE.md) for the `Tool`/`RoleDef`/`RoleRegistry` types and **never on the [`exo`](../exo/CLAUDE.md) domain crate** (`cargo tree -p exo-node` shows neither). The binary is the composition root that names both.
 
@@ -17,7 +17,7 @@ Assembles `exo-runtime` (all caps) + an **injected `RoleRegistry`** (the domain'
 | `hooksock` (N5) | serve | Per-agent UDS hook-RPC channel — runs the role hook fn on the live runtime and shapes the verdict per agent_type (never a Gemini Stop deny). |
 | `teamout` (N6) | watch | **Outbound Teams bridge (Claude-only, Linux-only).** Watches this node's own CC team inboxes for messages the agent *sent* to a teammate (native `SendMessage` / `shutdown_request`), maps the recipient name → tree-edge `Addressee`, and forwards onto the bus. The reverse of `dispatch`. No roster authored (a child self-registers as a teammate when it first messages up); sidecar-owned processed-count cursor, never writes CC's inboxes. |
 | `dispatch` (N2a) | — | The **last hop**: deliver one entry into the agent's native interface (Teams inbox or tmux paste). |
-| `hook` (N4) | one-shot | `exomonad experimental hook <event>` → bootstrap from papers → run the role's `pre_tool_use`/`stop`/`session_start` → print the verdict. No server. |
+| `hook` (N4) | one-shot | `exo hook <event>` → bootstrap from papers → run the role's `pre_tool_use`/`stop`/`session_start` → print the verdict. No server. |
 | `bootstrap` | — | Self-ID: read `--papers` → `NodePapers`, enrich with ambient env (`$TMUX_PANE`, `EXOMONAD_SWARM_RUN_ID`, `EXOMONAD_TMUX_SESSION`, `$HOME`), build `NodeContext { runtime, kind, own_inbox, parent_inbox, ... }`. |
 | `error` | — | `NodeError`. |
 

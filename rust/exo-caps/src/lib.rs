@@ -1,6 +1,6 @@
 //! `exo-caps` — the capability seam.
 //!
-//! Policy (`exo-policy`) is written generic over these traits; the runtime
+//! Policy (`exo`) is written generic over these traits; the runtime
 //! (`exo-runtime`) implements them. Unlike the old WASM boundary this is NOT enforced —
 //! policy MAY drop to raw IO as an escape hatch; good caps make it rarely want to.
 //!

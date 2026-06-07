@@ -2,7 +2,7 @@
 //! `(role, agent_type, kind)`, so illegal triples are *unnameable*. A shared private
 //! `birth(BirthCore)` tail (in the runtime impl) does the common sequence:
 //! append `AgentSpawned` → (`git worktree add` for a Worktree child) → `tmux new-pane` →
-//! write child papers (incl. `parent_inbox`) → launch `exomonad experimental node`
+//! write child papers (incl. `parent_inbox`) → launch `exo node`
 //! (see [`crate::invocation`]).
 
 use crate::types::AgentName;

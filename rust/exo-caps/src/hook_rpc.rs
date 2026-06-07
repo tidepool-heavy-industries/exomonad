@@ -1,6 +1,6 @@
 //! Generic hook-RPC wire types — the contract for the per-agent UDS hook channel.
 //!
-//! A short-lived `exomonad experimental hook` **client** forwards a hook invocation to the
+//! A short-lived `exo hook` **client** forwards a hook invocation to the
 //! node's **sidecar** over `.exo/agents/{name}/hook.sock`; the sidecar runs the role's hook fn
 //! against its live runtime and replies with the exact stdout to print. The channel is
 //! deliberately generic: adding a hook is a new [`HookEvent`] variant + a role hook fn — the

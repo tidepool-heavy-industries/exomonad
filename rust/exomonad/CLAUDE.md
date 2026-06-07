@@ -412,7 +412,7 @@ Claude Code → exomonad hook pre-tool-use (reads stdin JSON)
 *v2 node-mode (no server) — handled by the separate `exo` binary, not `exomonad`:*
 Claude Code → exo hook pre-tool-use --papers node.json
 → bootstrap NodeContext from papers
-→ run the node's `exo-policy` gate directly (no server)
+→ run the node's `exo` gate directly (no server)
 → stdout verdict
 
 **Session Start:**

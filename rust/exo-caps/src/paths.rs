@@ -52,7 +52,7 @@ pub fn team_cursor_path(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
 }
 
 /// Node's hook-RPC socket: `{home}/.claude/exo/sockets/{run_id}/pane-{n}.sock`. The sidecar
-/// binds it; the `exomonad experimental hook` client connects to it. Home-based (like inboxes),
+/// binds it; the `exo hook` client connects to it. Home-based (like inboxes),
 /// NOT under the worktree — so a live socket file can never dirty a worktree and trip the
 /// `stop` clean-gate. Both ends derive it identically from papers (run_id + own pane).
 pub fn hook_sock(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
