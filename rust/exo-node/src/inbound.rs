@@ -695,8 +695,15 @@ pub(crate) async fn try_reap(ctx: &Arc<NodeContext>) -> bool {
     if grace_ms > 0 {
         tokio::time::sleep(Duration::from_millis(grace_ms as u64)).await;
     }
-    if let Err(e) = Tmux::kill_pane(&*ctx.runtime, &ctx.own_pane).await {
-        warn!(node = %ctx.runtime.name().as_str(), "try_reap: kill_pane failed: {e}");
+    // Bounded retry around the own-pane kill — a self-reap that loses the race with tmux settling
+    // would otherwise leave a zombie pane. Best-effort: a final failure is surfaced (return false)
+    // so the caller doesn't claim a reap that didn't happen, but never escalated to a panic.
+    let kill = exo_runtime::retry_teardown("self_kill_pane", ctx.runtime.name().as_str(), || {
+        Tmux::kill_pane(&*ctx.runtime, &ctx.own_pane)
+    })
+    .await;
+    if let Err(e) = kill {
+        warn!(node = %ctx.runtime.name().as_str(), "try_reap: kill_pane failed after retries: {e}");
         return false;
     }
     true
