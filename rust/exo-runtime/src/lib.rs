@@ -35,3 +35,4 @@ mod topology;
 pub use node_config::write_node_agent_config;
 pub use runtime::Runtime;
 pub use session_boot::boot_root_session;
+pub use spawner::retry_teardown;

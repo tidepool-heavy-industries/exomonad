@@ -51,5 +51,5 @@ Ten caps, each one trait per file. `exo-runtime::Runtime` implements all of them
 
 ## Gaps / not-yet
 
-- `reclaim_worktree` / `kill_pane` are now called by the `merge` tool (folded-child reclaim) and the sidecar's reviewer verdict-teardown — both **best-effort** (not retried; a dirty or nested worktree can resist reclaim).
+- `reclaim_worktree` / `kill_pane` are called by the `merge` tool (folded-child reclaim) and the sidecar's reviewer verdict-teardown. Both are **best-effort but bounded-retried** — the runtime impls wrap each op in `exo_runtime::retry_teardown` (3 attempts, linear backoff), logging a loud structured error on final failure and surfacing (never escalating) it. A dirty or nested worktree can still resist reclaim after the retries and linger.
 - `ChildKind::Standalone` (fresh-repo child, a classic feature) is folded into `Worktree`; not separately represented.

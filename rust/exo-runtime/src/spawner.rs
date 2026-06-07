@@ -46,8 +46,69 @@ use exo_caps::{
     GeminiSpec, InboxPath, NodeKind, NodePapers, PaneId, SpawnError, Spawner, WorkerSpec,
 };
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
+
+/// Max attempts for a best-effort teardown op (`reclaim_worktree` / `kill_pane`). Bounded —
+/// never an unbounded loop. A transient tmux/git hiccup (a pane still settling, a lock briefly
+/// held) usually clears within a couple of tries.
+const MAX_TEARDOWN_ATTEMPTS: u32 = 3;
+/// Linear backoff base between teardown retries (`base * attempt`).
+const TEARDOWN_BACKOFF_BASE: Duration = Duration::from_millis(150);
+
+/// Run a best-effort teardown op with **bounded** retry + linear backoff. Each transient failure
+/// is logged at `warn`; a final failure after [`MAX_TEARDOWN_ATTEMPTS`] is logged LOUD and
+/// structured (`op` + `child` + `attempts`) and the last error is returned.
+///
+/// **Semantics stay best-effort.** This helper only retries-then-surfaces — it never panics and
+/// never escalates. The caller is responsible for keeping a returned `Err` non-fatal to the
+/// merge/teardown flow (it logs and proceeds; a lingering worktree/pane self-heals via the
+/// liveness reap and auto-incrementing child names).
+pub async fn retry_teardown<T, E, F, Fut>(
+    op: &'static str,
+    child: &str,
+    mut attempt: F,
+) -> Result<T, E>
+where
+    E: std::fmt::Display,
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
+    let mut last_err: Option<E> = None;
+    for n in 1..=MAX_TEARDOWN_ATTEMPTS {
+        match attempt().await {
+            Ok(v) => {
+                if n > 1 {
+                    tracing::info!(op, child, attempt = n, "teardown op succeeded on retry");
+                }
+                return Ok(v);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    op,
+                    child,
+                    attempt = n,
+                    max = MAX_TEARDOWN_ATTEMPTS,
+                    "teardown op failed: {e}"
+                );
+                last_err = Some(e);
+                if n < MAX_TEARDOWN_ATTEMPTS {
+                    tokio::time::sleep(TEARDOWN_BACKOFF_BASE * n).await;
+                }
+            }
+        }
+    }
+    let err = last_err.expect("retry loop runs at least once");
+    tracing::error!(
+        op,
+        child,
+        attempts = MAX_TEARDOWN_ATTEMPTS,
+        "teardown FAILED after {MAX_TEARDOWN_ATTEMPTS} attempts (best-effort — flow continues): {err}"
+    );
+    Err(err)
+}
 
 /// The fixed triple + identity each op hands to the shared `birth` tail. Constructed by
 /// the per-op method (the single place a triple is named); `birth` branches only on `kind`.
@@ -608,13 +669,15 @@ impl Spawner for Runtime {
         match record.kind {
             ChildKind::Worktree => {
                 let path = self.working_dir.join(".exo/worktrees").join(child.as_str());
-                exo_caps::Git::worktree_remove(self, &path)
-                    .await
-                    .map_err(|e| SpawnError::Failed {
-                        op: "reclaim_worktree",
-                        child: Some(child.clone()),
-                        detail: e.to_string(),
-                    })
+                retry_teardown("reclaim_worktree", child.as_str(), || {
+                    exo_caps::Git::worktree_remove(self, &path)
+                })
+                .await
+                .map_err(|e| SpawnError::Failed {
+                    op: "reclaim_worktree",
+                    child: Some(child.clone()),
+                    detail: e.to_string(),
+                })
             }
             ChildKind::Inline => Ok(()),
         }
@@ -628,13 +691,15 @@ impl Spawner for Runtime {
             detail: "unknown child".into(),
         })?;
 
-        exo_caps::Tmux::kill_pane(self, &record.pane)
-            .await
-            .map_err(|e| SpawnError::Failed {
-                op: "kill_pane",
-                child: Some(child.clone()),
-                detail: e.to_string(),
-            })
+        retry_teardown("kill_pane", child.as_str(), || {
+            exo_caps::Tmux::kill_pane(self, &record.pane)
+        })
+        .await
+        .map_err(|e| SpawnError::Failed {
+            op: "kill_pane",
+            child: Some(child.clone()),
+            detail: e.to_string(),
+        })
     }
 }
 
