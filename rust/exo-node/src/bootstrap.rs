@@ -174,6 +174,8 @@ mod tests {
             branch: branch.clone(),
             pane: own_pane.clone(),
             parent_inbox: Some(parent_inbox.clone()),
+            yolo: NodePapers::DEFAULT_YOLO,
+            wrap_nix: NodePapers::DEFAULT_WRAP_NIX,
         };
 
         let papers_json = serde_json::to_string(&papers).unwrap();

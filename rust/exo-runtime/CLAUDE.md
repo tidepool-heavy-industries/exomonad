@@ -33,6 +33,10 @@ All three spawn ops (`spawn_worker`/`spawn_gemini`/`fork_wave`) fix their own `(
 
 **Do not collapse steps 2+5** into a one-shot `new_pane(cwd, launch_cmd)` — that reopens the orphan window the two-phase split closes. Claude children get `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` so the Bus→Teams last hop can deliver native `<teammate-message>`s; Gemini children discover the sidecar via `GEMINI_CLI_SYSTEM_SETTINGS_PATH`.
 
+### Child launch policy (`yolo` / `wrap_nix`) — inherited via papers
+
+The two launch knobs are config, not literals: `yolo` (pass `--yolo` to Gemini children) and `wrap_nix` (wrap the launch in `nix develop` when the cwd has a `flake.nix`). They live on `NodePapers` (the `exo-caps` config seam) with behavior-preserving defaults (`DEFAULT_YOLO = true`, `DEFAULT_WRAP_NIX = false`), so a node with no config set launches children exactly as before. `birth` reads the spawning node's *own* papers (`own_launch_policy` — `{working_dir}/.exo/node.json`, or the run-namespaced `root.json` for the root), stamps the same policy onto each child's papers, and passes it to the launch builder. So policy set on one node flows down its whole subtree; an unreadable/older papers file (the root's defaults, a pre-field papers) falls back to the defaults. Writing non-default values into a node's papers (e.g. wiring `config.toml` → `root.json` at init) is the remaining seam to expose it end-to-end.
+
 ## The Runtime's stamp is the anti-spoof guarantee
 
 `Bus::deliver` stamps `from = Agent(self.name())` from the runtime's own identity. Policy hands over only a `Message` (no `from`), so a tool **cannot** forge its sender. Same discipline as the spawn ledger: the runtime owns identity, policy never asserts it.
@@ -40,5 +44,4 @@ All three spawn ops (`spawn_worker`/`spawn_gemini`/`fork_wave`) fix their own `(
 ## Gaps / not-yet
 
 - **`birth` itself is not unit-tested** (it needs live tmux+git). Only its helpers (ledger append/read, name resolution, inbox-path derivation) and `Bus` have automated tests; the converge integration test (`exo-node/tests/converge.rs`) covers the bus round-trip end-to-end.
-- `birth` hardcodes `yolo=true` and `wrap_nix=false` (node children launch plain, like the root) — no config knob yet.
 - The inbox-path scheme is **duplicated** between `spawner.rs` and `bus.rs` (noted in-code) — a deliberate non-hoist to avoid cross-file churn during the parallel build; a converge-time cleanup that hasn't happened.

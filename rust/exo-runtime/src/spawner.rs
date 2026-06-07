@@ -136,6 +136,33 @@ impl Runtime {
         exo_caps::paths::inbox_path(Path::new(&home), &self.run_id, pane)
     }
 
+    /// This node's child-launch policy (`yolo`, `wrap_nix`), read from its own papers and
+    /// inherited down the tree: `birth` stamps it onto each child's papers and uses it in
+    /// the launch command. A node whose papers can't be read (or whose papers predate these
+    /// fields — they default on parse) falls back to [`NodePapers`]' behavior-preserving
+    /// defaults, so the root and any older node launch children exactly as before.
+    /// Papers live at `{working_dir}/.exo/node.json` for a worktree node, or the
+    /// run-namespaced `root.json` for the root.
+    async fn own_launch_policy(&self) -> (bool, bool) {
+        let candidates = [
+            self.working_dir.join(".exo/node.json"),
+            self.working_dir
+                .join(format!(".exo/node/{}/root.json", self.run_id)),
+        ];
+        for path in candidates {
+            match tokio::fs::read(&path).await {
+                Ok(bytes) => match serde_json::from_slice::<NodePapers>(&bytes) {
+                    Ok(p) => return (p.yolo, p.wrap_nix),
+                    Err(e) => {
+                        tracing::warn!("own papers parse failed ({}): {e}", path.display());
+                    }
+                },
+                Err(_) => continue,
+            }
+        }
+        (NodePapers::DEFAULT_YOLO, NodePapers::DEFAULT_WRAP_NIX)
+    }
+
     pub(crate) async fn resolve_child_name(
         &self,
         given: Option<AgentName>,
@@ -340,8 +367,11 @@ impl Runtime {
         };
         self.append_child_record(&record).await?;
 
-        // (e) Write child papers
+        // (e) Write child papers. The child inherits this node's launch policy (yolo /
+        // wrap_nix), so it stamps the same onto its own children — config set on one node
+        // flows down its whole subtree.
         let parent_inbox = Some(self.own_inbox());
+        let (yolo, wrap_nix) = self.own_launch_policy().await;
 
         let papers = NodePapers::new(
             self.node_path().child(&core.name),
@@ -349,6 +379,8 @@ impl Runtime {
             core.role,
             pane.clone(),
             parent_inbox,
+            yolo,
+            wrap_nix,
         );
 
         let papers_path = match core.kind {
@@ -389,7 +421,8 @@ impl Runtime {
         // task can't break shell parsing — and the CLI/flags are the proven ones. The node
         // self-IDs from its papers (.mcp.json → `experimental node --papers`); the only env it
         // needs is the boot context its bootstrap reads, set explicitly (not via inherited
-        // session env). Node children launch plain (no nix wrap), matching their root.
+        // session env). `yolo` / `wrap_nix` come from this node's inherited launch policy
+        // (see `own_launch_policy`); the defaults launch plain (no nix wrap), like the root.
         let mut env_vars: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         env_vars.insert("EXOMONAD_SWARM_RUN_ID".into(), self.run_id.clone());
@@ -476,10 +509,10 @@ impl Runtime {
                 Some(&prompt_file),
                 None, // fork_session_id
                 &env_vars,
-                child_dir, // cwd (flake detection only; wrap_nix=false below)
+                child_dir, // cwd (flake detection for wrap_nix)
                 None,      // claude_flags
-                true,      // yolo → gemini --yolo
-                false,     // wrap_nix: node children launch plain, like the root
+                yolo,      // yolo → gemini --yolo (inherited launch policy)
+                wrap_nix,  // wrap_nix: nix develop wrap (inherited launch policy)
             )
         );
 
