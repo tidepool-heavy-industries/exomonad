@@ -141,6 +141,15 @@ install-all: (_install "release")
 # Install everything (fast dev build)
 install-all-dev: (_install "dev")
 
+# Build + install ONLY the `exo` v2 node binary — pure cargo, no WASM/GHC, no classic exomonad.
+# `-p exo` pulls in just the v2 crates + exomonad-shared/-proto. Needs protoc on PATH for
+# exomonad-proto's build.rs (run from `nix develop` if you don't have it).
+build-exo:
+    cargo build -p exo
+    mkdir -p ~/.cargo/bin
+    cp target/debug/exo ~/.cargo/bin/exo
+    @echo ">>> Installed exo (debug) -> ~/.cargo/bin/exo  [no WASM/GHC/classic]"
+
 # Regenerate Haskell proto types
 # Generated files are checked in - only run when protos change
 proto-gen-haskell:
