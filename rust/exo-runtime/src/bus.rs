@@ -27,10 +27,7 @@
 use crate::runtime::Runtime;
 use async_trait::async_trait;
 use chrono::Utc;
-use exo_caps::{
-    fold_children, Addressee, Bus, BusError, ChildRecord, InboxPath, IngestionEntry, Message,
-    Persona,
-};
+use exo_caps::{Addressee, Bus, BusError, InboxPath, IngestionEntry, Message, Persona, SpawnError};
 use tokio::io::AsyncWriteExt;
 
 impl Runtime {
@@ -43,33 +40,13 @@ impl Runtime {
                 .clone()
                 .ok_or_else(|| BusError::Unresolved(to.clone())),
             Addressee::InlineChild(name) | Addressee::WorktreeChild(name) => {
-                let path = self.working_dir().join(".exo/children.jsonl");
-                let data = match tokio::fs::read(&path).await {
-                    Ok(d) => d,
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                        return Err(BusError::Unresolved(to.clone()))
+                let children = self.read_children().await.map_err(|e| match e {
+                    SpawnError::Io(io) => BusError::Io(io),
+                    SpawnError::Failed { detail, .. } => {
+                        BusError::Io(std::io::Error::other(detail))
                     }
-                    Err(e) => return Err(BusError::Io(e)),
-                };
+                })?;
 
-                // Skip (don't fail on) a malformed line — a torn last record from a crash
-                // mid-append must not block delivery to EVERY child, only fail if the *target*
-                // child can't be found (handled by the lookup below). Mirrors the inbound loop's
-                // tolerant parse.
-                let mut records = Vec::new();
-                for line in data.split(|&b| b == b'\n') {
-                    if line.is_empty() {
-                        continue;
-                    }
-                    match serde_json::from_slice::<ChildRecord>(line) {
-                        Ok(record) => records.push(record),
-                        Err(e) => {
-                            tracing::warn!("skipping malformed children.jsonl line during child resolution: {e}");
-                        }
-                    }
-                }
-
-                let children = fold_children(&records);
                 children
                     .get(name)
                     .map(|c| c.inbox.clone())
@@ -132,7 +109,9 @@ impl Bus for Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use exo_caps::{AgentName, Branch, MessageBody, MessageKind, NodePath, PaneId, Summary};
+    use exo_caps::{
+        AgentName, Branch, ChildRecord, MessageBody, MessageKind, NodePath, PaneId, Summary,
+    };
     use std::io::Write;
     use tempfile::tempdir;
 
