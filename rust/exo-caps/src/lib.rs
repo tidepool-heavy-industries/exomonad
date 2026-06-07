@@ -31,7 +31,7 @@ pub mod process;
 pub mod tmux;
 
 pub use bus::{Addressee, Bus, BusError};
-pub use domain::{DomainSystem, RoleKind, SpawnSpec};
+pub use domain::{deliver_domain, DomainSystem, RoleKind, SpawnSpec};
 pub use error::{CapError, CapResult};
 pub use fs::{Fs, FsError};
 pub use git::{Git, GitError};
@@ -46,7 +46,7 @@ pub use spawner::{ForkSpec, GeminiSpec, SpawnError, Spawner, WorkerSpec};
 pub use tmux::{Tmux, TmuxError};
 pub use topology::{Topology, TopologyError, TopologyView, TreeNode};
 pub use types::{
-    AgentName, AgentType, Branch, ChildKind, ChildStatus, ControlKind, InboxPath, IngestionEntry,
-    Lifecycle, Message, MessageBody, MessageKind, NodeKind, NodePath, NodeStatus, PaneId, Persona,
-    ShutdownStatus, Summary, SyntheticName, SystemMessage,
+    AgentName, AgentType, Branch, ChildKind, ChildStatus, ControlKind, DomainPayload, InboxPath,
+    IngestionEntry, Lifecycle, Message, MessageBody, MessageKind, NodeKind, NodePath, NodeStatus,
+    PaneId, Persona, ReviewVerdict, ShutdownStatus, Summary, SyntheticName,
 };

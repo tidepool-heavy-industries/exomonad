@@ -106,7 +106,8 @@ fn render_entry(entry: &IngestionEntry) -> String {
         MessageKind::Chat => "chat",
         MessageKind::Event => "event",
         MessageKind::Control(_) => "control",
-        MessageKind::System(_) => "system",
+        MessageKind::Lifecycle(_) => "lifecycle",
+        MessageKind::Domain(_) => "domain",
     };
 
     format!(

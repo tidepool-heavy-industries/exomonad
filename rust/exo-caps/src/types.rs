@@ -424,12 +424,33 @@ pub enum MessageKind {
     Event,
     /// lifecycle (exomonad-internal) — see `ControlKind`.
     Control(ControlKind),
-    /// a node-to-node **system signal** — consumed by the recipient's *sidecar*, NOT rendered
-    /// into its LLM conversation unless the handler decides the agent must act. This one
-    /// envelope variant is just the sidecar-vs-LLM routing bit; the real, granular identifiers
-    /// are the [`SystemMessage`] variant tags (so `MessageKind` doesn't bloat per signal).
-    System(SystemMessage),
+    /// An **engine-owned lifecycle signal** ([`Lifecycle`]) — the closed, typed set the sidecar
+    /// acts on itself (`mark_child_idle` / `try_reap` / the shutdown matrix). Never rendered to the
+    /// LLM except as the handler decides. Typed because the engine owns the variant set.
+    Lifecycle(Lifecycle),
+    /// A **domain-opaque inter-node payload** — a domain's [`DomainSystem`](crate::DomainSystem)
+    /// erased to raw JSON, so a tool that emits one needs only `C: Bus` (least-privilege intact: a
+    /// fully-typed System wire would force `C: Bus<D::System>` everywhere). Deserialized back to the
+    /// concrete `D::System` at exactly one place — the inbound loop's Domain arm — before
+    /// `D::handle_system`. Built via [`deliver_domain`](crate::domain::deliver_domain).
+    Domain(DomainPayload),
 }
+
+/// A domain system payload erased to raw JSON on the bus (see [`MessageKind::Domain`]). A newtype
+/// over `Box<RawValue>` so it round-trips serde **transparently** (the raw JSON is spliced inline,
+/// not re-encoded) while still giving [`MessageKind`] its `PartialEq`/`Eq` derives — `RawValue`
+/// itself has neither, so equality compares the canonical raw string.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct DomainPayload(pub Box<serde_json::value::RawValue>);
+
+impl PartialEq for DomainPayload {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.get() == other.0.get()
+    }
+}
+
+impl Eq for DomainPayload {}
 
 /// A directed control **message**. Lifecycle **records** (`AgentSpawned`/`AgentStarted`)
 /// live in the json record log, not here.
@@ -450,7 +471,7 @@ pub enum ControlKind {
 }
 
 /// The outcome a node reports for a `Control(Shutdown)` it received (see
-/// [`SystemMessage::ShutdownResponse`]).
+/// [`Lifecycle::ShutdownResponse`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ShutdownStatus {
@@ -462,17 +483,16 @@ pub enum ShutdownStatus {
     Deferred,
 }
 
-/// System signals carried over the bus and handled by the recipient's sidecar (see
-/// [`MessageKind::System`]). Serde-tagged on `type` (`review_approved` / `review_denied` /
-/// `review_changes`) — **granular, flat, extensible**: new node-to-node control signals are new
-/// variants here, never a churn of the core envelope. There is no catch-all variant: an unknown
-/// `type` fails to deserialize the whole bus line, which the inbound loop's tolerant parser then
-/// skips + logs — the swarm won't crash, but that one message is dropped. (Add a
-/// `#[serde(other)]` catch-all here if graceful per-variant forward-compat is ever needed for a
-/// mixed-version swarm.)
+/// The review-gate verdict signals — the `exo` domain's inter-node payload, carried erased over the
+/// bus as [`MessageKind::Domain`]. **Transitional home:** this is a [`DomainSystem`](crate::DomainSystem)
+/// and belongs in the `exo` domain (it becomes `exo::ReviewSystem` when the engine goes generic over
+/// the domain in P2); it lives in `exo-caps` only while the engine still hard-codes review handling,
+/// because both the `verdict` tool (domain) and the inbound loop (engine) must name it and `exo-node`
+/// must not depend on `exo`. Serde-tagged on `type`. Lifecycle signals (`ChildIdle`/`ChildExited`/
+/// `ShutdownResponse`) are NOT here — they are engine-owned [`Lifecycle`] variants.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum SystemMessage {
+pub enum ReviewVerdict {
     /// The reviewer approved `branch@sha`. The submitter's sidecar auto-escalates `[READY]`
     /// upward (no LLM turn) iff `sha` still matches the submitter's HEAD.
     ReviewApproved { branch: Branch, sha: String },
@@ -496,34 +516,6 @@ pub enum SystemMessage {
     /// forever-stall: the submitter renders it as a re-submit prompt and tears the dead reviewer
     /// down. `reason` is a short human note.
     ReviewAborted { reason: String },
-    /// A node finished a turn and is yielding control (its stop hook fired). The envelope's
-    /// stamped `from` says *which* node; `summary` is a short human-readable note the parent may
-    /// render. Deliberately minimal: v1 just notifies on every stop. Refinement (dedupe,
-    /// richer state derived from the stop hook's payload) lands later in the parent's
-    /// `handle_system`, not by growing this variant.
-    ChildIdle { summary: String },
-    /// A node is about to reap itself (its cooperative/forced shutdown completed and its subtree is
-    /// clear). Sent to its parent *just before* it kills its own pane. The parent uses it as the
-    /// authoritative "this child is gone" trigger — re-evaluating its own pending shutdown without
-    /// racing pane-death timing. The envelope's stamped `from` says which child; `reason` is a short
-    /// note (e.g. `"shutdown"`).
-    ChildExited { reason: String },
-    /// A node's structured reply to a `Control(Shutdown)` it received. The *requester's* sidecar
-    /// renders this into a chat line for its LLM (the final hop) — the responder ships structure,
-    /// the requester owns presentation. The envelope's stamped `from` says which node replied.
-    ShutdownResponse {
-        status: ShutdownStatus,
-        /// Live children that block a cooperative shutdown (empty unless `status == Deferred` for a
-        /// non-empty subtree). Names only — the requester decides whether to force.
-        #[serde(default)]
-        live_children: Vec<String>,
-        /// Whether any of those children are actively working (only meaningful when deferred).
-        #[serde(default)]
-        busy: bool,
-        /// Short free-text note (e.g. a topology-read failure, or the accepted-mode detail).
-        #[serde(default)]
-        reason: String,
-    },
 }
 
 /// Engine-owned **lifecycle** signals — the closed, typed set of node-to-node control signals the
@@ -581,18 +573,18 @@ mod tests {
 
     #[test]
     fn review_aborted_serde_roundtrip() {
-        let m = SystemMessage::ReviewAborted {
+        let m = ReviewVerdict::ReviewAborted {
             reason: "no verdict".into(),
         };
         let json = serde_json::to_string(&m).unwrap();
         assert!(json.contains("\"type\":\"review_aborted\""));
-        let back: SystemMessage = serde_json::from_str(&json).unwrap();
+        let back: ReviewVerdict = serde_json::from_str(&json).unwrap();
         assert_eq!(m, back);
     }
 
     #[test]
     fn shutdown_response_serde_roundtrip() {
-        let m = SystemMessage::ShutdownResponse {
+        let m = Lifecycle::ShutdownResponse {
             status: ShutdownStatus::Deferred,
             live_children: vec!["a".into(), "b".into()],
             busy: true,
@@ -601,8 +593,28 @@ mod tests {
         let json = serde_json::to_string(&m).unwrap();
         assert!(json.contains("\"type\":\"shutdown_response\""));
         assert!(json.contains("\"status\":\"deferred\""));
-        let back: SystemMessage = serde_json::from_str(&json).unwrap();
+        let back: Lifecycle = serde_json::from_str(&json).unwrap();
         assert_eq!(m, back);
+    }
+
+    #[test]
+    fn domain_payload_round_trips_and_compares_by_raw() {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct S {
+            kind: String,
+            n: u32,
+        }
+        let raw = serde_json::value::to_raw_value(&S {
+            kind: "demo".into(),
+            n: 7,
+        })
+        .unwrap();
+        let kind = MessageKind::Domain(DomainPayload(raw));
+        let json = serde_json::to_string(&kind).unwrap();
+        // The domain payload is spliced inline under the `domain` tag, not re-encoded as a string.
+        assert!(json.contains(r#""domain":{"kind":"demo","n":7}"#));
+        let back: MessageKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(kind, back);
     }
 
     #[test]

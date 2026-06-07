@@ -33,8 +33,9 @@ use tracing::{error, info, warn};
 use chrono::Utc;
 use exo_caps::types::ShutdownStatus;
 use exo_caps::{
-    Addressee, AgentName, ChildLiveness, ControlKind, IngestionEntry, Message, MessageBody,
-    MessageKind, Persona, Summary, SyntheticName, SystemMessage, Tmux, Topology, TreeNode,
+    Addressee, AgentName, ChildLiveness, ControlKind, DomainPayload, IngestionEntry, Lifecycle,
+    Message, MessageBody, MessageKind, Persona, ReviewVerdict, Summary, SyntheticName, Tmux,
+    Topology, TreeNode,
 };
 
 use crate::bootstrap::NodeContext;
@@ -178,9 +179,15 @@ impl InboundHandler for RealHandler {
             MessageKind::Control(ControlKind::Shutdown { grace_ms, force }) => {
                 self.handle_shutdown(*grace_ms, *force).await
             }
-            // System signals are consumed by the sidecar, never delivered to the LLM directly.
-            MessageKind::System(system) => {
-                self.handle_system(&entry.from, system).await?;
+            // Engine-owned lifecycle signals — the sidecar acts on them itself.
+            MessageKind::Lifecycle(lc) => {
+                self.handle_lifecycle(&entry.from, lc).await?;
+                Ok(Some(false))
+            }
+            // Domain-opaque inter-node payload — deserialize to the (transitional) review verdict
+            // and act on it. (Generalized to `D::handle_system` when the engine goes generic.)
+            MessageKind::Domain(payload) => {
+                self.handle_domain(&entry.from, payload).await?;
                 Ok(Some(false))
             }
         }
@@ -188,20 +195,15 @@ impl InboundHandler for RealHandler {
 }
 
 impl RealHandler {
-    /// Route a [`SystemMessage`] (sidecar-side; never injected into the LLM directly).
-    ///
-    /// A **review verdict** comes from a one-shot reviewer that is this node's own `Worktree`
-    /// child — it's done after the verdict, and its branch never merges, so `teardown-on-merge`
-    /// would miss it. Apply the verdict, then reclaim that reviewer here, best-effort, regardless
-    /// of outcome. A **`ChildIdle`** comes from a LIVE child finishing a turn — render it and do
-    /// NOT tear the child down.
-    #[tracing::instrument(skip(self, system), fields(node = %self.ctx.runtime.name().as_str(), from = ?from, kind = "system"))]
-    async fn handle_system(&self, from: &Persona, system: &SystemMessage) -> NodeResult<()> {
-        match system {
+    /// Handle an engine-owned [`Lifecycle`] signal (sidecar-side; never injected into the LLM
+    /// except via the render helpers). These are the closed set the engine acts on itself.
+    #[tracing::instrument(skip(self, lc), fields(node = %self.ctx.runtime.name().as_str(), from = ?from, kind = "lifecycle"))]
+    async fn handle_lifecycle(&self, from: &Persona, lc: &Lifecycle) -> NodeResult<()> {
+        match lc {
             // A child yielded control. Flip its busy-bit to idle (the idle gate reads this), then
             // render a concise line for this node's LLM; never tear the child down. (v1: no
             // dedupe — volume is accepted; the refine-later seam is here.)
-            SystemMessage::ChildIdle { summary } => {
+            Lifecycle::ChildIdle { summary } => {
                 info!(outcome = "child_idle", summary = %summary, "handling child idle signal");
                 if let Persona::Agent(name) = from {
                     self.ctx.runtime.mark_child_idle(name);
@@ -211,7 +213,7 @@ impl RealHandler {
             // A child reaped itself (its shutdown completed). Record it in the authoritative
             // exited-set, then re-evaluate our own pending shutdown — if it was the last child, we
             // reap ourselves now (which may kill our pane and end the process).
-            SystemMessage::ChildExited { .. } => {
+            Lifecycle::ChildExited { .. } => {
                 info!(outcome = "child_exited", "handling child exit signal");
                 if let Persona::Agent(name) = from {
                     self.ctx
@@ -224,7 +226,7 @@ impl RealHandler {
                 Ok(())
             }
             // A child replied to a shutdown we sent it. Render it to our LLM; never tear it down.
-            SystemMessage::ShutdownResponse {
+            Lifecycle::ShutdownResponse {
                 status,
                 live_children,
                 busy,
@@ -234,36 +236,42 @@ impl RealHandler {
                 self.render_shutdown_response(from, status, live_children, *busy, reason)
                     .await
             }
-            // Review verdicts: apply, then reclaim the one-shot reviewer (verdict-only teardown).
-            SystemMessage::ReviewApproved { .. }
-            | SystemMessage::ReviewDenied { .. }
-            | SystemMessage::ReviewChanges { .. }
-            | SystemMessage::ReviewAborted { .. } => {
-                info!(
-                    outcome = "review_verdict",
-                    "applying review verdict and reclaiming reviewer"
+        }
+    }
+
+    /// Handle a domain-opaque [`MessageKind::Domain`] payload. Transitionally this is always the
+    /// review verdict ([`ReviewVerdict`]): deserialize, apply, then reclaim the one-shot reviewer
+    /// (verdict-only teardown — the reviewer's branch never merges, so teardown-on-merge would miss
+    /// it). An undeserializable payload is logged + skipped (tolerant, like a malformed bus line).
+    #[tracing::instrument(skip(self, payload), fields(node = %self.ctx.runtime.name().as_str(), from = ?from, kind = "domain"))]
+    async fn handle_domain(&self, from: &Persona, payload: &DomainPayload) -> NodeResult<()> {
+        let verdict: ReviewVerdict = match serde_json::from_str(payload.0.get()) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("skipping undeserializable domain payload: {e}");
+                return Ok(());
+            }
+        };
+        info!(
+            outcome = "review_verdict",
+            "applying review verdict and reclaiming reviewer"
+        );
+        let result = self.apply_verdict(&verdict).await;
+        if let Persona::Agent(reviewer) = from {
+            if let Err(e) = exo_caps::Spawner::kill_pane(&*self.ctx.runtime, reviewer).await {
+                warn!(
+                    "reviewer teardown: kill_pane({}) failed: {e}",
+                    reviewer.as_str()
                 );
-                let result = self.apply_verdict(system).await;
-                if let Persona::Agent(reviewer) = from {
-                    if let Err(e) = exo_caps::Spawner::kill_pane(&*self.ctx.runtime, reviewer).await
-                    {
-                        warn!(
-                            "reviewer teardown: kill_pane({}) failed: {e}",
-                            reviewer.as_str()
-                        );
-                    }
-                    if let Err(e) =
-                        exo_caps::Spawner::reclaim_worktree(&*self.ctx.runtime, reviewer).await
-                    {
-                        warn!(
-                            "reviewer teardown: reclaim_worktree({}) failed: {e}",
-                            reviewer.as_str()
-                        );
-                    }
-                }
-                result
+            }
+            if let Err(e) = exo_caps::Spawner::reclaim_worktree(&*self.ctx.runtime, reviewer).await {
+                warn!(
+                    "reviewer teardown: reclaim_worktree({}) failed: {e}",
+                    reviewer.as_str()
+                );
             }
         }
+        result
     }
 
     /// Render a concise \"child yielded control\" line into THIS node's LLM. The sender is a LIVE
@@ -286,11 +294,11 @@ impl RealHandler {
     }
 
     /// Act on a review verdict (escalate `[READY]` on a matching approval; wake the LLM on
-    /// deny/changes). The sender's lifecycle is handled by [`handle_system`](Self::handle_system).
+    /// deny/changes). The sender's teardown is handled by [`handle_domain`](Self::handle_domain).
     #[tracing::instrument(skip(self, system), fields(node = %self.ctx.runtime.name().as_str()))]
-    async fn apply_verdict(&self, system: &SystemMessage) -> NodeResult<()> {
+    async fn apply_verdict(&self, system: &ReviewVerdict) -> NodeResult<()> {
         match system {
-            SystemMessage::ReviewApproved { branch, sha } => {
+            ReviewVerdict::ReviewApproved { branch, sha } => {
                 // The approval must be for THIS node's branch at its CURRENT commit. A mismatched
                 // branch (with the right sha) must not escalate [READY] for my branch, and a stale
                 // sha (work committed after the review) needs a fresh review.
@@ -339,14 +347,14 @@ impl RealHandler {
                 );
                 Ok(())
             }
-            SystemMessage::ReviewDenied { message, .. } => {
+            ReviewVerdict::ReviewDenied { message, .. } => {
                 info!(outcome = "review_denied", "delivering review denial to LLM");
                 self.deliver_to_llm(&format!(
                     "[REVIEW: changes requested] Your branch was not approved. Address this feedback, commit, then call submit_branch again:\n{}",
                     message
                 )).await
             }
-            SystemMessage::ReviewChanges {
+            ReviewVerdict::ReviewChanges {
                 changes_branch,
                 message,
                 ..
@@ -360,17 +368,11 @@ impl RealHandler {
                     changes_branch.as_str(), message
                 )).await
             }
-            SystemMessage::ReviewAborted { reason } => {
+            ReviewVerdict::ReviewAborted { reason } => {
                 info!(outcome = "review_aborted", reason = %reason, "delivering review abort to LLM");
                 self.deliver_to_llm(&format!(
                     "[REVIEW ABORTED] Your reviewer exited without producing a verdict ({reason}). No approval was recorded — re-run `submit_branch` to spawn a fresh reviewer."
                 )).await
-            }
-            // `ChildIdle`/`ChildExited`/`ShutdownResponse` are intercepted in `handle_system`, never routed here.
-            SystemMessage::ChildIdle { .. }
-            | SystemMessage::ChildExited { .. }
-            | SystemMessage::ShutdownResponse { .. } => {
-                unreachable!("ChildIdle/ChildExited/ShutdownResponse handled in handle_system, never apply_verdict")
             }
         }
     }
@@ -401,7 +403,7 @@ impl RealHandler {
         crate::dispatch::dispatch(&self.ctx, &entry).await
     }
 
-    /// Render a child's [`ShutdownResponse`](exo_caps::SystemMessage::ShutdownResponse) into THIS
+    /// Render a child's [`ShutdownResponse`](exo_caps::Lifecycle::ShutdownResponse) into THIS
     /// node's LLM as a chat line, attributed to the child (`from`). Never tears anyone down.
     async fn render_shutdown_response(
         &self,
@@ -449,7 +451,7 @@ impl RealHandler {
                 .map_err(|e| std::io::Error::other(e.to_string()))?,
             summary: Summary::new("[shutdown response]".to_string())
                 .map_err(|e| std::io::Error::other(e.to_string()))?,
-            kind: MessageKind::System(SystemMessage::ShutdownResponse {
+            kind: MessageKind::Lifecycle(Lifecycle::ShutdownResponse {
                 status,
                 live_children,
                 busy,
@@ -577,7 +579,7 @@ fn decide(force: bool, childless: bool) -> ShutdownAction {
     }
 }
 
-/// Build the chat text a requester sees for a child's [`ShutdownResponse`](exo_caps::SystemMessage::ShutdownResponse).
+/// Build the chat text a requester sees for a child's [`ShutdownResponse`](exo_caps::Lifecycle::ShutdownResponse).
 /// Pure (no IO) so it unit-tests like `decide`. The dispatch header already attributes the line to
 /// the child, so the wording is first-person (the child speaking).
 fn format_shutdown_response(
@@ -685,7 +687,7 @@ pub(crate) async fn try_reap(ctx: &Arc<NodeContext>) -> bool {
             .ok()
             .unwrap_or_else(|| MessageBody::new("exited".to_string()).unwrap()),
         summary: Summary::new("[exited]".to_string()).unwrap(),
-        kind: MessageKind::System(SystemMessage::ChildExited {
+        kind: MessageKind::Lifecycle(Lifecycle::ChildExited {
             reason: "shutdown".to_string(),
         }),
     };

@@ -10,7 +10,8 @@ path = "src/lib.rs"
 
 [dependencies]
 serde = { workspace = true }
-serde_json = { workspace = true }
+# `raw_value` backs `MessageKind::Domain(Box<RawValue>)` — domain-opaque inter-node payload erasure.
+serde_json = { workspace = true, features = ["raw_value"] }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }

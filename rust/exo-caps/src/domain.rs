@@ -9,7 +9,9 @@
 //!
 //! See `docs/decisions/exo-trait-refactor.md` for the full design.
 
-use crate::types::{AgentType, ChildKind};
+use crate::bus::{Addressee, Bus};
+use crate::error::{CapError, CapResult};
+use crate::types::{AgentType, ChildKind, DomainPayload, Message, MessageBody, MessageKind, Summary};
 use crate::AgentName;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -74,4 +76,28 @@ pub trait SpawnSpec: Send + Sync + 'static {
     /// The fully-rendered prompt/task body delivered to the child. Consumes the spec — it is the
     /// last thing the birth tail reads.
     fn into_task(self) -> String;
+}
+
+/// Send a domain [`DomainSystem`] payload over the bus, erased as [`MessageKind::Domain`]. The free
+/// helper that keeps per-tool least-privilege: a tool emitting `D::System` names only its concrete
+/// type and `C: Bus` — it never needs `C: Bus<D::System>`. The recipient's inbound loop deserializes
+/// the raw payload back to `D::System` at exactly one place before `D::handle_system`.
+pub async fn deliver_domain<C: Bus + ?Sized, S: DomainSystem>(
+    bus: &C,
+    to: Addressee,
+    summary: &str,
+    text: &str,
+    system: &S,
+) -> CapResult<()> {
+    let raw = serde_json::value::to_raw_value(system).map_err(|e| CapError::Json {
+        context: "deliver_domain: encode domain system payload".into(),
+        source: e,
+    })?;
+    let msg = Message {
+        text: MessageBody::new(text.to_string())?,
+        summary: Summary::new(summary.to_string())?,
+        kind: MessageKind::Domain(DomainPayload(raw)),
+    };
+    bus.deliver(to, msg).await?;
+    Ok(())
 }

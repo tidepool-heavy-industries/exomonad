@@ -7,8 +7,8 @@
 //! ([`exo_framework::hooks`]).
 
 use exo_caps::{
-    Addressee, Bus, CapResult, ChildLiveness, Git, Kv, Log, Message, MessageBody, MessageKind,
-    Summary, SystemMessage,
+    deliver_domain, Addressee, Bus, CapResult, ChildLiveness, Git, Kv, Lifecycle, Log, Message,
+    MessageBody, MessageKind, ReviewVerdict, Summary,
 };
 use exo_framework::{BoxFuture, HookDecision, HookInput, SessionStartOutput, StopDecision};
 
@@ -49,16 +49,16 @@ pub fn pre_tool_use<'a, R: Send + Sync>(
     })
 }
 
-/// Build the [`ChildIdle`](SystemMessage::ChildIdle) a non-root node delivers to its parent at
-/// turn-end. Minimal by design (v1): a fixed human-readable summary the parent's `handle_system`
-/// renders. Refinement (dedupe, richer state from the hook payload) lands parent-side later, not
-/// by growing this message.
+/// Build the [`ChildIdle`](Lifecycle::ChildIdle) a non-root node delivers to its parent at
+/// turn-end. Minimal by design (v1): a fixed human-readable summary the parent's lifecycle handler
+/// renders. `ChildIdle` is an engine-owned [`Lifecycle`] signal (the sidecar acts on it), so it
+/// rides the typed lifecycle wire, not the domain payload.
 fn child_idle_message() -> CapResult<Message> {
     let summary = "finished a turn and is yielding control";
     Ok(Message {
         text: MessageBody::new(format!("[idle] {summary}"))?,
         summary: Summary::new(summary.into())?,
-        kind: MessageKind::System(SystemMessage::ChildIdle {
+        kind: MessageKind::Lifecycle(Lifecycle::ChildIdle {
             summary: summary.into(),
         }),
     })
@@ -154,27 +154,24 @@ pub fn stop_reviewer<'a, R: Bus + Kv + Log + Send + Sync>(
     Box::pin(async move {
         let produced = matches!(ctx.get("verdict_produced").await, Ok(Some(_)));
         if !produced {
-            match (
-                MessageBody::new("reviewer exited without producing a verdict".to_string()),
-                Summary::new("[review aborted]".to_string()),
-            ) {
-                (Ok(text), Ok(summary)) => {
-                    let msg = Message {
-                        text,
-                        summary,
-                        kind: MessageKind::System(SystemMessage::ReviewAborted {
-                            reason:
-                                "exited without invoking the verdict tool (likely emitted as prose)"
-                                    .to_string(),
-                        }),
-                    };
-                    if let Err(e) = ctx.deliver(Addressee::Parent, msg).await {
-                        ctx.error(&format!(
-                            "stop_reviewer: failed to deliver ReviewAborted: {e}"
-                        ));
-                    }
-                }
-                _ => ctx.error("stop_reviewer: could not build ReviewAborted message"),
+            // ReviewAborted is a domain verdict — it rides the erased domain wire via
+            // `deliver_domain`, so this gate needs only `Bus` (not `Bus<D::System>`).
+            let verdict = ReviewVerdict::ReviewAborted {
+                reason: "exited without invoking the verdict tool (likely emitted as prose)"
+                    .to_string(),
+            };
+            if let Err(e) = deliver_domain(
+                ctx,
+                Addressee::Parent,
+                "[review aborted]",
+                "reviewer exited without producing a verdict",
+                &verdict,
+            )
+            .await
+            {
+                ctx.error(&format!(
+                    "stop_reviewer: failed to deliver ReviewAborted: {e}"
+                ));
             }
         }
         StopDecision::Allow
@@ -199,7 +196,7 @@ mod tests {
             matches!(
                 c,
                 Call::BusDeliver { to: Addressee::Parent, msg }
-                    if matches!(msg.kind, MessageKind::System(SystemMessage::ChildIdle { .. }))
+                    if matches!(msg.kind, MessageKind::Lifecycle(Lifecycle::ChildIdle { .. }))
             )
         })
     }
@@ -208,13 +205,12 @@ mod tests {
         calls.iter().any(|c| {
             matches!(
                 c,
-                Call::BusDeliver {
-                    to: Addressee::Parent,
-                    msg
-                } if matches!(
-                    msg.kind,
-                    MessageKind::System(SystemMessage::ReviewAborted { .. })
-                )
+                Call::BusDeliver { to: Addressee::Parent, msg }
+                    if matches!(&msg.kind, MessageKind::Domain(p)
+                        if matches!(
+                            serde_json::from_str::<ReviewVerdict>(p.0.get()),
+                            Ok(ReviewVerdict::ReviewAborted { .. })
+                        ))
             )
         })
     }
