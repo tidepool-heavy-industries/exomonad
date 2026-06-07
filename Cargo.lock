@@ -1033,6 +1033,7 @@ dependencies = [
  "shell-escape",
  "tokio",
  "toml 0.8.23",
+ "tracing",
  "uuid",
 ]
 

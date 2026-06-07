@@ -17,7 +17,8 @@
 
 use std::sync::Arc;
 
-use exo_caps::AgentType;
+use exo_caps::{AgentType, RoleKind};
+use exo_framework::Exomonad;
 
 use crate::bootstrap::NodeContext;
 use crate::error::NodeResult;
@@ -29,7 +30,7 @@ const SHUTDOWN_GRACE_MS: u32 = 5000;
 
 /// Watch this node's own team inboxes and forward the agent's outbound teammate messages onto the
 /// bus. A no-op for non-Claude nodes (no CC team) and on non-Linux (no `resolve_self`).
-pub async fn watch(ctx: Arc<NodeContext>) -> NodeResult<()> {
+pub async fn watch<D: Exomonad>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
     if ctx.kind.agent_type() != AgentType::Claude {
         return Ok(());
     }
@@ -50,6 +51,7 @@ mod linux {
     use crate::bootstrap::NodeContext;
     use crate::error::{NodeError, NodeResult};
     use exo_caps::{AgentName, Bus, ControlKind, Message, MessageBody, MessageKind, Summary};
+    use exo_framework::Exomonad;
     use exo_scry::inbox::InboxMessage;
     use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
     use serde_json::Value;
@@ -85,7 +87,7 @@ mod linux {
     }
 
     #[tracing::instrument(skip(ctx), fields(node = %ctx.runtime.name().as_str()))]
-    pub async fn run(ctx: Arc<NodeContext>) -> NodeResult<()> {
+    pub async fn run<D: Exomonad>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
         let node = ctx.runtime.name();
         let Some((team, lead)) = wait_for_team(node.as_str()).await else {
             return Ok(()); // no team ever appeared — native outbound stays off, MCP tools still work
@@ -179,8 +181,8 @@ mod linux {
     }
 
     /// Read every member inbox (except our own lead inbox), forward entries past the cursor.
-    async fn reconcile(
-        ctx: &Arc<NodeContext>,
+    async fn reconcile<D: Exomonad>(
+        ctx: &Arc<NodeContext<D>>,
         team: &str,
         lead: Option<&str>,
         inboxes_dir: &Path,
@@ -236,7 +238,7 @@ mod linux {
     /// Bridge one teammate message onto the bus. Always advances the cursor (caller side) — a
     /// message we can't deliver is dropped with a warning rather than retried forever.
     #[tracing::instrument(skip(ctx, msg), fields(node = %ctx.runtime.name().as_str(), to = %member))]
-    async fn forward(ctx: &Arc<NodeContext>, member: &str, msg: &InboxMessage) {
+    async fn forward<D: Exomonad>(ctx: &Arc<NodeContext<D>>, member: &str, msg: &InboxMessage) {
         let Ok(name) = AgentName::new(member.to_string()) else {
             warn!(
                 outcome = "dropped_invalid_name",

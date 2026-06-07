@@ -1,11 +1,12 @@
 //! `verdict` — the reviewer's one output. A reviewer (spawned by a submitting node off the
 //! under-review branch) reads the diff against the acceptance criteria, then calls this with
-//! one of three decisions. It packages the decision into a [`ReviewVerdict`] and delivers it to
+//! one of three decisions. It packages the decision into a [`ReviewSystem`] and delivers it to
 //! its **parent** (the submitter — a real tree edge) over the erased domain wire
 //! ([`deliver_domain`]); the submitter's *sidecar* acts on it (approve → auto-escalate `[READY]`;
 //! deny/changes → wake the LLM). The reviewer then exits.
 
-use exo_caps::{deliver_domain, Addressee, Branch, Bus, CapError, CapResult, Kv, ReviewVerdict};
+use crate::review::ReviewSystem;
+use exo_caps::{deliver_domain, Addressee, Branch, Bus, CapError, CapResult, Kv};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -48,7 +49,7 @@ impl Verdict {
     pub async fn run<C: Bus + Kv>(ctx: &C, args: VerdictArgs) -> CapResult<ToolOutput> {
         let branch = Branch::new(args.branch.clone())?;
         let system = match args.decision {
-            Decision::Approve => ReviewVerdict::ReviewApproved {
+            Decision::Approve => ReviewSystem::ReviewApproved {
                 branch,
                 sha: args.sha.clone(),
             },
@@ -59,7 +60,7 @@ impl Verdict {
                         "decision=deny requires a non-empty message explaining what to fix",
                     ));
                 }
-                ReviewVerdict::ReviewDenied {
+                ReviewSystem::ReviewDenied {
                     branch,
                     sha: args.sha.clone(),
                     message: args.message.clone(),
@@ -81,7 +82,7 @@ impl Verdict {
                         ))
                     }
                 };
-                ReviewVerdict::ReviewChanges {
+                ReviewSystem::ReviewChanges {
                     branch,
                     sha: args.sha.clone(),
                     changes_branch,
@@ -109,32 +110,32 @@ impl Verdict {
     }
 }
 
-fn verb(s: &ReviewVerdict) -> &'static str {
+fn verb(s: &ReviewSystem) -> &'static str {
     match s {
-        ReviewVerdict::ReviewApproved { .. } => "approve",
-        ReviewVerdict::ReviewDenied { .. } => "deny",
-        ReviewVerdict::ReviewChanges { .. } => "changes",
+        ReviewSystem::ReviewApproved { .. } => "approve",
+        ReviewSystem::ReviewDenied { .. } => "deny",
+        ReviewSystem::ReviewChanges { .. } => "changes",
         // The verdict tool only ever builds the three decisions above; ReviewAborted is emitted by
         // the reviewer's stop hook, never here.
-        ReviewVerdict::ReviewAborted { .. } => unreachable!("verdict never produces ReviewAborted"),
+        ReviewSystem::ReviewAborted { .. } => unreachable!("verdict never produces ReviewAborted"),
     }
 }
 
-fn render(s: &ReviewVerdict, args: &VerdictArgs) -> String {
+fn render(s: &ReviewSystem, args: &VerdictArgs) -> String {
     match s {
-        ReviewVerdict::ReviewApproved { branch, sha } => {
+        ReviewSystem::ReviewApproved { branch, sha } => {
             format!(
                 "[VERDICT approve] branch `{}` @ {} approved.",
                 branch.as_str(),
                 sha
             )
         }
-        ReviewVerdict::ReviewDenied { branch, .. } => format!(
+        ReviewSystem::ReviewDenied { branch, .. } => format!(
             "[VERDICT deny] branch `{}` rejected: {}",
             branch.as_str(),
             args.message
         ),
-        ReviewVerdict::ReviewChanges {
+        ReviewSystem::ReviewChanges {
             branch,
             changes_branch,
             ..
@@ -144,7 +145,7 @@ fn render(s: &ReviewVerdict, args: &VerdictArgs) -> String {
             changes_branch.as_str(),
             args.message
         ),
-        ReviewVerdict::ReviewAborted { .. } => {
+        ReviewSystem::ReviewAborted { .. } => {
             unreachable!("verdict never produces ReviewAborted")
         }
     }
@@ -194,8 +195,8 @@ mod tests {
         assert!(calls.iter().any(|c| matches!(c, Call::BusDeliver { to, msg }
             if *to == Addressee::Parent
                 && matches!(&msg.kind, exo_caps::MessageKind::Domain(p)
-                    if matches!(serde_json::from_str::<ReviewVerdict>(p.0.get()),
-                        Ok(ReviewVerdict::ReviewApproved { branch, sha })
+                    if matches!(serde_json::from_str::<ReviewSystem>(p.0.get()),
+                        Ok(ReviewSystem::ReviewApproved { branch, sha })
                         if branch.as_str() == "main.dev-0" && sha == "abc123")))));
     }
 

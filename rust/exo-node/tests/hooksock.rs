@@ -16,7 +16,7 @@ use exo_runtime::Runtime;
 
 mod common;
 
-fn test_ctx(dir: &std::path::Path, run_id: &str) -> Arc<NodeContext> {
+fn test_ctx(dir: &std::path::Path, run_id: &str) -> Arc<NodeContext<common::TestDomain>> {
     let own_pane = PaneId::new("%7".into()).unwrap();
     let runtime = Runtime::new(
         NodePath::new(vec![AgentName::new("root".into()).unwrap()]).unwrap(),
@@ -29,7 +29,6 @@ fn test_ctx(dir: &std::path::Path, run_id: &str) -> Arc<NodeContext> {
     );
     Arc::new(NodeContext {
         runtime: Arc::new(runtime),
-        registry: common::test_roster(),
         kind: NodeKind::Root,
         own_pane,
         own_inbox: InboxPath::new(dir.join("own-inbox.jsonl")),

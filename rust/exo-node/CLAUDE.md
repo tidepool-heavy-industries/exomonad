@@ -1,8 +1,8 @@
 # exo-node — the per-node sidecar
 
-Assembles `exo-runtime` (all caps) + an **injected `RoleRegistry`** (the domain's tools/hooks/roles, built by the binary via `exo::roster()`) into a running **sidecar, one process per agent**. This is the binary's `exo node` and `exo hook` modes — there is **no central server**: each agent has its own sidecar, the filesystem is the bus, the process tree is the topology.
+Assembles `exo-runtime` (all caps) + a domain `D: Exomonad` (the domain's tools/hooks/roles/system, monomorphized once by the binary as `run_node::<exo::ExoDomain>`) into a running **sidecar, one process per agent**. This is the binary's `exo node` and `exo hook` modes — there is **no central server**: each agent has its own sidecar, the filesystem is the bus, the process tree is the topology.
 
-**Dependency inversion:** `exo-node` resolves a role's tools/hooks through the `RoleRegistry<Runtime>` carried in `NodeContext` (injected at `bootstrap(papers, cwd, registry)`), so it depends only on [`exo-framework`](../exo-framework/CLAUDE.md) for the `Tool`/`RoleDef`/`RoleRegistry` types and **never on the [`exo`](../exo/CLAUDE.md) domain crate** (`cargo tree -p exo-node` shows neither). The binary is the composition root that names both.
+**Generic over the domain (`Exomonad`):** `exo-node`'s `NodeContext<D>`, `run_node<D>`, `bootstrap<D>`, and every loop are generic over `D: Exomonad`. It resolves a role's tools/hooks through `D::role_def` (static dispatch — the fn-pointer `RoleRegistry` is **deleted**) and reacts to a domain inter-node payload through `D::handle_system` (the inbound Domain arm deserializes `D::System`, runs the domain handler via a `SystemCtx`, then performs the `SystemOutcome` — e.g. `ReclaimSender` tears the sender down). So it depends only on [`exo-framework`](../exo-framework/CLAUDE.md) for the trait seam and **never on the [`exo`](../exo/CLAUDE.md) domain crate** (`cargo tree -p exo-node` shows neither). The binary is the composition root that names both. Transitionally the engine bounds `D: Exomonad<Caps = Runtime, Role = NodeKind>` (the sidecar builds the concrete `Runtime`; papers still record a `NodeKind`); P5 relaxes `Role`.
 
 > Part of the v2 node-mode swarm. See `rust/CLAUDE.md`. Classic exomonad (`serve`/`mcp-stdio`) is untouched and lives in `exomonad-core`.
 
@@ -18,7 +18,7 @@ Assembles `exo-runtime` (all caps) + an **injected `RoleRegistry`** (the domain'
 | `teamout` (N6) | watch | **Outbound Teams bridge (Claude-only, Linux-only).** Watches this node's own CC team inboxes for messages the agent *sent* to a teammate (native `SendMessage` / `shutdown_request`), maps the recipient name → tree-edge `Addressee`, and forwards onto the bus. The reverse of `dispatch`. No roster authored (a child self-registers as a teammate when it first messages up); sidecar-owned processed-count cursor, never writes CC's inboxes. |
 | `dispatch` (N2a) | — | The **last hop**: deliver one entry into the agent's native interface (Teams inbox or tmux paste). |
 | `hook` (N4) | one-shot | `exo hook <event>` → bootstrap from papers → run the role's `pre_tool_use`/`stop`/`session_start` → print the verdict. No server. |
-| `bootstrap` | — | Self-ID: read `--papers` → `NodePapers`, enrich with ambient env (`$TMUX_PANE`, `EXOMONAD_SWARM_RUN_ID`, `EXOMONAD_TMUX_SESSION`, `$HOME`), build `NodeContext { runtime, kind, own_inbox, parent_inbox, ... }`. |
+| `bootstrap` | — | Self-ID: read `--papers` → `NodePapers`, enrich with ambient env (`$TMUX_PANE`, `EXOMONAD_SWARM_RUN_ID`, `EXOMONAD_TMUX_SESSION`, `$HOME`), build `NodeContext<D> { runtime, kind, own_inbox, parent_inbox, ... }`. |
 | `error` | — | `NodeError`. |
 
 `run_node` spawns `inbound`, `hooksock`, and `teamout` as background tasks and awaits `outbound::serve`; when serve returns (agent gone) it aborts all three. A background loop erroring is logged, not fatal.

@@ -1,9 +1,9 @@
 //! Roles — the concrete roster. [`role_def`] is the hand-written `match NodeKind` table (the
-//! single place a role's tool list + hooks are named), and [`roster`] wraps it as the
-//! [`RoleRegistry`](exo_framework::RoleRegistry) the binary injects into the engine. A role
-//! *reads* like declarative config but is plain, greppable, unit-testable Rust: a list of tool
-//! **types** plus three fn-pointers (hooks compose by pointing several roles at the same fn). NO
-//! `dyn Caps` — the table is parameterized by the concrete runtime `R`. The [`RoleDef<R>`] shape
+//! single place a role's tool list + hooks are named); the domain's [`Exomonad`](exo_framework::Exomonad)
+//! impl resolves a role's [`RoleDef`] through it (replacing the deleted fn-pointer `RoleRegistry`).
+//! A role *reads* like declarative config but is plain, greppable, unit-testable Rust: a list of
+//! tool **types** plus three fn-pointers (hooks compose by pointing several roles at the same fn).
+//! NO `dyn Caps` — the table is parameterized by the concrete runtime `R`. The [`RoleDef<R>`] shape
 //! and the fn-pointer aliases are the framework contract ([`exo_framework::roles`]).
 
 use crate::gates::{pre_tool_use, session_start, stop, stop_allow, stop_notify, stop_reviewer};
@@ -14,13 +14,7 @@ use crate::tools::submit::SubmitBranch;
 use crate::tools::tree::Tree;
 use crate::tools::verdict::Verdict;
 use exo_caps::NodeKind;
-use exo_framework::{PolicyCaps, RoleDef, RoleRegistry};
-
-/// Build the [`RoleRegistry`] the binary injects into the engine — the domain's whole
-/// public surface to `exo-node`. Monomorphized at the binary's concrete runtime `R`.
-pub fn roster<R: PolicyCaps>() -> RoleRegistry<R> {
-    RoleRegistry::new(role_def::<R>)
-}
+use exo_framework::{PolicyCaps, RoleDef};
 
 /// The per-role policy table. Hand-written `match` — the single place a role's tool list +
 /// hooks are named. Convergence is on-disk (v2): a TL folds a finished child with the local

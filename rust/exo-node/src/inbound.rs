@@ -33,17 +33,18 @@ use tracing::{error, info, warn};
 use chrono::Utc;
 use exo_caps::types::ShutdownStatus;
 use exo_caps::{
-    Addressee, AgentName, ChildLiveness, ControlKind, DomainPayload, IngestionEntry, Lifecycle,
-    Message, MessageBody, MessageKind, Persona, ReviewVerdict, Summary, SyntheticName, Tmux,
-    Topology, TreeNode,
+    Addressee, AgentName, Branch, CapResult, ChildLiveness, ControlKind, DomainPayload,
+    IngestionEntry, Lifecycle, Message, MessageBody, MessageKind, Persona, Summary, Tmux, Topology,
+    TreeNode,
 };
+use exo_framework::{Exomonad, SystemCtx, SystemOutcome};
 
 use crate::bootstrap::NodeContext;
 use crate::error::NodeResult;
 
 /// Watch the node's own ingestion inbox and route each new entry until shutdown.
 #[tracing::instrument(skip(ctx), fields(node = %ctx.runtime.name().as_str()))]
-pub async fn watch(ctx: Arc<NodeContext>) -> NodeResult<()> {
+pub async fn watch<D: Exomonad>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
     let inbox_path = ctx.own_inbox.as_path().to_path_buf();
     // Append rather than `with_extension` so a multi-dot inbox name can't mis-target the cursor.
     let cursor_path = PathBuf::from(format!("{}.cursor", inbox_path.display()));
@@ -162,12 +163,39 @@ trait InboundHandler {
     async fn handle(&self, entry: &IngestionEntry) -> NodeResult<Option<bool>>;
 }
 
-struct RealHandler {
-    ctx: Arc<NodeContext>,
+struct RealHandler<D: Exomonad> {
+    ctx: Arc<NodeContext<D>>,
+}
+
+/// The engine-side [`SystemCtx`] a domain's `handle_system` operates through: it wraps the live
+/// node context, exposing only `own_branch` / `head_sha` / `deliver_parent` / `deliver_to_self`
+/// (over the concrete `Runtime` caps + the last-hop dispatch), so the domain handler needs no caps
+/// and no last-hop knowledge.
+struct NodeSystemCtx<'a, D: Exomonad> {
+    ctx: &'a Arc<NodeContext<D>>,
 }
 
 #[async_trait]
-impl InboundHandler for RealHandler {
+impl<D: Exomonad> SystemCtx for NodeSystemCtx<'_, D> {
+    fn own_branch(&self) -> &Branch {
+        self.ctx.runtime.branch()
+    }
+    async fn head_sha(&self) -> CapResult<String> {
+        Ok(exo_caps::Git::head_sha(&*self.ctx.runtime).await?)
+    }
+    async fn deliver_parent(&self, msg: Message) -> CapResult<()> {
+        exo_caps::Bus::deliver(&*self.ctx.runtime, Addressee::Parent, msg).await?;
+        Ok(())
+    }
+    async fn deliver_to_self(&self, from: &str, summary: &str, text: &str) -> CapResult<()> {
+        crate::dispatch::deliver_synthetic(self.ctx, from, summary, text)
+            .await
+            .map_err(|e| exo_caps::CapError::invalid("deliver_to_self", e.to_string()))
+    }
+}
+
+#[async_trait]
+impl<D: Exomonad> InboundHandler for RealHandler<D> {
     #[tracing::instrument(skip(self, entry), fields(node = %self.ctx.runtime.name().as_str(), from = ?entry.from, kind = ?entry.msg.kind))]
     async fn handle(&self, entry: &IngestionEntry) -> NodeResult<Option<bool>> {
         match &entry.msg.kind {
@@ -194,7 +222,7 @@ impl InboundHandler for RealHandler {
     }
 }
 
-impl RealHandler {
+impl<D: Exomonad> RealHandler<D> {
     /// Handle an engine-owned [`Lifecycle`] signal (sidecar-side; never injected into the LLM
     /// except via the render helpers). These are the closed set the engine acts on itself.
     #[tracing::instrument(skip(self, lc), fields(node = %self.ctx.runtime.name().as_str(), from = ?from, kind = "lifecycle"))]
@@ -239,39 +267,43 @@ impl RealHandler {
         }
     }
 
-    /// Handle a domain-opaque [`MessageKind::Domain`] payload. Transitionally this is always the
-    /// review verdict ([`ReviewVerdict`]): deserialize, apply, then reclaim the one-shot reviewer
-    /// (verdict-only teardown — the reviewer's branch never merges, so teardown-on-merge would miss
-    /// it). An undeserializable payload is logged + skipped (tolerant, like a malformed bus line).
+    /// Handle a domain-opaque [`MessageKind::Domain`] payload — the **one place** the erased bus
+    /// payload is deserialized back to the concrete `D::System` and handed to `D::handle_system`.
+    /// The engine performs the lifecycle action the domain returns: [`SystemOutcome::ReclaimSender`]
+    /// tears down the sender (e.g. a one-shot reviewer — the engine owns `kill_pane`/`reclaim`).
+    /// An undeserializable payload is logged + skipped (tolerant, like a malformed bus line).
     #[tracing::instrument(skip(self, payload), fields(node = %self.ctx.runtime.name().as_str(), from = ?from, kind = "domain"))]
     async fn handle_domain(&self, from: &Persona, payload: &DomainPayload) -> NodeResult<()> {
-        let verdict: ReviewVerdict = match serde_json::from_str(payload.0.get()) {
+        let system: D::System = match serde_json::from_str(payload.0.get()) {
             Ok(v) => v,
             Err(e) => {
                 warn!("skipping undeserializable domain payload: {e}");
                 return Ok(());
             }
         };
-        info!(
-            outcome = "review_verdict",
-            "applying review verdict and reclaiming reviewer"
-        );
-        let result = self.apply_verdict(&verdict).await;
-        if let Persona::Agent(reviewer) = from {
-            if let Err(e) = exo_caps::Spawner::kill_pane(&*self.ctx.runtime, reviewer).await {
-                warn!(
-                    "reviewer teardown: kill_pane({}) failed: {e}",
-                    reviewer.as_str()
-                );
-            }
-            if let Err(e) = exo_caps::Spawner::reclaim_worktree(&*self.ctx.runtime, reviewer).await {
-                warn!(
-                    "reviewer teardown: reclaim_worktree({}) failed: {e}",
-                    reviewer.as_str()
-                );
+        let sctx = NodeSystemCtx { ctx: &self.ctx };
+        let outcome = D::handle_system::<NodeSystemCtx<D>>(&sctx, from, &system)
+            .await
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        match outcome {
+            SystemOutcome::Done => {}
+            SystemOutcome::ReclaimSender => {
+                if let Persona::Agent(sender) = from {
+                    if let Err(e) = exo_caps::Spawner::kill_pane(&*self.ctx.runtime, sender).await {
+                        warn!("sender teardown: kill_pane({}) failed: {e}", sender.as_str());
+                    }
+                    if let Err(e) =
+                        exo_caps::Spawner::reclaim_worktree(&*self.ctx.runtime, sender).await
+                    {
+                        warn!(
+                            "sender teardown: reclaim_worktree({}) failed: {e}",
+                            sender.as_str()
+                        );
+                    }
+                }
             }
         }
-        result
+        Ok(())
     }
 
     /// Render a concise \"child yielded control\" line into THIS node's LLM. The sender is a LIVE
@@ -286,116 +318,6 @@ impl RealHandler {
                 text: MessageBody::new(format!("[child idle] {summary}"))
                     .map_err(|e| std::io::Error::other(e.to_string()))?,
                 summary: Summary::new("[child idle]".into())
-                    .map_err(|e| std::io::Error::other(e.to_string()))?,
-                kind: MessageKind::Chat,
-            },
-        };
-        crate::dispatch::dispatch(&self.ctx, &entry).await
-    }
-
-    /// Act on a review verdict (escalate `[READY]` on a matching approval; wake the LLM on
-    /// deny/changes). The sender's teardown is handled by [`handle_domain`](Self::handle_domain).
-    #[tracing::instrument(skip(self, system), fields(node = %self.ctx.runtime.name().as_str()))]
-    async fn apply_verdict(&self, system: &ReviewVerdict) -> NodeResult<()> {
-        match system {
-            ReviewVerdict::ReviewApproved { branch, sha } => {
-                // The approval must be for THIS node's branch at its CURRENT commit. A mismatched
-                // branch (with the right sha) must not escalate [READY] for my branch, and a stale
-                // sha (work committed after the review) needs a fresh review.
-                let my_branch = self.ctx.runtime.branch().clone();
-                if branch.as_str() != my_branch.as_str() {
-                    warn!(
-                        "approval names branch {} but my branch is {} — ignoring",
-                        branch.as_str(),
-                        my_branch.as_str()
-                    );
-                    return Ok(());
-                }
-                let head = exo_caps::Git::head_sha(&*self.ctx.runtime)
-                    .await
-                    .map_err(|e| std::io::Error::other(e.to_string()))?;
-                if &head != sha {
-                    warn!(
-                        "stale approval for {} @ {} (HEAD is {}) — ignoring",
-                        branch.as_str(),
-                        sha,
-                        head
-                    );
-                    return Ok(());
-                }
-                // Escalate [READY] to the parent — sidecar-side, no LLM turn.
-                let text = format!(
-                    "[READY] branch `{}` was approved by review and is ready for merge.",
-                    my_branch.as_str()
-                );
-                let summary = format!("[READY] {}", my_branch.as_str());
-                let msg = Message {
-                    text: MessageBody::new(text)
-                        .map_err(|e| std::io::Error::other(e.to_string()))?,
-                    summary: Summary::new(summary)
-                        .map_err(|e| std::io::Error::other(e.to_string()))?,
-                    kind: MessageKind::Chat,
-                };
-                exo_caps::Bus::deliver(&*self.ctx.runtime, Addressee::Parent, msg)
-                    .await
-                    .map_err(|e| std::io::Error::other(e.to_string()))?;
-                info!(
-                    outcome = "escalated_ready",
-                    branch = %my_branch.as_str(),
-                    "review approved for {} — escalated [READY] to parent",
-                    my_branch.as_str()
-                );
-                Ok(())
-            }
-            ReviewVerdict::ReviewDenied { message, .. } => {
-                info!(outcome = "review_denied", "delivering review denial to LLM");
-                self.deliver_to_llm(&format!(
-                    "[REVIEW: changes requested] Your branch was not approved. Address this feedback, commit, then call submit_branch again:\n{}",
-                    message
-                )).await
-            }
-            ReviewVerdict::ReviewChanges {
-                changes_branch,
-                message,
-                ..
-            } => {
-                info!(
-                    outcome = "review_changes",
-                    "delivering review changes to LLM"
-                );
-                self.deliver_to_llm(&format!(
-                    "[REVIEW: proposed changes] The reviewer committed improvements on branch `{}`. Merge it with the `merge` tool to incorporate, then call submit_branch again:\n{}",
-                    changes_branch.as_str(), message
-                )).await
-            }
-            ReviewVerdict::ReviewAborted { reason } => {
-                info!(outcome = "review_aborted", reason = %reason, "delivering review abort to LLM");
-                self.deliver_to_llm(&format!(
-                    "[REVIEW ABORTED] Your reviewer exited without producing a verdict ({reason}). No approval was recorded — re-run `submit_branch` to spawn a fresh reviewer."
-                )).await
-            }
-        }
-    }
-
-    /// Inject a message into THIS node's own LLM conversation via the last-hop dispatch, attributed
-    /// to a synthetic sender.
-    async fn deliver_to_llm(&self, text: &str) -> NodeResult<()> {
-        self.deliver_to_self("reviewer", "[REVIEW]", text).await
-    }
-
-    /// Render `text` into THIS node's own LLM, attributed to synthetic `from` with `summary`.
-    async fn deliver_to_self(&self, from: &str, summary: &str, text: &str) -> NodeResult<()> {
-        let entry = IngestionEntry {
-            v: 1,
-            ts: Utc::now(),
-            from: Persona::Synthetic(
-                SyntheticName::new(from.to_string())
-                    .map_err(|e| std::io::Error::other(e.to_string()))?,
-            ),
-            msg: Message {
-                text: MessageBody::new(text.to_string())
-                    .map_err(|e| std::io::Error::other(e.to_string()))?,
-                summary: Summary::new(summary.to_string())
                     .map_err(|e| std::io::Error::other(e.to_string()))?,
                 kind: MessageKind::Chat,
             },
@@ -498,7 +420,8 @@ impl RealHandler {
             // Cooperative leaf — wrap up, reap on next idle (the stop hook drives try_reap).
             ShutdownAction::GracefulPending => {
                 self.ctx.set_shutdown_pending(grace_ms);
-                self.deliver_to_self(
+                crate::dispatch::deliver_synthetic(
+                    &self.ctx,
                     "shutdown",
                     "[shutdown requested]",
                     "[shutdown requested] Finish your work and yield — you'll be reaped when you go idle.",
@@ -518,13 +441,13 @@ impl RealHandler {
             // Forced + live children — sidecar cascades a forced teardown, reaps self when clear.
             ShutdownAction::Cascade => {
                 self.ctx.set_shutdown_pending(grace_ms);
-                let _ = self
-                    .deliver_to_self(
-                        "shutdown",
-                        "[shutdown]",
-                        "[shutdown] Forced teardown of your subtree in progress.",
-                    )
-                    .await;
+                let _ = crate::dispatch::deliver_synthetic(
+                    &self.ctx,
+                    "shutdown",
+                    "[shutdown]",
+                    "[shutdown] Forced teardown of your subtree in progress.",
+                )
+                .await;
                 for name in &live {
                     let Ok(an) = AgentName::new(name.clone()) else {
                         continue;
@@ -619,7 +542,7 @@ fn any_live(n: &TreeNode) -> bool {
 
 /// Names of this node's direct children that still have a live pane (recursively). `None` if the
 /// topology read failed (caller must not treat that as "childless").
-async fn live_children(ctx: &Arc<NodeContext>) -> Option<Vec<String>> {
+async fn live_children<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> Option<Vec<String>> {
     match ctx.runtime.topology().await {
         Ok(view) => Some(
             view.node
@@ -638,7 +561,7 @@ async fn live_children(ctx: &Arc<NodeContext>) -> Option<Vec<String>> {
 
 /// Live direct children NOT yet known-exited (the authoritative gone-set). On a topology error,
 /// returns a non-empty sentinel so `try_reap` errs toward NOT reaping.
-async fn remaining_live_children(ctx: &Arc<NodeContext>) -> Vec<String> {
+async fn remaining_live_children<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> Vec<String> {
     let exited = ctx.exited_children.lock().unwrap().clone();
     match ctx.runtime.topology().await {
         Ok(view) => view
@@ -671,7 +594,7 @@ fn shutdown_message(grace_ms: u32) -> NodeResult<Message> {
 /// wait the grace backstop, then kill its own pane (ending the process). Returns whether it
 /// reaped. Idempotent and safe to call on any stop / child-exit; a no-op when not pending or when
 /// children remain. Called from the stop-hook path (idle) and on inbound `ChildExited`.
-pub(crate) async fn try_reap(ctx: &Arc<NodeContext>) -> bool {
+pub(crate) async fn try_reap<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> bool {
     let grace = *ctx.shutdown_pending.lock().unwrap();
     let Some(grace_ms) = grace else {
         return false; // not shutting down

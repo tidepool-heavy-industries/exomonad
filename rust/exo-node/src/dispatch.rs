@@ -13,7 +13,12 @@
 
 use std::sync::Arc;
 
-use exo_caps::{AgentType, IngestionEntry, MessageKind, Persona, Tmux};
+use chrono::Utc;
+use exo_caps::{
+    AgentType, IngestionEntry, Message, MessageBody, MessageKind, Persona, RoleKind, Summary,
+    SyntheticName, Tmux,
+};
+use exo_framework::Exomonad;
 use tracing::{info, warn};
 
 use crate::bootstrap::NodeContext;
@@ -21,7 +26,10 @@ use crate::error::{NodeError, NodeResult};
 
 /// Deliver one ingestion entry into this node's own agent (the runtime-specific last hop).
 #[tracing::instrument(skip(ctx, entry), fields(node = %ctx.runtime.name().as_str(), from = ?entry.from, kind = ?entry.msg.kind))]
-pub async fn dispatch(ctx: &Arc<NodeContext>, entry: &IngestionEntry) -> NodeResult<()> {
+pub async fn dispatch<D: Exomonad>(
+    ctx: &Arc<NodeContext<D>>,
+    entry: &IngestionEntry,
+) -> NodeResult<()> {
     let agent_type = ctx.kind.agent_type();
 
     // Resolve THIS agent's own team. `resolve_self_or_portable` tries `resolve_self` first — it
@@ -65,6 +73,32 @@ pub async fn dispatch(ctx: &Arc<NodeContext>, entry: &IngestionEntry) -> NodeRes
             Ok(())
         }
     }
+}
+
+/// Inject a synthetic (sidecar-authored) message into THIS node's own LLM via the last-hop
+/// dispatch — the shared path for engine-internal renders (shutdown prompts) and the domain's
+/// `SystemCtx::deliver_to_self`. Attributed to a synthetic `from`.
+pub(crate) async fn deliver_synthetic<D: Exomonad>(
+    ctx: &Arc<NodeContext<D>>,
+    from: &str,
+    summary: &str,
+    text: &str,
+) -> NodeResult<()> {
+    let entry = IngestionEntry {
+        v: 1,
+        ts: Utc::now(),
+        from: Persona::Synthetic(
+            SyntheticName::new(from.to_string()).map_err(|e| std::io::Error::other(e.to_string()))?,
+        ),
+        msg: Message {
+            text: MessageBody::new(text.to_string())
+                .map_err(|e| std::io::Error::other(e.to_string()))?,
+            summary: Summary::new(summary.to_string())
+                .map_err(|e| std::io::Error::other(e.to_string()))?,
+            kind: MessageKind::Chat,
+        },
+    };
+    dispatch(ctx, &entry).await
 }
 
 #[derive(Debug, PartialEq, Eq)]

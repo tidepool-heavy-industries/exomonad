@@ -74,11 +74,13 @@ pub trait Exomonad: Send + Sync + 'static {
     fn role_def(role: Self::Role) -> RoleDef<Self::Caps>;
 
     /// React to one domain [`System`](Exomonad::System) message (the relocated review-gate logic
-    /// for the `exo` domain). Operates through [`SystemCtx`]; returns the [`SystemOutcome`] the
-    /// engine acts on (e.g. tear down a one-shot reviewer). Called at exactly one place — the
-    /// inbound loop's Domain arm, after deserializing the erased wire payload to `Self::System`.
-    fn handle_system<'a>(
-        ctx: &'a dyn SystemCtx,
+    /// for the `exo` domain). Operates through the engine-provided [`SystemCtx`] `C` (generic, not a
+    /// trait object — `C: SystemCtx` is `Sync` via the supertrait, so the returned future is `Send`
+    /// for the spawned inbound task); returns the [`SystemOutcome`] the engine acts on (e.g. tear
+    /// down a one-shot reviewer). Called at exactly one place — the inbound loop's Domain arm, after
+    /// deserializing the erased wire payload to `Self::System`.
+    fn handle_system<'a, C: SystemCtx>(
+        ctx: &'a C,
         from: &'a Persona,
         system: &'a Self::System,
     ) -> BoxFuture<'a, CapResult<SystemOutcome>>;

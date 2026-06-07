@@ -4,8 +4,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::Arc;
 
-use exo_caps::{AgentType, HookEvent, HookRequest, HookVerdict};
-use exo_framework::{HookDecision, HookInput, RoleDef, StopDecision};
+use exo_caps::{AgentType, HookEvent, HookRequest, HookVerdict, NodeKind};
+use exo_framework::{Exomonad, HookDecision, HookInput, RoleDef, StopDecision};
+use exo_runtime::Runtime;
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
@@ -24,7 +25,9 @@ use crate::error::{NodeError, NodeResult};
 /// Spawned as a background task by [`run_node`](crate::run_node) and aborted when the outbound
 /// serve loop returns; an error here is logged, never fatal.
 #[tracing::instrument(skip(ctx), fields(node = %ctx.runtime.name().as_str()))]
-pub async fn serve(ctx: Arc<NodeContext>) -> NodeResult<()> {
+pub async fn serve<D: Exomonad<Caps = Runtime, Role = NodeKind>>(
+    ctx: Arc<NodeContext<D>>,
+) -> NodeResult<()> {
     let home = std::env::var("HOME").map_err(|_| NodeError::MissingContext("HOME"))?;
     let sock = exo_caps::paths::hook_sock(Path::new(&home), &ctx.run_id, &ctx.own_pane);
 
@@ -56,7 +59,10 @@ pub async fn serve(ctx: Arc<NodeContext>) -> NodeResult<()> {
 /// One request/response cycle. The client writes a `HookRequest` then half-closes its write side;
 /// we read to EOF, run the hook, write the `HookVerdict`, and close.
 #[tracing::instrument(skip(ctx, stream), fields(node = %ctx.runtime.name().as_str()))]
-async fn handle_conn(ctx: Arc<NodeContext>, stream: UnixStream) -> NodeResult<()> {
+async fn handle_conn<D: Exomonad<Caps = Runtime, Role = NodeKind>>(
+    ctx: Arc<NodeContext<D>>,
+    stream: UnixStream,
+) -> NodeResult<()> {
     let mut buf = Vec::new();
     // Read up to 64KB with a 2-second timeout to prevent memory exhaustion and deadlocks.
     // The client MUST half-close its write side for us to see EOF.
@@ -100,8 +106,11 @@ async fn handle_conn(ctx: Arc<NodeContext>, stream: UnixStream) -> NodeResult<()
 
 /// Run the role's hook fn on the LIVE runtime, then shape stdout for the node's agent_type.
 #[tracing::instrument(skip(ctx, req), fields(node = %ctx.runtime.name().as_str(), event = ?req.event))]
-async fn run(ctx: &NodeContext, req: &HookRequest) -> HookVerdict {
-    let rd = ctx.registry.role_def(ctx.kind);
+async fn run<D: Exomonad<Caps = Runtime, Role = NodeKind>>(
+    ctx: &NodeContext<D>,
+    req: &HookRequest,
+) -> HookVerdict {
+    let rd = D::role_def(ctx.kind);
     let agent_type = ctx.kind.agent_type();
     let stdout = match req.event {
         HookEvent::PreToolUse => {

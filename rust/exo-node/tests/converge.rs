@@ -19,7 +19,10 @@ use exo_node::bootstrap::NodeContext;
 mod common;
 
 /// Build a real `NodeContext` rooted at `dir`, with a parent inbox the up-edge points at.
-fn test_ctx(dir: &std::path::Path, parent_inbox: Option<InboxPath>) -> Arc<NodeContext> {
+fn test_ctx(
+    dir: &std::path::Path,
+    parent_inbox: Option<InboxPath>,
+) -> Arc<NodeContext<common::TestDomain>> {
     let own_pane = PaneId::new("%42".into()).unwrap();
     let run_id = "converge-run".to_string();
     let runtime = Runtime::new(
@@ -38,7 +41,6 @@ fn test_ctx(dir: &std::path::Path, parent_inbox: Option<InboxPath>) -> Arc<NodeC
     let own_inbox = InboxPath::new(dir.join("own-inbox.jsonl"));
     Arc::new(NodeContext {
         runtime: Arc::new(runtime),
-        registry: common::test_roster(),
         kind: exo_caps::NodeKind::Tl,
         own_pane,
         own_inbox,

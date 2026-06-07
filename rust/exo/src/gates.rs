@@ -6,9 +6,10 @@
 //! least-privilege spec. The decision enums they return are the framework contract
 //! ([`exo_framework::hooks`]).
 
+use crate::review::ReviewSystem;
 use exo_caps::{
     deliver_domain, Addressee, Bus, CapResult, ChildLiveness, Git, Kv, Lifecycle, Log, Message,
-    MessageBody, MessageKind, ReviewVerdict, Summary,
+    MessageBody, MessageKind, Summary,
 };
 use exo_framework::{BoxFuture, HookDecision, HookInput, SessionStartOutput, StopDecision};
 
@@ -156,7 +157,7 @@ pub fn stop_reviewer<'a, R: Bus + Kv + Log + Send + Sync>(
         if !produced {
             // ReviewAborted is a domain verdict — it rides the erased domain wire via
             // `deliver_domain`, so this gate needs only `Bus` (not `Bus<D::System>`).
-            let verdict = ReviewVerdict::ReviewAborted {
+            let verdict = ReviewSystem::ReviewAborted {
                 reason: "exited without invoking the verdict tool (likely emitted as prose)"
                     .to_string(),
             };
@@ -208,8 +209,8 @@ mod tests {
                 Call::BusDeliver { to: Addressee::Parent, msg }
                     if matches!(&msg.kind, MessageKind::Domain(p)
                         if matches!(
-                            serde_json::from_str::<ReviewVerdict>(p.0.get()),
-                            Ok(ReviewVerdict::ReviewAborted { .. })
+                            serde_json::from_str::<ReviewSystem>(p.0.get()),
+                            Ok(ReviewSystem::ReviewAborted { .. })
                         ))
             )
         })

@@ -3,8 +3,9 @@
 //! The policy *contract*: the [`Tool<R>`](tool::Tool) trait +
 //! JSON-edge helpers, [`RoleDef<R>`](roles::RoleDef) + its hook fn-pointer aliases, the hook
 //! decision enums ([`hooks`]), the [`PolicyCaps`](caps::PolicyCaps) static bound-union for the
-//! dispatch boundary, and the [`RoleRegistry`](registry::RoleRegistry) that lets the engine
-//! resolve roles **injected by the binary** rather than depending on the concrete domain.
+//! dispatch boundary, and the [`Exomonad`](exomonad::Exomonad) trait that makes the engine generic
+//! machinery over a domain TYPE (resolving roles via `D::role_def` instead of the deleted
+//! fn-pointer registry).
 //!
 //! Everything here is generic over the concrete runtime `R` and written against the
 //! [`exo_caps`] trait seam — no IO, no concrete tools/roles/gates. Those live in the `exo`
@@ -24,13 +25,11 @@
 pub mod caps;
 pub mod exomonad;
 pub mod hooks;
-pub mod registry;
 pub mod roles;
 pub mod tool;
 
 pub use caps::PolicyCaps;
 pub use exomonad::{Exomonad, SystemCtx, SystemOutcome};
 pub use hooks::{HookDecision, HookInput, SessionStartOutput, StopDecision};
-pub use registry::RoleRegistry;
 pub use roles::{PreToolUseFn, RoleDef, SessionStartFn, StopFn};
 pub use tool::{ok_json, parse, schema_json, BoxFuture, Tool, ToolOutput};

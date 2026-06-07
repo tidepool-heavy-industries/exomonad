@@ -10,8 +10,11 @@
 //! ```
 
 mod config;
+mod domain;
 mod hook;
 mod init;
+
+use domain::ExoDomain;
 
 use std::sync::Arc;
 
@@ -84,8 +87,9 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::Node { papers } => {
             let cwd = std::env::current_dir().context("resolving node cwd")?;
-            // Inject the domain roster into the engine — the engine never names a concrete role.
-            let ctx = exo_node::bootstrap(&papers, cwd, exo::roster())
+            // Monomorphize the engine once at the `exo` domain — the engine never names a concrete
+            // role/system/spawn; it resolves everything through `ExoDomain`'s `Exomonad` impl.
+            let ctx = exo_node::bootstrap::<ExoDomain>(&papers, cwd)
                 .map(Arc::new)
                 .context("node self-ID / bootstrap")?;
             exo_node::run_node(ctx).await.context("node run")

@@ -10,7 +10,8 @@
 
 use std::sync::Arc;
 
-use exo_framework::Tool;
+use exo_caps::NodeKind;
+use exo_framework::{Exomonad, Tool};
 use exo_runtime::Runtime;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -20,8 +21,10 @@ use crate::bootstrap::NodeContext;
 use crate::error::NodeResult;
 
 /// Serve the policy toolset over rmcp/stdio until the stream closes.
-pub async fn serve(ctx: Arc<NodeContext>) -> NodeResult<()> {
-    let tools = ctx.registry.role_def(ctx.kind).tools;
+pub async fn serve<D: Exomonad<Caps = Runtime, Role = NodeKind>>(
+    ctx: Arc<NodeContext<D>>,
+) -> NodeResult<()> {
+    let tools = D::role_def(ctx.kind).tools;
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin).lines();
     let mut stdout = tokio::io::stdout();

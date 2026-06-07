@@ -483,41 +483,6 @@ pub enum ShutdownStatus {
     Deferred,
 }
 
-/// The review-gate verdict signals — the `exo` domain's inter-node payload, carried erased over the
-/// bus as [`MessageKind::Domain`]. **Transitional home:** this is a [`DomainSystem`](crate::DomainSystem)
-/// and belongs in the `exo` domain (it becomes `exo::ReviewSystem` when the engine goes generic over
-/// the domain in P2); it lives in `exo-caps` only while the engine still hard-codes review handling,
-/// because both the `verdict` tool (domain) and the inbound loop (engine) must name it and `exo-node`
-/// must not depend on `exo`. Serde-tagged on `type`. Lifecycle signals (`ChildIdle`/`ChildExited`/
-/// `ShutdownResponse`) are NOT here — they are engine-owned [`Lifecycle`] variants.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ReviewVerdict {
-    /// The reviewer approved `branch@sha`. The submitter's sidecar auto-escalates `[READY]`
-    /// upward (no LLM turn) iff `sha` still matches the submitter's HEAD.
-    ReviewApproved { branch: Branch, sha: String },
-    /// The reviewer rejected with feedback. Rendered + delivered to the submitter's LLM to address.
-    ReviewDenied {
-        branch: Branch,
-        sha: String,
-        message: String,
-    },
-    /// The reviewer committed a counter-proposal to `changes_branch`. Rendered + delivered to the
-    /// submitter's LLM to `merge` + re-submit.
-    ReviewChanges {
-        branch: Branch,
-        sha: String,
-        changes_branch: Branch,
-        message: String,
-    },
-    /// A reviewer ended its turn WITHOUT producing a verdict (e.g. it emitted the `verdict` tool
-    /// call as prose instead of invoking it — a known Gemini pathology). Sent by the reviewer's
-    /// `stop` hook to its parent (the submitter) so the failure is LOUD instead of a silent
-    /// forever-stall: the submitter renders it as a re-submit prompt and tears the dead reviewer
-    /// down. `reason` is a short human note.
-    ReviewAborted { reason: String },
-}
-
 /// Engine-owned **lifecycle** signals — the closed, typed set of node-to-node control signals the
 /// sidecar acts on *itself* (mark a child idle, reap on exit, render a shutdown reply), distinct
 /// from a domain's [`DomainSystem`](crate::DomainSystem) payload. Carried by
@@ -570,17 +535,6 @@ pub struct ChildStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn review_aborted_serde_roundtrip() {
-        let m = ReviewVerdict::ReviewAborted {
-            reason: "no verdict".into(),
-        };
-        let json = serde_json::to_string(&m).unwrap();
-        assert!(json.contains("\"type\":\"review_aborted\""));
-        let back: ReviewVerdict = serde_json::from_str(&json).unwrap();
-        assert_eq!(m, back);
-    }
 
     #[test]
     fn shutdown_response_serde_roundtrip() {

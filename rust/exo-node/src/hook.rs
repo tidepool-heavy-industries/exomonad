@@ -16,7 +16,8 @@ use std::path::Path;
 
 use crate::bootstrap::{bootstrap, NodeContext};
 use crate::error::NodeResult;
-use exo_framework::{HookDecision, HookInput, RoleRegistry, StopDecision};
+use exo_caps::{NodeKind, RoleKind};
+use exo_framework::{Exomonad, HookDecision, HookInput, StopDecision};
 use exo_runtime::Runtime;
 use serde_json::json;
 
@@ -29,23 +30,22 @@ pub enum HookEvent {
 }
 
 /// Handle one CC hook invocation: read stdin payload, self-ID via `papers_path`, run the
-/// role's policy hook, write the verdict JSON to stdout.
-pub async fn handle(
+/// role's policy hook (resolved through the domain `D`), write the verdict JSON to stdout.
+pub async fn handle<D: Exomonad<Caps = Runtime, Role = NodeKind>>(
     event: HookEvent,
     papers_path: &Path,
     stdin_json: &str,
-    registry: RoleRegistry<Runtime>,
 ) -> NodeResult<String> {
-    // 1. Self-ID: bootstrap with the injected domain roster.
-    let ctx = bootstrap(papers_path, std::env::current_dir()?, registry)?;
+    // 1. Self-ID against the domain `D`.
+    let ctx = bootstrap::<D>(papers_path, std::env::current_dir()?)?;
 
-    // 2. Resolve the role's hook fns from the injected registry.
-    let rd = ctx.registry.role_def(ctx.kind);
+    // 2. Resolve the role's hook fns through the domain.
+    let rd = D::role_def(ctx.kind);
 
     run_hook(ctx, rd, event, stdin_json).await
 }
 
-fn identity_context(ctx: &NodeContext) -> String {
+fn identity_context<D: Exomonad>(ctx: &NodeContext<D>) -> String {
     let role = ctx.kind.role_str();
     let name = ctx.runtime.name();
     let branch = ctx.runtime.branch();
@@ -93,8 +93,8 @@ fn identity_context(ctx: &NodeContext) -> String {
     )
 }
 
-async fn run_hook(
-    ctx: NodeContext,
+async fn run_hook<D: Exomonad>(
+    ctx: NodeContext<D>,
     rd: exo_framework::RoleDef<Runtime>,
     event: HookEvent,
     stdin_json: &str,
@@ -159,14 +159,19 @@ async fn run_hook(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{test_pre_tool_use, test_roster, test_session_start, test_stop};
+    use crate::test_support::{test_pre_tool_use, test_session_start, test_stop, TestDomain};
     use exo_caps::{AgentName, Branch, NodeKind, NodePath, PaneId};
     use exo_framework::{BoxFuture, HookDecision, HookInput, RoleDef, StopDecision};
     use exo_runtime::Runtime;
     use serde_json::{json, Value};
     use std::sync::Arc;
 
-    fn mock_ctx(kind: NodeKind, path: Vec<&str>, branch: &str, has_parent: bool) -> NodeContext {
+    fn mock_ctx(
+        kind: NodeKind,
+        path: Vec<&str>,
+        branch: &str,
+        has_parent: bool,
+    ) -> NodeContext<TestDomain> {
         let node_path = NodePath::new(
             path.into_iter()
                 .map(|s| AgentName::new(s.to_string()).unwrap())
@@ -192,7 +197,6 @@ mod tests {
 
         NodeContext {
             runtime: Arc::new(runtime),
-            registry: test_roster(),
             kind,
             own_pane: PaneId::new("%1".into()).unwrap(),
             own_inbox: exo_caps::InboxPath::new("/tmp/own".into()),

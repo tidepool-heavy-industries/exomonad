@@ -14,15 +14,24 @@
 //! - [`tools`] — one module per MCP tool (a type + `Args` + generic-over-caps `run` + adapter).
 //! - [`gates`] — the concrete hook bodies (`pre_tool_use` nudge, `stop` clean-gate, the per-role
 //!   `stop` variants, `session_start`).
-//! - [`roles`] — [`role_def`](roles::role_def) (the `NodeKind` table) + [`roster`](roles::roster)
-//!   (the registry builder the binary injects).
+//! - [`roles`] — [`role_def`](roles::role_def) (the `NodeKind` table the domain's [`Exomonad`]
+//!   impl resolves through).
+//! - [`review`] — the domain's inter-node behavior: [`ReviewSystem`](review::ReviewSystem)
+//!   (`D::System`) + the relocated review-gate logic ([`handle_review_system`](review::handle_review_system)).
+//! - [`spawn`] — [`ExoSpawn`](spawn::ExoSpawn), the domain's `D::Spawn`.
 //! - [`testing`] — the shared [`MockRuntime`](testing::MockRuntime) every tool unit-tests against.
+//!
+//! [`Exomonad`]: exo_framework::Exomonad
 
 pub mod gates;
+pub mod review;
 pub mod roles;
+pub mod spawn;
 pub mod tools;
 
 #[cfg(test)]
 pub mod testing;
 
-pub use roles::{role_def, roster};
+pub use review::{handle_review_system, ReviewSystem};
+pub use roles::role_def;
+pub use spawn::ExoSpawn;

@@ -21,6 +21,7 @@ serde_json = { workspace = true }
 async-trait = { workspace = true }
 schemars = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 
 # Bin (the node entrypoint + the full `exo init`/`node`/`hook` CLI) only: assemble the engine
 # sidecar with the domain roster injected, plus the root-session bootstrap. The lib stays generic

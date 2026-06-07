@@ -32,11 +32,10 @@ pub async fn run(event: HookEventType, papers: std::path::PathBuf) -> Result<()>
     // SessionStart stays one-shot in-process: it needs no live state and must survive
     // a cold-start race before the sidecar socket is listening.
     if event == HookEventType::SessionStart {
-        let verdict = exo_node::handle_hook(
+        let verdict = exo_node::handle_hook::<crate::domain::ExoDomain>(
             exo_node::HookEvent::SessionStart,
             &papers,
             &body,
-            exo::roster(),
         )
         .await
         .context("node session-start hook")?;

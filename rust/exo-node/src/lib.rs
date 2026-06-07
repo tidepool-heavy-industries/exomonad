@@ -34,6 +34,9 @@ pub use bootstrap::{bootstrap, NodeContext};
 pub use error::{NodeError, NodeResult};
 pub use hook::{handle as handle_hook, HookEvent};
 
+use exo_caps::NodeKind;
+use exo_framework::Exomonad;
+use exo_runtime::Runtime;
 use std::sync::Arc;
 
 /// Run the node's concurrent stimuli in one process (outbound serve + inbound watch + hooksock +
@@ -50,7 +53,9 @@ use std::sync::Arc;
 /// The background loops are aborted when `serve` returns. `Arc<NodeContext>` satisfies the
 /// `R: Send + Sync + 'static` dispatch boundary. A background loop erroring is logged but does
 /// not tear down the node — only the outbound anchor closing (or a shutdown) ends it.
-pub async fn run_node(ctx: Arc<NodeContext>) -> NodeResult<()> {
+pub async fn run_node<D: Exomonad<Caps = Runtime, Role = NodeKind>>(
+    ctx: Arc<NodeContext<D>>,
+) -> NodeResult<()> {
     let inbound = tokio::spawn({
         let ctx = ctx.clone();
         async move {

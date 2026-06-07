@@ -8,9 +8,12 @@ is the "small usage" half of the framework/domain split (the Rust analog of Clas
 config DSL). Written **generic over the `exo-caps` traits** (no `dyn Caps`), so least-privilege is
 compiler-checked and every tool is **unit-testable against mock caps with zero IO**.
 
-The engine never depends on this crate's lib. The binary builds a `RoleRegistry` from `roster()`
-and injects it into `exo-node`; that injection is the whole point of the split. See
-[`docs/decisions/exo-framework-domain-split.md`](../../docs/decisions/exo-framework-domain-split.md).
+The engine never depends on this crate's lib. The binary's bin-only `domain.rs` defines `ExoDomain`
+(the [`Exomonad`](../exo-framework/CLAUDE.md) impl: `Caps = Runtime`, `Role = NodeKind`, `System =
+ReviewSystem`, `Spawn = ExoSpawn`) and monomorphizes the engine once as `run_node::<ExoDomain>`;
+that's the seam (the fn-pointer `RoleRegistry` is gone). See
+[`docs/decisions/exo-framework-domain-split.md`](../../docs/decisions/exo-framework-domain-split.md)
+and [`docs/decisions/exo-trait-refactor.md`](../../docs/decisions/exo-trait-refactor.md).
 
 The CLI modules (`main.rs` / `init.rs` / `hook.rs` / `config.rs`) are **bin-only** — they link the
 v2/shared seam (`exo-node`, `exo-runtime`, `exomonad-shared`) but never classic `exomonad-core`. The
@@ -22,8 +25,11 @@ lib (`lib.rs` + `tools/` + `gates.rs` + `roles.rs`) stays generic over the caps 
 
 | File | Contents |
 |------|----------|
-| `lib.rs` | Re-exports `role_def` / `roster`. Generic over `R`, depends only on `exo-framework` + `exo-caps`. |
-| `main.rs` | The CLI dispatcher (bin): clap `Cli` → `init` / `node` / `hook`. `node` is the composition root — `exo node --papers <path>` → build the roster → `exo_node::bootstrap(papers, cwd, roster())` → `run_node`. |
+| `lib.rs` | Re-exports `role_def`, `ReviewSystem`/`handle_review_system` (the domain `System` + relocated gate), `ExoSpawn` (the domain `Spawn`). Generic over `R`, depends only on `exo-framework` + `exo-caps` (+ `tracing`). |
+| `review.rs` | The domain's inter-node behavior: `ReviewSystem` (`D::System`) + `handle_review_system` (the relocated `apply_verdict`, IO-free via the `SystemCtx` seam — unit-tested against a mock context). |
+| `spawn.rs` | `ExoSpawn` (`D::Spawn`) — the domain spawn intent implementing `SpawnSpec` (wired into the collapsed `Spawner::spawn` in P4). |
+| `domain.rs` | **Bin-only.** `ExoDomain` — the `Exomonad` impl that fixes `Caps = Runtime` and points `role_def`/`handle_system` at the lib. The one place that links `exo-runtime`. |
+| `main.rs` | The CLI dispatcher (bin): clap `Cli` → `init` / `node` / `hook`. `node` is the composition root — `exo node --papers <path>` → `exo_node::bootstrap::<ExoDomain>(papers, cwd)` → `run_node::<ExoDomain>`. |
 | `init.rs` | `exo init [--session <s>] [--recreate]` — bootstrap a node-mode ROOT (own tmux session, root papers, no server). Reuses `exo-runtime`/`exomonad-shared`. |
 | `hook.rs` | `exo hook <event> --papers <path>` — handle a CC/Gemini hook via the node's `exo` gate (SessionStart in-process; everything else routes to the sidecar hook socket, fail-open). |
 | `config.rs` | Minimal node-mode init config read (`tmux_session`, `model`, + the child-launch policy `yolo`/`wrap_nix` stamped onto the root's papers and inherited down the tree) — classic `exomonad` owns the full `Config`. |
@@ -56,8 +62,8 @@ fn-pointer list** (`tools/submit.rs`) mirroring the role hook fn-pointers.
 
 ## Roles
 
-`role_def(kind)` returns a `RoleDef<R> { tools, pre_tool_use, stop, session_start }`; `roster()`
-wraps `role_def` as the injected `RoleRegistry`. Hooks compose by pointing several roles at the same fn.
+`role_def(kind)` returns a `RoleDef<R> { tools, pre_tool_use, stop, session_start }`; `ExoDomain::role_def`
+resolves through it (the domain's `Exomonad` impl), replacing the deleted `RoleRegistry`. Hooks compose by pointing several roles at the same fn.
 
 | Role | agent | tools | stop gate |
 |------|-------|-------|-----------|

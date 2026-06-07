@@ -12,26 +12,24 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use exo_caps::{Branch, InboxPath, NodeKind, NodePapers, NodePath, PaneId};
-use exo_framework::RoleRegistry;
+use exo_framework::Exomonad;
 use exo_runtime::Runtime;
 use tracing::warn;
 
 use crate::error::{NodeError, NodeResult};
 
-/// Everything a running node needs: its identity, the concrete [`Runtime`] (all caps), the
-/// injected [`RoleRegistry`], and the ambient context the loops read. `Runtime` does not itself
-/// store the [`NodeKind`] (its identity is the tree address + branch), so the context carries it
-/// for role resolution.
+/// Everything a running node needs: its identity, the concrete [`Runtime`] (all caps), and the
+/// ambient context the loops read — generic over the domain `D` ([`Exomonad`]). The engine resolves
+/// a role's tools/hooks through `D::role_def` (static dispatch) rather than an injected registry, and
+/// reacts to domain system messages through `D::handle_system`. `Runtime` does not itself store the
+/// role (its identity is the tree address + branch), so the context carries it for role resolution.
 #[derive(Debug)]
-pub struct NodeContext {
+pub struct NodeContext<D: Exomonad> {
     /// The concrete runtime — implements every `exo-caps` capability. Policy monomorphizes
-    /// against this `R`; the outbound loop serves `registry.role_def(kind).tools`.
+    /// against this `R`; the outbound loop serves `D::role_def(kind).tools`.
     pub runtime: Arc<Runtime>,
-    /// The domain roster, **injected by the binary** (`exo::roster()`). The engine resolves a
-    /// role's tools/hooks through this — it never names a concrete role itself.
-    pub registry: RoleRegistry<Runtime>,
-    /// This node's archetype (from papers). Drives the role resolution + the last-hop agent_type.
-    pub kind: NodeKind,
+    /// This node's role (from papers). Drives the role resolution + the last-hop agent_type.
+    pub kind: D::Role,
     /// This node's own pane — the inbox key + the tmux-paste target for self-injection.
     pub own_pane: PaneId,
     /// This node's own ingestion inbox (`…/inboxes/{run_id}/pane-N.jsonl`) — what the
@@ -50,15 +48,13 @@ pub struct NodeContext {
     pub exited_children: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
-impl NodeContext {
+impl<D: Exomonad> NodeContext<D> {
     /// Mark this node as shutting down (cooperative or forced); the sidecar reaps itself once its
     /// subtree is clear. `grace_ms` is the pre-kill backstop applied at the actual reap.
     pub fn set_shutdown_pending(&self, grace_ms: u32) {
         *self.shutdown_pending.lock().unwrap() = Some(grace_ms);
     }
-}
 
-impl NodeContext {
     /// `true` for the un-parented root (no up-edge).
     pub fn is_root(&self) -> bool {
         self.parent_inbox.is_none()
@@ -86,11 +82,15 @@ fn load_papers(papers_path: &Path) -> NodeResult<NodePapers> {
 ///
 /// Ambient (env): `$TMUX_PANE` (the universal key — must agree with papers.pane),
 /// `EXOMONAD_SWARM_RUN_ID`, `EXOMONAD_TMUX_SESSION`, `$HOME`.
-pub fn bootstrap(
+///
+/// Generic over the domain `D` — monomorphized once at the binary (`bootstrap::<exo::ExoDomain>`).
+/// Transitionally bounded `Role = NodeKind` (papers still record a `NodeKind`); P5 makes papers
+/// carry `D::Role` and relaxes this. `Caps = Runtime` is inherent: the sidecar builds the concrete
+/// `Runtime` here, so the domain's tools monomorphize against it.
+pub fn bootstrap<D: Exomonad<Caps = Runtime, Role = NodeKind>>(
     papers_path: &Path,
     working_dir: PathBuf,
-    registry: RoleRegistry<Runtime>,
-) -> NodeResult<NodeContext> {
+) -> NodeResult<NodeContext<D>> {
     let papers = load_papers(papers_path)?;
 
     let run_id = std::env::var("EXOMONAD_SWARM_RUN_ID")
@@ -142,7 +142,6 @@ pub fn bootstrap(
 
     Ok(NodeContext {
         runtime: Arc::new(runtime),
-        registry,
         kind,
         own_pane,
         own_inbox,
@@ -195,12 +194,8 @@ mod tests {
         std::env::set_var("EXOMONAD_TMUX_SESSION", "test-session");
         std::env::set_var("HOME", dir.path().to_str().unwrap());
 
-        let ctx = bootstrap(
-            &papers_path,
-            working_dir.clone(),
-            crate::test_support::test_roster(),
-        )
-        .unwrap();
+        let ctx = bootstrap::<crate::test_support::TestDomain>(&papers_path, working_dir.clone())
+            .unwrap();
 
         assert_eq!(ctx.kind, NodeKind::Tl);
         assert_eq!(ctx.own_pane, own_pane);
@@ -210,11 +205,8 @@ mod tests {
 
         // 2. Missing env case
         std::env::remove_var("EXOMONAD_SWARM_RUN_ID");
-        let res = bootstrap(
-            &papers_path,
-            working_dir.clone(),
-            crate::test_support::test_roster(),
-        );
+        let res =
+            bootstrap::<crate::test_support::TestDomain>(&papers_path, working_dir.clone());
         assert!(res.is_err());
 
         // Cleanup env
