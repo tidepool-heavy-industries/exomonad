@@ -2,7 +2,7 @@
 
 Type-safe LLM agent orchestration over a tree of context windows. Two coexisting architectures share one model:
 
-- **v2 Node-Mode** (`exomonad experimental`) — the active track. No central server: one Rust sidecar per agent, the filesystem is the bus, the process tree is the topology. Tool/hook/role logic is plain Rust over a capability seam (`exo-caps`). Convergence is local `git merge`.
+- **v2 Node-Mode** (the `exo` binary) — the active track. No central server: one Rust sidecar per agent, the filesystem is the bus, the process tree is the topology. Tool/hook/role logic is plain Rust over a capability seam (`exo-caps`). Convergence is local `git merge`.
 - **Classic** (`exomonad serve`) — **deprecated, still supported.** A central MCP server; all tool/hook/event logic compiled to Haskell WASM (a typed config DSL); Rust executes the I/O effects the DSL yields.
 
 This file is a **router**: the shared model below, then pointers into the nested `CLAUDE.md` tree where the per-component detail now lives.
@@ -106,7 +106,7 @@ The Haskell/WASM logging pattern is in [`haskell/wasm-guest/CLAUDE.md`](haskell/
 **v2 Node-Mode (active):**
 ```bash
 exomonad new                  # one-time: .exo/config.toml, .gitignore, rules templates
-exomonad experimental init    # decentralized swarm session (per-agent sidecars, native Teams)
+exo init                      # decentralized swarm session (per-agent sidecars, native Teams)
 ```
 
 **Classic (deprecated):** `exomonad init` creates a central-server tmux session. Full classic getting-started, MCP registration, config, and companions → [`rust/exomonad/CLAUDE.md`](rust/exomonad/CLAUDE.md).

@@ -35,10 +35,6 @@ dirs = "5.0"
 pathdiff = "0.2"
 shell-escape = "0.1"
 exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"] }
-exo-node = { path = "../exo-node" }
-exo = { path = "../exo" }
-exo-caps = { path = "../exo-caps" }
-exo-runtime = { path = "../exo-runtime" }
 
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }

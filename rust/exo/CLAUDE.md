@@ -1,24 +1,33 @@
-# exo — the domain (tools / roles / gates) + the node entrypoint
+# exo — the v2 node-mode binary (CLI) + the domain (tools / roles / gates)
 
-The minimal **domain usage** of [`exo-framework`](../exo-framework/CLAUDE.md): the genuinely
-domain-specific Bucket-C logic that ports from the old Haskell DSL — the MCP tool set, the per-role
-roster, and the CC hook gates — plus a thin `main.rs` node entrypoint. This is the "small usage"
-half of the framework/domain split (the Rust analog of Classic's Haskell-WASM config DSL). Written
-**generic over the `exo-caps` traits** (no `dyn Caps`), so least-privilege is compiler-checked and
-every tool is **unit-testable against mock caps with zero IO**.
+`exo` is the **standalone v2 node-mode binary** — it owns the whole node-mode CLI surface
+(`exo init` / `exo node` / `exo hook`; classic `exomonad` is server-only and no longer carries an
+`experimental` subcommand). The lib half is the minimal **domain usage** of
+[`exo-framework`](../exo-framework/CLAUDE.md): the genuinely domain-specific Bucket-C logic that
+ports from the old Haskell DSL — the MCP tool set, the per-role roster, and the CC hook gates. This
+is the "small usage" half of the framework/domain split (the Rust analog of Classic's Haskell-WASM
+config DSL). Written **generic over the `exo-caps` traits** (no `dyn Caps`), so least-privilege is
+compiler-checked and every tool is **unit-testable against mock caps with zero IO**.
 
-The engine never depends on this crate. The binary builds a `RoleRegistry` from `roster()` and
-injects it into `exo-node`; that injection is the whole point of the split. See
+The engine never depends on this crate's lib. The binary builds a `RoleRegistry` from `roster()`
+and injects it into `exo-node`; that injection is the whole point of the split. See
 [`docs/decisions/exo-framework-domain-split.md`](../../docs/decisions/exo-framework-domain-split.md).
 
-> Part of the v2 node-mode swarm (`exomonad experimental`). See `rust/CLAUDE.md`.
+The CLI modules (`main.rs` / `init.rs` / `hook.rs` / `config.rs`) are **bin-only** — they link the
+v2/shared seam (`exo-node`, `exo-runtime`, `exomonad-shared`) but never classic `exomonad-core`. The
+lib (`lib.rs` + `tools/` + `gates.rs` + `roles.rs`) stays generic over the caps and links neither.
+
+> Part of the v2 node-mode swarm (the `exo` binary). See `rust/CLAUDE.md`.
 
 ## Shape
 
 | File | Contents |
 |------|----------|
 | `lib.rs` | Re-exports `role_def` / `roster`. Generic over `R`, depends only on `exo-framework` + `exo-caps`. |
-| `main.rs` | The node entrypoint (bin): `exo --papers <path>` → build the roster → `exo_node::bootstrap(papers, cwd, roster())` → `run_node`. The composition root. |
+| `main.rs` | The CLI dispatcher (bin): clap `Cli` → `init` / `node` / `hook`. `node` is the composition root — `exo node --papers <path>` → build the roster → `exo_node::bootstrap(papers, cwd, roster())` → `run_node`. |
+| `init.rs` | `exo init [--session <s>] [--recreate]` — bootstrap a node-mode ROOT (own tmux session, root papers, no server). Reuses `exo-runtime`/`exomonad-shared`. |
+| `hook.rs` | `exo hook <event> --papers <path>` — handle a CC/Gemini hook via the node's `exo-policy` gate (SessionStart in-process; everything else routes to the sidecar hook socket, fail-open). |
+| `config.rs` | Minimal node-mode init config read (`tmux_session`, `model` only) — classic `exomonad` owns the full `Config`. |
 | `tools/` | One module per tool — a type + `Args` (derives `Deserialize + JsonSchema`) + generic-over-caps `run` + a ~6-line hand-written `Tool<R>` adapter (NO macro). Each ships mock-cap unit tests. |
 | `gates.rs` | The concrete hook bodies: `pre_tool_use` (antipattern nudges), `stop` (the convergence gate) + per-role variants (`stop_allow`/`stop_notify`/`stop_reviewer`), `session_start`. Functions generic over the caps they need. |
 | `roles.rs` | `role_def(NodeKind)` — the hand-written table (the single place a role's tool list + hooks are named) — and `roster()`, which wraps it as the `RoleRegistry` the binary injects. |

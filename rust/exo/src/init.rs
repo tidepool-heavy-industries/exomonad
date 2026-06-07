@@ -1,4 +1,8 @@
-use crate::config::Config;
+//! `exo init` — bootstrap a node-mode ROOT: its own tmux session, root papers, NO central server.
+//!
+//! Reuses the v2/shared seam only (`exo-runtime`, `exo-caps`, `exomonad-shared`) — never classic
+//! `exomonad-core`.
+
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -18,7 +22,7 @@ fn ensure_git_excludes(cwd: &Path) -> Result<()> {
         .args(["rev-parse", "--git-common-dir"])
         .output()?;
     if !out.status.success() {
-        eprintln!("[exomonad] not a git repo (or git missing); skipping .git/info/exclude setup");
+        eprintln!("[exo] not a git repo (or git missing); skipping .git/info/exclude setup");
         return Ok(());
     }
     let common = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -67,8 +71,13 @@ fn ensure_git_excludes(cwd: &Path) -> Result<()> {
     Ok(())
 }
 
-pub async fn run(config: &Config, session: Option<String>, recreate: bool) -> Result<()> {
-    let session = session.unwrap_or_else(|| format!("{}-exp", config.tmux_session));
+pub async fn run(
+    tmux_session: &str,
+    model: Option<&str>,
+    session: Option<String>,
+    recreate: bool,
+) -> Result<()> {
+    let session = session.unwrap_or_else(|| format!("{tmux_session}-exp"));
     let run_id = uuid::Uuid::new_v4().to_string();
     let cwd = std::env::current_dir()?;
 
@@ -112,14 +121,10 @@ pub async fn run(config: &Config, session: Option<String>, recreate: bool) -> Re
 
     exo_runtime::write_node_agent_config(&cwd, &papers_path).await?;
 
-    let model_flag = config
-        .model
-        .as_deref()
-        .map(|m| format!(" --model {m}"))
-        .unwrap_or_default();
+    let model_flag = model.map(|m| format!(" --model {m}")).unwrap_or_default();
     // Embed the boot env directly in the launch command. The holding-shell pane was created
     // by `boot_root_session` BEFORE the `tmux set-environment` calls above, so it never picked
-    // up the session vars — `claude` (and the `experimental node` sidecar it spawns) would
+    // up the session vars — `claude` (and the `exo node` sidecar it spawns) would
     // otherwise start without EXOMONAD_SWARM_RUN_ID and fail bootstrap. The session-env calls
     // above still serve descendant panes spawned later.
     // `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` enables Teams (TeamCreate + the Teams inbox),
@@ -138,12 +143,12 @@ pub async fn run(config: &Config, session: Option<String>, recreate: bool) -> Re
         "EXOMONAD_SWARM_RUN_ID={run_id_esc} EXOMONAD_TMUX_SESSION={session_esc} CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude{continue_flag} --dangerously-skip-permissions{model_flag}"
     );
 
-    exomonad_core::services::tmux_ipc::TmuxIpc::new(&session)
+    exomonad_shared::services::tmux_ipc::TmuxIpc::new(&session)
         .inject_input(root_pane.as_str(), &launch)
         .await?;
 
     println!("Root node up in tmux session '{session}'. Attaching (detach: Ctrl-b d; reattach: tmux attach -t {session})...");
 
     // Attach the user into the root session, matching production `init`.
-    exomonad_core::services::tmux_ipc::TmuxIpc::attach_session(&session, None).await
+    exomonad_shared::services::tmux_ipc::TmuxIpc::attach_session(&session, None).await
 }

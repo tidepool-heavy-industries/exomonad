@@ -7,7 +7,6 @@
 //! WASM plugins are loaded from file (server-side only).
 
 mod app_state;
-mod experimental_init;
 mod init;
 mod logging;
 mod mcp_stdio;
@@ -27,20 +26,6 @@ use exomonad_core::{HookEnvelope, HookEventType};
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 use tracing::warn;
-
-/// The allow-shaped hook stdout for a node, by its agent type. Used to fail open when the sidecar
-/// socket is unreachable. Defaults to the Claude allow if papers can't be read (exit 0 is allow
-/// for both harnesses anyway, so this only affects the printed JSON).
-fn fail_open_shape(papers_path: &std::path::Path) -> &'static str {
-    let agent_type = std::fs::read(papers_path)
-        .ok()
-        .and_then(|b| serde_json::from_slice::<exo_caps::NodePapers>(&b).ok())
-        .map(|p| p.role.agent_type());
-    match agent_type {
-        Some(exo_caps::AgentType::Gemini) => "{}",
-        _ => r#"{"continue":true}"#,
-    }
-}
 
 // ============================================================================
 // CLI Types
@@ -66,12 +51,6 @@ enum Commands {
         /// The runtime environment (Claude or Gemini)
         #[arg(long, default_value = "claude")]
         runtime: HookRuntime,
-    },
-
-    /// Experimental Wave 2 features (swarm-sidecar node mode)
-    Experimental {
-        #[command(subcommand)]
-        command: ExperimentalCommands,
     },
 
     /// Initialize tmux session for this project.
@@ -139,42 +118,6 @@ enum Commands {
     Shutdown,
 }
 
-#[derive(Subcommand)]
-enum ExperimentalCommands {
-    /// Bootstrap a node-mode ROOT: own tmux session, root papers, NO central server.
-    Init {
-        /// tmux session name (default: "{config.tmux_session}-exp").
-        #[arg(long)]
-        session: Option<String>,
-        /// Tear down an existing session of the same name first.
-        #[arg(long)]
-        recreate: bool,
-    },
-
-    /// Run the swarm-sidecar node mode: self-ID from papers, then the two-loop
-    /// sidecar (outbound MCP serve + inbound ingestion-inbox watch).
-    Node {
-        /// Path to this node's birth papers (`node.json`), written by the parent at spawn.
-        #[arg(long)]
-        papers: std::path::PathBuf,
-    },
-
-    /// Handle a hook via `exo-policy` against a node's papers, with NO central server.
-    Hook {
-        /// The hook event type to handle
-        #[arg(value_enum)]
-        event: HookEventType,
-
-        /// The runtime environment (Claude or Gemini). Reserved/unused in this path.
-        #[arg(long, default_value = "claude")]
-        runtime: HookRuntime,
-
-        /// Path to this node's birth papers (`node.json`).
-        #[arg(long)]
-        papers: std::path::PathBuf,
-    },
-}
-
 // Main
 // ============================================================================
 
@@ -195,84 +138,6 @@ async fn main() -> Result<()> {
         Commands::McpStdio { ref role, ref name } => {
             return mcp_stdio::run(role, name).await;
         }
-
-        Commands::Experimental { command } => match command {
-            ExperimentalCommands::Init { session, recreate } => {
-                return experimental_init::run(&config, session, recreate).await;
-            }
-            ExperimentalCommands::Node { papers } => {
-                let cwd = std::env::current_dir().context("resolving node cwd")?;
-                let ctx = exo_node::bootstrap(&papers, cwd, exo::roster())
-                    .map(std::sync::Arc::new)
-                    .context("node self-ID / bootstrap")?;
-                return exo_node::run_node(ctx).await.context("node run");
-            }
-            ExperimentalCommands::Hook {
-                event,
-                runtime: _,
-                papers,
-            } => {
-                use std::io::Read;
-                let mut body = String::new();
-                std::io::stdin().read_to_string(&mut body)?;
-
-                // SessionStart stays one-shot in-process: it needs no live state and must survive
-                // a cold-start race before the sidecar socket is listening.
-                if event == HookEventType::SessionStart {
-                    let verdict = exo_node::handle_hook(
-                        exo_node::HookEvent::SessionStart,
-                        &papers,
-                        &body,
-                        exo::roster(),
-                    )
-                    .await
-                    .context("node session-start hook")?;
-                    println!("{verdict}");
-                    return Ok(());
-                }
-
-                // All other hooks route to the sidecar over its per-agent socket.
-                let hook_event = match event {
-                    HookEventType::PreToolUse => exo_caps::HookEvent::PreToolUse,
-                    HookEventType::Stop => exo_caps::HookEvent::Stop,
-                    other => {
-                        eprintln!(
-                            "[exomonad] node hook: unhandled event {other:?}, passing through"
-                        );
-                        print!("{}", fail_open_shape(&papers));
-                        return Ok(());
-                    }
-                };
-
-                let req = exo_caps::HookRequest {
-                    event: hook_event,
-                    stdin_json: body,
-                };
-
-                // Fail-open on ANY error: if the sidecar is unreachable there are no tools to
-                // gate, so never wedge the agent. Shape the allow per agent_type.
-                match exo_node::hooksock::client::resolve_hook_sock(&papers) {
-                    Ok((sock, node)) => {
-                        match exo_node::hooksock::client::client_request(&node, &sock, &req).await {
-                            Ok(verdict) => print!("{}", verdict.stdout),
-                            Err(e) => {
-                                eprintln!(
-                                    "[exomonad] node hook: socket RPC failed ({e}); failing open"
-                                );
-                                print!("{}", fail_open_shape(&papers));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "[exomonad] node hook: cannot resolve hook socket ({e}); failing open"
-                        );
-                        print!("{}", fail_open_shape(&papers));
-                    }
-                }
-                return Ok(());
-            }
-        },
 
         Commands::Recompile { ref role } => {
             let role_str = role.as_deref().unwrap_or(&config.wasm_name);

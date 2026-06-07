@@ -1021,13 +1021,19 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "clap",
  "exo-caps",
  "exo-framework",
  "exo-node",
+ "exo-runtime",
+ "exomonad-shared",
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "shell-escape",
  "tokio",
+ "toml 0.8.23",
+ "uuid",
 ]
 
 [[package]]
@@ -1114,10 +1120,6 @@ dependencies = [
  "claude-teams-bridge",
  "dirs 5.0.1",
  "duct",
- "exo",
- "exo-caps",
- "exo-node",
- "exo-runtime",
  "exomonad-core",
  "exomonad-proto",
  "http-body-util",

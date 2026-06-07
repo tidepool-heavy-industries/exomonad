@@ -12,7 +12,7 @@ pub async fn write_node_agent_config(agent_dir: &Path, papers_path: &Path) -> st
         "mcpServers": {
             "exomonad": {
                 "type": "stdio",
-                "command": "exomonad",
+                "command": exo_caps::invocation::BIN,
                 "args": exo_caps::invocation::node_args(&papers_path.to_string_lossy())
             }
         }
@@ -25,7 +25,7 @@ pub async fn write_node_agent_config(agent_dir: &Path, papers_path: &Path) -> st
     f.write_all(&mcp_json).await?;
     f.sync_all().await?;
 
-    // 2. .claude/settings.local.json (CC experimental hooks)
+    // 2. .claude/settings.local.json (CC node-mode hooks)
     let claude_dir = agent_dir.join(".claude");
     tokio::fs::create_dir_all(&claude_dir).await?;
 
@@ -119,7 +119,7 @@ pub(crate) fn gemini_settings_json(papers_path: &str, p_str_escaped: &str) -> se
         "mcpServers": {
             "exomonad": {
                 "type": "stdio",
-                "command": "exomonad",
+                "command": exo_caps::invocation::BIN,
                 "args": exo_caps::invocation::node_args(papers_path)
             }
         },
@@ -138,9 +138,9 @@ mod tests {
         let escaped = "'/tmp/node.json'";
         let json = gemini_settings_json(papers, escaped);
 
-        // 1. MCP server args
+        // 1. MCP server args (`exo node --papers <papers>` — papers is the last element)
         let args = &json["mcpServers"]["exomonad"]["args"];
-        assert_eq!(args[3], papers);
+        assert_eq!(args[2], papers);
 
         // 2. Hook keys and matchers (BeforeTool = regex (.*), lifecycle events = exact-string (""))
         let hooks = &json["hooks"];

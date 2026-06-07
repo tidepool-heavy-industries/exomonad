@@ -3,7 +3,7 @@
 This workspace contains two coexisting architectures for augmenting Claude Code sessions.
 
 1. **Classic Architecture** (`exomonad serve`): A central MCP server hosting Haskell WASM plugins. Designed for interactive, human-augmented sessions.
-2. **Node-mode V2** (`exomonad experimental node`): A headless, serverless swarm where each agent has its own Rust sidecar. Designed for autonomous, distributed orchestration.
+2. **Node-mode V2** (the `exo` binary: `exo init` / `exo node` / `exo hook`): A headless, serverless swarm where each agent has its own Rust sidecar. Designed for autonomous, distributed orchestration.
 
 Both architectures share tmux isolation, git-worktree code isolation, the agent triad, and the scaffold-fork-converge lifecycle.
 
@@ -133,7 +133,7 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 | exomonad-shared | Library | Shared seam: domain, protocol, error/util/ffi/hooks/logging, `services::{tmux_ipc, resilience, agent_control}`. No classic link; consumed by both `exomonad-core` and `exo-runtime` |
 | exomonad-proto | Library | Proto-generated types (prost) for FFI + effects |
 
-**Node-mode swarm (`exomonad experimental` — v2, no central server):** a per-agent
+**Node-mode swarm (the `exo` binary — v2, no central server):** a per-agent
 Rust sidecar, the filesystem as the bus, the process tree as the topology. Convergence
 is on-disk (local `git merge`) — no GitHub/Copilot. Built beside classic, non-destructive.
 
@@ -176,8 +176,8 @@ exomonad mcp-stdio --role root --agent-id root
 # Handle Claude Code hook (legacy, forwards to server)
 echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 
-# Handle Claude Code hook (experimental node mode, no server)
-echo '{"hook_event_name":"PreToolUse",...}' | exomonad experimental hook pre-tool-use --papers node.json
+# Handle Claude Code hook (v2 node mode, no server)
+echo '{"hook_event_name":"PreToolUse",...}' | exo hook pre-tool-use --papers node.json
 ```
 
 **Note:** WASM is loaded from `.exo/wasm/` at runtime. To update WASM, run `just wasm-all` or `exomonad recompile --role devswarm`.

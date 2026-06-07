@@ -6,14 +6,11 @@ Unified sidecar binary: Rust host with Haskell WASM plugin.
 
 **All logic is in Haskell WASM. Rust handles I/O only.**
 
-WASM is loaded from `.exo/wasm/wasm-guest-devswarm.wasm` at runtime by `exomonad serve`. The `exomonad hook` command (legacy) is a thin UDS client that forwards hook events to the running server — it does NOT load WASM itself. The `exomonad experimental hook` command handles hooks via `exo-policy` against node papers (no server).
+`exomonad` is **classic-only**: a central MCP server hosting Haskell WASM plugins. WASM is loaded from `.exo/wasm/wasm-guest-devswarm.wasm` at runtime by `exomonad serve`. The `exomonad hook` command (legacy) is a thin UDS client that forwards hook events to the running server — it does NOT load WASM itself. (The v2 node-mode binary is **`exo`** — `exo init` / `exo node` / `exo hook`; see [`rust/exo/CLAUDE.md`](../exo/CLAUDE.md).)
 
 ```
 # Hook mode (thin UDS client → server)
 Claude Code → exomonad hook → UDS (.exo/server.sock) → server WASM → HookEnvelope → stdout
-
-# Experimental Hook mode (Wave 2, no server)
-Claude Code → exomonad experimental hook --papers node.json → exo-policy → stdout
 
 # MCP mode (multi-agent, devswarm WASM)
 N agents → exomonad serve → UDS (.exo/server.sock) → Unified WASM (handles all roles) → effects → I/O
@@ -25,8 +22,6 @@ N agents → exomonad serve → UDS (.exo/server.sock) → Unified WASM (handles
 
 ```bash
 exomonad hook pre-tool-use        # Handle Claude Code hook (legacy, forwards to server)
-exomonad experimental node        # Run swarm-sidecar node mode (Wave 2)
-exomonad experimental hook        # Handle hook via exo-policy (Wave 2, no server)
 exomonad mcp-stdio                # Stdio MCP server (single agent)
 exomonad serve                    # UDS MCP server (multi-agent, hot reload)
 exomonad recompile [--role ROLE]  # Build WASM from Haskell source
@@ -414,10 +409,10 @@ Claude Code → exomonad hook pre-tool-use (reads stdin JSON)
 → Haskell decides allow/deny → HookEnvelope { stdout, exit_code }
 → Claude Code proceeds or blocks
 
-*Experimental (Wave 2, node-based):*
-Claude Code → exomonad experimental hook pre-tool-use --papers node.json
+*v2 node-mode (no server) — handled by the separate `exo` binary, not `exomonad`:*
+Claude Code → exo hook pre-tool-use --papers node.json
 → bootstrap NodeContext from papers
-→ run exo-policy hook directly (no server)
+→ run the node's `exo-policy` gate directly (no server)
 → stdout verdict
 
 **Session Start:**

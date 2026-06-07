@@ -22,7 +22,15 @@ async-trait = { workspace = true }
 schemars = { workspace = true }
 tokio = { workspace = true }
 
-# Bin (the node entrypoint) only: assemble the engine sidecar with the domain roster injected.
-# The lib stays generic over the cap traits and never references these.
+# Bin (the node entrypoint + the full `exo init`/`node`/`hook` CLI) only: assemble the engine
+# sidecar with the domain roster injected, plus the root-session bootstrap. The lib stays generic
+# over the cap traits and never references these. None of these link classic `exomonad-core` —
+# `exo-runtime`/`exomonad-shared` are the v2/shared seam, keeping `exo` classic-core-free.
 exo-node = { path = "../exo-node" }
+exo-runtime = { path = "../exo-runtime" }
+exomonad-shared = { path = "../exomonad-shared", version = "0.1.0" }
 anyhow = { workspace = true }
+clap = { workspace = true }
+toml = "0.8"
+uuid = { workspace = true }
+shell-escape = "0.1"

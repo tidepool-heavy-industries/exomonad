@@ -106,13 +106,14 @@ _install profile:
     echo ">>> [1/3] Building Haskell WASM plugins (cabal cached if unchanged)..."
     just wasm-all
 
-    echo ">>> [2/3] Building Rust binary (${LABEL})..."
-    nix develop --command cargo build ${CARGO_FLAGS} -p exomonad
+    echo ">>> [2/3] Building Rust binaries (${LABEL})..."
+    nix develop --command cargo build ${CARGO_FLAGS} -p exomonad -p exo
 
     echo ">>> [3/3] Installing binaries..."
     mkdir -p ~/.cargo/bin
     mkdir -p ~/.exo/wasm
     cp "target/${TARGET_DIR}/exomonad" ~/.cargo/bin/
+    cp "target/${TARGET_DIR}/exo" ~/.cargo/bin/
     cp .exo/wasm/wasm-guest-devswarm.wasm ~/.exo/wasm/
     [ -f .exo/wasm/wasm-guest-e2e-test.wasm ] && cp .exo/wasm/wasm-guest-e2e-test.wasm ~/.exo/wasm/ || true
 
@@ -122,14 +123,16 @@ _install profile:
 
     # macOS: remove quarantine and ad-hoc sign to avoid sandbox/Gatekeeper issues
     if [ "$(uname)" = "Darwin" ]; then
-        xattr -d com.apple.quarantine ~/.cargo/bin/exomonad 2>/dev/null || true
-        codesign -s - -f ~/.cargo/bin/exomonad 2>/dev/null || true
+        for bin in exomonad exo; do
+            xattr -d com.apple.quarantine ~/.cargo/bin/${bin} 2>/dev/null || true
+            codesign -s - -f ~/.cargo/bin/${bin} 2>/dev/null || true
+        done
     fi
 
     echo ">>> Done!"
     echo ""
     echo "Installed:"
-    ls -lh ~/.cargo/bin/exomonad
+    ls -lh ~/.cargo/bin/exomonad ~/.cargo/bin/exo
     ls -lh .exo/wasm/wasm-guest-devswarm.wasm
 
 # Install everything: Rust binaries + WASM plugins (release build)
