@@ -1,11 +1,16 @@
-//! The `Spawner` cap — the recursion. **Per-op methods**, each fixing its own
-//! `(role, agent_type, kind)`, so illegal triples are *unnameable*. A shared private
-//! `birth(BirthCore)` tail (in the runtime impl) does the common sequence:
-//! append `AgentSpawned` → (`git worktree add` for a Worktree child) → `tmux new-pane` →
-//! write child papers (incl. `parent_inbox`) → launch `exo node`
-//! (see [`crate::invocation`]).
+//! The `Spawner` cap — the recursion, collapsed to **one generic op**. A domain hands a
+//! [`SpawnSpec`](crate::SpawnSpec) (its `D::Spawn`) carrying the `(role, kind)` it fixed at the
+//! tool boundary, and the runtime births it through one private `birth` tail:
+//! append `Spawned` record → (`git worktree add` for a Worktree child) → `tmux new-pane` →
+//! write child papers (incl. `parent_inbox`) → launch `exo node` (see [`crate::invocation`]).
+//!
+//! Replaces the old per-archetype methods (`spawn_worker`/`spawn_gemini`/`spawn_reviewer`/the
+//! per-op `fork_wave`): a new archetype is now a new domain role + a thin domain tool wrapper that
+//! builds a `D::Spawn`, **not** a new `Spawner` method (an `exo-caps` edit). The role-fixing moved
+//! out of the cap and into the domain.
 
-use crate::types::AgentName;
+use crate::types::{AgentName, NodeKind};
+use crate::SpawnSpec;
 use async_trait::async_trait;
 use thiserror::Error;
 
@@ -24,70 +29,34 @@ pub enum SpawnError {
     Io(#[from] std::io::Error),
 }
 
-// Task-content specs — the ONLY thing the caller supplies; `(role, agent_type, kind)`
-// are fixed by which method is called. Field lists port field-for-field from the
-// Haskell `WorkerSpec` / `SpawnSpec` in Wave 3 — `task` is a placeholder for the full set
-// (steps / verify / done_criteria / context / boundary / read_first / …).
-
-/// → Inline / Worker / Gemini.
-#[derive(Debug, Clone)]
-pub struct WorkerSpec {
-    pub name: Option<AgentName>,
-    pub task: String,
-    pub steps: Vec<String>,
-    pub verify: Vec<String>,
-    pub done_criteria: Vec<String>,
-    pub context: Option<String>,
-    pub boundary: Vec<String>,
-    pub read_first: Vec<String>,
-}
-
-/// → Worktree / Dev / Gemini.
-#[derive(Debug, Clone)]
-pub struct GeminiSpec {
-    pub name: Option<AgentName>,
-    pub task: String,
-    pub steps: Vec<String>,
-    pub verify: Vec<String>,
-    pub done_criteria: Vec<String>,
-    pub context: Option<String>,
-    pub boundary: Vec<String>,
-    pub read_first: Vec<String>,
-}
-
-/// → Worktree / Tl / Claude.
-#[derive(Debug, Clone)]
-pub struct ForkSpec {
-    pub name: Option<AgentName>,
-    pub task: String,
-    pub steps: Vec<String>,
-    pub verify: Vec<String>,
-    pub done_criteria: Vec<String>,
-    pub context: Option<String>,
-    pub boundary: Vec<String>,
-    pub read_first: Vec<String>,
-    /// Opt-in (default false): inherit the parent's Claude context by launching the
-    /// child with `--resume --fork-session <parent-uuid>`. Honored ONLY for Claude
-    /// worktree children (the `fork_wave` op); Gemini and inline/worker spawns ignore
-    /// it. False means a fresh launch — byte-identical to pre-fork-session behavior.
-    pub fork_session: bool,
-}
-
 #[async_trait]
 pub trait Spawner {
-    async fn spawn_worker(&self, spec: WorkerSpec) -> Result<AgentName, SpawnError>;
-    async fn spawn_gemini(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError>;
-    /// Spawn a short-lived **reviewer** of the caller's branch: a Gemini in its OWN worktree
-    /// branched off the *current* branch (the under-review code), `role = Reviewer`. Mirrors
-    /// `spawn_gemini` but fixes the role — the reviewer reads the diff, emits a `verdict`, exits.
-    async fn spawn_reviewer(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError>;
-    /// Fork a wave — **per-spec results**, so one bad fork doesn't discard the children
-    /// that did spawn (the TL converges on what succeeded, re-decomposes the failures).
-    async fn fork_wave(&self, specs: Vec<ForkSpec>) -> Vec<Result<AgentName, SpawnError>>;
+    /// Birth one child from a domain spawn intent. The `(role, kind)` are read off the spec (fixed
+    /// by whichever domain tool built it), so an illegal pairing is unnameable at that boundary.
+    ///
+    /// Transitionally bounded `Role = NodeKind` (the runtime still writes a `NodeKind` into papers);
+    /// P5 relaxes this to the fully generic `S: SpawnSpec` once papers carry `D::Role`.
+    async fn spawn<S: SpawnSpec<Role = NodeKind>>(
+        &self,
+        spec: S,
+    ) -> Result<AgentName, SpawnError>;
 
-    /// Teardown is **two independent steps, not one reap**. Worktree
-    /// reclamation is parent-side, run at convergence (after the child's PR merges); an
-    /// `Inline` child has no worktree to reclaim.
+    /// Fork a wave — **per-spec results**, so one bad fork doesn't discard the children that did
+    /// spawn (the TL converges on what succeeded, re-decomposes the failures). A thin sequential
+    /// wrapper over [`spawn`](Spawner::spawn); a domain `fork_wave` tool passes a `Vec<D::Spawn>`.
+    async fn fork_wave<S: SpawnSpec<Role = NodeKind>>(
+        &self,
+        specs: Vec<S>,
+    ) -> Vec<Result<AgentName, SpawnError>> {
+        let mut out = Vec::with_capacity(specs.len());
+        for spec in specs {
+            out.push(self.spawn(spec).await);
+        }
+        out
+    }
+
+    /// Teardown is **two independent steps, not one reap**. Worktree reclamation is parent-side, run
+    /// at convergence (after the child's branch merges); an `Inline` child has no worktree to reclaim.
     async fn reclaim_worktree(&self, child: &AgentName) -> Result<(), SpawnError>;
     /// Forceful process teardown of a non-responsive child (graceful shutdown is a
     /// `Control(Shutdown)` *message* the child self-applies — not here).

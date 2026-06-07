@@ -42,8 +42,8 @@
 use crate::runtime::Runtime;
 use async_trait::async_trait;
 use exo_caps::{
-    fold_children, AgentName, AgentType, Branch, Child, ChildKind, ChildRecord, ForkSpec,
-    GeminiSpec, InboxPath, NodeKind, NodePapers, PaneId, SpawnError, Spawner, WorkerSpec,
+    fold_children, AgentName, AgentType, Branch, Child, ChildKind, ChildRecord, InboxPath, NodeKind,
+    NodePapers, PaneId, RoleKind, SpawnError, SpawnSpec, Spawner,
 };
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -258,61 +258,6 @@ impl Runtime {
         }
     }
 
-    fn render_spec_prompt(
-        task: &str,
-        read_first: &[String],
-        steps: &[String],
-        verify: &[String],
-        boundary: &[String],
-        context: Option<&String>,
-        done_criteria: &[String],
-    ) -> String {
-        let mut prompt = task.to_string();
-
-        if !boundary.is_empty() {
-            prompt.push_str("\n\nBOUNDARY (DO NOT):");
-            for b in boundary {
-                prompt.push_str(&format!("\n- {}", b));
-            }
-        }
-
-        if !read_first.is_empty() {
-            prompt.push_str("\n\nREAD FIRST:");
-            for rf in read_first {
-                prompt.push_str(&format!("\n- {}", rf));
-            }
-        }
-
-        if !steps.is_empty() {
-            prompt.push_str("\n\nSTEPS:");
-            for (i, step) in steps.iter().enumerate() {
-                prompt.push_str(&format!("\n{}. {}", i + 1, step));
-            }
-        }
-
-        if !verify.is_empty() {
-            prompt.push_str("\n\nVERIFY:");
-            for v in verify {
-                prompt.push_str(&format!("\n- {}", v));
-            }
-        }
-
-        if let Some(ctx) = context {
-            if !ctx.is_empty() {
-                prompt.push_str("\n\nCONTEXT:\n");
-                prompt.push_str(ctx);
-            }
-        }
-
-        if !done_criteria.is_empty() {
-            prompt.push_str("\n\nDONE CRITERIA:");
-            for d in done_criteria {
-                prompt.push_str(&format!("\n- {}", d));
-            }
-        }
-
-        prompt
-    }
 }
 
 impl Runtime {
@@ -469,19 +414,9 @@ impl Runtime {
         })?;
         tokio::fs::write(&papers_path, papers_json).await?;
 
-        // Persist this node's spec (prompt + acceptance criteria) so the reviewer it later spawns
-        // from `submit_branch` can judge against the *original* bar. Worktree children only (an
-        // inline worker shares the parent's `.exo` and never submits). Best-effort — a write
-        // failure must not fail the spawn.
-        if core.kind == ChildKind::Worktree {
-            let acceptance_path = child_dir.join(".exo/acceptance.md");
-            if let Err(e) = tokio::fs::write(&acceptance_path, &core.task).await {
-                tracing::warn!(
-                    "failed to persist .exo/acceptance.md for {}: {e}",
-                    core.name.as_str()
-                );
-            }
-        }
+        // The node's spec (the reviewer's acceptance bar) is persisted to `.exo/acceptance.md` by
+        // the spawning DOMAIN tool via the `Fs` cap, NOT here — the runtime no longer knows the
+        // review-gate's filename (that domain concept moved out with the Spawner collapse).
 
         // (f) Launch the agent via exomonad's shared launch builder (reuse over reinvent):
         // the prompt goes in a file (.exo/tmp), never inline — so a multi-line/quote-bearing
@@ -647,108 +582,36 @@ impl Runtime {
 
 #[async_trait]
 impl Spawner for Runtime {
-    async fn spawn_worker(&self, spec: WorkerSpec) -> Result<AgentName, SpawnError> {
-        let name = self.resolve_child_name(spec.name, "worker").await?;
-        let task = Self::render_spec_prompt(
-            &spec.task,
-            &spec.read_first,
-            &spec.steps,
-            &spec.verify,
-            &spec.boundary,
-            spec.context.as_ref(),
-            &spec.done_criteria,
-        );
+    async fn spawn<S: SpawnSpec<Role = NodeKind>>(
+        &self,
+        spec: S,
+    ) -> Result<AgentName, SpawnError> {
+        let role = spec.role();
+        let kind = spec.child_kind();
+        let fork_session = spec.fork_session();
+        let prefix = spec.name_prefix().to_string();
+        let name = self.resolve_child_name(spec.name(), &prefix).await?;
+        // The branch: a Worktree child gets its own (safe-generated from its tree address); an
+        // Inline child shares the parent's worktree + branch. The agent backend is the role→backend
+        // mapping the engine owns.
+        let branch = match kind {
+            ChildKind::Worktree => Branch::from_path(&self.node_path().child(&name)),
+            ChildKind::Inline => self.branch().clone(),
+        };
+        let agent_type = RoleKind::agent_type(&role);
+        // The spec carries the fully-rendered prompt (the domain tool rendered it); birth wraps it
+        // in the worktree/inline preamble.
+        let task = spec.into_task();
         let core = BirthCore {
-            kind: ChildKind::Inline,
-            agent_type: AgentType::Gemini,
-            role: NodeKind::Worker,
-            branch: self.branch().clone(),
+            kind,
+            agent_type,
+            role,
+            branch,
             name,
             task,
-            fork_session: false,
+            fork_session,
         };
         self.birth(core).await
-    }
-
-    async fn spawn_gemini(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError> {
-        let name = self.resolve_child_name(spec.name, "dev").await?;
-        let task = Self::render_spec_prompt(
-            &spec.task,
-            &spec.read_first,
-            &spec.steps,
-            &spec.verify,
-            &spec.boundary,
-            spec.context.as_ref(),
-            &spec.done_criteria,
-        );
-        let core = BirthCore {
-            kind: ChildKind::Worktree,
-            agent_type: AgentType::Gemini,
-            role: NodeKind::Dev,
-            branch: Branch::from_path(&self.node_path().child(&name)),
-            name,
-            task,
-            fork_session: false,
-        };
-        self.birth(core).await
-    }
-
-    async fn spawn_reviewer(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError> {
-        let name = self.resolve_child_name(spec.name, "reviewer").await?;
-        let task = Self::render_spec_prompt(
-            &spec.task,
-            &spec.read_first,
-            &spec.steps,
-            &spec.verify,
-            &spec.boundary,
-            spec.context.as_ref(),
-            &spec.done_criteria,
-        );
-        // Worktree off the CURRENT branch (the under-review code), role=Reviewer. Identical
-        // machinery to `spawn_gemini`; only the role differs (drives papers/tools).
-        let core = BirthCore {
-            kind: ChildKind::Worktree,
-            agent_type: AgentType::Gemini,
-            role: NodeKind::Reviewer,
-            branch: Branch::from_path(&self.node_path().child(&name)),
-            name,
-            task,
-            fork_session: false,
-        };
-        self.birth(core).await
-    }
-
-    async fn fork_wave(&self, specs: Vec<ForkSpec>) -> Vec<Result<AgentName, SpawnError>> {
-        let mut results = Vec::with_capacity(specs.len());
-        for spec in specs {
-            let name = match self.resolve_child_name(spec.name, "tl").await {
-                Ok(n) => n,
-                Err(e) => {
-                    results.push(Err(e));
-                    continue;
-                }
-            };
-            let task = Self::render_spec_prompt(
-                &spec.task,
-                &spec.read_first,
-                &spec.steps,
-                &spec.verify,
-                &spec.boundary,
-                spec.context.as_ref(),
-                &spec.done_criteria,
-            );
-            let core = BirthCore {
-                kind: ChildKind::Worktree,
-                agent_type: AgentType::Claude,
-                role: NodeKind::Tl,
-                branch: Branch::from_path(&self.node_path().child(&name)),
-                name,
-                task,
-                fork_session: spec.fork_session,
-            };
-            results.push(self.birth(core).await);
-        }
-        results
     }
 
     async fn reclaim_worktree(&self, child: &AgentName) -> Result<(), SpawnError> {
@@ -905,40 +768,3 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod extra_tests {
-    use super::*;
-
-    #[test]
-    fn test_render_spec_prompt() {
-        let task = "do work";
-        let read_first = vec!["README.md".to_string()];
-        let steps = vec!["step 1".to_string(), "step 2".to_string()];
-        let verify = vec!["cargo test".to_string()];
-        let boundary = vec!["no delete".to_string()];
-        let context = Some("some context".to_string());
-        let done_criteria = vec!["all green".to_string()];
-
-        let prompt = Runtime::render_spec_prompt(
-            task,
-            &read_first,
-            &steps,
-            &verify,
-            &boundary,
-            context.as_ref(),
-            &done_criteria,
-        );
-
-        assert!(prompt.contains("do work"));
-        assert!(prompt.contains("BOUNDARY (DO NOT):\n- no delete"));
-        assert!(prompt.contains("READ FIRST:\n- README.md"));
-        assert!(prompt.contains("STEPS:\n1. step 1\n2. step 2"));
-        assert!(prompt.contains("VERIFY:\n- cargo test"));
-        assert!(prompt.contains("CONTEXT:\nsome context"));
-        assert!(prompt.contains("DONE CRITERIA:\n- all green"));
-
-        // Bare task
-        let bare = Runtime::render_spec_prompt("task", &[], &[], &[], &[], None, &[]);
-        assert_eq!(bare, "task");
-    }
-}

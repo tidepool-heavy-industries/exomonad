@@ -12,10 +12,9 @@
 
 use async_trait::async_trait;
 use exo_caps::{
-    Addressee, AgentName, Branch, Bus, BusError, ChildKind, ChildLiveness, ForkSpec, Fs, FsError,
-    GeminiSpec, Git, GitError, Kv, KvError, Log, Message, PaneId, Process, ProcessError,
-    SpawnError, Spawner, Tmux, TmuxError, Topology, TopologyError, TopologyView, TreeNode,
-    WorkerSpec,
+    Addressee, AgentName, Branch, Bus, BusError, ChildKind, ChildLiveness, Fs, FsError, Git,
+    GitError, Kv, KvError, Log, Message, NodeKind, PaneId, Process, ProcessError, SpawnError,
+    SpawnSpec, Spawner, Tmux, TmuxError, Topology, TopologyError, TopologyView, TreeNode,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -33,17 +32,11 @@ pub enum Call {
     Merge {
         branch: Branch,
     },
-    SpawnWorker {
-        spec_task: String,
-        step_count: usize,
-    },
-    SpawnGemini {
-        spec_task: String,
-        step_count: usize,
-    },
-    SpawnReviewer {
-        spec_task: String,
-        step_count: usize,
+    /// One collapsed `Spawner::spawn` — the role the domain tool fixed + the rendered task.
+    Spawn {
+        role: NodeKind,
+        task: String,
+        fork_session: bool,
     },
     ForkWave {
         n: usize,
@@ -192,47 +185,41 @@ impl Git for MockRuntime {
 
 #[async_trait]
 impl Spawner for MockRuntime {
-    async fn spawn_worker(&self, spec: WorkerSpec) -> Result<AgentName, SpawnError> {
-        self.record(Call::SpawnWorker {
-            spec_task: spec.task.clone(),
-            step_count: spec.steps.len(),
-        });
-        Ok(spec
-            .name
-            .unwrap_or_else(|| AgentName::new("worker-mock".into()).unwrap()))
-    }
-    async fn spawn_gemini(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError> {
-        self.record(Call::SpawnGemini {
-            spec_task: spec.task.clone(),
-            step_count: spec.steps.len(),
-        });
-        Ok(spec
-            .name
-            .unwrap_or_else(|| AgentName::new("gemini-mock".into()).unwrap()))
-    }
-    async fn spawn_reviewer(&self, spec: GeminiSpec) -> Result<AgentName, SpawnError> {
-        if self.should_fail("spawn_reviewer") {
+    async fn spawn<S: SpawnSpec<Role = NodeKind>>(
+        &self,
+        spec: S,
+    ) -> Result<AgentName, SpawnError> {
+        if self.should_fail("spawn") {
             return Err(SpawnError::Failed {
-                op: "spawn_reviewer",
+                op: "spawn",
                 child: None,
                 detail: "mock forced failure".into(),
             });
         }
-        self.record(Call::SpawnReviewer {
-            spec_task: spec.task.clone(),
-            step_count: spec.steps.len(),
+        let role = spec.role();
+        let fork_session = spec.fork_session();
+        let name = spec
+            .name()
+            .unwrap_or_else(|| AgentName::new(format!("{}-mock", spec.name_prefix())).unwrap());
+        let task = spec.into_task();
+        self.record(Call::Spawn {
+            role,
+            task,
+            fork_session,
         });
-        Ok(spec
-            .name
-            .unwrap_or_else(|| AgentName::new("reviewer-mock".into()).unwrap()))
+        Ok(name)
     }
-    async fn fork_wave(&self, specs: Vec<ForkSpec>) -> Vec<Result<AgentName, SpawnError>> {
+    // Override the default loop only to record the wave size as one call (the tools assert on it).
+    async fn fork_wave<S: SpawnSpec<Role = NodeKind>>(
+        &self,
+        specs: Vec<S>,
+    ) -> Vec<Result<AgentName, SpawnError>> {
         self.record(Call::ForkWave { n: specs.len() });
         specs
             .into_iter()
             .enumerate()
             .map(|(i, s)| {
-                Ok(s.name
+                Ok(s.name()
                     .unwrap_or_else(|| AgentName::new(format!("fork-mock-{i}")).unwrap()))
             })
             .collect()

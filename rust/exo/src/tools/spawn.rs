@@ -5,7 +5,8 @@
 //! generic-over-caps `run<C: Spawner>`, and a `Tool<R>` adapter. Ships mock-cap unit tests
 //! (assert the right `Spawner` method recorded) in this file.
 
-use exo_caps::{AgentName, CapResult, ForkSpec, GeminiSpec, Spawner, WorkerSpec};
+use crate::spawn::{render_spec_prompt, write_acceptance, ExoSpawn};
+use exo_caps::{AgentName, CapResult, ChildKind, Fs, NodeKind, Spawner};
 use exo_framework::{ok_json, parse, schema_json, Tool, ToolOutput};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -36,17 +37,24 @@ impl SpawnWorker {
             Some(n) => Some(AgentName::new(n)?),
             None => None,
         };
-        let spec = WorkerSpec {
+        // The tool fixes the (role, kind): an ephemeral inline Gemini worker.
+        let spec = ExoSpawn {
+            role: NodeKind::Worker,
+            kind: ChildKind::Inline,
             name,
-            task: args.task,
-            steps: args.steps,
-            verify: args.verify,
-            done_criteria: args.done_criteria,
-            context: args.context,
-            boundary: args.boundary,
-            read_first: args.read_first,
+            name_prefix: "worker",
+            task: render_spec_prompt(
+                &args.task,
+                &args.read_first,
+                &args.steps,
+                &args.verify,
+                &args.boundary,
+                args.context.as_ref(),
+                &args.done_criteria,
+            ),
+            fork_session: false,
         };
-        let spawned = ctx.spawn_worker(spec).await?;
+        let spawned = ctx.spawn(spec).await?;
         Ok(ToolOutput::with_data(
             format!("Spawned worker {}", spawned.as_str()),
             serde_json::json!({ "spawned": spawned.as_str() }),
@@ -95,22 +103,32 @@ pub struct SpawnGeminiArgs {
 pub struct SpawnGemini;
 
 impl SpawnGemini {
-    async fn run<C: Spawner>(ctx: &C, args: SpawnGeminiArgs) -> CapResult<ToolOutput> {
+    async fn run<C: Spawner + Fs>(ctx: &C, args: SpawnGeminiArgs) -> CapResult<ToolOutput> {
         let name = match args.name {
             Some(n) => Some(AgentName::new(n)?),
             None => None,
         };
-        let spec = GeminiSpec {
+        let task = render_spec_prompt(
+            &args.task,
+            &args.read_first,
+            &args.steps,
+            &args.verify,
+            &args.boundary,
+            args.context.as_ref(),
+            &args.done_criteria,
+        );
+        // The tool fixes the (role, kind): a Gemini dev leaf in its own worktree.
+        let spec = ExoSpawn {
+            role: NodeKind::Dev,
+            kind: ChildKind::Worktree,
             name,
-            task: args.task,
-            steps: args.steps,
-            verify: args.verify,
-            done_criteria: args.done_criteria,
-            context: args.context,
-            boundary: args.boundary,
-            read_first: args.read_first,
+            name_prefix: "dev",
+            task: task.clone(),
+            fork_session: false,
         };
-        let spawned = ctx.spawn_gemini(spec).await?;
+        let spawned = ctx.spawn(spec).await?;
+        // Persist the child's spec as its acceptance bar (relocated out of the runtime birth).
+        write_acceptance(ctx, &spawned, &task).await;
         Ok(ToolOutput::with_data(
             format!("Spawned dev {}", spawned.as_str()),
             serde_json::json!({ "spawned": spawned.as_str() }),
@@ -119,7 +137,7 @@ impl SpawnGemini {
 }
 
 #[async_trait::async_trait]
-impl<R: Spawner + Send + Sync> Tool<R> for SpawnGemini {
+impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnGemini {
     fn name(&self) -> &str {
         "spawn_gemini"
     }
@@ -170,22 +188,33 @@ pub struct ForkWaveArgs {
 pub struct ForkWave;
 
 impl ForkWave {
-    async fn run<C: Spawner>(ctx: &C, args: ForkWaveArgs) -> CapResult<ToolOutput> {
+    async fn run<C: Spawner + Fs + Sync>(ctx: &C, args: ForkWaveArgs) -> CapResult<ToolOutput> {
         let mut specs = Vec::with_capacity(args.children.len());
+        // Keep the rendered tasks parallel to `specs` so we can persist each spawned child's
+        // acceptance bar after the wave returns (the results are positional).
+        let mut tasks = Vec::with_capacity(args.children.len());
         for child in args.children {
             let name = match child.name {
                 Some(n) => Some(AgentName::new(n)?),
                 None => None,
             };
-            specs.push(ForkSpec {
+            let task = render_spec_prompt(
+                &child.task,
+                &child.read_first,
+                &child.steps,
+                &child.verify,
+                &child.boundary,
+                child.context.as_ref(),
+                &child.done_criteria,
+            );
+            tasks.push(task.clone());
+            // The tool fixes the (role, kind): a Claude TL child in its own worktree.
+            specs.push(ExoSpawn {
+                role: NodeKind::Tl,
+                kind: ChildKind::Worktree,
                 name,
-                task: child.task,
-                steps: child.steps,
-                verify: child.verify,
-                done_criteria: child.done_criteria,
-                context: child.context,
-                boundary: child.boundary,
-                read_first: child.read_first,
+                name_prefix: "tl",
+                task,
                 fork_session: child.fork_session,
             });
         }
@@ -193,9 +222,12 @@ impl ForkWave {
 
         let mut spawned = Vec::new();
         let mut errors = Vec::new();
-        for res in results {
+        for (res, task) in results.into_iter().zip(tasks.iter()) {
             match res {
-                Ok(name) => spawned.push(name.as_str().to_string()),
+                Ok(name) => {
+                    write_acceptance(ctx, &name, task).await;
+                    spawned.push(name.as_str().to_string());
+                }
                 Err(e) => errors.push(e.to_string()),
             }
         }
@@ -218,7 +250,7 @@ impl ForkWave {
 }
 
 #[async_trait::async_trait]
-impl<R: Spawner + Send + Sync> Tool<R> for ForkWave {
+impl<R: Spawner + Fs + Send + Sync> Tool<R> for ForkWave {
     fn name(&self) -> &str {
         "fork_wave"
     }
@@ -260,12 +292,9 @@ mod tests {
         let calls = mock.calls_made();
         assert_eq!(calls.len(), 1);
         match &calls[0] {
-            Call::SpawnWorker {
-                spec_task,
-                step_count,
-            } => {
-                assert_eq!(spec_task, "do something");
-                assert_eq!(*step_count, 0);
+            Call::Spawn { role, task, .. } => {
+                assert_eq!(*role, exo_caps::NodeKind::Worker);
+                assert!(task.contains("do something"));
             }
             _ => panic!("wrong call"),
         }
@@ -287,11 +316,10 @@ mod tests {
         let _ = SpawnWorker::run(&mock, args).await.unwrap();
         let calls = mock.calls_made();
         match &calls[0] {
-            Call::SpawnWorker {
-                spec_task: _,
-                step_count,
-            } => {
-                assert_eq!(*step_count, 1);
+            Call::Spawn { task, .. } => {
+                // The structured fields are rendered into the single task body by the domain.
+                assert!(task.contains("STEPS:\n1. step 1"));
+                assert!(task.contains("BOUNDARY (DO NOT):\n- boundary 1"));
             }
             _ => panic!("wrong call"),
         }
@@ -313,17 +341,11 @@ mod tests {
         let out = SpawnGemini::run(&mock, args).await.unwrap();
         assert!(out.text.contains("Spawned dev"));
         let calls = mock.calls_made();
-        assert_eq!(calls.len(), 1);
-        match &calls[0] {
-            Call::SpawnGemini {
-                spec_task,
-                step_count,
-            } => {
-                assert_eq!(spec_task, "do something else");
-                assert_eq!(*step_count, 0);
-            }
-            _ => panic!("wrong call"),
-        }
+        // The spawn, then the acceptance.md write (relocated into the domain tool).
+        assert!(calls.iter().any(|c| matches!(c, Call::Spawn { role, task, .. }
+            if *role == exo_caps::NodeKind::Dev && task.contains("do something else"))));
+        assert!(calls.iter().any(|c| matches!(c, Call::FsWrite { path }
+            if path.contains("gemini-1") && path.ends_with(".exo/acceptance.md"))));
     }
 
     #[tokio::test]
@@ -360,10 +382,15 @@ mod tests {
             .text
             .contains("Forked 2 children (2 succeeded, 0 failed)"));
         let calls = mock.calls_made();
-        assert_eq!(calls.len(), 1);
-        match &calls[0] {
-            Call::ForkWave { n } => assert_eq!(*n, 2),
-            _ => panic!("wrong call"),
-        }
+        // One fork_wave call recording the wave size...
+        assert!(calls
+            .iter()
+            .any(|c| matches!(c, Call::ForkWave { n } if *n == 2)));
+        // ...and an acceptance.md write per spawned child.
+        let writes = calls
+            .iter()
+            .filter(|c| matches!(c, Call::FsWrite { path } if path.ends_with(".exo/acceptance.md")))
+            .count();
+        assert_eq!(writes, 2);
     }
 }

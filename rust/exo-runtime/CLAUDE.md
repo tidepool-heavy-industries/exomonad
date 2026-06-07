@@ -23,7 +23,14 @@ The single concrete `Runtime` struct that implements **every** `exo-caps` trait.
 
 ## Spawn: `birth` and record-first ordering (read before editing `spawner.rs`)
 
-All three spawn ops (`spawn_worker`/`spawn_gemini`/`fork_wave`) fix their own `(role, agent_type, kind)` triple and funnel through one private `birth(BirthCore)` tail. The ordering is a **load-bearing race guard** — do not reorder:
+The one generic `Spawner::spawn<S: SpawnSpec<Role = NodeKind>>` reads `(role, kind, name, task,
+fork_session)` off the domain spec (the domain tool fixed the role/kind) and funnels through one
+private `birth(BirthCore)` tail. The agent backend is `RoleKind::agent_type(role)`; the branch is
+safe-generated for a Worktree child or the parent's branch for an Inline one. The prompt arrives
+**pre-rendered** (`spec.into_task()` — the domain owns `render_spec_prompt` now), and the node's spec
+is persisted to `.exo/acceptance.md` by the spawning **domain tool** via the `Fs` cap, **not** by
+birth (the runtime no longer knows the review-gate's filename). The ordering is a **load-bearing
+race guard** — do not reorder:
 
 1. (Worktree child only) `git worktree add` at `.exo/worktrees/{name}`.
 2. `Tmux::new_window`/`new_pane` opens a **holding shell** (NOT the agent) → captures `%N`.

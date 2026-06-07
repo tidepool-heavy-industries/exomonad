@@ -8,9 +8,10 @@
 //! rewrite. v1 has a single check: the worktree must be clean (work committed), because a parent
 //! merges the BRANCH off disk and uncommitted changes would be invisible to that merge.
 
+use crate::spawn::ExoSpawn;
 use exo_caps::{
-    Addressee, Bus, CapError, CapResult, Fs, GeminiSpec, Git, Message, MessageBody, MessageKind,
-    Process, Spawner, Summary,
+    Addressee, Bus, CapError, CapResult, ChildKind, Fs, Git, Message, MessageBody, MessageKind,
+    NodeKind, Process, Spawner, Summary,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -227,17 +228,17 @@ impl SubmitBranch {
             branch = branch.as_str(),
             note = args.note,
         );
-        let spec = GeminiSpec {
+        // Spawn a reviewer in its own worktree off the under-review branch (role fixed here, the
+        // domain tool boundary). It reads the diff + acceptance criteria, emits a `verdict`, exits.
+        let spec = ExoSpawn {
+            role: NodeKind::Reviewer,
+            kind: ChildKind::Worktree,
             name: None,
+            name_prefix: "reviewer",
             task: review_task,
-            steps: vec![],
-            verify: vec![],
-            done_criteria: vec![],
-            context: None,
-            boundary: vec![],
-            read_first: vec![],
+            fork_session: false,
         };
-        let reviewer = ctx.spawn_reviewer(spec).await?;
+        let reviewer = ctx.spawn(spec).await?;
 
         Ok(ToolOutput::with_data(
             format!(
@@ -296,9 +297,9 @@ mod tests {
         assert!(out.text.contains("dev.policy-claude"));
         let calls = mock.calls_made();
         // It spawns a reviewer...
-        assert!(calls
-            .iter()
-            .any(|c| matches!(c, Call::SpawnReviewer { .. })));
+        assert!(calls.iter().any(
+            |c| matches!(c, Call::Spawn { role, .. } if *role == exo_caps::NodeKind::Reviewer)
+        ));
         // ...and NEVER delivers [READY] itself — only the sidecar does, on an approve-verdict.
         assert!(!calls.iter().any(|c| matches!(c, Call::BusDeliver { .. })));
     }
@@ -319,9 +320,7 @@ mod tests {
         assert!(out.text.contains("WITHOUT review"));
         let calls = mock.calls_made();
         // No reviewer is spawned...
-        assert!(!calls
-            .iter()
-            .any(|c| matches!(c, Call::SpawnReviewer { .. })));
+        assert!(!calls.iter().any(|c| matches!(c, Call::Spawn { .. })));
         // ...and it forwards a SKIPPED [READY] to the parent.
         assert!(calls
             .iter()
