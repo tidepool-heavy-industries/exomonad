@@ -76,11 +76,11 @@ The `mode` parameter enables the same record for both schema generation (`AsSche
 
 - **Library/SDK**: `haskell/wasm-guest` provides the SDK for defining MCP tools and hooks.
 
-## Common Commands
+## Building & Testing
 
 ```bash
-cabal build all           # Build everything
-cabal test all            # Run tests
+cabal build all           # Build Haskell
+cabal test all            # Run Haskell tests
 just pre-commit           # Run all checks
 just proto-gen-haskell    # Regenerate Haskell types from proto files
 ```

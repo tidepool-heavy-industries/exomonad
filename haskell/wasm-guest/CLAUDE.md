@@ -183,3 +183,62 @@ GitHub poller (Rust, 60s interval)
 - **Dispatch**: `handle_event` FFI export in `Main.hs`, routes `{ role, event_type, payload }` JSON to the role's `EventHandlerConfig`
 - **Config**: Dev and TL roles use `prReviewEventHandlers`, Worker uses `defaultEventHandlers` (all NoAction)
 - **Extensibility**: Add new event types to `EventInput` + new handlers to `EventHandlerConfig`. The poller fires events, WASM decides actions.
+
+## Architecture
+
+### Architecture Rules
+
+**In the Classic architecture, never add direct Rust MCP tools.** All MCP tools and hooks are defined in Haskell WASM — tool schemas, argument parsing, dispatch logic, everything. Rust is the I/O runtime: it executes effects that the Haskell DSL yields. If a new tool needs new I/O capabilities, add a new effect handler in Rust and a corresponding effect type in Haskell. The tool itself lives in `haskell/wasm-guest/src/ExoMonad/Guest/Tools/`.
+
+This is the architectural premise of Classic: Haskell WASM is the single source of truth for tool definitions. Rust never defines tool schemas, never parses tool arguments, never contains tool logic.
+
+**Haskell WASM = Embedded DSL**
+- Defines tool schemas, handlers, decision logic
+- Yields typed effects (no I/O)
+- Compiled to WASM32-WASI, loaded via Extism
+- Single source of truth for MCP tools
+- Hot reload: serve mode checks mtime per tool call
+
+## Building
+
+### WASM Build Commands
+
+```bash
+# WASM builds (two equivalent options)
+just wasm-all                     # Build all WASM via nix
+exomonad recompile --role devswarm # Build specific role's WASM via nix
+# Both are standalone CLI commands — neither requires the server to be running.
+# Output: .exo/wasm/wasm-guest-devswarm.wasm
+
+# Hot reload: server checks WASM mtime per tool call, so after recompile
+# the next MCP call picks up the new WASM automatically.
+# For immediate reload: `exomonad reload` clears the plugin cache explicitly.
+```
+
+### WASM Build Pipeline
+
+1. Role configs in `.exo/roles/devswarm/` define tool composition per role (`RootRole.hs`, `TLRole.hs`, `DevRole.hs`, `WorkerRole.hs`)
+2. `AllRoles.hs` registers all roles; `Main.hs` provides FFI exports
+3. `cabal.project.wasm` lists the devswarm package alongside `wasm-guest` SDK
+4. `just wasm-all` builds via `nix develop .#wasm -c wasm32-wasi-cabal build ...`
+5. Compiled WASM copied to `.exo/wasm/wasm-guest-devswarm.wasm`
+6. `exomonad serve` loads devswarm WASM from `.exo/wasm/` at runtime (hot reload via mtime check)
+
+## MCP Tools Reference
+
+All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/Tools/`):
+
+| Tool | Role | Description |
+|------|------|-------------|
+| `fork_wave` | root, tl | Fork N parallel Claude agents, each in its own worktree. Context inherited by default (`fork_session` defaults to `true`). |
+| `spawn_gemini` | root, tl | Spawn Gemini agent in own worktree+branch. Structured spec fields: steps, verify, boundary, context, read_first. |
+| `spawn_worker` | root, tl | Spawn ephemeral Gemini worker in tmux pane (no branch, no PR). Just name + task. |
+| `file_pr` | tl, dev | Create/update PR (auto-detects base branch from naming) |
+| `merge_pr` | root, tl | Merge child PR (gh merge + git fetch) |
+| `notify_parent` | tl, dev, worker | Send message to parent agent. Auto-routed via Teams inbox (primary) or tmux STDIN (fallback) |
+| `send_message` | all | Send message to another exomonad-spawned agent (routes via Teams inbox, UDS, or tmux) |
+| `task_list` | dev, worker | List tasks from the shared Claude Code task list (auto-resolves team from TeamRegistry) |
+| `task_get` | dev, worker | Get a task by ID from the shared task list |
+| `task_update` | dev, worker | Update task status, owner, or activeForm in the shared task list |
+
+**Note**: Git operations (`git status`, `git log`, etc.) and GitHub operations (`gh pr list`, etc.) use the Bash tool with `git` and `gh` commands, not MCP tools.
