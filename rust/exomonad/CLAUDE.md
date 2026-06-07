@@ -252,3 +252,189 @@ Claude Code hook JSON (stdin)
 
 - **[exomonad-core](../exomonad-core/)** - Framework, handlers, services, protocol types, UI protocol
 - **[wasm-guest](../../haskell/wasm-guest/)** - Haskell WASM plugin source
+
+## Classic Architecture (server-based)
+
+This section details the server-based "Classic" architecture where a central Rust process hosts Haskell-WASM plugins to coordinate agent teams.
+
+### Session Entry Point
+
+**`exomonad new` is the one-time project bootstrap.** It creates `.exo/config.toml`, `.gitignore`, and copies WASM plugins and rules templates.
+
+**`exomonad init` is the idempotent entry point for Classic sessions.** It creates a tmux session with:
+- **Server window**: Runs `exomonad serve` (the MCP server, binds to `.exo/server.sock`)
+- **TL window**: Runs `nix develop` (where you launch `claude` or work directly)
+
+The server must be running before Claude Code or Gemini can use MCP tools. Without it, every tool call fails. Init also writes `.mcp.json` (MCP server config) and `.claude/settings.local.json` (hooks and session settings).
+
+```bash
+cd exomonad/                  # Run from the project root
+exomonad new                  # One-time setup: creates config, WASM, rules
+exomonad init                 # Creates tmux session, starts server
+# Then in the TL window:
+claude                        # MCP tools available immediately
+```
+
+### MCP Registration
+
+`exomonad init` automatically registers the Claude MCP server. For Gemini, register manually via stdio:
+```bash
+gemini mcp add exomonad --command "exomonad mcp-stdio"
+```
+
+### Zero-Config for Consuming Repos
+
+After running `just install-all` (which installs WASM to `~/.exo/wasm/`), any project works out of the box:
+
+```bash
+cd ~/new-project && git init
+exomonad new                  # Creates .exo/config.toml, copies WASM from ~/.exo/wasm/
+exomonad init                 # Starts server, registers Claude MCP, creates tmux session
+```
+
+For custom roles, copy `.exo/roles/` and `.exo/lib/` from exomonad and `exomonad new` will build WASM from source instead.
+
+### Configuration
+
+**Bootstrap:** `exomonad new` auto-creates `.exo/config.toml` (empty, all defaults) and `.gitignore` entries if missing. Works in any project directory. All fields are optional — auto-detection handles the common case. **Claude rules:** `exomonad new` copies `.exo/rules/exomonad.md` → `.claude/rules/exomonad.md` (if the template exists and the destination doesn't). Template resolution: project-local `.exo/rules/` → global `~/.exo/rules/`. This gives fresh Claude instances automatic knowledge of exomonad MCP tools.
+
+```toml
+# All fields below are optional — shown with their auto-detected defaults
+default_role = "tl"          # auto-detected from .exo/roles/ if exactly one role exists
+project_dir = "."
+shell_command = "nix develop" # environment wrapper for TL tab + server
+wasm_dir = ".exo/wasm"       # project-local (default), override for shared installs
+wasm_name = "devswarm"       # auto-detected from .exo/roles/ if exactly one role exists
+model = "sonnet"             # optional — passed as --model flag to root TL agent
+poll_interval = 60           # optional — GitHub poll cycle in seconds (default: 60)
+
+# Extra MCP servers (HTTP or stdio). Included in .mcp.json for all agents.
+[extra_mcp_servers.metacog]
+type = "http"
+url = "http://localhost:8080"
+
+[extra_mcp_servers.notebooklm]
+type = "stdio"
+command = "notebooklm-mcp"
+args = []
+
+# Companion agents spawned alongside the root TL during init.
+[[companions]]
+name = "sleeptime"
+agent_type = "claude"          # claude | gemini | shoal | process
+role = "sleeptime"             # WASM role for MCP tools (default: "worker")
+command = "claude --dangerously-skip-permissions"
+task = "You are sleeptime"     # optional — omit for interactive session
+model = "haiku"                # optional — passed as --model flag to companion
+
+[[companions]]
+name = "mock-github"
+agent_type = "process"         # plain process: no MCP, no worktree, no agent identity
+command = "python3 tests/e2e/mock_github.py --port 9876"
+```
+
+**Config hierarchy:**
+- `config.toml` uses `default_role` (project-wide default)
+- `config.local.toml` uses `role` (worktree-specific override)
+- Resolution: `local.role > global.default_role`
+- WASM: `wasm_dir` in config > `.exo/wasm/` (project-local)
+
+**Hook configuration** is auto-generated in two places:
+- **`exomonad init`**: Writes `.claude/settings.local.json` with all hooks (SessionStart, PreToolUse, etc.) for the root TL session
+- **`fork_wave`**: Writes `.claude/settings.local.json` into each spawned Claude worktree
+
+The `SessionStart` hook is critical — it registers the Claude session UUID in `ClaudeSessionRegistry`, which `fork_wave` reads to pass `--resume <uuid> --fork-session` for context inheritance. Without it, spawned subtrees start with no context.
+
+Gemini agents get settings via `GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var (NOT `.gemini/settings.json`).
+
+**Claude Code settings help:** We have a Claude Code configuration specialist (preloaded with official documentation) available as an oracle for hook syntax, settings structure, MCP setup, and debugging.
+
+### Companion Agents
+
+Companion agents are persistent agents spawned alongside the root TL during `exomonad init`. Claude companions get their own git worktree at `.exo/companions/{name}/` on branch `companion/{name}`, providing isolated `.mcp.json` discovery via CWD — the same mechanism that makes `fork_wave` reliable.
+
+Each Claude companion worktree contains:
+- `.mcp.json` — MCP config with the companion's role/name identity
+- `.claude/settings.local.json` — hooks (SessionStart, PreToolUse, etc.)
+- `.exo/server.sock` — symlink to project root's server socket
+- `.git` — worktree git file pointing to the main repo
+
+Worktrees persist across `--recreate` (only the tmux session is torn down). Gemini/Shoal companions use their existing env-var/flag-based config approach.
+
+**Process companions** (`agent_type = "process"`) are plain long-running processes — no MCP config, no agent identity, no worktree, no hooks. Just a command in a tmux window. Use for mock servers, log tailers, or any background process that should live alongside the session.
+
+### PR Workflow
+
+- **`file_pr`** — Create or update a PR for the current branch. Auto-detects base branch from dot-separated naming convention.
+- **`merge_pr`** — Merge a child's PR (`gh pr merge` + `git fetch` for auto-rebase). TL role only.
+
+### Components
+
+```
+Human in tmux session
+    └── Claude Code + exomonad (Rust + Haskell WASM)
+            ├── MCP tools via WASM (fork_wave, spawn_gemini, spawn_worker, etc.)
+            └── Agent tree:
+                ├── worktree: dev.feature-a (TL role, can spawn children)
+                │   ├── worker: rust-impl (Gemini, in-place pane)
+                │   └── worker: haskell-impl (Gemini, in-place pane)
+                └── worktree: dev.feature-b (TL role)
+                    └── ...
+```
+
+**Haskell WASM = Embedded DSL**
+- Defines tool schemas, handlers, decision logic
+- Yields typed effects (no I/O)
+- Compiled to WASM32-WASI, loaded via Extism
+- Single source of truth for MCP tools
+- Hot reload: serve mode checks mtime per tool call
+
+**Rust = Runtime**
+- Hosts WASM plugin, executes all effects (git, GitHub API, filesystem, tmux)
+- Owns the process lifecycle
+- REST server on UDS (started by `exomonad init`), `mcp-stdio` translates MCP JSON-RPC to REST
+
+### Data Flows
+
+**MCP Tool Call:**
+```
+Claude Code → stdio (JSON-RPC) → exomonad mcp-stdio (translates JSON-RPC → REST)
+→ UDS GET /agents/{role}/{name}/tools (list) or POST /agents/{role}/{name}/tools/call (call)
+→ exomonad serve REST handler → WASM handle_list_tools / handle_mcp_call
+→ Haskell dispatches to tool handler → yields effects
+→ Rust executes effects via host functions → result returned
+→ mcp-stdio translates REST response → JSON-RPC → stdout → Claude Code
+```
+
+**Hook Call:**
+
+*Legacy (production, server-based):*
+Claude Code → exomonad hook pre-tool-use (reads stdin JSON)
+→ UDS request to server → WASM handle_pre_tool_use
+→ Haskell decides allow/deny → HookEnvelope { stdout, exit_code }
+→ Claude Code proceeds or blocks
+
+*Experimental (Wave 2, node-based):*
+Claude Code → exomonad experimental hook pre-tool-use --papers node.json
+→ bootstrap NodeContext from papers
+→ run exo-policy hook directly (no server)
+→ stdout verdict
+
+**Session Start:**
+```
+Claude Code starts → exomonad hook session-start
+→ WASM yields SessionRegister effect with claude_session_id
+→ Server stores in ClaudeSessionRegistry
+→ fork_wave uses this ID for --fork-session
+```
+
+**Event Handler Call:**
+```
+GitHub poller detects world event (Copilot review, CI status, timeout)
+→ Poller resolves agent's PluginManager from plugins map
+→ Calls WASM handle_event with { role, event_type, payload }
+→ Haskell dispatches to EventHandlerConfig handler → returns EventAction
+→ Rust acts on EventAction: InjectMessage (deliver to agent pane) or NotifyParent (deliver to parent)
+```
+
+**Fail-open:** If the server is unreachable, `exomonad hook` prints `{"continue":true}` and exits 0.
