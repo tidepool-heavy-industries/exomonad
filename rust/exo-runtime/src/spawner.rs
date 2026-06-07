@@ -120,6 +120,12 @@ pub(crate) struct BirthCore {
     pub name: AgentName,
     pub branch: Branch,
     pub task: String,
+    /// Opt-in context inheritance. When true AND this is a Claude worktree child, the
+    /// launch resolves the parent's Claude session UUID (via `exo-scry`) and starts the
+    /// child with `--resume --fork-session <uuid>`. Set only by `fork_wave` (from
+    /// `ForkSpec::fork_session`); false for every other op. Default-false keeps launch
+    /// byte-identical unless explicitly opted in.
+    pub fork_session: bool,
 }
 
 // ── Shared ledger + inbox-scheme helpers (Spawner-TL scaffold) ───────────────────────────
@@ -563,12 +569,62 @@ impl Runtime {
             detail: e.to_string(),
         })?;
 
+        // Opt-in context inheritance: ONLY a Claude worktree child with fork_session set.
+        // Resolve the parent's Claude session UUID from live OS state (exo-scry — observed,
+        // no registry) and link the child's Claude project dir so --fork-session can find
+        // the parent's sessions. Any miss (no team / no uuid / resolution error) falls back
+        // to a fresh launch (None) — never crashes, never blocks the spawn.
+        let fork_session_id: Option<String> = if core.fork_session
+            && core.agent_type == AgentType::Claude
+            && core.kind == ChildKind::Worktree
+        {
+            if let Err(e) =
+                exomonad_shared::services::agent_control::fork_session::link_parent_project_dir(
+                    &self.working_dir,
+                    child_dir,
+                )
+            {
+                tracing::warn!(
+                    "fork_session: link_parent_project_dir failed for {}: {e}",
+                    core.name.as_str()
+                );
+            }
+            match exo_scry::resolve_self_or_portable() {
+                Ok(Some(team)) => match team.lead_session_id {
+                    Some(uuid) => Some(uuid),
+                    None => {
+                        tracing::warn!(
+                            "fork_session requested for {} but active team has no lead_session_id; launching fresh",
+                            core.name.as_str()
+                        );
+                        None
+                    }
+                },
+                Ok(None) => {
+                    tracing::warn!(
+                        "fork_session requested for {} but no active team resolved; launching fresh",
+                        core.name.as_str()
+                    );
+                    None
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "fork_session requested for {} but team resolution failed ({e}); launching fresh",
+                        core.name.as_str()
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let launch_cmd = format!(
             "{}\n",
             exomonad_shared::services::agent_control::launch::build_agent_command(
                 agent_type,
                 Some(&prompt_file),
-                None, // fork_session_id
+                fork_session_id.as_deref(),
                 &env_vars,
                 child_dir, // cwd (flake detection for wrap_nix)
                 None,      // claude_flags
@@ -609,6 +665,7 @@ impl Spawner for Runtime {
             branch: self.branch().clone(),
             name,
             task,
+            fork_session: false,
         };
         self.birth(core).await
     }
@@ -631,6 +688,7 @@ impl Spawner for Runtime {
             branch: Branch::from_path(&self.node_path().child(&name)),
             name,
             task,
+            fork_session: false,
         };
         self.birth(core).await
     }
@@ -655,6 +713,7 @@ impl Spawner for Runtime {
             branch: Branch::from_path(&self.node_path().child(&name)),
             name,
             task,
+            fork_session: false,
         };
         self.birth(core).await
     }
@@ -685,6 +744,7 @@ impl Spawner for Runtime {
                 branch: Branch::from_path(&self.node_path().child(&name)),
                 name,
                 task,
+                fork_session: spec.fork_session,
             };
             results.push(self.birth(core).await);
         }

@@ -39,7 +39,7 @@ contract ([`exo-framework`](../exo-framework/CLAUDE.md)); this crate provides th
 
 | Tool | Caps | Roles | What it does |
 |------|------|-------|--------------|
-| `fork_wave` | `Spawner` | root, tl | Fork N Claude TL children (own worktrees). |
+| `fork_wave` | `Spawner` | root, tl | Fork N Claude TL children (own worktrees). Per-child opt-in `fork_session: bool` (default false) inherits the parent's context via `--resume --fork-session`; default-false launches fresh. |
 | `spawn_gemini` | `Spawner` | root, tl | Spawn a Gemini dev in its own worktree. |
 | `spawn_worker` | `Spawner` | root, tl | Spawn an ephemeral Gemini worker (inline pane). |
 | `merge` | `Git`+`Spawner` | root, tl | **The local fold:** `git merge <child-branch>`, followed by best-effort teardown (`kill_pane` + `reclaim_worktree`) of the child. |

@@ -66,6 +66,11 @@ pub struct ForkSpec {
     pub context: Option<String>,
     pub boundary: Vec<String>,
     pub read_first: Vec<String>,
+    /// Opt-in (default false): inherit the parent's Claude context by launching the
+    /// child with `--resume --fork-session <parent-uuid>`. Honored ONLY for Claude
+    /// worktree children (the `fork_wave` op); Gemini and inline/worker spawns ignore
+    /// it. False means a fresh launch — byte-identical to pre-fork-session behavior.
+    pub fork_session: bool,
 }
 
 #[async_trait]

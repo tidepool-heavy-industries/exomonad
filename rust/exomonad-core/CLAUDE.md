@@ -4,7 +4,7 @@ ExoMonad core is the **classic** library: the effect system framework, WASM host
 
 ## Relationship to `exomonad-shared`
 
-The lean seam both architectures need — `domain`, `protocol`, `error`/`util`/`ffi`/`hooks`/`logging`, and `services::{tmux_ipc, resilience, agent_control::{AgentType, ClaudeSpawnFlags, launch}}` — was extracted into the **`exomonad-shared`** crate (which never links classic). `exomonad-core` depends on it and **re-exports those modules at their historical paths**, so classic code keeps resolving `crate::domain::X`, `crate::protocol::Y`, `crate::services::tmux_ipc::…`, `crate::services::agent_control::{AgentType, launch}`, etc. unchanged:
+The lean seam both architectures need — `domain`, `protocol`, `error`/`util`/`ffi`/`hooks`/`logging`, and `services::{tmux_ipc, resilience, agent_control::{AgentType, ClaudeSpawnFlags, launch, fork_session}}` — was extracted into the **`exomonad-shared`** crate (which never links classic). `exomonad-core` depends on it and **re-exports those modules at their historical paths**, so classic code keeps resolving `crate::domain::X`, `crate::protocol::Y`, `crate::services::tmux_ipc::…`, `crate::services::agent_control::{AgentType, launch}`, etc. unchanged:
 
 - `lib.rs`: `pub use exomonad_shared::{domain, error, ffi, hooks, logging, protocol, util};`
 - `services/mod.rs`: `pub use exomonad_shared::services::{resilience, tmux_ipc};`

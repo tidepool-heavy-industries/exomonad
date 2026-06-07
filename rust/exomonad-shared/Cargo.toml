@@ -29,6 +29,7 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"] }
 shell-escape = "0.1"
+dirs = "5.0"
 
 [dev-dependencies]
 proptest = "1.4"

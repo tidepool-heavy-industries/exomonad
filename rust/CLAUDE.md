@@ -96,7 +96,7 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 ├── exomonad-shared/  ← Shared seam (classic + node-mode, no classic link)
 │   • domain (validated newtypes), protocol (Runtime, HookEventType, hook/mcp/service)
 │   • error / util / ffi / hooks / logging plumbing
-│   • services::{tmux_ipc, resilience, agent_control::{AgentType, ClaudeSpawnFlags, launch}}
+│   • services::{tmux_ipc, resilience, agent_control::{AgentType, ClaudeSpawnFlags, launch, fork_session}}
 │
 ├── exomonad-core/  ← Classic library (publishable); depends on exomonad-shared
 │   • Framework: EffectHandler trait, EffectRegistry, RuntimeBuilder, Runtime

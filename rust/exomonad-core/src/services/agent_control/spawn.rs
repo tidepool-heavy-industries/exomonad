@@ -753,34 +753,11 @@ impl<
             info!(worktree = %worktree_path.display(), "Wrote hook configuration for spawned Claude agent");
 
             // Symlink Claude project dir so child can discover parent's sessions for --fork-session.
-            // Claude Code encodes paths via [^a-zA-Z0-9] → '-' (lossy regex replacement).
-            // Without this symlink, --resume --fork-session fails with "no conversation ID found".
-            {
-                let claude_projects_dir = dirs::home_dir()
-                    .ok_or(SpawnError::HomeDirNotSet)?
-                    .join(".claude")
-                    .join("projects");
-                let canonical_project_dir = self.project_dir().canonicalize().unwrap_or_else(|_| self.project_dir().to_path_buf());
-                let parent_encoded = encode_claude_project_dir(&canonical_project_dir);
-                let worktree_encoded = encode_claude_project_dir(&worktree_path);
-                let parent_project = claude_projects_dir.join(&parent_encoded);
-                let child_project = claude_projects_dir.join(&worktree_encoded);
-                if parent_project.exists() && !child_project.exists() {
-                    match std::os::unix::fs::symlink(&parent_project, &child_project) {
-                        Ok(()) => info!(
-                            parent = %parent_encoded,
-                            child = %worktree_encoded,
-                            "Symlinked Claude project dir for session inheritance"
-                        ),
-                        Err(e) => warn!(
-                            parent = %parent_encoded,
-                            child = %worktree_encoded,
-                            error = %e,
-                            "Failed to symlink Claude project dir (fork-session may not work)"
-                        ),
-                    }
-                }
-            }
+            exomonad_shared::services::agent_control::fork_session::link_parent_project_dir(
+                self.project_dir(),
+                &worktree_path,
+            )
+            .map_err(|_| SpawnError::HomeDirNotSet)?;
 
             // Build task prompt with worktree context warning
             let mut task_with_context = format!(
@@ -1020,15 +997,6 @@ impl<
     }
 }
 
-/// Encode a filesystem path the way Claude Code stores it in ~/.claude/projects/.
-/// Non-alphanumeric ASCII becomes '-'.
-fn encode_claude_project_dir(p: &Path) -> String {
-    p.to_string_lossy()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1072,35 +1040,4 @@ mod tests {
         assert!(!agent_wt.join(".exo/context/outside").exists());
     }
 
-    #[test]
-    fn test_claude_project_path_encoding() {
-        // Claude Code encodes paths via [^a-zA-Z0-9] → '-'
-        // Verified against actual ~/.claude/projects/ directory names.
-
-        // Basic path
-        assert_eq!(
-            encode_claude_project_dir(Path::new("/home/inanna/dev/exomonad")),
-            "-home-inanna-dev-exomonad"
-        );
-        // Worktree path (dots and hyphens in segments)
-        assert_eq!(
-            encode_claude_project_dir(Path::new("/home/inanna/dev/exomonad/.exo/worktrees/fork-session")),
-            "-home-inanna-dev-exomonad--exo-worktrees-fork-session"
-        );
-        // Hidden dir (leading dot → double dash after parent separator)
-        assert_eq!(
-            encode_claude_project_dir(Path::new("/home/inanna/.config/home-manager")),
-            "-home-inanna--config-home-manager"
-        );
-        // Deep nested path with hyphens
-        assert_eq!(
-            encode_claude_project_dir(Path::new("/home/inanna/dev/aegis-binder-diagnostic-framework")),
-            "-home-inanna-dev-aegis-binder-diagnostic-framework"
-        );
-        // Path with spaces
-        assert_eq!(
-            encode_claude_project_dir(Path::new("/home/user/My Projects/app")),
-            "-home-user-My-Projects-app"
-        );
-    }
 }

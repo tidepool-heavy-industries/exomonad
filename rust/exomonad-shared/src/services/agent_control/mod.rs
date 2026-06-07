@@ -5,6 +5,7 @@
 //! in classic `exomonad-core`; only the type definitions and the pure
 //! command-building free functions live here.
 
+pub mod fork_session;
 pub mod launch;
 mod types;
 

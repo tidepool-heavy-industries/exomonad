@@ -154,6 +154,12 @@ pub struct ForkChildArgs {
     pub boundary: Vec<String>,
     #[serde(default)]
     pub read_first: Vec<String>,
+    /// Opt-in (default false): inherit this TL session's context by launching the child
+    /// Claude with `--resume --fork-session <this-session-uuid>`. Default false — the
+    /// scaffold commit + spec is the primary context channel, and forking a stale/compacted
+    /// parent context often hurts.
+    #[serde(default)]
+    pub fork_session: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -180,6 +186,7 @@ impl ForkWave {
                 context: child.context,
                 boundary: child.boundary,
                 read_first: child.read_first,
+                fork_session: child.fork_session,
             });
         }
         let results = ctx.fork_wave(specs).await;
@@ -333,6 +340,7 @@ mod tests {
                     context: None,
                     boundary: vec![],
                     read_first: vec![],
+                    fork_session: false,
                 },
                 ForkChildArgs {
                     name: Some("child-2".to_string()),
@@ -343,6 +351,7 @@ mod tests {
                     context: None,
                     boundary: vec![],
                     read_first: vec![],
+                    fork_session: false,
                 },
             ],
         };
