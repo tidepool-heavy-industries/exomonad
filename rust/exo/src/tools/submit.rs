@@ -8,10 +8,11 @@
 //! rewrite. v1 has a single check: the worktree must be clean (work committed), because a parent
 //! merges the BRANCH off disk and uncommitted changes would be invisible to that merge.
 
+use crate::roles::ExoRole;
 use crate::spawn::ExoSpawn;
 use exo_caps::{
     Addressee, Bus, CapError, CapResult, ChildKind, Fs, Git, Message, MessageBody, MessageKind,
-    NodeKind, Process, Spawner, Summary,
+    Process, Spawner, Summary,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -231,7 +232,7 @@ impl SubmitBranch {
         // Spawn a reviewer in its own worktree off the under-review branch (role fixed here, the
         // domain tool boundary). It reads the diff + acceptance criteria, emits a `verdict`, exits.
         let spec = ExoSpawn {
-            role: NodeKind::Reviewer,
+            role: ExoRole::Reviewer,
             kind: ChildKind::Worktree,
             name: None,
             name_prefix: "reviewer",
@@ -297,9 +298,9 @@ mod tests {
         assert!(out.text.contains("dev.policy-claude"));
         let calls = mock.calls_made();
         // It spawns a reviewer...
-        assert!(calls.iter().any(
-            |c| matches!(c, Call::Spawn { role, .. } if *role == exo_caps::NodeKind::Reviewer)
-        ));
+        assert!(calls
+            .iter()
+            .any(|c| matches!(c, Call::Spawn { role, .. } if role == "reviewer")));
         // ...and NEVER delivers [READY] itself — only the sidecar does, on an approve-verdict.
         assert!(!calls.iter().any(|c| matches!(c, Call::BusDeliver { .. })));
     }

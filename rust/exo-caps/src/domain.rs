@@ -17,7 +17,7 @@ use serde::{de::DeserializeOwned, Serialize};
 
 /// A domain's **role enum** — the closed set of node archetypes a domain defines (the `exo`
 /// domain's is `root`/`tl`/`dev`/`worker`/`reviewer`). Replaces the hard-coded
-/// [`NodeKind`](crate::NodeKind): adding a role is a domain edit, not an engine edit.
+/// the engine's old closed `NodeKind`: adding a role is a domain edit, not an engine edit.
 ///
 /// The engine reads three things off a role: its `agent_type` (the role→backend mapping — which
 /// CLI to launch + how the last-hop delivers), its `role_str` (the wire/papers key), and `all`

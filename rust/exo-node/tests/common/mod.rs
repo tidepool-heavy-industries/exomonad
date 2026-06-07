@@ -4,13 +4,51 @@
 //! layer's `Deny → nudge` shaping is exercised without coupling the engine test to the domain's
 //! concrete antipattern rules (those are unit-tested in `exo`).
 
-use exo_caps::{AgentName, CapResult, ChildKind, NodeKind, Persona, SpawnSpec};
+use exo_caps::{AgentName, AgentType, CapResult, ChildKind, Persona, RoleKind, SpawnSpec};
 use exo_framework::{
     BoxFuture, Exomonad, HookDecision, HookInput, RoleDef, SessionStartOutput, StopDecision,
     SystemCtx, SystemOutcome,
 };
 use exo_runtime::Runtime;
 use serde::{Deserialize, Serialize};
+
+/// A stand-in domain role for the integration tests (mirrors `exo::ExoRole`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TestRole {
+    Root,
+    Tl,
+    Dev,
+    Worker,
+    Reviewer,
+}
+
+impl RoleKind for TestRole {
+    fn all() -> &'static [Self] {
+        &[
+            TestRole::Root,
+            TestRole::Tl,
+            TestRole::Dev,
+            TestRole::Worker,
+            TestRole::Reviewer,
+        ]
+    }
+    fn agent_type(&self) -> AgentType {
+        match self {
+            TestRole::Root | TestRole::Tl => AgentType::Claude,
+            _ => AgentType::Gemini,
+        }
+    }
+    fn role_str(&self) -> &'static str {
+        match self {
+            TestRole::Root => "root",
+            TestRole::Tl => "tl",
+            TestRole::Dev => "dev",
+            TestRole::Worker => "worker",
+            TestRole::Reviewer => "reviewer",
+        }
+    }
+}
 
 fn pre<'a>(_: &'a Runtime, input: &'a HookInput) -> BoxFuture<'a, HookDecision> {
     let deny = input.tool_name == "Bash" || input.tool_name == "run_shell_command";
@@ -40,9 +78,9 @@ pub struct TestSystem;
 pub struct TestSpawn;
 
 impl SpawnSpec for TestSpawn {
-    type Role = NodeKind;
-    fn role(&self) -> NodeKind {
-        NodeKind::Worker
+    type Role = TestRole;
+    fn role(&self) -> TestRole {
+        TestRole::Worker
     }
     fn child_kind(&self) -> ChildKind {
         ChildKind::Inline
@@ -66,11 +104,11 @@ pub struct TestDomain;
 
 impl Exomonad for TestDomain {
     type Caps = Runtime;
-    type Role = NodeKind;
+    type Role = TestRole;
     type System = TestSystem;
     type Spawn = TestSpawn;
 
-    fn role_def(_role: NodeKind) -> RoleDef<Runtime> {
+    fn role_def(_role: TestRole) -> RoleDef<Runtime> {
         RoleDef {
             tools: vec![],
             pre_tool_use: pre,

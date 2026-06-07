@@ -117,7 +117,8 @@ pub async fn run(
     // Stamp the configured child-launch policy onto the root's papers. `birth` reads a node's own
     // papers (`own_launch_policy`) and inherits the policy onto every child, so setting it on the
     // root flows it down the whole tree. Defaults (config unset) keep launches byte-identical.
-    let mut papers = exo_caps::NodePapers::root(root_pane.clone());
+    // The root's role is the domain's `ExoRole::Root` (recorded erased in papers).
+    let mut papers = exo_caps::NodePapers::root(root_pane.clone(), exo::ExoRole::Root)?;
     papers.yolo = yolo;
     papers.wrap_nix = wrap_nix;
     let papers_path = cwd.join(format!(".exo/node/{run_id}/root.json"));

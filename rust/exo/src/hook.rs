@@ -14,10 +14,12 @@ use std::path::Path;
 /// socket is unreachable. Defaults to the Claude allow if papers can't be read (exit 0 is allow
 /// for both harnesses anyway, so this only affects the printed JSON).
 fn fail_open_shape(papers_path: &Path) -> &'static str {
+    use exo_caps::RoleKind;
     let agent_type = std::fs::read(papers_path)
         .ok()
         .and_then(|b| serde_json::from_slice::<exo_caps::NodePapers>(&b).ok())
-        .map(|p| p.role.agent_type());
+        .and_then(|p| p.role.typed::<exo::ExoRole>().ok())
+        .map(|r| r.agent_type());
     match agent_type {
         Some(exo_caps::AgentType::Gemini) => "{}",
         _ => r#"{"continue":true}"#,

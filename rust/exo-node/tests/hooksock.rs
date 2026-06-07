@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use exo_caps::{AgentName, Branch, HookEvent, HookRequest, InboxPath, NodeKind, NodePath, PaneId};
+use exo_caps::{AgentName, Branch, HookEvent, HookRequest, InboxPath, NodePath, PaneId};
 use exo_node::bootstrap::NodeContext;
 use exo_node::hooksock;
 use exo_runtime::Runtime;
@@ -29,7 +29,7 @@ fn test_ctx(dir: &std::path::Path, run_id: &str) -> Arc<NodeContext<common::Test
     );
     Arc::new(NodeContext {
         runtime: Arc::new(runtime),
-        kind: NodeKind::Root,
+        kind: common::TestRole::Root,
         own_pane,
         own_inbox: InboxPath::new(dir.join("own-inbox.jsonl")),
         parent_inbox: None,

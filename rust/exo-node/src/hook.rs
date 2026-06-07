@@ -16,7 +16,7 @@ use std::path::Path;
 
 use crate::bootstrap::{bootstrap, NodeContext};
 use crate::error::NodeResult;
-use exo_caps::{NodeKind, RoleKind};
+use exo_caps::RoleKind;
 use exo_framework::{Exomonad, HookDecision, HookInput, StopDecision};
 use exo_runtime::Runtime;
 use serde_json::json;
@@ -31,7 +31,7 @@ pub enum HookEvent {
 
 /// Handle one CC hook invocation: read stdin payload, self-ID via `papers_path`, run the
 /// role's policy hook (resolved through the domain `D`), write the verdict JSON to stdout.
-pub async fn handle<D: Exomonad<Caps = Runtime, Role = NodeKind>>(
+pub async fn handle<D: Exomonad<Caps = Runtime>>(
     event: HookEvent,
     papers_path: &Path,
     stdin_json: &str,
@@ -159,15 +159,17 @@ async fn run_hook<D: Exomonad>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{test_pre_tool_use, test_session_start, test_stop, TestDomain};
-    use exo_caps::{AgentName, Branch, NodeKind, NodePath, PaneId};
+    use crate::test_support::{
+        test_pre_tool_use, test_session_start, test_stop, TestDomain, TestRole,
+    };
+    use exo_caps::{AgentName, Branch, NodePath, PaneId};
     use exo_framework::{BoxFuture, HookDecision, HookInput, RoleDef, StopDecision};
     use exo_runtime::Runtime;
     use serde_json::{json, Value};
     use std::sync::Arc;
 
     fn mock_ctx(
-        kind: NodeKind,
+        kind: TestRole,
         path: Vec<&str>,
         branch: &str,
         has_parent: bool,
@@ -210,7 +212,7 @@ mod tests {
     #[test]
     fn test_identity_context() {
         let ctx = mock_ctx(
-            NodeKind::Dev,
+            TestRole::Dev,
             vec!["root", "dev-node"],
             "main.root.dev-node",
             true,
@@ -228,7 +230,7 @@ mod tests {
 
         // Claude (Tl) leads a solo team with a run-scoped, globally-unique name (`run-123`[..8]).
         let ctx_tl = mock_ctx(
-            NodeKind::Tl,
+            TestRole::Tl,
             vec!["root", "tl-node"],
             "main.root.tl-node",
             true,
@@ -240,7 +242,7 @@ mod tests {
             "expected run-scoped team name: {id_tl}"
         );
 
-        let ctx_root = mock_ctx(NodeKind::Root, vec!["root"], "main", false);
+        let ctx_root = mock_ctx(TestRole::Root, vec!["root"], "main", false);
         let id_root = identity_context(&ctx_root);
         assert!(id_root.contains("Parent: none (root)"));
         // Root is Claude too — it leads a team so children's ChildIdle can be delivered natively.
@@ -249,8 +251,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_hook_pre_tool_use_unrecognized() {
-        let ctx = mock_ctx(NodeKind::Dev, vec!["root", "dev-node"], "main", false);
-        let rd = crate::test_support::test_role_def(NodeKind::Dev);
+        let ctx = mock_ctx(TestRole::Dev, vec!["root", "dev-node"], "main", false);
+        let rd = crate::test_support::test_role_def(TestRole::Dev);
         let stdin = json!({
             "tool_name": "unrecognized_tool",
             "tool_input": {}
@@ -266,8 +268,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_hook_session_start() {
-        let ctx = mock_ctx(NodeKind::Dev, vec!["root", "dev-node"], "main", false);
-        let rd = crate::test_support::test_role_def(NodeKind::Dev);
+        let ctx = mock_ctx(TestRole::Dev, vec!["root", "dev-node"], "main", false);
+        let rd = crate::test_support::test_role_def(TestRole::Dev);
 
         let res = run_hook(ctx, rd, HookEvent::SessionStart, "")
             .await
@@ -291,7 +293,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_hook_stop_blocked() {
-        let ctx = mock_ctx(NodeKind::Dev, vec!["root", "dev"], "main", false);
+        let ctx = mock_ctx(TestRole::Dev, vec!["root", "dev"], "main", false);
         let rd = RoleDef {
             tools: vec![],
             pre_tool_use: test_pre_tool_use,
@@ -318,7 +320,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_hook_pre_tool_deny() {
-        let ctx = mock_ctx(NodeKind::Dev, vec!["root", "dev"], "main", false);
+        let ctx = mock_ctx(TestRole::Dev, vec!["root", "dev"], "main", false);
         let rd = RoleDef {
             tools: vec![],
             pre_tool_use: mock_pre_tool_deny,
@@ -352,7 +354,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_hook_pre_tool_modify() {
-        let ctx = mock_ctx(NodeKind::Dev, vec!["root", "dev"], "main", false);
+        let ctx = mock_ctx(TestRole::Dev, vec!["root", "dev"], "main", false);
         let rd = RoleDef {
             tools: vec![],
             pre_tool_use: mock_pre_tool_modify,

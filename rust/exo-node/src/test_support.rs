@@ -1,17 +1,53 @@
 //! Shared test fixtures for the engine. The seam means `exo-node` must not depend on the domain
-//! crate, so its tests inject a trivial [`TestDomain`] — the same `Exomonad` seam production fills
-//! with `exo::ExoDomain`. Each gate is a minimal allow/default; tests that need specific hook
-//! behavior build their own `RoleDef` inline.
+//! crate, so its tests inject a trivial [`TestDomain`] with its own [`TestRole`] — the same
+//! `Exomonad` seam production fills with `exo::ExoDomain` / `exo::ExoRole`. `TestRole` mirrors the
+//! `exo` archetypes (role_str + agent_type) so the engine's identity/last-hop tests are realistic.
 
-use exo_caps::{
-    AgentName, CapResult, ChildKind, NodeKind, Persona, SpawnSpec,
-};
+use exo_caps::{AgentName, AgentType, CapResult, ChildKind, Persona, RoleKind, SpawnSpec};
 use exo_framework::{
     BoxFuture, Exomonad, HookDecision, HookInput, RoleDef, SessionStartOutput, StopDecision,
     SystemCtx, SystemOutcome,
 };
 use exo_runtime::Runtime;
 use serde::{Deserialize, Serialize};
+
+/// A stand-in domain role for the engine tests (mirrors `exo::ExoRole`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TestRole {
+    Root,
+    Tl,
+    Dev,
+    Worker,
+    Reviewer,
+}
+
+impl RoleKind for TestRole {
+    fn all() -> &'static [Self] {
+        &[
+            TestRole::Root,
+            TestRole::Tl,
+            TestRole::Dev,
+            TestRole::Worker,
+            TestRole::Reviewer,
+        ]
+    }
+    fn agent_type(&self) -> AgentType {
+        match self {
+            TestRole::Root | TestRole::Tl => AgentType::Claude,
+            TestRole::Dev | TestRole::Worker | TestRole::Reviewer => AgentType::Gemini,
+        }
+    }
+    fn role_str(&self) -> &'static str {
+        match self {
+            TestRole::Root => "root",
+            TestRole::Tl => "tl",
+            TestRole::Dev => "dev",
+            TestRole::Worker => "worker",
+            TestRole::Reviewer => "reviewer",
+        }
+    }
+}
 
 pub(crate) fn test_pre_tool_use<'a>(
     _: &'a Runtime,
@@ -28,7 +64,7 @@ pub(crate) fn test_session_start(_: &Runtime) -> BoxFuture<'_, SessionStartOutpu
     Box::pin(async { SessionStartOutput::default() })
 }
 
-pub(crate) fn test_role_def(_kind: NodeKind) -> RoleDef<Runtime> {
+pub(crate) fn test_role_def(_kind: TestRole) -> RoleDef<Runtime> {
     RoleDef {
         tools: vec![],
         pre_tool_use: test_pre_tool_use,
@@ -46,9 +82,9 @@ pub struct TestSystem;
 pub struct TestSpawn;
 
 impl SpawnSpec for TestSpawn {
-    type Role = NodeKind;
-    fn role(&self) -> NodeKind {
-        NodeKind::Worker
+    type Role = TestRole;
+    fn role(&self) -> TestRole {
+        TestRole::Worker
     }
     fn child_kind(&self) -> ChildKind {
         ChildKind::Inline
@@ -72,11 +108,11 @@ pub struct TestDomain;
 
 impl Exomonad for TestDomain {
     type Caps = Runtime;
-    type Role = NodeKind;
+    type Role = TestRole;
     type System = TestSystem;
     type Spawn = TestSpawn;
 
-    fn role_def(role: NodeKind) -> RoleDef<Runtime> {
+    fn role_def(role: TestRole) -> RoleDef<Runtime> {
         test_role_def(role)
     }
 

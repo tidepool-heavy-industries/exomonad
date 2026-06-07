@@ -13,7 +13,7 @@
 use async_trait::async_trait;
 use exo_caps::{
     Addressee, AgentName, Branch, Bus, BusError, ChildKind, ChildLiveness, Fs, FsError, Git,
-    GitError, Kv, KvError, Log, Message, NodeKind, PaneId, Process, ProcessError, SpawnError,
+    GitError, Kv, KvError, Log, Message, PaneId, Process, ProcessError, RoleKind, SpawnError,
     SpawnSpec, Spawner, Tmux, TmuxError, Topology, TopologyError, TopologyView, TreeNode,
 };
 use std::collections::HashMap;
@@ -32,9 +32,10 @@ pub enum Call {
     Merge {
         branch: Branch,
     },
-    /// One collapsed `Spawner::spawn` — the role the domain tool fixed + the rendered task.
+    /// One collapsed `Spawner::spawn` — the role's `role_str` (the spec is generic over the domain
+    /// role, so we record the stable string) + the rendered task.
     Spawn {
-        role: NodeKind,
+        role: String,
         task: String,
         fork_session: bool,
     },
@@ -185,10 +186,7 @@ impl Git for MockRuntime {
 
 #[async_trait]
 impl Spawner for MockRuntime {
-    async fn spawn<S: SpawnSpec<Role = NodeKind>>(
-        &self,
-        spec: S,
-    ) -> Result<AgentName, SpawnError> {
+    async fn spawn<S: SpawnSpec>(&self, spec: S) -> Result<AgentName, SpawnError> {
         if self.should_fail("spawn") {
             return Err(SpawnError::Failed {
                 op: "spawn",
@@ -196,7 +194,7 @@ impl Spawner for MockRuntime {
                 detail: "mock forced failure".into(),
             });
         }
-        let role = spec.role();
+        let role = spec.role().role_str().to_string();
         let fork_session = spec.fork_session();
         let name = spec
             .name()
@@ -210,10 +208,7 @@ impl Spawner for MockRuntime {
         Ok(name)
     }
     // Override the default loop only to record the wave size as one call (the tools assert on it).
-    async fn fork_wave<S: SpawnSpec<Role = NodeKind>>(
-        &self,
-        specs: Vec<S>,
-    ) -> Vec<Result<AgentName, SpawnError>> {
+    async fn fork_wave<S: SpawnSpec>(&self, specs: Vec<S>) -> Vec<Result<AgentName, SpawnError>> {
         self.record(Call::ForkWave { n: specs.len() });
         specs
             .into_iter()

@@ -9,7 +9,7 @@
 //! builds a `D::Spawn`, **not** a new `Spawner` method (an `exo-caps` edit). The role-fixing moved
 //! out of the cap and into the domain.
 
-use crate::types::{AgentName, NodeKind};
+use crate::types::AgentName;
 use crate::SpawnSpec;
 use async_trait::async_trait;
 use thiserror::Error;
@@ -33,21 +33,13 @@ pub enum SpawnError {
 pub trait Spawner {
     /// Birth one child from a domain spawn intent. The `(role, kind)` are read off the spec (fixed
     /// by whichever domain tool built it), so an illegal pairing is unnameable at that boundary.
-    ///
-    /// Transitionally bounded `Role = NodeKind` (the runtime still writes a `NodeKind` into papers);
-    /// P5 relaxes this to the fully generic `S: SpawnSpec` once papers carry `D::Role`.
-    async fn spawn<S: SpawnSpec<Role = NodeKind>>(
-        &self,
-        spec: S,
-    ) -> Result<AgentName, SpawnError>;
+    /// Fully generic over the domain's role — the runtime records the role erased ([`RoleRecord`](crate::RoleRecord)).
+    async fn spawn<S: SpawnSpec>(&self, spec: S) -> Result<AgentName, SpawnError>;
 
     /// Fork a wave — **per-spec results**, so one bad fork doesn't discard the children that did
     /// spawn (the TL converges on what succeeded, re-decomposes the failures). A thin sequential
     /// wrapper over [`spawn`](Spawner::spawn); a domain `fork_wave` tool passes a `Vec<D::Spawn>`.
-    async fn fork_wave<S: SpawnSpec<Role = NodeKind>>(
-        &self,
-        specs: Vec<S>,
-    ) -> Vec<Result<AgentName, SpawnError>> {
+    async fn fork_wave<S: SpawnSpec>(&self, specs: Vec<S>) -> Vec<Result<AgentName, SpawnError>> {
         let mut out = Vec::with_capacity(specs.len());
         for spec in specs {
             out.push(self.spawn(spec).await);

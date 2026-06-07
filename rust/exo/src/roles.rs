@@ -1,4 +1,5 @@
-//! Roles — the concrete roster. [`role_def`] is the hand-written `match NodeKind` table (the
+//! Roles — the concrete roster. [`ExoRole`] is the domain's role enum; [`role_def`] is the
+//! hand-written `match ExoRole` table (the
 //! single place a role's tool list + hooks are named); the domain's [`Exomonad`](exo_framework::Exomonad)
 //! impl resolves a role's [`RoleDef`] through it (replacing the deleted fn-pointer `RoleRegistry`).
 //! A role *reads* like declarative config but is plain, greppable, unit-testable Rust: a list of
@@ -13,17 +14,61 @@ use crate::tools::spawn::{ForkWave, SpawnGemini, SpawnWorker};
 use crate::tools::submit::SubmitBranch;
 use crate::tools::tree::Tree;
 use crate::tools::verdict::Verdict;
-use exo_caps::NodeKind;
+use exo_caps::{AgentType, RoleKind};
 use exo_framework::{PolicyCaps, RoleDef};
+use serde::{Deserialize, Serialize};
+
+/// The `exo` domain's role enum — the closed set of node archetypes (its `D::Role`). Owned by the
+/// domain (was the engine's `NodeKind` before the trait refactor — leak #1), reached by the engine
+/// only through the [`RoleKind`] seam. `agent_type` is the role→backend mapping (leak #2): a domain
+/// maps each role onto the engine-owned launchable backend set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExoRole {
+    Root,
+    Tl,
+    Dev,
+    Worker,
+    /// A short-lived Gemini spawned by a submitting node to review its branch. Works in its own
+    /// worktree off the under-review code and emits a `verdict`. Not a tree-building archetype.
+    Reviewer,
+}
+
+impl RoleKind for ExoRole {
+    fn all() -> &'static [Self] {
+        &[
+            ExoRole::Root,
+            ExoRole::Tl,
+            ExoRole::Dev,
+            ExoRole::Worker,
+            ExoRole::Reviewer,
+        ]
+    }
+    fn agent_type(&self) -> AgentType {
+        match self {
+            ExoRole::Root | ExoRole::Tl => AgentType::Claude,
+            ExoRole::Dev | ExoRole::Worker | ExoRole::Reviewer => AgentType::Gemini,
+        }
+    }
+    fn role_str(&self) -> &'static str {
+        match self {
+            ExoRole::Root => "root",
+            ExoRole::Tl => "tl",
+            ExoRole::Dev => "dev",
+            ExoRole::Worker => "worker",
+            ExoRole::Reviewer => "reviewer",
+        }
+    }
+}
 
 /// The per-role policy table. Hand-written `match` — the single place a role's tool list +
 /// hooks are named. Convergence is on-disk (v2): a TL folds a finished child with the local
 /// `merge` tool (no PR, no GitHub); leaves just commit to their branch.
-pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
+pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
     match kind {
         // Root is the human-facing top: no parent (so no `notify_parent`). It spawns children
         // and folds them by merging their branches locally; that's it.
-        NodeKind::Root => RoleDef {
+        ExoRole::Root => RoleDef {
             tools: vec![
                 Box::new(ForkWave),
                 Box::new(SpawnGemini),
@@ -39,7 +84,7 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
         },
         // A spawned TL spawns + folds its own subtree, then submits its own branch up to its
         // parent when done (and notifies for status/failure).
-        NodeKind::Tl => RoleDef {
+        ExoRole::Tl => RoleDef {
             tools: vec![
                 Box::new(ForkWave),
                 Box::new(SpawnGemini),
@@ -56,7 +101,7 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
         },
         // A dev leaf works on its own branch and submits it for the parent to merge. It NEVER blocks at
         // stop (Gemini #20426); the committed-before-fold guarantee is enforced by submit_branch.
-        NodeKind::Dev => RoleDef {
+        ExoRole::Dev => RoleDef {
             tools: vec![Box::new(NotifyParent), Box::new(SubmitBranch)],
             pre_tool_use,
             stop: stop_notify,
@@ -64,7 +109,7 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
         },
         // A worker is an inline child sharing the parent's worktree — no own branch to submit, so it
         // only reports back, but it still signals the parent when it yields control.
-        NodeKind::Worker => RoleDef {
+        ExoRole::Worker => RoleDef {
             tools: vec![Box::new(NotifyParent)],
             pre_tool_use,
             stop: stop_notify,
@@ -72,7 +117,7 @@ pub fn role_def<R: PolicyCaps>(kind: NodeKind) -> RoleDef<R> {
         },
         // A reviewer reads the under-review branch and emits a `verdict`, then exits. It does not
         // submit or merge; `notify_parent` is its colleague back-channel ("why'd you do this?").
-        NodeKind::Reviewer => RoleDef {
+        ExoRole::Reviewer => RoleDef {
             tools: vec![Box::new(Verdict), Box::new(NotifyParent)],
             pre_tool_use,
             // Ephemeral; it exits after the verdict — nothing to fold, so don't gate (would only
@@ -92,11 +137,11 @@ mod tests {
     #[tokio::test]
     async fn every_role_builds_non_empty_tools() {
         for kind in [
-            NodeKind::Root,
-            NodeKind::Tl,
-            NodeKind::Dev,
-            NodeKind::Worker,
-            NodeKind::Reviewer,
+            ExoRole::Root,
+            ExoRole::Tl,
+            ExoRole::Dev,
+            ExoRole::Worker,
+            ExoRole::Reviewer,
         ] {
             let rd = role_def::<MockRuntime>(kind);
             assert!(!rd.tools.is_empty(), "Role {:?} should have tools", kind);
@@ -110,12 +155,12 @@ mod tests {
             // if no verdict → stop_reviewer. Dev/Worker (Gemini) notify the parent then allow
             // (never block). Tl keeps the dirty-gate (stop).
             let expected_stop = match kind {
-                NodeKind::Root => stop_allow::<MockRuntime> as *const () as usize,
-                NodeKind::Reviewer => stop_reviewer::<MockRuntime> as *const () as usize,
-                NodeKind::Dev | NodeKind::Worker => {
+                ExoRole::Root => stop_allow::<MockRuntime> as *const () as usize,
+                ExoRole::Reviewer => stop_reviewer::<MockRuntime> as *const () as usize,
+                ExoRole::Dev | ExoRole::Worker => {
                     stop_notify::<MockRuntime> as *const () as usize
                 }
-                NodeKind::Tl => stop::<MockRuntime> as *const () as usize,
+                ExoRole::Tl => stop::<MockRuntime> as *const () as usize,
             };
             assert_eq!(rd.stop as usize, expected_stop, "Role {:?} stop fn", kind);
             assert_eq!(
@@ -127,7 +172,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_role_stop_gate_blocks_when_dirty() {
-        let rd = role_def::<MockRuntime>(NodeKind::Tl);
+        let rd = role_def::<MockRuntime>(ExoRole::Tl);
         let ctx = MockRuntime {
             is_clean: false,
             ..Default::default()

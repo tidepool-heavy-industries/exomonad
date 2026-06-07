@@ -5,8 +5,9 @@
 //! generic-over-caps `run<C: Spawner>`, and a `Tool<R>` adapter. Ships mock-cap unit tests
 //! (assert the right `Spawner` method recorded) in this file.
 
+use crate::roles::ExoRole;
 use crate::spawn::{render_spec_prompt, write_acceptance, ExoSpawn};
-use exo_caps::{AgentName, CapResult, ChildKind, Fs, NodeKind, Spawner};
+use exo_caps::{AgentName, CapResult, ChildKind, Fs, Spawner};
 use exo_framework::{ok_json, parse, schema_json, Tool, ToolOutput};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -39,7 +40,7 @@ impl SpawnWorker {
         };
         // The tool fixes the (role, kind): an ephemeral inline Gemini worker.
         let spec = ExoSpawn {
-            role: NodeKind::Worker,
+            role: ExoRole::Worker,
             kind: ChildKind::Inline,
             name,
             name_prefix: "worker",
@@ -119,7 +120,7 @@ impl SpawnGemini {
         );
         // The tool fixes the (role, kind): a Gemini dev leaf in its own worktree.
         let spec = ExoSpawn {
-            role: NodeKind::Dev,
+            role: ExoRole::Dev,
             kind: ChildKind::Worktree,
             name,
             name_prefix: "dev",
@@ -210,7 +211,7 @@ impl ForkWave {
             tasks.push(task.clone());
             // The tool fixes the (role, kind): a Claude TL child in its own worktree.
             specs.push(ExoSpawn {
-                role: NodeKind::Tl,
+                role: ExoRole::Tl,
                 kind: ChildKind::Worktree,
                 name,
                 name_prefix: "tl",
@@ -293,7 +294,7 @@ mod tests {
         assert_eq!(calls.len(), 1);
         match &calls[0] {
             Call::Spawn { role, task, .. } => {
-                assert_eq!(*role, exo_caps::NodeKind::Worker);
+                assert_eq!(role, "worker");
                 assert!(task.contains("do something"));
             }
             _ => panic!("wrong call"),
@@ -343,7 +344,7 @@ mod tests {
         let calls = mock.calls_made();
         // The spawn, then the acceptance.md write (relocated into the domain tool).
         assert!(calls.iter().any(|c| matches!(c, Call::Spawn { role, task, .. }
-            if *role == exo_caps::NodeKind::Dev && task.contains("do something else"))));
+            if role == "dev" && task.contains("do something else"))));
         assert!(calls.iter().any(|c| matches!(c, Call::FsWrite { path }
             if path.contains("gemini-1") && path.ends_with(".exo/acceptance.md"))));
     }

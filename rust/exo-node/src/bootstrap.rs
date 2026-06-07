@@ -6,12 +6,13 @@
 //! enriching with the ambient run context (`$TMUX_PANE`, `EXOMONAD_SWARM_RUN_ID`,
 //! `EXOMONAD_TMUX_SESSION`) and, lazily, CC team membership via `exo-scry`. The result is a
 //! [`NodeContext`] holding a real [`Runtime`] (the `R` policy monomorphizes against), the
-//! injected [`RoleRegistry`], plus the [`NodeKind`] needed to pick the role's toolset/hooks.
+//! the [`NodeContext`] holding a [`Runtime`], plus the node's `D::Role` (typed from papers) used to
+//! pick the role's toolset/hooks.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use exo_caps::{Branch, InboxPath, NodeKind, NodePapers, NodePath, PaneId};
+use exo_caps::{Branch, InboxPath, NodePapers, NodePath, PaneId};
 use exo_framework::Exomonad;
 use exo_runtime::Runtime;
 use tracing::warn;
@@ -84,10 +85,10 @@ fn load_papers(papers_path: &Path) -> NodeResult<NodePapers> {
 /// `EXOMONAD_SWARM_RUN_ID`, `EXOMONAD_TMUX_SESSION`, `$HOME`.
 ///
 /// Generic over the domain `D` — monomorphized once at the binary (`bootstrap::<exo::ExoDomain>`).
-/// Transitionally bounded `Role = NodeKind` (papers still record a `NodeKind`); P5 makes papers
-/// carry `D::Role` and relaxes this. `Caps = Runtime` is inherent: the sidecar builds the concrete
+/// The role is read off the papers (recorded erased) and typed back to `D::Role` here — bootstrap
+/// is the role's one typed reader. `Caps = Runtime` is inherent: the sidecar builds the concrete
 /// `Runtime` here, so the domain's tools monomorphize against it.
-pub fn bootstrap<D: Exomonad<Caps = Runtime, Role = NodeKind>>(
+pub fn bootstrap<D: Exomonad<Caps = Runtime>>(
     papers_path: &Path,
     working_dir: PathBuf,
 ) -> NodeResult<NodeContext<D>> {
@@ -127,7 +128,11 @@ pub fn bootstrap<D: Exomonad<Caps = Runtime, Role = NodeKind>>(
 
     let node_path: NodePath = papers.path.clone();
     let branch: Branch = papers.branch.clone();
-    let kind: NodeKind = papers.role;
+    // The role is recorded erased; type it back to this domain's role enum (the one typed read).
+    let kind: D::Role = papers.role.typed::<D::Role>().map_err(|e| NodeError::Papers {
+        path: papers_path.display().to_string(),
+        detail: format!("role: {e}"),
+    })?;
     let parent_inbox: Option<InboxPath> = papers.parent_inbox.clone();
 
     let runtime = Runtime::new(
@@ -155,7 +160,8 @@ pub fn bootstrap<D: Exomonad<Caps = Runtime, Role = NodeKind>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use exo_caps::{AgentName, Branch, InboxPath, NodeKind, NodePapers, NodePath, PaneId};
+    use crate::test_support::TestRole;
+    use exo_caps::{AgentName, Branch, InboxPath, NodePapers, NodePath, PaneId};
     use std::fs;
     use tempfile::tempdir;
 
@@ -175,16 +181,16 @@ mod tests {
         .unwrap();
         let branch = Branch::new("root.me".into()).unwrap();
 
-        let papers = NodePapers {
-            v: 1,
-            role: NodeKind::Tl,
-            path: node_path.clone(),
-            branch: branch.clone(),
-            pane: own_pane.clone(),
-            parent_inbox: Some(parent_inbox.clone()),
-            yolo: NodePapers::DEFAULT_YOLO,
-            wrap_nix: NodePapers::DEFAULT_WRAP_NIX,
-        };
+        let papers = NodePapers::new(
+            node_path.clone(),
+            branch.clone(),
+            TestRole::Tl,
+            own_pane.clone(),
+            Some(parent_inbox.clone()),
+            NodePapers::DEFAULT_YOLO,
+            NodePapers::DEFAULT_WRAP_NIX,
+        )
+        .unwrap();
 
         let papers_json = serde_json::to_string(&papers).unwrap();
         fs::write(&papers_path, papers_json).unwrap();
@@ -197,7 +203,7 @@ mod tests {
         let ctx = bootstrap::<crate::test_support::TestDomain>(&papers_path, working_dir.clone())
             .unwrap();
 
-        assert_eq!(ctx.kind, NodeKind::Tl);
+        assert_eq!(ctx.kind, TestRole::Tl);
         assert_eq!(ctx.own_pane, own_pane);
         assert_eq!(ctx.parent_inbox, Some(parent_inbox));
         assert_eq!(ctx.run_id, "test-run");

@@ -33,5 +33,5 @@ pub mod tools;
 pub mod testing;
 
 pub use review::{handle_review_system, ReviewSystem};
-pub use roles::role_def;
+pub use roles::{role_def, ExoRole};
 pub use spawn::ExoSpawn;

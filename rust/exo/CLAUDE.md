@@ -9,7 +9,7 @@ config DSL). Written **generic over the `exo-caps` traits** (no `dyn Caps`), so 
 compiler-checked and every tool is **unit-testable against mock caps with zero IO**.
 
 The engine never depends on this crate's lib. The binary's bin-only `domain.rs` defines `ExoDomain`
-(the [`Exomonad`](../exo-framework/CLAUDE.md) impl: `Caps = Runtime`, `Role = NodeKind`, `System =
+(the [`Exomonad`](../exo-framework/CLAUDE.md) impl: `Caps = Runtime`, `Role = ExoRole`, `System =
 ReviewSystem`, `Spawn = ExoSpawn`) and monomorphizes the engine once as `run_node::<ExoDomain>`;
 that's the seam (the fn-pointer `RoleRegistry` is gone). See
 [`docs/decisions/exo-framework-domain-split.md`](../../docs/decisions/exo-framework-domain-split.md)
@@ -35,7 +35,7 @@ lib (`lib.rs` + `tools/` + `gates.rs` + `roles.rs`) stays generic over the caps 
 | `config.rs` | Minimal node-mode init config read (`tmux_session`, `model`, + the child-launch policy `yolo`/`wrap_nix` stamped onto the root's papers and inherited down the tree) — classic `exomonad` owns the full `Config`. |
 | `tools/` | One module per tool — a type + `Args` (derives `Deserialize + JsonSchema`) + generic-over-caps `run` + a ~6-line hand-written `Tool<R>` adapter (NO macro). Each ships mock-cap unit tests. |
 | `gates.rs` | The concrete hook bodies: `pre_tool_use` (antipattern nudges), `stop` (the convergence gate) + per-role variants (`stop_allow`/`stop_notify`/`stop_reviewer`), `session_start`. Functions generic over the caps they need. |
-| `roles.rs` | `role_def(NodeKind)` — the hand-written table (the single place a role's tool list + hooks are named) — and `roster()`, which wraps it as the `RoleRegistry` the binary injects. |
+| `roles.rs` | `ExoRole` (the domain's `D::Role`, impl `RoleKind`) + `role_def(ExoRole)` — the hand-written table (the single place a role's tool list + hooks are named), resolved through `ExoDomain`'s `Exomonad::role_def`. |
 | `testing.rs` | `MockRuntime` — impls every cap, records calls, returns canned values. Every tool tests against this one shared mock. |
 
 The `Tool<R>` trait, `RoleDef<R>`, the hook decision enums, and `PolicyCaps` are the framework

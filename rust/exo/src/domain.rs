@@ -9,8 +9,8 @@
 //! [`role_def`](exo::role_def) and [`handle_review_system`](exo::handle_review_system) — lives in
 //! the lib and is unit-tested there against mocks.
 
-use exo::{handle_review_system, role_def, ExoSpawn, ReviewSystem};
-use exo_caps::{CapResult, NodeKind, Persona};
+use exo::{handle_review_system, role_def, ExoRole, ExoSpawn, ReviewSystem};
+use exo_caps::{CapResult, Persona};
 use exo_framework::{BoxFuture, Exomonad, RoleDef, SystemCtx, SystemOutcome};
 use exo_runtime::Runtime;
 
@@ -19,11 +19,11 @@ pub struct ExoDomain;
 
 impl Exomonad for ExoDomain {
     type Caps = Runtime;
-    type Role = NodeKind;
+    type Role = ExoRole;
     type System = ReviewSystem;
     type Spawn = ExoSpawn;
 
-    fn role_def(role: NodeKind) -> RoleDef<Runtime> {
+    fn role_def(role: ExoRole) -> RoleDef<Runtime> {
         role_def::<Runtime>(role)
     }
 

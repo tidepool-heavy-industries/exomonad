@@ -7,8 +7,7 @@
 //! file owns **only** the struct + its accessors, so cap leaves never collide here.
 
 use exo_caps::{
-    Addressee, AgentName, Branch, ChildKind, ChildStatus, InboxPath, NodeKind, NodePath,
-    NodeStatus, PaneId,
+    Addressee, AgentName, Branch, ChildKind, ChildStatus, InboxPath, NodePath, NodeStatus, PaneId,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -138,8 +137,9 @@ impl Runtime {
             })
     }
 
-    /// Build a periodic status snapshot.
-    pub fn status_snapshot(&self, kind: NodeKind, shutdown_pending: bool) -> NodeStatus {
+    /// Build a periodic status snapshot. `role_str` is the node's domain role as its stable string
+    /// (the engine no longer knows the domain role enum; the caller passes `D::Role::role_str`).
+    pub fn status_snapshot(&self, role_str: &str, shutdown_pending: bool) -> NodeStatus {
         let children = self
             .children_busy
             .lock()
@@ -153,7 +153,7 @@ impl Runtime {
 
         NodeStatus {
             node: self.node_path.clone(),
-            kind,
+            kind: role_str.to_string(),
             branch: self.branch.as_str().to_string(),
             shutdown_pending,
             children,

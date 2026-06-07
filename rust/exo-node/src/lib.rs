@@ -1,8 +1,8 @@
 //! `exo-node` — the per-node sidecar (Wave 2).
 //!
-//! Assembles the real [`exo_runtime::Runtime`] (all caps) + an injected
-//! [`RoleRegistry`](exo_framework::RoleRegistry) (the domain's tools / hooks / roles, built by the
-//! binary via `exo::roster()`) into a running **two-loop sidecar**, one process per agent:
+//! Assembles the real [`exo_runtime::Runtime`] (all caps) + a domain `D: Exomonad` (the domain's
+//! tools / hooks / roles / system, monomorphized once by the binary via `run_node::<exo::ExoDomain>`)
+//! into a running **two-loop sidecar**, one process per agent:
 //!
 //! ```text
 //!   OUTBOUND (N1):  serve the role's Tools (from the injected roster) over rmcp/stdio; send_message → Bus::deliver.
@@ -34,7 +34,7 @@ pub use bootstrap::{bootstrap, NodeContext};
 pub use error::{NodeError, NodeResult};
 pub use hook::{handle as handle_hook, HookEvent};
 
-use exo_caps::NodeKind;
+use exo_caps::RoleKind;
 use exo_framework::Exomonad;
 use exo_runtime::Runtime;
 use std::sync::Arc;
@@ -53,9 +53,7 @@ use std::sync::Arc;
 /// The background loops are aborted when `serve` returns. `Arc<NodeContext>` satisfies the
 /// `R: Send + Sync + 'static` dispatch boundary. A background loop erroring is logged but does
 /// not tear down the node — only the outbound anchor closing (or a shutdown) ends it.
-pub async fn run_node<D: Exomonad<Caps = Runtime, Role = NodeKind>>(
-    ctx: Arc<NodeContext<D>>,
-) -> NodeResult<()> {
+pub async fn run_node<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
     let inbound = tokio::spawn({
         let ctx = ctx.clone();
         async move {
@@ -99,7 +97,9 @@ pub async fn run_node<D: Exomonad<Caps = Runtime, Role = NodeKind>>(
             loop {
                 interval.tick().await;
                 let shutdown_pending = ctx.shutdown_pending.lock().unwrap().is_some();
-                let snapshot = ctx.runtime.status_snapshot(ctx.kind, shutdown_pending);
+                let snapshot = ctx
+                    .runtime
+                    .status_snapshot(ctx.kind.role_str(), shutdown_pending);
                 if let Ok(bytes) = serde_json::to_vec(&snapshot) {
                     if let Err(e) =
                         exo_caps::Fs::write_atomic(&*ctx.runtime, &status_path, &bytes).await

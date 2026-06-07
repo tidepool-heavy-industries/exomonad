@@ -16,8 +16,6 @@
 //! - [`caps`] — the [`PolicyCaps`](caps::PolicyCaps) static bound-union for the dispatch boundary.
 //! - [`hooks`] — the decision enums (`pre_tool_use` nudges, `stop` clean-gate, `session_start`).
 //! - [`roles`] — [`RoleDef<R>`](roles::RoleDef) + the hook fn-pointer type aliases.
-//! - [`registry`] — [`RoleRegistry<R>`](registry::RoleRegistry), the injected role resolver (being
-//!   superseded by [`exomonad`]).
 //! - [`exomonad`] — the [`Exomonad`](exomonad::Exomonad) trait: the engine as generic machinery
 //!   over a domain TYPE (four associated types + `role_def` + `handle_system`). The seam traits its
 //!   associated types are bound by ([`RoleKind`](exo_caps::RoleKind) etc.) live in `exo-caps`.

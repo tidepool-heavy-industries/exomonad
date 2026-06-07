@@ -42,8 +42,8 @@
 use crate::runtime::Runtime;
 use async_trait::async_trait;
 use exo_caps::{
-    fold_children, AgentName, AgentType, Branch, Child, ChildKind, ChildRecord, InboxPath, NodeKind,
-    NodePapers, PaneId, RoleKind, SpawnError, SpawnSpec, Spawner,
+    fold_children, AgentName, AgentType, Branch, Child, ChildKind, ChildRecord, InboxPath,
+    NodePapers, PaneId, RoleKind, RoleRecord, SpawnError, SpawnSpec, Spawner,
 };
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -116,7 +116,9 @@ where
 pub(crate) struct BirthCore {
     pub kind: ChildKind,
     pub agent_type: AgentType,
-    pub role: NodeKind,
+    /// The child's role, erased ([`RoleRecord`]) — birth writes it straight into papers, so the
+    /// birth tail stays non-generic over the domain role (the domain tool already fixed it).
+    pub role: RoleRecord,
     pub name: AgentName,
     pub branch: Branch,
     pub task: String,
@@ -385,15 +387,18 @@ impl Runtime {
         let parent_inbox = Some(self.own_inbox());
         let (yolo, wrap_nix) = self.own_launch_policy().await;
 
-        let papers = NodePapers::new(
-            self.node_path().child(&core.name),
-            core.branch.clone(),
-            core.role,
-            pane.clone(),
+        // Struct literal (not `NodePapers::new`, which takes a *typed* role): the role is already
+        // erased into a `RoleRecord` on `BirthCore`, so birth stays non-generic over the domain role.
+        let papers = NodePapers {
+            v: NodePapers::VERSION,
+            path: self.node_path().child(&core.name),
+            branch: core.branch.clone(),
+            role: core.role.clone(),
+            pane: pane.clone(),
             parent_inbox,
             yolo,
             wrap_nix,
-        );
+        };
 
         let papers_path = match core.kind {
             ChildKind::Worktree => child_dir.join(".exo/node.json"),
@@ -582,10 +587,7 @@ impl Runtime {
 
 #[async_trait]
 impl Spawner for Runtime {
-    async fn spawn<S: SpawnSpec<Role = NodeKind>>(
-        &self,
-        spec: S,
-    ) -> Result<AgentName, SpawnError> {
+    async fn spawn<S: SpawnSpec>(&self, spec: S) -> Result<AgentName, SpawnError> {
         let role = spec.role();
         let kind = spec.child_kind();
         let fork_session = spec.fork_session();
@@ -593,12 +595,17 @@ impl Spawner for Runtime {
         let name = self.resolve_child_name(spec.name(), &prefix).await?;
         // The branch: a Worktree child gets its own (safe-generated from its tree address); an
         // Inline child shares the parent's worktree + branch. The agent backend is the role→backend
-        // mapping the engine owns.
+        // mapping the domain owns (via `RoleKind`); the role itself is recorded erased.
         let branch = match kind {
             ChildKind::Worktree => Branch::from_path(&self.node_path().child(&name)),
             ChildKind::Inline => self.branch().clone(),
         };
         let agent_type = RoleKind::agent_type(&role);
+        let role = RoleRecord::new(&role).map_err(|e| SpawnError::Failed {
+            op: "role_record",
+            child: Some(name.clone()),
+            detail: e.to_string(),
+        })?;
         // The spec carries the fully-rendered prompt (the domain tool rendered it); birth wraps it
         // in the worktree/inline preamble.
         let task = spec.into_task();

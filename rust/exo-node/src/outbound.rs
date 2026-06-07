@@ -10,7 +10,6 @@
 
 use std::sync::Arc;
 
-use exo_caps::NodeKind;
 use exo_framework::{Exomonad, Tool};
 use exo_runtime::Runtime;
 use serde_json::{json, Value};
@@ -21,7 +20,7 @@ use crate::bootstrap::NodeContext;
 use crate::error::NodeResult;
 
 /// Serve the policy toolset over rmcp/stdio until the stream closes.
-pub async fn serve<D: Exomonad<Caps = Runtime, Role = NodeKind>>(
+pub async fn serve<D: Exomonad<Caps = Runtime>>(
     ctx: Arc<NodeContext<D>>,
 ) -> NodeResult<()> {
     let tools = D::role_def(ctx.kind).tools;

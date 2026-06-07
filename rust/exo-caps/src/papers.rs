@@ -1,15 +1,57 @@
 //! Type-1 papers (`node.json`) — a node's immutable birth identity, written by the parent
 //! at spawn and read by the child's sidecar at boot. The one contract that crosses the
-//! birth → self-ID seam (Spawner writes it; Wave-2 node bootstrap reads it).
+//! birth → self-ID seam (Spawner writes it; node bootstrap reads it).
 //!
 //! Assigned-at-birth, never derived: `role`/`parent`/tree-position exist in no runtime's
-//! live state, so they are *recorded* once. `agent_type` is **not** stored — it derives
-//! from `role` ([`NodeKind::agent_type`]). The `pane` is the universal key; `parent_inbox`
-//! is the direct up-edge for `Bus::deliver(Parent, …)` (`None` only for the root).
+//! live state, so they are *recorded* once. `agent_type` is **not** stored — a domain derives
+//! it from `role` ([`RoleKind::agent_type`](crate::RoleKind)). The `pane` is the universal key;
+//! `parent_inbox` is the direct up-edge for `Bus::deliver(Parent, …)` (`None` only for the root).
+//!
+//! The role is stored **erased** as a [`RoleRecord`] (raw JSON) so `NodePapers` stays
+//! domain-agnostic (non-generic): the parent writes its domain's `D::Role`, and the child's
+//! bootstrap — the only typed reader of the role — deserializes it back to `D::Role` (validating
+//! through serde). Same validate-on-read guarantee as a fully-typed papers struct, without
+//! genericizing `NodePapers<R>` across every reader (`own_launch_policy`, the hook-socket
+//! resolver, …) that only needs the non-role fields.
 
-use crate::types::{AgentName, Branch, NodeKind, NodePath, PaneId};
-use crate::InboxPath;
+use crate::error::{CapError, CapResult};
+use crate::types::{AgentName, Branch, NodePath, PaneId};
+use crate::{InboxPath, RoleKind};
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
+
+/// A node's role, recorded **erased** (raw JSON of the domain's `D::Role`). Typed back via
+/// [`RoleRecord::typed`] by the one reader that knows the domain (bootstrap). Equality compares the
+/// canonical raw string (`RawValue` has no `PartialEq`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RoleRecord(pub Box<RawValue>);
+
+impl RoleRecord {
+    /// Record a typed domain role.
+    pub fn new<R: RoleKind>(role: &R) -> CapResult<Self> {
+        Ok(RoleRecord(serde_json::value::to_raw_value(role).map_err(
+            |e| CapError::Json {
+                context: "RoleRecord::new: encode role".into(),
+                source: e,
+            },
+        )?))
+    }
+    /// Read the role back as the domain's role type (validates through serde).
+    pub fn typed<R: RoleKind>(&self) -> CapResult<R> {
+        serde_json::from_str(self.0.get()).map_err(|e| CapError::Json {
+            context: "RoleRecord::typed: decode role".into(),
+            source: e,
+        })
+    }
+}
+
+impl PartialEq for RoleRecord {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.get() == other.0.get()
+    }
+}
+impl Eq for RoleRecord {}
 
 /// A node's birth papers, persisted as `{cwd}/.exo/node.json` (worktree child) or the
 /// pane-keyed run dir (inline worker). Schema-versioned (`v`, parsed tolerantly) so a
@@ -25,8 +67,9 @@ pub struct NodePapers {
     /// Git branch — decoupled from `path`, generated safely (a `.` in a segment can't
     /// corrupt it).
     pub branch: Branch,
-    /// The `NodeKind` (`root`/`tl`/`dev`/`worker`). `agent_type` derives from this.
-    pub role: NodeKind,
+    /// The node's role, erased ([`RoleRecord`]); bootstrap types it back to `D::Role`.
+    /// `agent_type` derives from this (domain-side).
+    pub role: RoleRecord,
     /// tmux pane — delivery target + inbox-key derivation.
     pub pane: PaneId,
     /// Path to the parent's ingestion inbox (the up-edge). `None` for the root.
@@ -63,54 +106,78 @@ impl NodePapers {
     pub const DEFAULT_YOLO: bool = true;
     pub const DEFAULT_WRAP_NIX: bool = false;
 
-    /// Construct papers for the root node. The root has no parent (`parent_inbox` = `None`).
-    pub fn root(pane: PaneId) -> Self {
-        NodePapers {
-            v: Self::VERSION,
-            path: NodePath::new(vec![
-                AgentName::new("root".into()).expect("valid agent name")
-            ])
-            .expect("valid node path"),
-            branch: Branch::new("root".into()).expect("valid branch name"),
-            role: NodeKind::Root,
-            pane,
-            parent_inbox: None,
-            yolo: Self::DEFAULT_YOLO,
-            wrap_nix: Self::DEFAULT_WRAP_NIX,
-        }
-    }
-
-    /// Construct papers for a node being born (`v` set to the current [`VERSION`]). `yolo` /
-    /// `wrap_nix` are the launch policy stamped onto the child (inherited from the parent).
-    pub fn new(
+    /// Construct papers for a node being born (`v` set to the current [`VERSION`]). The role is
+    /// recorded erased; `yolo` / `wrap_nix` are the launch policy stamped onto the child.
+    pub fn new<R: RoleKind>(
         path: NodePath,
         branch: Branch,
-        role: NodeKind,
+        role: R,
         pane: PaneId,
         parent_inbox: Option<InboxPath>,
         yolo: bool,
         wrap_nix: bool,
-    ) -> Self {
-        NodePapers {
+    ) -> CapResult<Self> {
+        Ok(NodePapers {
             v: Self::VERSION,
             path,
             branch,
-            role,
+            role: RoleRecord::new(&role)?,
             pane,
             parent_inbox,
             yolo,
             wrap_nix,
-        }
+        })
+    }
+
+    /// Construct papers for the root node (no parent). The domain supplies its root role.
+    pub fn root<R: RoleKind>(pane: PaneId, role: R) -> CapResult<Self> {
+        Self::new(
+            NodePath::new(vec![
+                AgentName::new("root".into()).expect("valid agent name")
+            ])
+            .expect("valid node path"),
+            Branch::new("root".into()).expect("valid branch name"),
+            role,
+            pane,
+            None,
+            Self::DEFAULT_YOLO,
+            Self::DEFAULT_WRAP_NIX,
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AgentName;
+    use crate::AgentType;
 
     fn an(s: &str) -> AgentName {
         AgentName::new(s.into()).unwrap()
+    }
+
+    /// A stand-in domain role for the papers round-trip tests (exo-caps owns no concrete role).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "lowercase")]
+    enum TestRole {
+        Root,
+        Dev,
+    }
+    impl RoleKind for TestRole {
+        fn all() -> &'static [Self] {
+            &[TestRole::Root, TestRole::Dev]
+        }
+        fn agent_type(&self) -> AgentType {
+            match self {
+                TestRole::Root => AgentType::Claude,
+                TestRole::Dev => AgentType::Gemini,
+            }
+        }
+        fn role_str(&self) -> &'static str {
+            match self {
+                TestRole::Root => "root",
+                TestRole::Dev => "dev",
+            }
+        }
     }
 
     #[test]
@@ -118,34 +185,22 @@ mod tests {
         let papers = NodePapers::new(
             NodePath::new(vec![an("dev"), an("oauth-gemini")]).unwrap(),
             Branch::new("dev.oauth-gemini".into()).unwrap(),
-            NodeKind::Dev,
+            TestRole::Dev,
             PaneId::new("%317".into()).unwrap(),
             Some(InboxPath::new(
                 "/home/u/.claude/exo/inboxes/run-1/pane-311.jsonl".into(),
             )),
             NodePapers::DEFAULT_YOLO,
             NodePapers::DEFAULT_WRAP_NIX,
-        );
+        )
+        .unwrap();
         let json = serde_json::to_string(&papers).unwrap();
-        // role serializes as the lowercase NodeKind variant
+        // role serializes erased as the raw role JSON (here the lowercase TestRole variant)
         assert!(json.contains(r#""role":"dev""#));
         let back: NodePapers = serde_json::from_str(&json).unwrap();
         assert_eq!(papers, back);
-    }
-
-    #[test]
-    fn root_papers_have_no_parent_inbox() {
-        let papers = NodePapers::new(
-            NodePath::new(vec![an("root")]).unwrap(),
-            Branch::new("main".into()).unwrap(),
-            NodeKind::Root,
-            PaneId::new("%1".into()).unwrap(),
-            None,
-            NodePapers::DEFAULT_YOLO,
-            NodePapers::DEFAULT_WRAP_NIX,
-        );
-        let json = serde_json::to_string(&papers).unwrap();
-        assert!(json.contains(r#""parent_inbox":null"#));
+        // and the role types back to the domain enum
+        assert_eq!(back.role.typed::<TestRole>().unwrap(), TestRole::Dev);
     }
 
     #[test]
@@ -158,14 +213,15 @@ mod tests {
         // The launch-policy fields, absent from older papers, default to today's behavior.
         assert_eq!(papers.yolo, NodePapers::DEFAULT_YOLO);
         assert_eq!(papers.wrap_nix, NodePapers::DEFAULT_WRAP_NIX);
+        assert_eq!(papers.role.typed::<TestRole>().unwrap(), TestRole::Root);
     }
 
     #[test]
     fn root_constructor() {
         let pane = PaneId::new("%1".into()).unwrap();
-        let papers = NodePapers::root(pane.clone());
+        let papers = NodePapers::root(pane.clone(), TestRole::Root).unwrap();
         assert_eq!(papers.v, NodePapers::VERSION);
-        assert_eq!(papers.role, NodeKind::Root);
+        assert_eq!(papers.role.typed::<TestRole>().unwrap(), TestRole::Root);
         assert!(papers.parent_inbox.is_none());
         assert_eq!(papers.path.name().as_str(), "root");
         assert_eq!(papers.branch.as_str(), "root");

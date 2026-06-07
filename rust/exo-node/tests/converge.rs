@@ -41,7 +41,7 @@ fn test_ctx(
     let own_inbox = InboxPath::new(dir.join("own-inbox.jsonl"));
     Arc::new(NodeContext {
         runtime: Arc::new(runtime),
-        kind: exo_caps::NodeKind::Tl,
+        kind: common::TestRole::Tl,
         own_pane,
         own_inbox,
         parent_inbox,

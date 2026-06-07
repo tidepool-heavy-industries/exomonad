@@ -4,9 +4,9 @@
 //! unit-testable Rust: a list of tool **types** plus three fn-pointers. NO `dyn Caps` — the
 //! table is parameterized by the concrete runtime `R`.
 //!
-//! The concrete roster (the `match NodeKind` body that names each role's tools + hooks) is
-//! domain code and lives in the `exo` usage crate; the engine resolves it through a
-//! [`RoleRegistry`](crate::registry::RoleRegistry) injected by the binary.
+//! The concrete roster (the `match` over the domain's role enum that names each role's tools +
+//! hooks) is domain code and lives in the `exo` usage crate; the engine resolves it through
+//! [`Exomonad::role_def`](crate::exomonad::Exomonad::role_def), monomorphized at the binary.
 
 use crate::hooks::{HookDecision, HookInput, SessionStartOutput, StopDecision};
 use crate::tool::{BoxFuture, Tool};

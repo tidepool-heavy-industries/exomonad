@@ -40,13 +40,13 @@ pub use kv::{Kv, KvError};
 pub use lifecycle::{fold_children, Child, ChildLifecycle, ChildRecord};
 pub use liveness::ChildLiveness;
 pub use log::Log;
-pub use papers::NodePapers;
+pub use papers::{NodePapers, RoleRecord};
 pub use process::{Process, ProcessError};
 pub use spawner::{SpawnError, Spawner};
 pub use tmux::{Tmux, TmuxError};
 pub use topology::{Topology, TopologyError, TopologyView, TreeNode};
 pub use types::{
     AgentName, AgentType, Branch, ChildKind, ChildStatus, ControlKind, DomainPayload, InboxPath,
-    IngestionEntry, Lifecycle, Message, MessageBody, MessageKind, NodeKind, NodePath, NodeStatus,
-    PaneId, Persona, ShutdownStatus, Summary, SyntheticName,
+    IngestionEntry, Lifecycle, Message, MessageBody, MessageKind, NodePath, NodeStatus, PaneId,
+    Persona, ShutdownStatus, Summary, SyntheticName,
 };

@@ -296,62 +296,9 @@ impl TryFrom<String> for Summary {
 
 // ── archetype & runtime ──────────────────────────────────────────────────────
 
-/// A node's archetype — the **one** stored identity enum. `role` (the `role_def` key)
-/// is the variant; `agent_type` **derives**. Only the four real archetypes are
-/// representable, so `(Root, Gemini)` / `(Worker, Claude)` are unnameable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum NodeKind {
-    Root,
-    Tl,
-    Dev,
-    Worker,
-    /// A short-lived Gemini spawned by a submitting node to review its branch. Works in its own
-    /// worktree off the under-review code (full YOLO; its blast radius is its own branch) and
-    /// emits a `verdict`. Not a tree-building archetype — it reviews, then exits.
-    Reviewer,
-}
-
-impl NodeKind {
-    /// Runtime derives from the archetype — never stored separately.
-    pub fn agent_type(self) -> AgentType {
-        match self {
-            NodeKind::Root | NodeKind::Tl => AgentType::Claude,
-            NodeKind::Dev | NodeKind::Worker | NodeKind::Reviewer => AgentType::Gemini,
-        }
-    }
-    /// The `role_def` key / wire string.
-    pub fn role_str(self) -> &'static str {
-        match self {
-            NodeKind::Root => "root",
-            NodeKind::Tl => "tl",
-            NodeKind::Dev => "dev",
-            NodeKind::Worker => "worker",
-            NodeKind::Reviewer => "reviewer",
-        }
-    }
-}
-
-/// The default-domain role enum implements the engine's [`RoleKind`](crate::RoleKind) seam by
-/// delegating to its inherent methods. (The `exo` domain swaps `NodeKind` for its own `ExoRole`
-/// in a later phase; this impl is what proves the seam fits the existing archetype set.)
-impl crate::RoleKind for NodeKind {
-    fn all() -> &'static [Self] {
-        &[
-            NodeKind::Root,
-            NodeKind::Tl,
-            NodeKind::Dev,
-            NodeKind::Worker,
-            NodeKind::Reviewer,
-        ]
-    }
-    fn agent_type(&self) -> AgentType {
-        (*self).agent_type()
-    }
-    fn role_str(&self) -> &'static str {
-        (*self).role_str()
-    }
-}
+// The concrete role enum is **domain-owned** (`exo::ExoRole`), reached through the
+// [`RoleKind`](crate::RoleKind) seam. The engine never names a role variant. (Before the trait
+// refactor a closed `NodeKind` lived here — that was leak #1.)
 
 /// Runtime — used by the **delivery last-hop only** (the Claude/Gemini/Shoal switch).
 /// For a tree node it equals `node_kind.agent_type()`. Shoal is a companion /
@@ -518,7 +465,9 @@ pub enum Lifecycle {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeStatus {
     pub node: NodePath,
-    pub kind: NodeKind,
+    /// The node's role as its domain **`role_str`** (not a typed enum), so domain-agnostic readers
+    /// (exo-scry / observability) parse the status without knowing the domain's role type.
+    pub kind: String,
     pub branch: String,
     pub shutdown_pending: bool,
     /// Direct children and their busy state.
@@ -569,15 +518,6 @@ mod tests {
         assert!(json.contains(r#""domain":{"kind":"demo","n":7}"#));
         let back: MessageKind = serde_json::from_str(&json).unwrap();
         assert_eq!(kind, back);
-    }
-
-    #[test]
-    fn node_kind_derives_runtime_and_role() {
-        assert_eq!(NodeKind::Root.agent_type(), AgentType::Claude);
-        assert_eq!(NodeKind::Tl.agent_type(), AgentType::Claude);
-        assert_eq!(NodeKind::Dev.agent_type(), AgentType::Gemini);
-        assert_eq!(NodeKind::Worker.agent_type(), AgentType::Gemini);
-        assert_eq!(NodeKind::Dev.role_str(), "dev");
     }
 
     fn an(s: &str) -> AgentName {

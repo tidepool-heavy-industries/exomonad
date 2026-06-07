@@ -23,7 +23,7 @@ The single concrete `Runtime` struct that implements **every** `exo-caps` trait.
 
 ## Spawn: `birth` and record-first ordering (read before editing `spawner.rs`)
 
-The one generic `Spawner::spawn<S: SpawnSpec<Role = NodeKind>>` reads `(role, kind, name, task,
+The one generic `Spawner::spawn<S: SpawnSpec>` reads `(role, kind, name, task,
 fork_session)` off the domain spec (the domain tool fixed the role/kind) and funnels through one
 private `birth(BirthCore)` tail. The agent backend is `RoleKind::agent_type(role)`; the branch is
 safe-generated for a Worktree child or the parent's branch for an Inline one. The prompt arrives
