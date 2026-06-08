@@ -20,7 +20,7 @@ use exo_caps::{
     Persona, RoleKind, SpawnSpec,
 };
 use exo_framework::{
-    BoxFuture, Exomonad, ok_json, parse, schema_json, RoleDef, SystemCtx, SystemOutcome, Tool,
+    ok_json, parse, schema_json, BoxFuture, Exomonad, RoleDef, SystemCtx, SystemOutcome, Tool,
     ToolOutput,
 };
 use exo_runtime::Runtime;
@@ -289,4 +289,29 @@ async fn handle_system_runs_through_the_seam() {
     };
     assert_eq!(spec.role(), ProofRole::Auditor);
     assert_eq!(spec.child_kind(), ChildKind::Worktree);
+}
+
+#[test]
+fn auditor_role_def_is_wired() {
+    let rd = ProofDomain::role_def(ProofRole::Auditor);
+    assert!(!rd.tools.is_empty());
+    assert!(rd.tools.iter().any(|t| t.name() == "submit_audit"));
+
+    // Verify hook pointers are wired
+    assert_eq!(rd.pre_tool_use as usize, pre as *const () as usize);
+    assert_eq!(rd.stop as usize, stop as *const () as usize);
+    assert_eq!(rd.session_start as usize, session as *const () as usize);
+}
+
+#[test]
+fn proof_spawn_properties_round_trip() {
+    let spec = ProofSpawn {
+        role: ProofRole::Auditor,
+    };
+    assert_eq!(spec.role(), ProofRole::Auditor);
+    assert_eq!(spec.child_kind(), ChildKind::Worktree);
+    assert_eq!(spec.name(), None);
+    assert_eq!(spec.name_prefix(), "audit");
+    assert!(!spec.fork_session());
+    assert_eq!(spec.into_task(), "audit the branch");
 }

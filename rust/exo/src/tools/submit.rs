@@ -331,6 +331,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn spawns_reviewer_with_diff_instruction() {
+        let mock = MockRuntime::default();
+        SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "did the thing".into(),
+                dangerously_skip_reviewer: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let calls = mock.calls_made();
+        let spawn = calls
+            .iter()
+            .find_map(|c| {
+                if let Call::Spawn { role, task, .. } = c {
+                    if role == "reviewer" {
+                        return Some(task);
+                    }
+                }
+                None
+            })
+            .expect("reviewer should be spawned");
+
+        assert!(spawn.contains("git diff basebasebasebasebasebasebasebasebasebase...HEAD"));
+        assert!(spawn.contains("dev.policy-claude"));
+    }
+
+    #[tokio::test]
+    async fn spawns_reviewer_with_fallback_when_no_base() {
+        let mock = MockRuntime {
+            merge_base: None,
+            ..Default::default()
+        };
+        SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "did the thing".into(),
+                dangerously_skip_reviewer: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let calls = mock.calls_made();
+        let spawn = calls
+            .iter()
+            .find_map(|c| {
+                if let Call::Spawn { role, task, .. } = c {
+                    if role == "reviewer" {
+                        return Some(task);
+                    }
+                }
+                None
+            })
+            .expect("reviewer should be spawned");
+
+        assert!(spawn.contains("no diff base could be resolved"));
+    }
+
+    #[tokio::test]
     async fn blocks_when_dirty() {
         let mock = MockRuntime {
             is_clean: false,

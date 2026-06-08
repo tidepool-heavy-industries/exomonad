@@ -108,7 +108,10 @@ pub fn render_spec_prompt(
 /// the spawning node's worktree (`birth` already created the child's `.exo/`); a write failure only
 /// costs the reviewer its acceptance context.
 pub async fn write_acceptance<C: Fs>(ctx: &C, child: &AgentName, spec_task: &str) {
-    let path = PathBuf::from(format!(".exo/worktrees/{}/.exo/acceptance.md", child.as_str()));
+    let path = PathBuf::from(format!(
+        ".exo/worktrees/{}/.exo/acceptance.md",
+        child.as_str()
+    ));
     if let Err(e) = ctx.write_atomic(&path, spec_task.as_bytes()).await {
         tracing::warn!(
             "failed to persist .exo/acceptance.md for {}: {e}",
@@ -139,6 +142,36 @@ mod tests {
         assert!(p.contains("VERIFY:\n- cargo test"));
         assert!(p.contains("CONTEXT:\nsome context"));
         assert!(p.contains("DONE CRITERIA:\n- all green"));
-        assert_eq!(render_spec_prompt("task", &[], &[], &[], &[], None, &[]), "task");
+        assert_eq!(
+            render_spec_prompt("task", &[], &[], &[], &[], None, &[]),
+            "task"
+        );
+    }
+
+    #[test]
+    fn render_spec_prompt_empty_context_omitted() {
+        let p = render_spec_prompt("task", &[], &[], &[], &[], Some(&"".to_string()), &[]);
+        assert!(!p.contains("CONTEXT:"));
+    }
+
+    #[test]
+    fn exo_spawn_roundtrip() {
+        use exo_caps::RoleKind;
+        let name = AgentName::new("x".into()).unwrap();
+        let spawn = ExoSpawn {
+            role: ExoRole::Dev,
+            kind: ChildKind::Worktree,
+            name: Some(name.clone()),
+            name_prefix: "dev",
+            task: "t".into(),
+            fork_session: true,
+        };
+        assert_eq!(spawn.role(), ExoRole::Dev);
+        assert_eq!(spawn.role().role_str(), "dev");
+        assert_eq!(spawn.child_kind(), ChildKind::Worktree);
+        assert_eq!(spawn.name(), Some(name));
+        assert_eq!(spawn.name_prefix(), "dev");
+        assert!(spawn.fork_session());
+        assert_eq!(spawn.into_task(), "t");
     }
 }

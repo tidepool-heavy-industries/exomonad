@@ -192,7 +192,9 @@ mod tests {
         .unwrap();
 
         let calls = mock.calls_made();
-        assert!(calls.iter().any(|c| matches!(c, Call::BusDeliver { to, msg }
+        assert!(calls
+            .iter()
+            .any(|c| matches!(c, Call::BusDeliver { to, msg }
             if *to == Addressee::Parent
                 && matches!(&msg.kind, exo_caps::MessageKind::Domain(p)
                     if matches!(serde_json::from_str::<ReviewSystem>(p.0.get()),
@@ -215,5 +217,86 @@ mod tests {
         )
         .await;
         assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn deny_requires_message() {
+        let mock = MockRuntime::default();
+        let res = Verdict::run(
+            &mock,
+            VerdictArgs {
+                decision: Decision::Deny,
+                branch: "main.dev-0".into(),
+                sha: "abc123".into(),
+                message: "  ".into(), // whitespace only
+                changes_branch: None,
+            },
+        )
+        .await;
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn deny_with_message_delivers() {
+        let mock = MockRuntime::default();
+        Verdict::run(
+            &mock,
+            VerdictArgs {
+                decision: Decision::Deny,
+                branch: "main.dev-0".into(),
+                sha: "abc123".into(),
+                message: "fix it".into(),
+                changes_branch: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let calls = mock.calls_made();
+        assert!(calls.iter().any(|c| matches!(c, Call::BusDeliver { to, msg }
+            if *to == Addressee::Parent
+                && matches!(&msg.kind, exo_caps::MessageKind::Domain(p)
+                    if matches!(serde_json::from_str::<ReviewSystem>(p.0.get()),
+                        Ok(ReviewSystem::ReviewDenied { branch, sha, message })
+                        if branch.as_str() == "main.dev-0" && sha == "abc123" && message == "fix it")))));
+
+        assert_eq!(
+            mock.kv
+                .lock()
+                .unwrap()
+                .get("verdict_produced")
+                .map(|s| s.as_str()),
+            Some("true")
+        );
+    }
+
+    #[tokio::test]
+    async fn changes_success_delivers() {
+        let mock = MockRuntime::default();
+        Verdict::run(
+            &mock,
+            VerdictArgs {
+                decision: Decision::Changes,
+                branch: "main.dev-0".into(),
+                sha: "abc123".into(),
+                message: "improved".into(),
+                changes_branch: Some("reviewer.patch-1".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let calls = mock.calls_made();
+        assert!(calls
+            .iter()
+            .any(|c| matches!(c, Call::BusDeliver { to, msg }
+            if *to == Addressee::Parent
+                && matches!(&msg.kind, exo_caps::MessageKind::Domain(p)
+                    if matches!(serde_json::from_str::<ReviewSystem>(p.0.get()),
+                        Ok(ReviewSystem::ReviewChanges { branch, sha, changes_branch, message })
+                        if branch.as_str() == "main.dev-0" 
+                            && sha == "abc123" 
+                            && changes_branch.as_str() == "reviewer.patch-1" 
+                            && message == "improved")))));
     }
 }
