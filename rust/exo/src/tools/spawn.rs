@@ -356,7 +356,9 @@ mod tests {
         assert!(out.text.contains("Spawned dev"));
         let calls = mock.calls_made();
         // The spawn, then the acceptance.md write (relocated into the domain tool).
-        assert!(calls.iter().any(|c| matches!(c, Call::Spawn { role, task, .. }
+        assert!(calls
+            .iter()
+            .any(|c| matches!(c, Call::Spawn { role, task, .. }
             if role == "dev" && task.contains("do something else"))));
         assert!(calls.iter().any(|c| matches!(c, Call::FsWrite { path }
             if path.contains("gemini-1") && path.ends_with(".exo/acceptance.md"))));

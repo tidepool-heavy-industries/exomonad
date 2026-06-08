@@ -276,7 +276,6 @@ impl Runtime {
             }
         }
     }
-
 }
 
 impl Runtime {
@@ -628,8 +627,7 @@ impl Spawner for Runtime {
         // Resolve the child's role-steering protocol (override-or-const) while the role is still
         // typed. Threaded onto `BirthCore` for both Gemini (written to its `context.fileName`) and
         // Claude (passed via `--append-system-prompt`).
-        let protocol =
-            resolve_protocol(&self.working_dir, role.role_str(), role.protocol()).await;
+        let protocol = resolve_protocol(&self.working_dir, role.role_str(), role.protocol()).await;
         let role = RoleRecord::new(&role).map_err(|e| SpawnError::Failed {
             op: "role_record",
             child: Some(name.clone()),
@@ -661,16 +659,78 @@ impl Spawner for Runtime {
 
         match record.kind {
             ChildKind::Worktree => {
-                let path = self.working_dir.join(".exo/worktrees").join(child.as_str());
-                retry_teardown("reclaim_worktree", child.as_str(), || {
-                    exo_caps::Git::worktree_remove(self, &path)
-                })
-                .await
-                .map_err(|e| SpawnError::Failed {
-                    op: "reclaim_worktree",
-                    child: Some(child.clone()),
-                    detail: e.to_string(),
-                })
+                let base_path = self.working_dir.join(".exo/worktrees").join(child.as_str());
+
+                // Find all nested worktrees.
+                let mut stack = vec![base_path.clone()];
+                let mut to_remove = vec![];
+                while let Some(dir) = stack.pop() {
+                    to_remove.push(dir.clone());
+                    let w_dir = dir.join(".exo/worktrees");
+                    if let Ok(mut entries) = tokio::fs::read_dir(&w_dir).await {
+                        while let Ok(Some(entry)) = entries.next_entry().await {
+                            if let Ok(ft) = entry.file_type().await {
+                                if ft.is_dir() {
+                                    stack.push(entry.path());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let working_dir = self.working_dir.clone();
+                // Innermost first
+                for path in to_remove.into_iter().rev() {
+                    let child_name = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    let path_str = path.to_string_lossy().to_string();
+                    let cwd = working_dir.clone();
+
+                    let res = retry_teardown("reclaim_worktree", &child_name, || {
+                        let path_str = path_str.clone();
+                        let cwd = cwd.clone();
+                        async move {
+                            // SAFE: `git worktree remove --force` removes only the working directory + admin entry;
+                            // it does NOT delete the branch ref, so a reviewer's committed fixup on its branch survives.
+                            let out = tokio::process::Command::new("git")
+                                .current_dir(&cwd)
+                                .args(["worktree", "remove", "--force", &path_str])
+                                .output()
+                                .await
+                                .map_err(|e| SpawnError::Failed {
+                                    op: "git_worktree_remove",
+                                    child: None,
+                                    detail: e.to_string(),
+                                })?;
+                            if !out.status.success() {
+                                return Err(SpawnError::Failed {
+                                    op: "git_worktree_remove",
+                                    child: None,
+                                    detail: String::from_utf8_lossy(&out.stderr).to_string(),
+                                });
+                            }
+                            Ok(())
+                        }
+                    })
+                    .await;
+
+                    if let Err(e) = res {
+                        if path == base_path {
+                            return Err(SpawnError::Failed {
+                                op: "reclaim_worktree",
+                                child: Some(child.clone()),
+                                detail: e.to_string(),
+                            });
+                        } else {
+                            tracing::warn!("nested reclaim failed: {}", e);
+                        }
+                    }
+                }
+
+                Ok(())
             }
             ChildKind::Inline => Ok(()),
         }
@@ -803,5 +863,50 @@ mod tests {
         assert!(s.contains("run-42"));
         assert!(s.contains("pane-317.jsonl"));
     }
-}
 
+    #[tokio::test]
+    async fn test_retry_teardown_success_on_first_try() {
+        let mut calls = 0;
+        let res: Result<u32, &str> = retry_teardown("test", "child", || {
+            calls += 1;
+            async move { Ok(42) }
+        })
+        .await;
+
+        assert_eq!(res.unwrap(), 42);
+        assert_eq!(calls, 1);
+    }
+
+    #[tokio::test]
+    async fn test_retry_teardown_success_on_retry() {
+        let mut calls = 0;
+        let res: Result<u32, &str> = retry_teardown("test", "child", || {
+            calls += 1;
+            async move {
+                if calls < 2 {
+                    Err("transient")
+                } else {
+                    Ok(42)
+                }
+            }
+        })
+        .await;
+
+        assert_eq!(res.unwrap(), 42);
+        assert_eq!(calls, 2);
+    }
+
+    #[tokio::test]
+    async fn test_retry_teardown_failure_after_max_attempts() {
+        let mut calls = 0;
+        let res: Result<u32, &str> = retry_teardown("test", "child", || {
+            calls += 1;
+            async move { Err("persistent") }
+        })
+        .await;
+
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), "persistent");
+        assert_eq!(calls, MAX_TEARDOWN_ATTEMPTS as usize);
+    }
+}
