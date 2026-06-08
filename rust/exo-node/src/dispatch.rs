@@ -19,7 +19,7 @@ use exo_caps::{
     SyntheticName, Tmux,
 };
 use exo_framework::Exomonad;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::bootstrap::NodeContext;
 use crate::error::{NodeError, NodeResult};
@@ -54,23 +54,36 @@ pub async fn dispatch<D: Exomonad>(
         LastHop::TeamsInbox { team, to } => {
             info!(outcome = "teams_inbox", team = %team, to = %to, "dispatching via Teams inbox");
             let persona_str = render_persona(&entry.from);
-            exo_scry::inbox::send_message(
+            match exo_scry::inbox::send_message(
                 &team,
                 &to,
                 &persona_str,
                 entry.msg.text.as_str(),
                 entry.msg.summary.as_str(),
-            )
-            .map_err(|e| NodeError::Scry(e.to_string()))?;
-            Ok(())
+            ) {
+                Ok(_) => {
+                    info!("dispatch via Teams inbox OK");
+                    Ok(())
+                }
+                Err(e) => {
+                    error!("FAILED to dispatch via Teams inbox: {e}");
+                    Err(NodeError::Scry(e.to_string()))
+                }
+            }
         }
         LastHop::TmuxPaste => {
             info!(outcome = "tmux_paste", "dispatching via tmux paste");
             let rendered = render_entry(entry);
-            Tmux::paste(&*ctx.runtime, &ctx.own_pane, &rendered)
-                .await
-                .map_err(|e| NodeError::Scry(format!("Tmux paste failed: {}", e)))?;
-            Ok(())
+            match Tmux::paste(&*ctx.runtime, &ctx.own_pane, &rendered).await {
+                Ok(()) => {
+                    info!("dispatch via tmux paste OK");
+                    Ok(())
+                }
+                Err(e) => {
+                    error!("FAILED to dispatch via tmux paste: {e}");
+                    Err(NodeError::Scry(format!("Tmux paste failed: {}", e)))
+                }
+            }
         }
     }
 }

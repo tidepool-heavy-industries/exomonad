@@ -29,6 +29,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use exo_caps::{Addressee, Bus, BusError, InboxPath, IngestionEntry, Message, Persona, SpawnError};
 use tokio::io::AsyncWriteExt;
+use tracing::{error, info};
 
 impl Runtime {
     /// Resolve a policy-facing [`Addressee`] to the concrete inbox file to append to.
@@ -67,6 +68,7 @@ impl Bus for Runtime {
             self.mark_child_busy(name);
         }
 
+        let summary = msg.summary.as_str().to_string();
         let entry = IngestionEntry {
             v: 1,
             ts: Utc::now(),
@@ -97,11 +99,15 @@ impl Bus for Runtime {
             .open(path)
             .await?;
 
-        file.write_all(line.as_bytes()).await?;
+        if let Err(e) = file.write_all(line.as_bytes()).await {
+            error!(to = ?to, summary = %summary, "Bus::deliver FAILED: {e}");
+            return Err(e.into());
+        }
         // tokio's File buffers and does NOT flush on drop — without this the line is lost.
         // This is a kernel-buffer flush, not fsync: the bytes reach the page cache (surviving
         // a process crash), matching the "no fsync" durability level.
         file.flush().await?;
+        info!(to = ?to, summary = %summary, "Bus::deliver OK");
         Ok(())
     }
 }
