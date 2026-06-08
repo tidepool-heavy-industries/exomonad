@@ -5,7 +5,7 @@
 //! ([`deliver_domain`]); the submitter's *sidecar* acts on it (approve → auto-escalate `[READY]`;
 //! deny/changes → wake the LLM). The reviewer then exits.
 
-use crate::review::ReviewSystem;
+use crate::review::{Finding, ReviewSystem, Severity};
 use exo_caps::{deliver_domain, Addressee, Branch, Bus, CapError, CapResult, Kv};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -13,33 +13,18 @@ use serde_json::json;
 
 use exo_framework::{ok_json, parse, schema_json, Tool, ToolOutput};
 
-/// The reviewer's decision.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum Decision {
-    /// The branch meets the bar — the submitter may escalate.
-    Approve,
-    /// The branch does not meet the bar — `message` explains what to fix.
-    Deny,
-    /// You committed improvements to your OWN branch — the submitter should merge `changes_branch`.
-    Changes,
-}
-
 /// Arguments for `verdict`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct VerdictArgs {
-    /// approve / deny / changes.
-    pub decision: Decision,
     /// The branch you reviewed (as given in your review task).
     pub branch: String,
     /// The commit sha you reviewed (as given in your review task).
     pub sha: String,
-    /// Feedback for the submitter (required for deny / changes).
+    /// A high-level summary of your review.
+    pub summary: String,
+    /// A structured list of findings. Any Severity::Error will block the merge.
     #[serde(default)]
-    pub message: String,
-    /// For `changes`: your own branch carrying the committed counter-proposal.
-    #[serde(default)]
-    pub changes_branch: Option<String>,
+    pub findings: Vec<Finding>,
 }
 
 /// The `verdict` tool.
@@ -47,56 +32,36 @@ pub struct Verdict;
 
 impl Verdict {
     pub async fn run<C: Bus + Kv>(ctx: &C, args: VerdictArgs) -> CapResult<ToolOutput> {
+        if args.summary.trim().is_empty() {
+            return Err(CapError::invalid(
+                "verdict",
+                "summary must not be empty",
+            ));
+        }
+
+        for finding in &args.findings {
+            if finding.severity == Severity::Error && finding.body.trim().is_empty() {
+                return Err(CapError::invalid(
+                    "verdict",
+                    format!("Error-severity finding for file {} must have a non-empty body", finding.file),
+                ));
+            }
+        }
+
         let branch = Branch::new(args.branch.clone())?;
-        let system = match args.decision {
-            Decision::Approve => ReviewSystem::ReviewApproved {
-                branch,
-                sha: args.sha.clone(),
-            },
-            Decision::Deny => {
-                if args.message.trim().is_empty() {
-                    return Err(CapError::invalid(
-                        "verdict",
-                        "decision=deny requires a non-empty message explaining what to fix",
-                    ));
-                }
-                ReviewSystem::ReviewDenied {
-                    branch,
-                    sha: args.sha.clone(),
-                    message: args.message.clone(),
-                }
-            }
-            Decision::Changes => {
-                if args.message.trim().is_empty() {
-                    return Err(CapError::invalid(
-                        "verdict",
-                        "decision=changes requires a non-empty message describing the change",
-                    ));
-                }
-                let changes_branch = match args.changes_branch.clone() {
-                    Some(b) => Branch::new(b)?,
-                    None => {
-                        return Err(CapError::invalid(
-                            "verdict",
-                            "decision=changes requires changes_branch",
-                        ))
-                    }
-                };
-                ReviewSystem::ReviewChanges {
-                    branch,
-                    sha: args.sha.clone(),
-                    changes_branch,
-                    message: args.message.clone(),
-                }
-            }
+        let system = ReviewSystem::Reviewed {
+            branch,
+            sha: args.sha.clone(),
+            summary: args.summary.clone(),
+            findings: args.findings.clone(),
         };
 
-        // A short human-readable rendering rides text/summary (used in logs, and shown to the
-        // submitter's LLM when the sidecar delivers a deny/changes); the typed payload is erased
-        // into the domain wire by `deliver_domain`.
-        let summary = format!("[VERDICT] {} {}", verb(&system), args.branch);
-        let text = render(&system, &args);
-        deliver_domain(ctx, Addressee::Parent, &summary, &text, &system).await?;
+        let blocked = args.findings.iter().any(|f| f.severity.blocks());
+        let outcome_label = if blocked { "CHANGES REQUESTED" } else { "APPROVED" };
+        let verdict_summary = format!("[VERDICT] {} {}", outcome_label, args.branch);
+        let text = crate::review::render_findings(&args.summary, &args.findings);
+
+        deliver_domain(ctx, Addressee::Parent, &verdict_summary, &text, &system).await?;
 
         // Record that a verdict was produced this turn so the reviewer's stop hook stays silent
         // (the verdict is the done-signal). Best-effort — a kv failure at worst causes a spurious
@@ -104,50 +69,9 @@ impl Verdict {
         let _ = ctx.set("verdict_produced", "true").await;
 
         Ok(ToolOutput::with_data(
-            "verdict delivered to parent".to_string(),
-            json!({ "branch": args.branch, "sha": args.sha }),
+            format!("verdict delivered to parent: {}", outcome_label),
+            json!({ "branch": args.branch, "sha": args.sha, "blocked": blocked }),
         ))
-    }
-}
-
-fn verb(s: &ReviewSystem) -> &'static str {
-    match s {
-        ReviewSystem::ReviewApproved { .. } => "approve",
-        ReviewSystem::ReviewDenied { .. } => "deny",
-        ReviewSystem::ReviewChanges { .. } => "changes",
-        // The verdict tool only ever builds the three decisions above; ReviewAborted is emitted by
-        // the reviewer's stop hook, never here.
-        ReviewSystem::ReviewAborted { .. } => unreachable!("verdict never produces ReviewAborted"),
-    }
-}
-
-fn render(s: &ReviewSystem, args: &VerdictArgs) -> String {
-    match s {
-        ReviewSystem::ReviewApproved { branch, sha } => {
-            format!(
-                "[VERDICT approve] branch `{}` @ {} approved.",
-                branch.as_str(),
-                sha
-            )
-        }
-        ReviewSystem::ReviewDenied { branch, .. } => format!(
-            "[VERDICT deny] branch `{}` rejected: {}",
-            branch.as_str(),
-            args.message
-        ),
-        ReviewSystem::ReviewChanges {
-            branch,
-            changes_branch,
-            ..
-        } => format!(
-            "[VERDICT changes] branch `{}` — merge `{}` to incorporate: {}",
-            branch.as_str(),
-            changes_branch.as_str(),
-            args.message
-        ),
-        ReviewSystem::ReviewAborted { .. } => {
-            unreachable!("verdict never produces ReviewAborted")
-        }
     }
 }
 
@@ -158,9 +82,10 @@ impl<R: Bus + Kv + Send + Sync> Tool<R> for Verdict {
     }
     fn description(&self) -> &str {
         "Submit your review verdict on the branch you were spawned to review, then end your turn. \
-         `approve` (meets the bar), `deny` + `message` (what to fix), or `changes` + `changes_branch` \
-         + `message` (you committed a fix to your own branch for the submitter to merge). Pass the \
-         `branch` and `sha` from your review task."
+         Provide a high-level `summary` and a list of structured `findings`. Each finding has a \
+         `file`, `line`, `severity` (error, warning, info, hint), `body`, and optional `suggestion`. \
+         Any `error` severity finding will block the merge and require the submitter to address it. \
+         The decision (approve vs request changes) is derived automatically from your findings."
     }
     fn schema(&self) -> serde_json::Value {
         schema_json(schemars::schema_for!(VerdictArgs))
@@ -176,77 +101,21 @@ mod tests {
     use crate::testing::{Call, MockRuntime};
 
     #[tokio::test]
-    async fn approve_delivers_system_message_to_parent() {
+    async fn approved_delivers_system_message_to_parent() {
         let mock = MockRuntime::default();
         Verdict::run(
             &mock,
             VerdictArgs {
-                decision: Decision::Approve,
                 branch: "main.dev-0".into(),
                 sha: "abc123".into(),
-                message: String::new(),
-                changes_branch: None,
-            },
-        )
-        .await
-        .unwrap();
-
-        let calls = mock.calls_made();
-        assert!(calls
-            .iter()
-            .any(|c| matches!(c, Call::BusDeliver { to, msg }
-            if *to == Addressee::Parent
-                && matches!(&msg.kind, exo_caps::MessageKind::Domain(p)
-                    if matches!(serde_json::from_str::<ReviewSystem>(&p.0),
-                        Ok(ReviewSystem::ReviewApproved { branch, sha })
-                        if branch.as_str() == "main.dev-0" && sha == "abc123")))));
-    }
-
-    #[tokio::test]
-    async fn changes_requires_changes_branch() {
-        let mock = MockRuntime::default();
-        let res = Verdict::run(
-            &mock,
-            VerdictArgs {
-                decision: Decision::Changes,
-                branch: "main.dev-0".into(),
-                sha: "abc123".into(),
-                message: "fixed the bug".into(),
-                changes_branch: None,
-            },
-        )
-        .await;
-        assert!(res.is_err());
-    }
-
-    #[tokio::test]
-    async fn deny_requires_message() {
-        let mock = MockRuntime::default();
-        let res = Verdict::run(
-            &mock,
-            VerdictArgs {
-                decision: Decision::Deny,
-                branch: "main.dev-0".into(),
-                sha: "abc123".into(),
-                message: "  ".into(), // whitespace only
-                changes_branch: None,
-            },
-        )
-        .await;
-        assert!(res.is_err());
-    }
-
-    #[tokio::test]
-    async fn deny_with_message_delivers() {
-        let mock = MockRuntime::default();
-        Verdict::run(
-            &mock,
-            VerdictArgs {
-                decision: Decision::Deny,
-                branch: "main.dev-0".into(),
-                sha: "abc123".into(),
-                message: "fix it".into(),
-                changes_branch: None,
+                summary: "LGTM".into(),
+                findings: vec![Finding {
+                    file: "src/lib.rs".into(),
+                    line: Some(10),
+                    severity: Severity::Hint,
+                    body: "nit".into(),
+                    suggestion: None,
+                }],
             },
         )
         .await
@@ -257,8 +126,38 @@ mod tests {
             if *to == Addressee::Parent
                 && matches!(&msg.kind, exo_caps::MessageKind::Domain(p)
                     if matches!(serde_json::from_str::<ReviewSystem>(&p.0),
-                        Ok(ReviewSystem::ReviewDenied { branch, sha, message })
-                        if branch.as_str() == "main.dev-0" && sha == "abc123" && message == "fix it")))));
+                        Ok(ReviewSystem::Reviewed { branch, sha, findings, .. })
+                        if branch.as_str() == "main.dev-0" && sha == "abc123" && findings.len() == 1)))));
+    }
+
+    #[tokio::test]
+    async fn blocked_delivers_system_message_to_parent() {
+        let mock = MockRuntime::default();
+        Verdict::run(
+            &mock,
+            VerdictArgs {
+                branch: "main.dev-0".into(),
+                sha: "abc123".into(),
+                summary: "needs work".into(),
+                findings: vec![Finding {
+                    file: "src/lib.rs".into(),
+                    line: Some(10),
+                    severity: Severity::Error,
+                    body: "bug".into(),
+                    suggestion: None,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        let calls = mock.calls_made();
+        assert!(calls.iter().any(|c| matches!(c, Call::BusDeliver { to, msg }
+            if *to == Addressee::Parent
+                && matches!(&msg.kind, exo_caps::MessageKind::Domain(p)
+                    if matches!(serde_json::from_str::<ReviewSystem>(&p.0),
+                        Ok(ReviewSystem::Reviewed { branch, sha, findings, .. })
+                        if branch.as_str() == "main.dev-0" && sha == "abc123" && findings.len() == 1)))));
 
         assert_eq!(
             mock.kv
@@ -271,32 +170,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn changes_success_delivers() {
+    async fn requires_non_empty_summary() {
         let mock = MockRuntime::default();
-        Verdict::run(
+        let res = Verdict::run(
             &mock,
             VerdictArgs {
-                decision: Decision::Changes,
                 branch: "main.dev-0".into(),
                 sha: "abc123".into(),
-                message: "improved".into(),
-                changes_branch: Some("reviewer.patch-1".into()),
+                summary: "  ".into(),
+                findings: vec![],
             },
         )
-        .await
-        .unwrap();
+        .await;
+        assert!(res.is_err());
+    }
 
-        let calls = mock.calls_made();
-        assert!(calls
-            .iter()
-            .any(|c| matches!(c, Call::BusDeliver { to, msg }
-            if *to == Addressee::Parent
-                && matches!(&msg.kind, exo_caps::MessageKind::Domain(p)
-                    if matches!(serde_json::from_str::<ReviewSystem>(&p.0),
-                        Ok(ReviewSystem::ReviewChanges { branch, sha, changes_branch, message })
-                        if branch.as_str() == "main.dev-0"
-                            && sha == "abc123"
-                            && changes_branch.as_str() == "reviewer.patch-1"
-                            && message == "improved")))));
+    #[tokio::test]
+    async fn error_finding_requires_body() {
+        let mock = MockRuntime::default();
+        let res = Verdict::run(
+            &mock,
+            VerdictArgs {
+                branch: "main.dev-0".into(),
+                sha: "abc123".into(),
+                summary: "broken".into(),
+                findings: vec![Finding {
+                    file: "src/lib.rs".into(),
+                    line: Some(10),
+                    severity: Severity::Error,
+                    body: "".into(),
+                    suggestion: None,
+                }],
+            },
+        )
+        .await;
+        assert!(res.is_err());
     }
 }

@@ -219,11 +219,10 @@ impl SubmitBranch {
              you may build / test / experiment freely in your own worktree (changes here never touch \
              the reviewed code). Judge the work against the ACCEPTANCE CRITERIA below and the \
              project's conventions, then call the `verdict` tool with branch=`{branch}`, sha=`{sha}`, \
-             and one of:\n\
-             - approve  (it meets the bar)\n\
-             - deny + message  (what must change)\n\
-             - changes + message + changes_branch=<your own branch>  (you committed a concrete fix \
-             to your own branch for the submitter to merge)\n\n\
+             a high-level `summary`, and a list of structured `findings` (file, line, severity, body, suggestion). \
+             Use the following severity rubric:\n\
+             - error: correctness, security, or missed spec. This BLOCKS the merge.\n\
+             - warning / info / hint: non-blocking nits or suggestions.\n\n\
              Note from the submitter: {note}\n\n\
              ACCEPTANCE CRITERIA\n{acceptance}",
             branch = branch.as_str(),

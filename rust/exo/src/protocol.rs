@@ -108,7 +108,7 @@ Read CLAUDE.md first. Follow the spec exactly — the anti-patterns section is m
 3. Run the VERIFY commands
 4. Commit your changes (`git add <specific files>` — NEVER `git add .` or `git add -A`)
 5. Call `submit_branch` to request review of your branch
-6. If the reviewer returns changes or a denial, address them and re-submit (a new commit gets a fresh review)
+6. If the reviewer returns feedback, address every Error finding, commit your changes, and re-submit (a new commit gets a fresh review). Warning, Info, and Hint findings are optional but recommended.
 7. Use `notify_parent` only to report status or escalate a blocker
 
 ## Boundaries
@@ -140,7 +140,12 @@ You are a one-shot reviewer in your own worktree, branched off the code under re
 
 1. Read `.exo/acceptance.md` (the spec the work was held to) and `git diff` the branch against its fork point.
 2. Judge the change against that bar — correctness first.
-3. Emit exactly ONE `verdict`: approve, deny (with a reason), or changes (with a branch).
-4. Then exit. Do not commit, do not merge, do not spawn.
+3. Emit structured findings via the `verdict` tool with a REQUIRED `summary`.
+   - Severity rubric:
+     - `error`: correctness, security, or missed spec. This BLOCKS the merge.
+     - `warning`/`info`/`hint`: non-blocking nits or suggestions.
+   - Reserve `error` for MUST-change items.
+4. NEVER commit, merge, or create branches. Put concrete fixes in a finding's `suggestion` field.
+5. Then exit.
 
 Invoke the `verdict` tool for real — do not print the call as text."#;

@@ -1,9 +1,9 @@
-use exo::review::ReviewSystem;
+use exo::review::{Finding, ReviewSystem, Severity};
 use exo::roles::ExoRole;
 use exo::tools::merge::MergeArgs;
 use exo::tools::submit::SubmitBranchArgs;
 use exo::tools::tree::TreeArgs;
-use exo::tools::verdict::{Decision, VerdictArgs};
+use exo::tools::verdict::VerdictArgs;
 use exo_caps::Branch;
 use serde_json::json;
 
@@ -37,20 +37,17 @@ fn test_exo_role_roundtrip() {
 fn test_review_system_roundtrip() {
     let branch = Branch::new("main.dev-0".into()).unwrap();
     let variants = [
-        ReviewSystem::ReviewApproved {
+        ReviewSystem::Reviewed {
             branch: branch.clone(),
             sha: "abc".into(),
-        },
-        ReviewSystem::ReviewDenied {
-            branch: branch.clone(),
-            sha: "abc".into(),
-            message: "fix".into(),
-        },
-        ReviewSystem::ReviewChanges {
-            branch: branch.clone(),
-            sha: "abc".into(),
-            changes_branch: Branch::new("rev.patch".into()).unwrap(),
-            message: "fixed".into(),
+            summary: "ok".into(),
+            findings: vec![Finding {
+                file: "f".into(),
+                line: Some(1),
+                severity: Severity::Error,
+                body: "b".into(),
+                suggestion: Some("s".into()),
+            }],
         },
         ReviewSystem::ReviewAborted {
             reason: "timeout".into(),
@@ -64,14 +61,9 @@ fn test_review_system_roundtrip() {
 
 #[test]
 fn test_review_system_wire_pinning() {
-    let approved: ReviewSystem =
-        serde_json::from_str(r#"{"type":"review_approved","branch":"b","sha":"s"}"#).unwrap();
-    assert!(matches!(approved, ReviewSystem::ReviewApproved { .. }));
-
-    let denied: ReviewSystem =
-        serde_json::from_str(r#"{"type":"review_denied","branch":"b","sha":"s","message":"m"}"#)
-            .unwrap();
-    assert!(matches!(denied, ReviewSystem::ReviewDenied { .. }));
+    let reviewed: ReviewSystem =
+        serde_json::from_str(r#"{"type":"reviewed","branch":"b","sha":"s","summary":"ok","findings":[]}"#).unwrap();
+    assert!(matches!(reviewed, ReviewSystem::Reviewed { .. }));
 }
 
 #[test]
@@ -102,17 +94,15 @@ fn test_merge_args_roundtrip() {
 #[test]
 fn test_verdict_args_roundtrip() {
     let args = VerdictArgs {
-        decision: Decision::Approve,
         branch: "b".into(),
         sha: "s".into(),
-        message: "ok".into(),
-        changes_branch: None,
+        summary: "ok".into(),
+        findings: vec![],
     };
     let back = assert_roundtrip(&args);
-    assert!(matches!(back.decision, Decision::Approve));
     assert_eq!(args.branch, back.branch);
     assert_eq!(args.sha, back.sha);
-    assert_eq!(args.message, back.message);
+    assert_eq!(args.summary, back.summary);
 }
 
 #[test]
