@@ -24,3 +24,54 @@ pub fn match_dir_by_inode(root: &Path, inodes: &HashSet<u64>) -> std::io::Result
     }
     Ok(None)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn matches_dir_by_its_real_inode() {
+        let root = std::env::temp_dir().join(format!("exo-scry-pathmap-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        let child = root.join("child_dir");
+        fs::create_dir_all(&child).unwrap();
+
+        let inode = fs::metadata(&child).unwrap().ino();
+        let mut inodes = HashSet::new();
+        inodes.insert(inode);
+
+        let matched = match_dir_by_inode(&root, &inodes).unwrap();
+        assert!(matched.is_some());
+        assert_eq!(matched.unwrap().file_name().unwrap(), "child_dir");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn no_match_returns_none() {
+        let root =
+            std::env::temp_dir().join(format!("exo-scry-pathmap-nomatch-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        let mut inodes = HashSet::new();
+        inodes.insert(999_999_999); // Unlikely inode
+
+        let matched = match_dir_by_inode(&root, &inodes).unwrap();
+        assert!(matched.is_none());
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn missing_root_is_none() {
+        let root = PathBuf::from("/tmp/nonexistent-path-12345");
+        let mut inodes = HashSet::new();
+        inodes.insert(1);
+        let matched = match_dir_by_inode(&root, &inodes).unwrap();
+        assert!(matched.is_none());
+    }
+}

@@ -118,21 +118,6 @@ pub fn self_pid() -> i32 {
     std::process::id() as i32
 }
 
-/// Ground-truth liveness for a tmux-backed member: does its pane still exist and
-/// run a Claude process? This is observed, not claimed — the config's `isActive`
-/// flag goes stale (it stays `true` when a pane is killed without a clean
-/// shutdown). A vanished pane, or a pane with no Claude in it (e.g. a spawn whose
-/// launch command was corrupted), both read as not-live.
-pub fn pane_has_live_claude(pane: &str) -> bool {
-    if pane.is_empty() {
-        return false;
-    }
-    match crate::tmux::pane_pid(pane) {
-        Ok(pid) => find_claude_descendant(pid).is_ok(),
-        Err(_) => false,
-    }
-}
-
 /// The working directory of a process (`/proc/{pid}/cwd`). On macOS the portable
 /// equivalent is `proc_pidinfo(PROC_PIDVNODEPATHINFO)`.
 pub fn process_cwd(pid: i32) -> Result<std::path::PathBuf> {

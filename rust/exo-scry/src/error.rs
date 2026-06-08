@@ -86,3 +86,62 @@ impl ScryError {
 }
 
 pub type Result<T> = std::result::Result<T, ScryError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn from_proc_maps_notfound_to_process_gone() {
+        let e = procfs::ProcError::NotFound(None);
+        let scry_e = ScryError::from_proc(7, e);
+        match scry_e {
+            ScryError::ProcessGone(pid) => assert_eq!(pid, 7),
+            _ => panic!("Expected ProcessGone, got {:?}", scry_e),
+        }
+    }
+
+    #[test]
+    fn from_proc_maps_permission_denied() {
+        let e = procfs::ProcError::PermissionDenied(None);
+        let scry_e = ScryError::from_proc(7, e);
+        match scry_e {
+            ScryError::PermissionDenied(pid) => assert_eq!(pid, 7),
+            _ => panic!("Expected PermissionDenied, got {:?}", scry_e),
+        }
+    }
+
+    #[test]
+    fn from_proc_other_is_proc_unavailable() {
+        // Incomplete exists in procfs 0.17 and is neither NotFound, PermissionDenied, nor Io
+        let e = procfs::ProcError::Incomplete(None);
+        let scry_e = ScryError::from_proc(7, e);
+        match scry_e {
+            ScryError::ProcUnavailable(_) => {}
+            _ => panic!("Expected ProcUnavailable, got {:?}", scry_e),
+        }
+    }
+
+    #[test]
+    fn display_messages() {
+        assert!(ScryError::ProcessGone(9).to_string().contains("9"));
+        assert!(ScryError::ProcessGone(9).to_string().contains("gone"));
+
+        let e = ScryError::NoClaudeProcess {
+            start: 3,
+            direction: "ancestry",
+            walked: 5,
+        };
+        assert!(e.to_string().contains("ancestry"));
+        assert!(e.to_string().contains("5"));
+
+        let e = ScryError::AmbiguousCwd {
+            cwd: PathBuf::from("/w"),
+            pids: vec![1, 2],
+        };
+        let s = e.to_string();
+        assert!(s.contains("2"));
+        assert!(s.contains("/w"));
+    }
+}

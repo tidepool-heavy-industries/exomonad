@@ -114,3 +114,83 @@ impl Drop for FileLock {
         let _ = std::fs::remove_file(&self.0);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inbox_message_serde_roundtrip() {
+        let msg = InboxMessage {
+            from: "alice".into(),
+            text: "hello".into(),
+            summary: "greeting".into(),
+            timestamp: "2023-01-01T00:00:00Z".into(),
+            read: true,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: InboxMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.from, msg.from);
+        assert_eq!(back.text, msg.text);
+        assert_eq!(back.summary, msg.summary);
+        assert_eq!(back.timestamp, msg.timestamp);
+        assert_eq!(back.read, msg.read);
+    }
+
+    #[test]
+    fn inbox_message_defaults_on_missing_fields() {
+        let json = r#"{"from":"a","text":"hi"}"#;
+        let msg: InboxMessage = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.from, "a");
+        assert_eq!(msg.text, "hi");
+        assert_eq!(msg.summary, "");
+        assert_eq!(msg.timestamp, "");
+        assert_eq!(msg.read, false);
+    }
+
+    #[test]
+    fn inbox_roundtrip_under_temp_home() {
+        let temp = std::env::temp_dir().join(format!("exo-scry-inbox-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+
+        // Save original HOME to restore later
+        let old_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", &temp);
+
+        // Case 3: read_inbox missing file is empty
+        let msgs = read_inbox("team1", "member1").unwrap();
+        assert!(msgs.is_empty());
+
+        // Case 4: send_message then read_inbox
+        let sent = send_message("team1", "member1", "from-me", "hello world", "sum").unwrap();
+        assert_eq!(sent.from, "from-me");
+        assert_eq!(sent.text, "hello world");
+        assert_eq!(sent.summary, "sum");
+        assert!(!sent.timestamp.is_empty());
+        assert!(!sent.read);
+
+        let msgs = read_inbox("team1", "member1").unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].from, "from-me");
+        assert_eq!(msgs[0].text, "hello world");
+        assert_eq!(msgs[0].summary, "sum");
+        assert!(!msgs[0].timestamp.is_empty());
+        assert!(!msgs[0].read);
+
+        // Second message (append)
+        send_message("team1", "member1", "someone", "else", "another").unwrap();
+        let msgs = read_inbox("team1", "member1").unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(msgs[1].from, "someone");
+
+        // Restore HOME
+        if let Some(h) = old_home {
+            std::env::set_var("HOME", h);
+        } else {
+            std::env::remove_var("HOME");
+        }
+
+        std::fs::remove_dir_all(&temp).unwrap();
+    }
+}
