@@ -174,7 +174,10 @@ impl RoleKind for TestRole {
         &[TestRole::Lead, TestRole::Reviewer]
     }
     fn agent_type(&self) -> AgentType {
-        AgentType::Claude
+        match self {
+            TestRole::Lead => AgentType::Claude,
+            TestRole::Reviewer => AgentType::Gemini,
+        }
     }
     fn role_str(&self) -> &'static str {
         match self {
@@ -355,6 +358,9 @@ fn echo_tool_dispatches_through_json_edge() {
 fn role_protocol_default_is_empty_and_override_nonempty() {
     assert_eq!(TestRole::Lead.protocol(), "");
     assert_eq!(TestRole::Reviewer.protocol(), "review protocol");
+
+    assert_eq!(TestRole::Lead.agent_type(), AgentType::Claude);
+    assert_eq!(TestRole::Reviewer.agent_type(), AgentType::Gemini);
 }
 
 struct MockCtx {
