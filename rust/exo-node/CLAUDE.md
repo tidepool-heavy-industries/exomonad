@@ -23,6 +23,15 @@ Assembles `exo-runtime` (all caps) + a domain `D: Exomonad` (the domain's tools/
 
 `run_node` spawns `inbound`, `hooksock`, and `teamout` as background tasks and awaits `outbound::serve`; when serve returns (agent gone) it aborts all three. A background loop erroring is logged, not fatal.
 
+## Persistent Logging
+
+The sidecar initializes a persistent file subscriber at startup (in the binary composition root). Logs are written to the **project root** (the main repo's `.exo/` dir, NOT the worktree's) so they survive worktree teardown:
+
+- **Path:** `<project-root>/.exo/logs/sidecar/<run_id>/<node_name>.log`
+- **Configuration:** Respects `RUST_LOG` (default: `info`).
+- **Mechanism:** Uses `tracing-subscriber` with a non-blocking `tracing-appender`.
+- **Instrumentation:** The inbound loop (`Domain`/`Lifecycle` arms), `handle_system` outcomes, and delivery sites (`deliver_parent`/`deliver_to_self`) are instrumented with detailed success/failure logs.
+
 ## The inbound → dispatch path
 
 `inbound::watch` resumes from a `pane-N.cursor` byte-offset (missing cursor → start at EOF, no history replay), reads only up to the last `\n` (torn lines re-read once complete), advances the cursor **after** successful delivery (at-least-once; a duplicate line is benign), and routes by `kind`:

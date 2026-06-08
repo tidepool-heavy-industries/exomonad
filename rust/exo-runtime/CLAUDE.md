@@ -12,7 +12,7 @@ The single concrete `Runtime` struct that implements **every** `exo-caps` trait.
 |------|-----------|
 | `runtime` | The `Runtime` struct: birth identity (`node_path`, `branch`, `own_pane`) + ambient context (`working_dir`, `parent_inbox`, `run_id`, `tmux_session`). Identity baked in at construction — always present, no `Option`, no task-locals. |
 | `git` | `impl Git` — `tokio::process` git. `merge` = `git merge --no-edit <branch>` (the local fold). |
-| `bus` | `impl Bus` — **the genuinely-new piece.** Append a line to the target's jsonl inbox; resolve `Addressee`→`InboxPath` (Parent = papers pointer; child = fold `children.jsonl`); stamp the envelope; assert line ≤ `PIPE_BUF` (4096) and **never spill**; append + flush, no fsync. |
+| `bus` | `impl Bus` — **the genuinely-new piece.** Append a line to the target's jsonl inbox; resolve `Addressee`→`InboxPath` (Parent = papers pointer; child = fold `children.jsonl`); stamp the envelope; assert line ≤ `PIPE_BUF` (4096) and **never spill**; append + flush, no fsync. **Instrumented with detailed success/failure logs.** |
 | `spawner` | `impl Spawner` — the recursion (birth + teardown). See below. |
 | `tmux` | `impl Tmux` — delegates to exomonad-shared `TmuxIpc::inject_input` (hardened buffer-paste). |
 | `liveness` | `impl ChildLiveness` — the idle gate's read: any *direct* child still working? Combines the in-memory busy-bit map (mutated at birth in `spawner`, on child-deliver in `bus`, on `ChildIdle` in `exo-node`) with a tmux pane probe (`topology::live_panes`); a dead pane forces idle. Pure truth table split out + unit-tested. |
