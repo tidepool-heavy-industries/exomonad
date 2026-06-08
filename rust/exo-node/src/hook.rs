@@ -16,7 +16,7 @@ use std::path::Path;
 
 use crate::bootstrap::{bootstrap, NodeContext};
 use crate::error::NodeResult;
-use exo_caps::{AgentType, RoleKind};
+use exo_caps::RoleKind;
 use exo_framework::{Exomonad, HookDecision, HookInput, StopDecision};
 use exo_runtime::Runtime;
 use serde_json::json;
@@ -93,22 +93,6 @@ fn identity_context<D: Exomonad>(ctx: &NodeContext<D>) -> String {
     )
 }
 
-/// Resolve a role's session-start protocol prose: the optional on-disk override
-/// (`{working_dir}/.exo/roles/devswarm/context/{role}.md`) if it exists, else the domain's baked-in
-/// const (`D::Role::protocol`). The compiled const is the source of truth; the file just overrides
-/// it during prompt-tuning. Returns empty when the role defines no protocol (the `RoleKind`
-/// default) and no override file is present.
-fn role_protocol<D: Exomonad>(ctx: &NodeContext<D>) -> String {
-    let override_path = ctx
-        .runtime
-        .working_dir()
-        .join(format!(".exo/roles/devswarm/context/{}.md", ctx.kind.role_str()));
-    match std::fs::read_to_string(&override_path) {
-        Ok(s) => s,
-        Err(_) => ctx.kind.protocol().to_string(),
-    }
-}
-
 async fn run_hook<D: Exomonad>(
     ctx: NodeContext<D>,
     rd: exo_framework::RoleDef<Runtime>,
@@ -156,21 +140,10 @@ async fn run_hook<D: Exomonad>(
             let policy_output = (rd.session_start)(&ctx.runtime).await;
             let id_ctx = identity_context(&ctx);
 
-            let mut combined_context = match policy_output.additional_context {
+            let combined_context = match policy_output.additional_context {
                 Some(p_ctx) => format!("{}\n\n{}", id_ctx, p_ctx),
                 None => id_ctx,
             };
-
-            // Claude nodes receive their role protocol appended to the session-start context
-            // (after the identity + team lines). Gemini nodes get the same prose via their
-            // settings.json `context.fileName` instead (written at spawn), so they are skipped here.
-            if ctx.kind.agent_type() == AgentType::Claude {
-                let protocol = role_protocol(&ctx);
-                if !protocol.trim().is_empty() {
-                    combined_context.push_str("\n\n");
-                    combined_context.push_str(protocol.trim_end());
-                }
-            }
 
             let output = json!({
                 "hookSpecificOutput": {
@@ -317,10 +290,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_run_hook_session_start_appends_claude_protocol() {
-        // A Claude node (Tl) gets its role protocol appended to the session-start additionalContext,
-        // after the identity + team lines (no override file exists at the mock working_dir, so the
-        // baked const wins).
+    async fn test_run_hook_session_start_no_longer_appends_claude_protocol() {
+        // A Claude node (Tl) no longer gets its role protocol appended to the session-start additionalContext
+        // in the hook; it now receives it via the launch-time system prompt.
         let ctx = mock_ctx(TestRole::Tl, vec!["root", "tl-node"], "main", true);
         let rd = crate::test_support::test_role_def(TestRole::Tl);
 
@@ -331,12 +303,9 @@ mod tests {
         let add_ctx = val["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap();
-        // Identity first, protocol appended after.
+        
         assert!(add_ctx.contains("tl-node"));
-        assert!(add_ctx.contains("TEST-TL-PROTOCOL-MARKER"));
-        let id_pos = add_ctx.find("tl-node").unwrap();
-        let proto_pos = add_ctx.find("TEST-TL-PROTOCOL-MARKER").unwrap();
-        assert!(proto_pos > id_pos, "protocol must follow identity: {add_ctx}");
+        assert!(!add_ctx.contains("TEST-TL-PROTOCOL-MARKER"), "Protocol must NOT be appended in the hook: {add_ctx}");
     }
 
     fn mock_stop_block<'a>(_: &'a exo_runtime::Runtime) -> BoxFuture<'a, StopDecision> {

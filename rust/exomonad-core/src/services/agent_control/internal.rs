@@ -398,6 +398,7 @@ impl<
         cwd: &Path,
         claude_flags: Option<&ClaudeSpawnFlags>,
         yolo: bool,
+        append_system_prompt: Option<&str>,
     ) -> String {
         // Classic mode always wraps in nix-develop when a flake is present.
         super::launch::build_agent_command(
@@ -409,6 +410,7 @@ impl<
             claude_flags,
             yolo,
             true,
+            append_system_prompt,
         )
     }
 
@@ -444,6 +446,7 @@ impl<
             cwd,
             claude_flags,
             self.yolo,
+            None,
         );
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         let tmux = self.tmux()?;
@@ -547,6 +550,7 @@ impl<
             cwd,
             claude_flags,
             self.yolo,
+            None,
         );
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
         let tmux = self.tmux()?;

@@ -36,7 +36,7 @@ race guard** — do not reorder:
 2. `Tmux::new_window`/`new_pane` opens a **holding shell** (NOT the agent) → captures `%N`.
 3. **Append `ChildRecord::Spawned{pane:%N}` to `children.jsonl`.** ← THE GUARD: the record precedes the *agent* launch, so a crash leaves at most a bare shell, never an untracked agent.
 4. Write the child's `node.json` papers (`parent_inbox` = my own inbox).
-5. Write per-runtime MCP config, then `Tmux::paste` the launch command (via exomonad-shared's `build_agent_command` + `write_prompt_file` — prompt goes in a file, never inline) into the holding shell.
+5. Write per-runtime MCP config, then `Tmux::paste` the launch command (via exomonad-shared's `build_agent_command` + `write_prompt_file` — prompt goes in a file, never inline) into the holding shell. The role protocol (override-or-const) is passed via `--append-system-prompt` for Claude; for Gemini, the `settings.json` context file is its system-prompt equivalent.
 
 **Do not collapse steps 2+5** into a one-shot `new_pane(cwd, launch_cmd)` — that reopens the orphan window the two-phase split closes. Claude children get `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` so the Bus→Teams last hop can deliver native `<teammate-message>`s; Gemini children discover the sidecar via `GEMINI_CLI_SYSTEM_SETTINGS_PATH`.
 
