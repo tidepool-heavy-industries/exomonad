@@ -384,20 +384,13 @@ pub enum MessageKind {
 }
 
 /// A domain system payload erased to raw JSON on the bus (see [`MessageKind::Domain`]). A newtype
-/// over `Box<RawValue>` so it round-trips serde **transparently** (the raw JSON is spliced inline,
-/// not re-encoded) while still giving [`MessageKind`] its `PartialEq`/`Eq` derives — `RawValue`
-/// itself has neither, so equality compares the canonical raw string.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// over `String` of the serialized JSON. A `String` is used (not `RawValue`) because `RawValue`
+/// cannot be deserialized through `#[serde(flatten)]`'s buffered intermediate `Content` map,
+/// which silently broke `Domain`-message parsing. Surrounding `MessageKind` still derives
+/// `PartialEq`/`Eq` because `String` implements them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct DomainPayload(pub Box<serde_json::value::RawValue>);
-
-impl PartialEq for DomainPayload {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.get() == other.0.get()
-    }
-}
-
-impl Eq for DomainPayload {}
+pub struct DomainPayload(pub String);
 
 /// A directed control **message**. Lifecycle **records** (`AgentSpawned`/`AgentStarted`)
 /// live in the json record log, not here.
@@ -507,16 +500,16 @@ mod tests {
             kind: String,
             n: u32,
         }
-        let raw = serde_json::value::to_raw_value(&S {
+        let json = serde_json::to_string(&S {
             kind: "demo".into(),
             n: 7,
         })
         .unwrap();
-        let kind = MessageKind::Domain(DomainPayload(raw));
-        let json = serde_json::to_string(&kind).unwrap();
-        // The domain payload is spliced inline under the `domain` tag, not re-encoded as a string.
-        assert!(json.contains(r#""domain":{"kind":"demo","n":7}"#));
-        let back: MessageKind = serde_json::from_str(&json).unwrap();
+        let kind = MessageKind::Domain(DomainPayload(json));
+        let serialized = serde_json::to_string(&kind).unwrap();
+        // The domain payload is now a JSON string literal (escaped) because String is used,
+        // which survives flatten's buffering.
+        let back: MessageKind = serde_json::from_str(&serialized).unwrap();
         assert_eq!(kind, back);
     }
 

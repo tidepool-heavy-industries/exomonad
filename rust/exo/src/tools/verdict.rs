@@ -197,7 +197,7 @@ mod tests {
             .any(|c| matches!(c, Call::BusDeliver { to, msg }
             if *to == Addressee::Parent
                 && matches!(&msg.kind, exo_caps::MessageKind::Domain(p)
-                    if matches!(serde_json::from_str::<ReviewSystem>(p.0.get()),
+                    if matches!(serde_json::from_str::<ReviewSystem>(&p.0),
                         Ok(ReviewSystem::ReviewApproved { branch, sha })
                         if branch.as_str() == "main.dev-0" && sha == "abc123")))));
     }
@@ -256,7 +256,7 @@ mod tests {
         assert!(calls.iter().any(|c| matches!(c, Call::BusDeliver { to, msg }
             if *to == Addressee::Parent
                 && matches!(&msg.kind, exo_caps::MessageKind::Domain(p)
-                    if matches!(serde_json::from_str::<ReviewSystem>(p.0.get()),
+                    if matches!(serde_json::from_str::<ReviewSystem>(&p.0),
                         Ok(ReviewSystem::ReviewDenied { branch, sha, message })
                         if branch.as_str() == "main.dev-0" && sha == "abc123" && message == "fix it")))));
 
@@ -292,7 +292,7 @@ mod tests {
             .any(|c| matches!(c, Call::BusDeliver { to, msg }
             if *to == Addressee::Parent
                 && matches!(&msg.kind, exo_caps::MessageKind::Domain(p)
-                    if matches!(serde_json::from_str::<ReviewSystem>(p.0.get()),
+                    if matches!(serde_json::from_str::<ReviewSystem>(&p.0),
                         Ok(ReviewSystem::ReviewChanges { branch, sha, changes_branch, message })
                         if branch.as_str() == "main.dev-0"
                             && sha == "abc123"

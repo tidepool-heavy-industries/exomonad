@@ -97,14 +97,14 @@ pub async fn deliver_domain<C: Bus + ?Sized, S: DomainSystem>(
     text: &str,
     system: &S,
 ) -> CapResult<()> {
-    let raw = serde_json::value::to_raw_value(system).map_err(|e| CapError::Json {
+    let json = serde_json::to_string(system).map_err(|e| CapError::Json {
         context: "deliver_domain: encode domain system payload".into(),
         source: e,
     })?;
     let msg = Message {
         text: MessageBody::new(text.to_string())?,
         summary: Summary::new(summary.to_string())?,
-        kind: MessageKind::Domain(DomainPayload(raw)),
+        kind: MessageKind::Domain(DomainPayload(json)),
     };
     bus.deliver(to, msg).await?;
     Ok(())

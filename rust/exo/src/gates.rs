@@ -209,7 +209,7 @@ mod tests {
                 Call::BusDeliver { to: Addressee::Parent, msg }
                     if matches!(&msg.kind, MessageKind::Domain(p)
                         if matches!(
-                            serde_json::from_str::<ReviewSystem>(p.0.get()),
+                            serde_json::from_str::<ReviewSystem>(&p.0),
                             Ok(ReviewSystem::ReviewAborted { .. })
                         ))
             )

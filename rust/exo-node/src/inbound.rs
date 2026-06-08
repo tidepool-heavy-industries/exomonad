@@ -295,12 +295,12 @@ impl<D: Exomonad> RealHandler<D> {
     /// An undeserializable payload is logged + skipped (tolerant, like a malformed bus line).
     #[tracing::instrument(skip(self, payload), fields(node = %self.ctx.runtime.name().as_str(), from = ?from, kind = "domain"))]
     async fn handle_domain(&self, from: &Persona, payload: &DomainPayload) -> NodeResult<()> {
-        let system: D::System = match serde_json::from_str(payload.0.get()) {
+        let system: D::System = match serde_json::from_str(&payload.0) {
             Ok(v) => v,
             Err(e) => {
                 warn!(
                     "FAILED to deserialize domain payload: {e}. Raw payload: {}",
-                    payload.0.get()
+                    payload.0
                 );
                 return Ok(());
             }
