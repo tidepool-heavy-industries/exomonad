@@ -71,7 +71,7 @@ pub enum Call {
 
 /// Canned return values + a recording log. Interior-mutable so the cap methods take `&self`
 /// (as the traits require) while still recording. Fields are `pub` so a test can set up the
-/// exact scenario (e.g. `mock.pr_for_branch = Some(7)` then assert `stop` blocks).
+/// exact scenario (e.g. `mock.is_clean = false` then assert `stop` blocks).
 pub struct MockRuntime {
     pub calls: Mutex<Vec<Call>>,
     pub kv: Mutex<HashMap<String, String>>,

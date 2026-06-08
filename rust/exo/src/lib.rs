@@ -6,15 +6,15 @@
 //! gates — written **generic over the [`exo_caps`] traits** (no `dyn Caps`), so least-privilege
 //! is compiler-checked and every tool is unit-testable against mock caps with zero IO.
 //!
-//! The engine never depends on this crate. The binary builds a
-//! [`RoleRegistry`](exo_framework::RoleRegistry) from [`roster`] and injects it into `exo-node`;
-//! that injection is the whole point of the framework/domain split.
+//! The engine never depends on this crate. The binary's bin-only `domain.rs` defines `ExoDomain`
+//! (the [`Exomonad`] impl) and monomorphizes the engine once as `run_node::<ExoDomain>`;
+//! that seam is the whole point of the framework/domain split.
 //!
 //! ## Shape
 //! - [`tools`] — one module per MCP tool (a type + `Args` + generic-over-caps `run` + adapter).
 //! - [`gates`] — the concrete hook bodies (`pre_tool_use` nudge, `stop` clean-gate, the per-role
 //!   `stop` variants, `session_start`).
-//! - [`roles`] — [`role_def`](roles::role_def) (the `NodeKind` table the domain's [`Exomonad`]
+//! - [`roles`] — [`role_def`](roles::role_def) (the `ExoRole` table the domain's [`Exomonad`]
 //!   impl resolves through).
 //! - [`review`] — the domain's inter-node behavior: [`ReviewSystem`](review::ReviewSystem)
 //!   (`D::System`) + the relocated review-gate logic ([`handle_review_system`](review::handle_review_system)).
