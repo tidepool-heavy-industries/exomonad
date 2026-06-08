@@ -10,6 +10,7 @@
 //! ```
 
 mod config;
+mod doctor;
 mod domain;
 mod hook;
 mod init;
@@ -66,6 +67,17 @@ enum Commands {
         #[arg(long)]
         papers: std::path::PathBuf,
     },
+
+    /// Health-check + cleanup: audit .exo/worktrees and reclaim merged ones.
+    Doctor {
+        /// Actually reclaim merged worktrees (dry-run by default).
+        #[arg(long)]
+        fix: bool,
+
+        /// Also reclaim UNMERGED worktrees (dangerous, use with caution).
+        #[arg(long)]
+        include_unmerged: bool,
+    },
 }
 
 #[tokio::main]
@@ -115,6 +127,11 @@ async fn main() -> anyhow::Result<()> {
                 hook::run(event, papers).await
             }
         }
+
+        Commands::Doctor {
+            fix,
+            include_unmerged,
+        } => doctor::run(fix, include_unmerged).await,
     }
 }
 

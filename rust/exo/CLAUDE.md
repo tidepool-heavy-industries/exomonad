@@ -31,6 +31,7 @@ lib (`lib.rs` + `tools/` + `gates.rs` + `roles.rs`) stays generic over the caps 
 | `domain.rs` | **Bin-only.** `ExoDomain` — the `Exomonad` impl that fixes `Caps = Runtime` and points `role_def`/`handle_system` at the lib. The one place that links `exo-runtime`. |
 | `main.rs` | The CLI dispatcher (bin): clap `Cli` → `init` / `node` / `hook`. `node` is the composition root — `exo node --papers <path>` → `exo_node::bootstrap::<ExoDomain>(papers, cwd)` → `run_node::<ExoDomain>`. |
 | `init.rs` | `exo init [--session <s>] [--recreate]` — bootstrap a node-mode ROOT (own tmux session, root papers, no server). Reuses `exo-runtime`/`exomonad-shared`. |
+| `doctor.rs` | `exo doctor [--fix] [--include-unmerged]` — health-check + cleanup tool for worktrees. |
 | `hook.rs` | `exo hook <event> --papers <path>` — handle a CC/Gemini hook via the node's `exo` gate (SessionStart in-process; everything else routes to the sidecar hook socket, fail-open). |
 | `config.rs` | Minimal node-mode init config read (`tmux_session`, `model`, + the child-launch policy `yolo`/`wrap_nix` stamped onto the root's papers and inherited down the tree) — classic `exomonad` owns the full `Config`. |
 | `tools/` | One module per tool — a type + `Args` (derives `Deserialize + JsonSchema`) + generic-over-caps `run` + a ~6-line hand-written `Tool<R>` adapter (NO macro). Each ships mock-cap unit tests. |
@@ -55,6 +56,16 @@ contract ([`exo-framework`](../exo-framework/CLAUDE.md)); this crate provides th
 | `notify_parent` | `Bus` | tl, dev, worker, reviewer | Status/failure update to `Addressee::Parent` (NOT the done-signal). |
 | `send_message` | `Bus` | root, tl | Deliver to a child (`Inline`/`Worktree`) — **tree-edges only**. |
 | `tree` | `Topology`+`Fs` | root, tl | Read-only: the caller's subtree (recursive ledger fold) + parent + per-node `pane_alive` liveness. |
+
+## exo doctor
+
+`exo doctor` is a health-check and cleanup tool for node-mode workspaces. It audits the `.exo/worktrees/` directory and identifies stale (merged) worktrees.
+
+- **Dry-run (default)**: `exo doctor` reports merged and unmerged worktrees but removes nothing.
+- **Reclaim**: `exo doctor --fix` reclaims merged worktrees by running `git worktree remove --force` and deleting their associated branches.
+- **Force**: `exo doctor --fix --include-unmerged` reclaims even unmerged worktrees (dangerous).
+
+Worktrees are considered reclaimable if their HEAD is an ancestor of the current branch's HEAD. The current worktree (repo root) is never removed.
 
 Every tool implements `Tool::description()`; `exo-node`'s `tools/list` emits it, so the toolset is
 self-documenting — an agent learns the local-merge loop (commit → `submit_branch` → parent `merge`,
