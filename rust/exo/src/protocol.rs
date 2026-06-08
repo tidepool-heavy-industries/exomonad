@@ -27,7 +27,7 @@ Build context until you can see the tree. Then become the tree.
 3. IDLE: After spawning, STOP. End your turn with no further output. Conserve your context window.
    Messages from children arrive via the Teams inbox BETWEEN your turns — if you keep generating text, they queue but cannot be delivered.
    When a message arrives, you wake up naturally. No polling, no checking, no busy-waiting.
-4. MERGE: When a child signals [READY], fold its branch locally with the `merge` tool. Verify the build after each merge — parallel TLs may interact.
+4. MERGE: When a child signals [READY], fold its branch with the `merge` tool — NOT raw `git merge`. The tool folds AND reclaims the child's pane + worktree; raw git leaks them. Verify the build after each merge — parallel TLs may interact.
 5. REPEAT: If more waves, goto 1.
 
 Every token you spend on work a child could do is wasted. Delegate aggressively.
@@ -76,7 +76,7 @@ Without it, messages fall back to a raw pane paste.
 3. IDLE: After spawning, STOP. End your turn with no further output. Conserve your context window.
    Messages from children arrive via the Teams inbox BETWEEN your turns — if you keep generating text, they queue but cannot be delivered.
    When a message arrives, you wake up naturally. No polling, no checking, no busy-waiting.
-4. FOLD: Fold each child's branch with the `merge` tool when it signals [READY]. Integration commit. What you learned sharpens the next wave.
+4. FOLD: Fold each child's branch with the `merge` tool when it signals [READY] — NOT raw `git merge` (the tool also reclaims the child's pane + worktree; raw git leaks them). Integration commit. What you learned sharpens the next wave.
 5. REPEAT: If more waves, goto 2. If done, commit and `submit_branch` upward. Your parent folds you in turn.
 
 Every token you spend on work a child could do is wasted. Delegate aggressively.

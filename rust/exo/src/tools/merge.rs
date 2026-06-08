@@ -70,8 +70,10 @@ impl<R: Git + Spawner + Send + Sync> Tool<R> for Merge {
     }
 
     fn description(&self) -> &str {
-        "Fold a child's branch into yours with a local `git merge` (the child names it in its \
-         `submit_branch` [READY] message). Children are worktrees of the same repo, so this needs \
+        "Fold a child's branch into yours with a local `git merge` AND reclaim the child (kill its \
+         pane + remove its worktree) — one-step fold + cleanup. ALWAYS prefer this over a raw `git \
+         merge`, which leaks the child's pane and worktree. The child names its branch in its \
+         `submit_branch` [READY] message. Children are worktrees of the same repo, so this needs \
          no remote, no PR. A merge conflict surfaces as an error for you to resolve."
     }
 
