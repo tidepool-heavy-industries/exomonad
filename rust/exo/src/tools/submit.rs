@@ -184,18 +184,24 @@ impl SubmitBranch {
         // derived parent *name* may not be a live git ref (a direct child of root derives "root",
         // which the human session never checks out), so resolve to a merge-base SHA, trying the
         // derived parent then the repo's default branch. A SHA always resolves in `git diff`.
-        let derived_parent = branch
-            .as_str()
-            .rsplit_once('.')
-            .map(|(p, _)| p)
-            .unwrap_or("main");
-        let mut base_sha = None;
-        for candidate in [derived_parent, "main", "master"] {
-            if let Some(found) = ctx.merge_base(candidate).await? {
-                base_sha = Some(found);
-                break;
+        let base_sha = match ctx.fork_point().await? {
+            Some(fp) => Some(fp),
+            None => {
+                let derived_parent = branch
+                    .as_str()
+                    .rsplit_once('.')
+                    .map(|(p, _)| p)
+                    .unwrap_or("main");
+                let mut b = None;
+                for candidate in [derived_parent, "main", "master"] {
+                    if let Some(found) = ctx.merge_base(candidate).await? {
+                        b = Some(found);
+                        break;
+                    }
+                }
+                b
             }
-        }
+        };
         let diff_instruction = match &base_sha {
             Some(b) => format!("Run `git diff {b}...HEAD` to see exactly what changed"),
             None => {
@@ -387,6 +393,38 @@ mod tests {
 
         assert!(spawn.contains("git diff basebasebasebasebasebasebasebasebasebase...HEAD"));
         assert!(spawn.contains("dev.policy-claude"));
+    }
+
+    #[tokio::test]
+    async fn spawns_reviewer_preferring_fork_point() {
+        let mock = MockRuntime {
+            fork_point: Some("forkforkforkforkforkforkforkforkforkfork".into()),
+            ..Default::default()
+        };
+        SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "did the thing".into(),
+                dangerously_skip_reviewer: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let calls = mock.calls_made();
+        let spawn = calls
+            .iter()
+            .find_map(|c| {
+                if let Call::Spawn { role, task, .. } = c {
+                    if role == "reviewer" {
+                        return Some(task);
+                    }
+                }
+                None
+            })
+            .expect("reviewer should be spawned");
+
+        assert!(spawn.contains("git diff forkforkforkforkforkforkforkforkforkfork...HEAD"));
     }
 
     #[tokio::test]

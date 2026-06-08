@@ -42,6 +42,60 @@ impl Git for Runtime {
         Ok((!sha.is_empty()).then_some(sha))
     }
 
+    async fn fork_point(&self) -> Result<Option<String>, GitError> {
+        let head = self.head_sha().await?;
+        // current branch name (may be detached — then current is empty, fine)
+        let cur_out = Command::new("git")
+            .current_dir(self.working_dir())
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .output()
+            .await?;
+        let current = String::from_utf8_lossy(&cur_out.stdout).trim().to_string();
+        // all local branch short names
+        let refs_out = Command::new("git")
+            .current_dir(self.working_dir())
+            .args(["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+            .output()
+            .await?;
+        if !refs_out.status.success() {
+            return Ok(None);
+        }
+        let branches = String::from_utf8_lossy(&refs_out.stdout);
+        let mut best: Option<(usize, String)> = None; // (ancestor-count, sha)
+        for b in branches.lines().map(str::trim).filter(|b| !b.is_empty()) {
+            if b == current {
+                continue;
+            }
+            // merge-base HEAD <b>
+            let mb_out = Command::new("git")
+                .current_dir(self.working_dir())
+                .args(["merge-base", "HEAD", b])
+                .output()
+                .await?;
+            if !mb_out.status.success() {
+                continue;
+            }
+            let mb = String::from_utf8_lossy(&mb_out.stdout).trim().to_string();
+            if mb.is_empty() || mb == head {
+                continue; // exclude HEAD itself (descendant branches) and no-shared-history
+            }
+            // recency = number of commits reachable from mb (more ancestors = closer to HEAD)
+            let cnt_out = Command::new("git")
+                .current_dir(self.working_dir())
+                .args(["rev-list", "--count", &mb])
+                .output()
+                .await?;
+            let count: usize = String::from_utf8_lossy(&cnt_out.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(0);
+            if best.as_ref().is_none_or(|(c, _)| count > *c) {
+                best = Some((count, mb));
+            }
+        }
+        Ok(best.map(|(_, sha)| sha))
+    }
+
     async fn is_clean(&self) -> Result<bool, GitError> {
         let output = self.git(&["status", "--porcelain"]).await?;
         Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())

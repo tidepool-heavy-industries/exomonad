@@ -82,6 +82,8 @@ pub struct MockRuntime {
     pub head_sha: String,
     /// What `merge_base` returns for any refish (set `None` to exercise the submit fallback chain).
     pub merge_base: Option<String>,
+    /// What `fork_point` returns (default None so submit tests exercise the merge_base fallback).
+    pub fork_point: Option<String>,
     pub is_clean: bool,
     /// What [`ChildLiveness::any_child_busy`] returns. Default `true` (a working child → the
     /// subtree-idle gate treats the node as busy); set `false` to model a quiescent subtree.
@@ -100,6 +102,7 @@ impl Default for MockRuntime {
             current_branch: Branch::new("dev.policy-claude".into()).unwrap(),
             head_sha: "0000000000000000000000000000000000000000".into(),
             merge_base: Some("basebasebasebasebasebasebasebasebasebase".into()),
+            fork_point: None,
             is_clean: true,
             child_busy: true,
             fail: Mutex::new(None),
@@ -150,6 +153,9 @@ impl Git for MockRuntime {
     }
     async fn merge_base(&self, _refish: &str) -> Result<Option<String>, GitError> {
         Ok(self.merge_base.clone())
+    }
+    async fn fork_point(&self) -> Result<Option<String>, GitError> {
+        Ok(self.fork_point.clone())
     }
     async fn is_clean(&self) -> Result<bool, GitError> {
         Ok(self.is_clean)

@@ -26,6 +26,11 @@ pub trait Git {
     /// caller can fall back to another base). Used to give a reviewer a real `git diff` base
     /// instead of a branch *name* that may not be a live ref.
     async fn merge_base(&self, refish: &str) -> Result<Option<String>, GitError>;
+    /// The closest fork point of HEAD: the most-recent merge-base of HEAD against any other
+    /// local branch, excluding HEAD itself (so the branch's own descendant branches — e.g.
+    /// reviewer children forked from HEAD — don't collapse the diff to empty). `None` if no
+    /// other branch shares history with HEAD. Name-agnostic: needs no parent-branch name.
+    async fn fork_point(&self) -> Result<Option<String>, GitError>;
     async fn is_clean(&self) -> Result<bool, GitError>;
     async fn fetch(&self) -> Result<(), GitError>;
     /// Merge `branch` into the current branch (the local fold; no remote). Non-interactive.
