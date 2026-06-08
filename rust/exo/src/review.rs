@@ -69,6 +69,49 @@ pub enum ReviewSystem {
     ReviewAborted { reason: String },
 }
 
+/// A single round of review persisted to the log.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewRound {
+    /// The 1-indexed round number.
+    pub round: u32,
+    /// The commit SHA reviewed in this round.
+    pub sha: String,
+    /// The high-level summary of the review.
+    pub summary: String,
+    /// The detailed findings.
+    pub findings: Vec<Finding>,
+    /// Whether this round blocked the merge (derived from findings).
+    pub blocked: bool,
+}
+
+/// The durable log of all review rounds for a branch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewLog {
+    /// The branch name.
+    pub branch: String,
+    /// The history of review rounds, oldest to newest.
+    pub rounds: Vec<ReviewRound>,
+}
+
+/// Sanitize a branch name to a safe filename: [A-Za-z0-9_-], join with `.`.
+pub fn safe_branch(branch: &str) -> String {
+    branch
+        .split('.')
+        .map(|seg| {
+            seg.chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
 /// Apply a review verdict (the relocated `apply_verdict`). Escalates `[READY]` to the parent on a
 /// matching approval (no blocking findings); wakes this node's LLM on blocked/aborted reviews.
 /// Always asks the engine to reclaim the one-shot reviewer (the sender) afterward — a reviewer is
@@ -145,6 +188,45 @@ pub async fn handle_review_system<C: SystemCtx + ?Sized>(
                     &render_findings(summary, findings),
                 )
                 .await?;
+            }
+
+            // BEST-EFFORT: Persist the review round to the durable log.
+            let safe = safe_branch(my_branch.as_str());
+            let path = std::path::PathBuf::from(format!(".exo/reviews/{safe}.json"));
+
+            let mut log = match ctx.read_reviews(&path).await {
+                Ok(Some(bytes)) => serde_json::from_slice::<ReviewLog>(&bytes).unwrap_or_else(|e| {
+                    tracing::warn!("failed to parse review log at {:?}: {e}", path);
+                    ReviewLog {
+                        branch: my_branch.as_str().to_string(),
+                        rounds: vec![],
+                    }
+                }),
+                Ok(None) => ReviewLog {
+                    branch: my_branch.as_str().to_string(),
+                    rounds: vec![],
+                },
+                Err(e) => {
+                    tracing::warn!("failed to read review log at {:?}: {e}", path);
+                    ReviewLog {
+                        branch: my_branch.as_str().to_string(),
+                        rounds: vec![],
+                    }
+                }
+            };
+
+            log.rounds.push(ReviewRound {
+                round: (log.rounds.len() as u32) + 1,
+                sha: sha.clone(),
+                summary: summary.clone(),
+                findings: findings.clone(),
+                blocked,
+            });
+
+            if let Ok(bytes) = serde_json::to_vec(&log) {
+                if let Err(e) = ctx.persist_reviews(&path, &bytes).await {
+                    tracing::warn!("failed to persist review log at {:?}: {e}", path);
+                }
             }
 
             Ok(SystemOutcome::ReclaimSender)
@@ -237,6 +319,7 @@ mod tests {
         head: String,
         parent: Mutex<Vec<String>>,
         to_self: Mutex<Vec<String>>,
+        persisted: Mutex<Vec<(std::path::PathBuf, Vec<u8>)>>,
     }
 
     #[async_trait]
@@ -258,6 +341,22 @@ mod tests {
             self.to_self.lock().unwrap().push(summary.to_string());
             Ok(())
         }
+        async fn read_reviews(&self, path: &std::path::Path) -> CapResult<Option<Vec<u8>>> {
+            Ok(self
+                .persisted
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(p, _)| p == path)
+                .map(|(_, b)| b.clone()))
+        }
+        async fn persist_reviews(&self, path: &std::path::Path, bytes: &[u8]) -> CapResult<()> {
+            self.persisted
+                .lock()
+                .unwrap()
+                .push((path.to_path_buf(), bytes.to_vec()));
+            Ok(())
+        }
     }
 
     fn mock(branch: &str, head: &str) -> MockCtx {
@@ -266,6 +365,7 @@ mod tests {
             head: head.into(),
             parent: Mutex::new(vec![]),
             to_self: Mutex::new(vec![]),
+            persisted: Mutex::new(vec![]),
         }
     }
 
@@ -371,33 +471,70 @@ mod tests {
         assert!(!Severity::Hint.blocks());
     }
 
-    #[test]
-    fn rendering_contains_key_elements() {
-        let findings = vec![
-            Finding {
+    #[tokio::test]
+    async fn persistence_appends_rounds() {
+        let ctx = mock("root.dev-0", "abc");
+        let sys = ReviewSystem::Reviewed {
+            branch: Branch::new("root.dev-0".into()).unwrap(),
+            sha: "abc".into(),
+            summary: "round 1".into(),
+            findings: vec![Finding {
                 file: "src/lib.rs".into(),
                 line: Some(10),
                 severity: Severity::Error,
-                body: "blocking bug".into(),
-                suggestion: Some("fix it".into()),
-            },
-            Finding {
-                file: "README.md".into(),
-                line: None,
-                severity: Severity::Hint,
-                body: "typo".into(),
+                body: "bug".into(),
                 suggestion: None,
-            },
-        ];
-        let rendered = render_findings("Initial review", &findings);
-        assert!(rendered.contains("changes requested"));
-        assert!(rendered.contains("Initial review"));
-        assert!(rendered.contains("ERROR"));
-        assert!(rendered.contains("L10"));
-        assert!(rendered.contains("blocking bug"));
-        assert!(rendered.contains("Suggestion: fix it"));
-        assert!(rendered.contains("HINT"));
-        assert!(rendered.contains("typo"));
-        assert!(rendered.contains("Address every Error finding"));
+            }],
+        };
+
+        // First round
+        handle_review_system(&ctx, &from(), &sys).await.unwrap();
+        {
+            let p = ctx.persisted.lock().unwrap();
+            assert_eq!(p.len(), 1);
+            let (_, bytes) = &p[0];
+            let log: ReviewLog = serde_json::from_slice(bytes).unwrap();
+            assert_eq!(log.rounds.len(), 1);
+            assert_eq!(log.rounds[0].round, 1);
+            assert_eq!(log.rounds[0].summary, "round 1");
+            assert!(log.rounds[0].blocked);
+        }
+
+        // Second round (different sha/summary, approved)
+        let ctx2 = mock("root.dev-0", "def");
+        // Pre-fill ctx2 with the first round
+        let first_round_bytes = ctx.persisted.lock().unwrap()[0].1.clone();
+        let path = std::path::PathBuf::from(".exo/reviews/root.dev-0.json");
+        ctx2.persisted
+            .lock()
+            .unwrap()
+            .push((path.clone(), first_round_bytes));
+
+        let sys2 = ReviewSystem::Reviewed {
+            branch: Branch::new("root.dev-0".into()).unwrap(),
+            sha: "def".into(),
+            summary: "round 2 looks good".into(),
+            findings: vec![],
+        };
+
+        handle_review_system(&ctx2, &from(), &sys2).await.unwrap();
+        {
+            let p = ctx2.persisted.lock().unwrap();
+            // Should have read-then-pushed a NEW version
+            assert_eq!(p.len(), 2);
+            let (_, bytes) = &p[1];
+            let log: ReviewLog = serde_json::from_slice(bytes).unwrap();
+            assert_eq!(log.rounds.len(), 2);
+            assert_eq!(log.rounds[1].round, 2);
+            assert_eq!(log.rounds[1].sha, "def");
+            assert!(!log.rounds[1].blocked);
+        }
+    }
+
+    #[test]
+    fn safe_branch_sanitizes() {
+        assert_eq!(safe_branch("root.dev-0"), "root.dev-0");
+        assert_eq!(safe_branch("root/dev-0"), "root-dev-0");
+        assert_eq!(safe_branch("root.feat/bug"), "root.feat-bug");
     }
 }

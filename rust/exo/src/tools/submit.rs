@@ -210,6 +210,35 @@ impl SubmitBranch {
             Err(_) => "(no acceptance criteria recorded for this branch)".to_string(),
         };
 
+        // BEST-EFFORT: Read prior review rounds for continuity.
+        let safe = crate::review::safe_branch(branch.as_str());
+        let review_log_path = std::path::PathBuf::from(format!(".exo/reviews/{safe}.json"));
+        let mut prior_round_context = String::new();
+        if let Ok(bytes) = ctx.read(&review_log_path).await {
+            if let Ok(log) = serde_json::from_slice::<crate::review::ReviewLog>(&bytes) {
+                if let Some(last) = log.rounds.last() {
+                    let unresolved: Vec<_> = last
+                        .findings
+                        .iter()
+                        .filter(|f| f.severity.blocks())
+                        .collect();
+                    if !unresolved.is_empty() {
+                        prior_round_context = format!(
+                            "\n\nPRIOR ROUND — verify these were addressed; do not re-raise resolved items\nSummary: {}\nFindings:\n",
+                            last.summary
+                        );
+                        for f in unresolved {
+                            let line = f
+                                .line
+                                .map(|l| format!("L{l}"))
+                                .unwrap_or_else(|| "     ".to_string());
+                            prior_round_context.push_str(&format!("- {} {}: {}\n", f.file, line, f.body));
+                        }
+                    }
+                }
+            }
+        }
+
         // Spawn a reviewer in its own worktree off this branch. We do NOT deliver `[READY]` here —
         // the ONLY path that escalates is the sidecar reacting to an approve-verdict for this sha
         // (see exo-node `handle_system`). That makes the gate structural: the LLM has no tool that
@@ -224,9 +253,10 @@ impl SubmitBranch {
              - error: correctness, security, or missed spec. This BLOCKS the merge.\n\
              - warning / info / hint: non-blocking nits or suggestions.\n\n\
              Note from the submitter: {note}\n\n\
-             ACCEPTANCE CRITERIA\n{acceptance}",
+             ACCEPTANCE CRITERIA\n{acceptance}{prior}",
             branch = branch.as_str(),
             note = args.note,
+            prior = prior_round_context,
         );
         // Spawn a reviewer in its own worktree off the under-review branch (role fixed here, the
         // domain tool boundary). It reads the diff + acceptance criteria, emits a `verdict`, exits.
@@ -411,5 +441,60 @@ mod tests {
             .calls_made()
             .iter()
             .any(|c| matches!(c, Call::BusDeliver { .. })));
+    }
+
+    #[tokio::test]
+    async fn submit_folds_prior_round_findings() {
+        let mock = MockRuntime::default();
+        let safe = crate::review::safe_branch("dev.policy-claude");
+        let path = format!(".exo/reviews/{safe}.json");
+
+        let log = crate::review::ReviewLog {
+            branch: "dev.policy-claude".into(),
+            rounds: vec![crate::review::ReviewRound {
+                round: 1,
+                sha: "oldsha".into(),
+                summary: "failed first round".into(),
+                findings: vec![crate::review::Finding {
+                    file: "broken.rs".into(),
+                    line: Some(5),
+                    severity: crate::review::Severity::Error,
+                    body: "fix me".into(),
+                    suggestion: None,
+                }],
+                blocked: true,
+            }],
+        };
+        mock.files
+            .lock()
+            .unwrap()
+            .insert(path, serde_json::to_vec(&log).unwrap());
+
+        SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "retrying".into(),
+                dangerously_skip_reviewer: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let calls = mock.calls_made();
+        let spawn = calls
+            .iter()
+            .find_map(|c| {
+                if let Call::Spawn { role, task, .. } = c {
+                    if role == "reviewer" {
+                        return Some(task);
+                    }
+                }
+                None
+            })
+            .expect("reviewer should be spawned");
+
+        assert!(spawn.contains("PRIOR ROUND"));
+        assert!(spawn.contains("failed first round"));
+        assert!(spawn.contains("broken.rs L5: fix me"));
     }
 }

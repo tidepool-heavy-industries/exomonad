@@ -211,6 +211,29 @@ impl<D: Exomonad> SystemCtx for NodeSystemCtx<'_, D> {
             }
         }
     }
+    async fn read_reviews(&self, path: &Path) -> CapResult<Option<Vec<u8>>> {
+        match exo_caps::Fs::read(&*self.ctx.runtime, path).await {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(exo_caps::FsError::At { source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound =>
+            {
+                Ok(None)
+            }
+            Err(e) => {
+                error!("FAILED to read reviews at {:?}: {e}", path);
+                Err(exo_caps::CapError::Fs(e))
+            }
+        }
+    }
+    async fn persist_reviews(&self, path: &Path, bytes: &[u8]) -> CapResult<()> {
+        match exo_caps::Fs::write_atomic(&*self.ctx.runtime, path, bytes).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                error!("FAILED to persist reviews at {:?}: {e}", path);
+                Err(exo_caps::CapError::Fs(e))
+            }
+        }
+    }
 }
 
 #[async_trait]

@@ -56,6 +56,10 @@ pub trait SystemCtx: Send + Sync {
     async fn deliver_parent(&self, msg: Message) -> CapResult<()>;
     /// Inject a synthetic message into THIS node's own LLM conversation (the last-hop dispatch).
     async fn deliver_to_self(&self, from: &str, summary: &str, text: &str) -> CapResult<()>;
+    /// Read the review log for a branch. None if the file is missing.
+    async fn read_reviews(&self, path: &std::path::Path) -> CapResult<Option<Vec<u8>>>;
+    /// Persist the review log for a branch (atomic write).
+    async fn persist_reviews(&self, path: &std::path::Path, bytes: &[u8]) -> CapResult<()>;
 }
 
 /// The domain trait. A ZST domain implements it; the engine is generic over `D: Exomonad`.
