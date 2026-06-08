@@ -294,9 +294,9 @@ mod tests {
                 && matches!(&msg.kind, exo_caps::MessageKind::Domain(p)
                     if matches!(serde_json::from_str::<ReviewSystem>(p.0.get()),
                         Ok(ReviewSystem::ReviewChanges { branch, sha, changes_branch, message })
-                        if branch.as_str() == "main.dev-0" 
-                            && sha == "abc123" 
-                            && changes_branch.as_str() == "reviewer.patch-1" 
+                        if branch.as_str() == "main.dev-0"
+                            && sha == "abc123"
+                            && changes_branch.as_str() == "reviewer.patch-1"
                             && message == "improved")))));
     }
 }
