@@ -37,4 +37,5 @@ CC's own teammate bookkeeping desyncs — we observed phantom teammates, stale `
 
 ## Gaps / not-yet
 
+- `ActiveTeam.me` is currently always `None` because the pane-based `resolve_by_pane` path was removed — it remains in the type for a future teammate-self-resolution path but is presently vestigial.
 - The inotify path is **Linux-only**. The node's `dispatch` now resolves via `resolve_self_or_portable()`, which falls back to the portable `resolve_via_transcript` path (→ `resolve_by_session`) when the inotify signal finds nothing or errors transiently. **Wired, but UNTESTED on non-Linux:** the portable path is portable *by design* (cwd→transcript→config-scan, no inotify), but its cwd reader is currently Linux-only, so on non-Linux `resolve_self_or_portable()` yields `None` and native delivery there has never run. On Linux the fallback rung itself is exercised only when `resolve_self` fails, which doesn't happen in the common case — so it too is effectively untested in practice.

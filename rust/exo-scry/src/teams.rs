@@ -80,11 +80,6 @@ impl Team {
     pub fn lead_session_id(&self) -> Option<&str> {
         (!self.lead_session_id.is_empty()).then_some(self.lead_session_id.as_str())
     }
-
-    /// Look up a member by name.
-    pub fn member(&self, name: &str) -> Option<&Teammate> {
-        self.members.iter().find(|m| m.name == name)
-    }
 }
 
 /// Read and parse `~/.claude/teams/{team}/config.json`.
