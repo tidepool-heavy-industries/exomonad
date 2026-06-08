@@ -62,16 +62,19 @@ pub async fn write_node_agent_config(agent_dir: &Path, papers_path: &Path) -> st
 }
 
 /// Write the Gemini-specific `settings.json` (MCP + hooks) to the given agent directory.
+///
+/// `protocol` is the resolved role-steering prose (override-or-const). When non-empty it is
+/// written to a `protocol.md` beside the settings and referenced by absolute path in
+/// `context.fileName` (mirrors classic's `generate_gemini_worker_settings`): Gemini has no
+/// reliable session-start `additionalContext`, so the context file is its steering channel.
+/// Skipped entirely when the protocol is empty.
 pub async fn write_gemini_node_config(
     settings_path: &Path,
     papers_path: &Path,
+    protocol: &str,
 ) -> std::io::Result<()> {
     let p_raw = papers_path.to_string_lossy();
     let p_esc = shell_escape::escape(p_raw.clone().into_owned().into()).into_owned();
-
-    let settings = gemini_settings_json(&p_raw, &p_esc);
-    let settings_json = serde_json::to_vec_pretty(&settings)
-        .map_err(|e| std::io::Error::other(format!("gemini settings encode: {e}")))?;
 
     // Per-pane path (NOT the child's worktree): inline siblings share their parent's worktree,
     // so a worktree-local settings.json would clobber each other's papers pointer. Gemini reads
@@ -79,6 +82,22 @@ pub async fn write_gemini_node_config(
     if let Some(parent) = settings_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
+
+    let context_path = if protocol.trim().is_empty() {
+        None
+    } else {
+        let dir = settings_path.parent().unwrap_or_else(|| Path::new("."));
+        let path = dir.join("protocol.md");
+        let mut f = tokio::fs::File::create(&path).await?;
+        f.write_all(protocol.as_bytes()).await?;
+        f.sync_all().await?;
+        Some(path)
+    };
+
+    let settings = gemini_settings_json(&p_raw, &p_esc, context_path.as_deref());
+    let settings_json = serde_json::to_vec_pretty(&settings)
+        .map_err(|e| std::io::Error::other(format!("gemini settings encode: {e}")))?;
+
     let mut f = tokio::fs::File::create(settings_path).await?;
     f.write_all(&settings_json).await?;
     f.sync_all().await?;
@@ -86,7 +105,11 @@ pub async fn write_gemini_node_config(
     Ok(())
 }
 
-pub(crate) fn gemini_settings_json(papers_path: &str, p_str_escaped: &str) -> serde_json::Value {
+pub(crate) fn gemini_settings_json(
+    papers_path: &str,
+    p_str_escaped: &str,
+    context_path: Option<&Path>,
+) -> serde_json::Value {
     use exo_caps::invocation::{
         hook_command, GEMINI_AFTER_AGENT, GEMINI_BEFORE_TOOL, GEMINI_SESSION_START, PRE_TOOL_USE,
         SESSION_START, STOP,
@@ -115,7 +138,7 @@ pub(crate) fn gemini_settings_json(papers_path: &str, p_str_escaped: &str) -> se
         }]),
     );
 
-    serde_json::json!({
+    let mut settings = serde_json::json!({
         "mcpServers": {
             "exomonad": {
                 "type": "stdio",
@@ -124,7 +147,17 @@ pub(crate) fn gemini_settings_json(papers_path: &str, p_str_escaped: &str) -> se
             }
         },
         "hooks": hooks
-    })
+    });
+
+    // Reference the role-steering context file (absolute path so a worktree child finds it),
+    // alongside a project-local GEMINI.md if present — mirrors classic's `context.fileName`.
+    if let Some(cp) = context_path {
+        settings["context"] = serde_json::json!({
+            "fileName": ["GEMINI.md", cp.to_string_lossy()]
+        });
+    }
+
+    settings
 }
 
 #[cfg(test)]
@@ -136,7 +169,7 @@ mod tests {
     fn test_gemini_settings_shape() {
         let papers = "/tmp/node.json";
         let escaped = "'/tmp/node.json'";
-        let json = gemini_settings_json(papers, escaped);
+        let json = gemini_settings_json(papers, escaped, None);
 
         // 1. MCP server args (`exo node --papers <papers>` — papers is the last element)
         let args = &json["mcpServers"]["exomonad"]["args"];
@@ -154,5 +187,53 @@ mod tests {
             .unwrap();
         assert!(cmd.contains("pre-tool-use"));
         assert!(cmd.contains(escaped));
+
+        // 4. No context block when no protocol path is supplied.
+        assert!(json.get("context").is_none());
+    }
+
+    #[test]
+    fn test_gemini_settings_context_file() {
+        let path = Path::new("/tmp/agent/protocol.md");
+        let json = gemini_settings_json("/tmp/node.json", "'/tmp/node.json'", Some(path));
+        let files = &json["context"]["fileName"];
+        assert_eq!(files[0], "GEMINI.md");
+        assert_eq!(files[1], "/tmp/agent/protocol.md");
+    }
+
+    #[tokio::test]
+    async fn test_write_gemini_node_config_writes_protocol_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let settings_path = tmp.path().join("agent/settings.json");
+        let papers_path = tmp.path().join("node.json");
+
+        write_gemini_node_config(&settings_path, &papers_path, "ROLE PROTOCOL BODY")
+            .await
+            .unwrap();
+
+        let protocol_file = tmp.path().join("agent/protocol.md");
+        let body = tokio::fs::read_to_string(&protocol_file).await.unwrap();
+        assert_eq!(body, "ROLE PROTOCOL BODY");
+
+        let settings: serde_json::Value =
+            serde_json::from_slice(&tokio::fs::read(&settings_path).await.unwrap()).unwrap();
+        let files = &settings["context"]["fileName"];
+        assert_eq!(files[1], *protocol_file.to_string_lossy());
+    }
+
+    #[tokio::test]
+    async fn test_write_gemini_node_config_skips_empty_protocol() {
+        let tmp = tempfile::tempdir().unwrap();
+        let settings_path = tmp.path().join("agent/settings.json");
+        let papers_path = tmp.path().join("node.json");
+
+        write_gemini_node_config(&settings_path, &papers_path, "  ")
+            .await
+            .unwrap();
+
+        assert!(!tmp.path().join("agent/protocol.md").exists());
+        let settings: serde_json::Value =
+            serde_json::from_slice(&tokio::fs::read(&settings_path).await.unwrap()).unwrap();
+        assert!(settings.get("context").is_none());
     }
 }

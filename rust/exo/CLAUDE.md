@@ -35,7 +35,8 @@ lib (`lib.rs` + `tools/` + `gates.rs` + `roles.rs`) stays generic over the caps 
 | `config.rs` | Minimal node-mode init config read (`tmux_session`, `model`, + the child-launch policy `yolo`/`wrap_nix` stamped onto the root's papers and inherited down the tree) — classic `exomonad` owns the full `Config`. |
 | `tools/` | One module per tool — a type + `Args` (derives `Deserialize + JsonSchema`) + generic-over-caps `run` + a ~6-line hand-written `Tool<R>` adapter (NO macro). Each ships mock-cap unit tests. |
 | `gates.rs` | The concrete hook bodies: `pre_tool_use` (antipattern nudges), `stop` (the convergence gate) + per-role variants (`stop_allow`/`stop_notify`/`stop_reviewer`), `session_start`. Functions generic over the caps they need. |
-| `roles.rs` | `ExoRole` (the domain's `D::Role`, impl `RoleKind`) + `role_def(ExoRole)` — the hand-written table (the single place a role's tool list + hooks are named), resolved through `ExoDomain`'s `Exomonad::role_def`. |
+| `roles.rs` | `ExoRole` (the domain's `D::Role`, impl `RoleKind`) + `role_def(ExoRole)` — the hand-written table (the single place a role's tool list + hooks are named), resolved through `ExoDomain`'s `Exomonad::role_def`. `RoleKind::protocol` is overridden here to map each variant to its `protocol.rs` const. |
+| `protocol.rs` | Per-role **decomposition-steering protocol** consts (`ROOT`/`TL`/`DEV`/`WORKER`/`REVIEWER`) — the prose the engine injects at session_start. The **source of truth** (ported from `.exo/roles/devswarm/context/*.md`, translated to v2 mechanics: local `merge` + `submit_branch`, no PRs/Copilot); an optional on-disk `.md` override wins during prompt-tuning. |
 | `testing.rs` | `MockRuntime` — impls every cap, records calls, returns canned values. Every tool tests against this one shared mock. |
 
 The `Tool<R>` trait, `RoleDef<R>`, the hook decision enums, and `PolicyCaps` are the framework
@@ -93,7 +94,7 @@ tool that skips review. The reviewer is torn down (best-effort) as soon as the `
 - **`stop_notify`** (dev, worker) — Gemini turn-end hook (`R: Bus + Log`): deliver `System(ChildIdle)`, then **always Allow**. **Never blocks** — Gemini's `AfterAgent` `deny` can infinite-loop (gemini-cli #20426).
 - **`stop_allow`** (root) — unconditional Allow. Root has no parent.
 - **`stop_reviewer`** (reviewer) — silent on the happy path (verdict produced); emits a loud `ReviewAborted` to the parent if the reviewer exits without a verdict. Always allows exit.
-- **`session_start`** — identity bootstrap (the node-identity context is prepended by `exo-node`).
+- **`session_start`** — identity bootstrap (the node-identity context is prepended by `exo-node`). The role's **steering protocol** (`RoleKind::protocol`, mapped to a `protocol.rs` const, override-or-const) is injected here too: appended to the Claude `additionalContext` by `exo-node`'s hook, or written to a Gemini child's `context.fileName` at spawn by `exo-runtime`.
 
 ## Gaps / not-yet
 

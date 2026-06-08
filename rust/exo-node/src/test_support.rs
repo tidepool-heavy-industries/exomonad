@@ -47,6 +47,15 @@ impl RoleKind for TestRole {
             TestRole::Reviewer => "reviewer",
         }
     }
+    fn protocol(&self) -> &'static str {
+        // Distinct markers per role so the engine's injection tests can assert which prose lands
+        // (Claude → session-start additionalContext; Gemini → context file, NOT additionalContext).
+        match self {
+            TestRole::Tl => "TEST-TL-PROTOCOL-MARKER",
+            TestRole::Dev => "TEST-DEV-PROTOCOL-MARKER",
+            _ => "",
+        }
+    }
 }
 
 pub(crate) fn test_pre_tool_use<'a>(

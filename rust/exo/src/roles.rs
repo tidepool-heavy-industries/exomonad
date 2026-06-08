@@ -59,6 +59,15 @@ impl RoleKind for ExoRole {
             ExoRole::Reviewer => "reviewer",
         }
     }
+    fn protocol(&self) -> &'static str {
+        match self {
+            ExoRole::Root => crate::protocol::ROOT,
+            ExoRole::Tl => crate::protocol::TL,
+            ExoRole::Dev => crate::protocol::DEV,
+            ExoRole::Worker => crate::protocol::WORKER,
+            ExoRole::Reviewer => crate::protocol::REVIEWER,
+        }
+    }
 }
 
 /// The per-role policy table. Hand-written `match` — the single place a role's tool list +
@@ -167,6 +176,22 @@ mod tests {
                 rd.session_start as usize,
                 session_start::<MockRuntime> as *const () as usize
             );
+        }
+    }
+
+    #[test]
+    fn test_role_protocol_maps_per_variant() {
+        // Each ExoRole returns its own protocol const (the override of the empty RoleKind default).
+        assert!(ExoRole::Root.protocol().contains("Root TL Protocol"));
+        assert!(ExoRole::Tl.protocol().contains("Spawned TL Protocol"));
+        assert!(ExoRole::Dev.protocol().contains("Dev Agent Protocol"));
+        assert!(ExoRole::Worker.protocol().contains("Worker Agent Protocol"));
+        assert!(ExoRole::Reviewer.protocol().contains("Reviewer Protocol"));
+        // v2-accurate: no classic plumbing leaked into the steering prose.
+        for kind in ExoRole::all() {
+            let p = kind.protocol();
+            assert!(!p.contains("file_pr"), "{kind:?} mentions classic file_pr");
+            assert!(!p.contains("Copilot"), "{kind:?} mentions Copilot");
         }
     }
 

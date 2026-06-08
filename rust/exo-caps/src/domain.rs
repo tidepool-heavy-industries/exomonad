@@ -37,6 +37,14 @@ pub trait RoleKind:
     fn agent_type(&self) -> AgentType;
     /// The role's stable wire/papers key (also the `role_def` lookup key).
     fn role_str(&self) -> &'static str;
+    /// The role's **decomposition-steering protocol** — the prose the engine injects at
+    /// `session_start` so a node receives its role contract (cost model, scaffold-fork-converge,
+    /// idle-after-spawn, never-implement). **Defaults to empty**: a domain opts in per-role, and a
+    /// role that returns `""` injects nothing. The compiled const is the source of truth; the
+    /// engine may apply an optional on-disk `.md` override during prompt-tuning.
+    fn protocol(&self) -> &'static str {
+        ""
+    }
 }
 
 /// A domain's **inter-node system payload** — the typed message a domain's tools send node-to-node

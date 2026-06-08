@@ -110,6 +110,19 @@ where
     Err(err)
 }
 
+/// Resolve a role's steering protocol: the optional on-disk override
+/// (`{working_dir}/.exo/roles/devswarm/context/{role}.md`) if it exists, else the domain's
+/// baked-in const (`RoleKind::protocol`). The compiled const is the source of truth; the file just
+/// overrides it during prompt-tuning. Mirrors the same resolution `exo-node`'s SessionStart hook
+/// applies for Claude — here it feeds a Gemini child's `context.fileName`.
+async fn resolve_protocol(working_dir: &Path, role_str: &str, baked: &str) -> String {
+    let path = working_dir.join(format!(".exo/roles/devswarm/context/{role_str}.md"));
+    match tokio::fs::read_to_string(&path).await {
+        Ok(s) => s,
+        Err(_) => baked.to_string(),
+    }
+}
+
 /// The fixed triple + identity each op hands to the shared `birth` tail. Constructed by
 /// the per-op method (the single place a triple is named); `birth` branches only on `kind`.
 #[derive(Debug, Clone)]
@@ -122,6 +135,10 @@ pub(crate) struct BirthCore {
     pub name: AgentName,
     pub branch: Branch,
     pub task: String,
+    /// The child's resolved role-steering protocol (override-or-const). Only consumed for a Gemini
+    /// child (written to its `context.fileName`); a Claude child gets its protocol via the
+    /// SessionStart hook instead, so this is unused for Claude. Empty ⇒ no steering injected.
+    pub protocol: String,
     /// Opt-in context inheritance. When true AND this is a Claude worktree child, the
     /// launch resolves the parent's Claude session UUID (via `exo-scry`) and starts the
     /// child with `--resume --fork-session <uuid>`. Set only by `fork_wave` (from
@@ -458,13 +475,17 @@ impl Runtime {
                 let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
                 let settings_path =
                     exo_caps::paths::gemini_settings_path(Path::new(&home), &self.run_id, pane);
-                crate::node_config::write_gemini_node_config(&settings_path, &papers_path)
-                    .await
-                    .map_err(|e| SpawnError::Failed {
-                        op: "write_gemini_node_config",
-                        child: Some(core.name.clone()),
-                        detail: e.to_string(),
-                    })?;
+                crate::node_config::write_gemini_node_config(
+                    &settings_path,
+                    &papers_path,
+                    &core.protocol,
+                )
+                .await
+                .map_err(|e| SpawnError::Failed {
+                    op: "write_gemini_node_config",
+                    child: Some(core.name.clone()),
+                    detail: e.to_string(),
+                })?;
                 env_vars.insert(
                     "GEMINI_CLI_SYSTEM_SETTINGS_PATH".into(),
                     settings_path.to_string_lossy().into_owned(),
@@ -601,6 +622,11 @@ impl Spawner for Runtime {
             ChildKind::Inline => self.branch().clone(),
         };
         let agent_type = RoleKind::agent_type(&role);
+        // Resolve the child's role-steering protocol (override-or-const) while the role is still
+        // typed. Threaded onto `BirthCore` for a Gemini child's `context.fileName`; a Claude child
+        // gets its protocol via the SessionStart hook, so this is unused there.
+        let protocol =
+            resolve_protocol(&self.working_dir, role.role_str(), role.protocol()).await;
         let role = RoleRecord::new(&role).map_err(|e| SpawnError::Failed {
             op: "role_record",
             child: Some(name.clone()),
@@ -616,6 +642,7 @@ impl Spawner for Runtime {
             branch,
             name,
             task,
+            protocol,
             fork_session,
         };
         self.birth(core).await

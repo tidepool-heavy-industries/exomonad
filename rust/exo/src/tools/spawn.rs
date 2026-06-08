@@ -69,9 +69,13 @@ impl<R: Spawner + Send + Sync> Tool<R> for SpawnWorker {
         "spawn_worker"
     }
     fn description(&self) -> &str {
-        "Spawn an ephemeral Gemini worker in a pane inside YOUR worktree (no own branch). For \
+        "Spawn an ephemeral Gemini worker in a pane inside YOUR worktree (no own branch, no \
+         review). PREFER DELEGATING OVER DOING WORK YOURSELF — a Gemini leaf costs ~10-30x less \
+         than your Opus tokens, so every line you implement yourself is wasted budget. Give it \
+         acceptance criteria, key file paths, and anti-patterns — not line-by-line code. For \
          research or non-conflicting in-place edits; it reports back with `notify_parent`. There \
-         is nothing to merge — for work that should land on its own branch, use `spawn_gemini`."
+         is nothing to merge — for work that should land on its own branch, use `spawn_gemini`. \
+         After spawning, return immediately — idle and wait, do not poll."
     }
     fn schema(&self) -> serde_json::Value {
         schema_json(schemars::schema_for!(SpawnWorkerArgs))
@@ -143,9 +147,14 @@ impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnGemini {
         "spawn_gemini"
     }
     fn description(&self) -> &str {
-        "Spawn a Gemini dev leaf in its OWN worktree + branch with a self-contained spec. It \
-         commits its work to that branch and calls `submit_branch` when ready; you then `merge` \
-         the branch locally. No PRs, no remote — convergence is on-disk."
+        "Spawn a Gemini dev leaf in its OWN worktree + branch with a self-contained spec. PREFER \
+         DELEGATING OVER DOING WORK YOURSELF — a Gemini leaf costs ~10-30x less than your Opus \
+         tokens; every line you implement yourself is wasted budget. Use the structured fields \
+         (steps, verify, boundary, read_first) for precise specs — give it acceptance criteria \
+         and file paths, not line-by-line code. It commits to that branch and calls \
+         `submit_branch` when ready; a one-shot reviewer checks it, then you `merge` the branch \
+         locally. No PRs, no remote — convergence is on-disk. After spawning, return immediately \
+         — idle and wait for [READY], do not poll."
     }
     fn schema(&self) -> serde_json::Value {
         schema_json(schemars::schema_for!(SpawnGeminiArgs))
@@ -256,9 +265,13 @@ impl<R: Spawner + Fs + Send + Sync> Tool<R> for ForkWave {
         "fork_wave"
     }
     fn description(&self) -> &str {
-        "Fork a wave of Claude TL children, each in its own worktree + branch (context \
-         inherited). Each runs scaffold-fork-converge on its subtree and calls `submit_branch` \
-         when its branch is ready; you then `merge` it locally. Requires a clean worktree."
+        "Fork a wave of parallel Claude TL children, each in its own worktree + branch. Each runs \
+         scaffold-fork-converge on its subtree and calls `submit_branch` when its branch is \
+         ready; you then `merge` it locally — no PRs, no remote, convergence is on-disk. \
+         Decompose and delegate aggressively: every token you spend on work a child could do is \
+         wasted. Create a team (TeamCreate) BEFORE calling so children's messages reach you. \
+         Requires a clean worktree. After spawning, return immediately — idle and wait, do not \
+         poll."
     }
     fn schema(&self) -> serde_json::Value {
         schema_json(schemars::schema_for!(ForkWaveArgs))

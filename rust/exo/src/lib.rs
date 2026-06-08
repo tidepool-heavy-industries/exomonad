@@ -24,6 +24,7 @@
 //! [`Exomonad`]: exo_framework::Exomonad
 
 pub mod gates;
+pub mod protocol;
 pub mod review;
 pub mod roles;
 pub mod spawn;
