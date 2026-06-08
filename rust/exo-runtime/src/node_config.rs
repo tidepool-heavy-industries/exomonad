@@ -94,7 +94,13 @@ pub async fn write_gemini_node_config(
         Some(path)
     };
 
-    let settings = gemini_settings_json(&p_raw, &p_esc, context_path.as_deref());
+    let dir = settings_path.parent().unwrap_or_else(|| Path::new("."));
+    let policy_path = dir.join("policy.toml");
+    let mut f = tokio::fs::File::create(&policy_path).await?;
+    f.write_all(gemini_policy_toml().as_bytes()).await?;
+    f.sync_all().await?;
+
+    let settings = gemini_settings_json(&p_raw, &p_esc, context_path.as_deref(), Some(&policy_path));
     let settings_json = serde_json::to_vec_pretty(&settings)
         .map_err(|e| std::io::Error::other(format!("gemini settings encode: {e}")))?;
 
@@ -105,10 +111,25 @@ pub async fn write_gemini_node_config(
     Ok(())
 }
 
+fn gemini_policy_toml() -> &'static str {
+    r#"[[rule]]
+toolName = "run_shell_command"
+decision = "allow"
+priority = 100
+allowRedirection = true
+
+[[rule]]
+toolName = "*"
+decision = "allow"
+priority = 90
+"#
+}
+
 pub(crate) fn gemini_settings_json(
     papers_path: &str,
     p_str_escaped: &str,
     context_path: Option<&Path>,
+    policy_path: Option<&Path>,
 ) -> serde_json::Value {
     use exo_caps::invocation::{
         hook_command, GEMINI_AFTER_AGENT, GEMINI_BEFORE_TOOL, GEMINI_SESSION_START, PRE_TOOL_USE,
@@ -157,6 +178,10 @@ pub(crate) fn gemini_settings_json(
         });
     }
 
+    if let Some(pp) = policy_path {
+        settings["adminPolicyPaths"] = serde_json::json!([pp.to_string_lossy()]);
+    }
+
     settings
 }
 
@@ -169,7 +194,7 @@ mod tests {
     fn test_gemini_settings_shape() {
         let papers = "/tmp/node.json";
         let escaped = "'/tmp/node.json'";
-        let json = gemini_settings_json(papers, escaped, None);
+        let json = gemini_settings_json(papers, escaped, None, None);
 
         // 1. MCP server args (`exo node --papers <papers>` — papers is the last element)
         let args = &json["mcpServers"]["exomonad"]["args"];
@@ -195,10 +220,40 @@ mod tests {
     #[test]
     fn test_gemini_settings_context_file() {
         let path = Path::new("/tmp/agent/protocol.md");
-        let json = gemini_settings_json("/tmp/node.json", "'/tmp/node.json'", Some(path));
+        let json = gemini_settings_json("/tmp/node.json", "'/tmp/node.json'", Some(path), None);
         let files = &json["context"]["fileName"];
         assert_eq!(files[0], "GEMINI.md");
         assert_eq!(files[1], "/tmp/agent/protocol.md");
+    }
+
+    #[test]
+    fn test_gemini_settings_policy_path() {
+        let path = Path::new("/tmp/agent/policy.toml");
+        let json = gemini_settings_json("/tmp/node.json", "'/tmp/node.json'", None, Some(path));
+        assert_eq!(json["adminPolicyPaths"][0], "/tmp/agent/policy.toml");
+    }
+
+    #[tokio::test]
+    async fn test_write_gemini_node_config_writes_policy_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let settings_path = tmp.path().join("agent/settings.json");
+        let papers_path = tmp.path().join("node.json");
+
+        write_gemini_node_config(&settings_path, &papers_path, "")
+            .await
+            .unwrap();
+
+        let policy_file = tmp.path().join("agent/policy.toml");
+        let body = tokio::fs::read_to_string(&policy_file).await.unwrap();
+        assert!(body.contains("run_shell_command"));
+        assert!(body.contains("allowRedirection = true"));
+
+        let settings: serde_json::Value =
+            serde_json::from_slice(&tokio::fs::read(&settings_path).await.unwrap()).unwrap();
+        assert_eq!(
+            settings["adminPolicyPaths"][0],
+            *policy_file.to_string_lossy()
+        );
     }
 
     #[tokio::test]
