@@ -25,7 +25,7 @@ lib (`lib.rs` + `tools/` + `gates.rs` + `roles.rs`) stays generic over the caps 
 
 | File | Contents |
 |------|----------|
-| `lib.rs` | Re-exports `role_def`, `ReviewSystem`/`handle_review_system` (the domain `System` + relocated gate), `ExoSpawn` (the domain `Spawn`). Generic over `R`, depends only on `exo-framework` + `exo-caps` (+ `tracing`). |
+| `lib.rs` | Re-exports `role_def`, `ExoRole`, `ReviewSystem`/`handle_review_system` (the domain `System` + relocated gate), `ExoSpawn` (the domain `Spawn`). Generic over `R`, depends only on `exo-framework` + `exo-caps` (+ `tracing`). |
 | `review.rs` | The domain's inter-node behavior: `ReviewSystem` (`D::System`) + `handle_review_system` (the relocated `apply_verdict`, IO-free via the `SystemCtx` seam — unit-tested against a mock context). |
 | `spawn.rs` | `ExoSpawn` (`D::Spawn`) implementing `SpawnSpec`, the role-fixing the per-op tools do; `render_spec_prompt` (moved from the runtime) + `write_acceptance` (the `.exo/acceptance.md` write via `Fs`, relocated out of birth). |
 | `domain.rs` | **Bin-only.** `ExoDomain` — the `Exomonad` impl that fixes `Caps = Runtime` and points `role_def`/`handle_system` at the lib. The one place that links `exo-runtime`. |
@@ -51,10 +51,10 @@ contract ([`exo-framework`](../exo-framework/CLAUDE.md)); this crate provides th
 | `spawn_worker` | `Spawner` | root, tl | Spawn an ephemeral Gemini worker (inline pane). |
 | `merge` | `Git`+`Spawner` | root, tl | **The local fold:** `git merge <child-branch>`, followed by best-effort teardown (`kill_pane` + `reclaim_worktree`) of the child. |
 | `submit_branch` | `Git`+`Process`+`Spawner`+`Fs`+`Bus` | tl, dev | **Request review.** Runs the precondition checks (committed + `.exo/checks/pre-merge/*` scripts), then spawns a **reviewer** off this branch (fork-point `git diff` base via `Git::merge_base`) and returns "stop & wait". It does NOT deliver `[READY]` — only the sidecar does, on an approve-verdict (the structural gate). Escape hatch: `dangerously_skip_reviewer: true`. |
-| `verdict` | `Bus` | reviewer | A reviewer's one output → a `System(SystemMessage)` to its parent: `approve` / `deny`+msg / `changes`+branch. Triggers reviewer teardown (handled in `exo-node`). |
+| `verdict` | `Bus`+`Kv` | reviewer | A reviewer's one output → a `System(SystemMessage)` to its parent: `approve` / `deny`+msg / `changes`+branch. Triggers reviewer teardown (handled in `exo-node`). |
 | `notify_parent` | `Bus` | tl, dev, worker, reviewer | Status/failure update to `Addressee::Parent` (NOT the done-signal). |
 | `send_message` | `Bus` | root, tl | Deliver to a child (`Inline`/`Worktree`) — **tree-edges only**. |
-| `tree` | `Topology` | root, tl | Read-only: the caller's subtree (recursive ledger fold) + parent + per-node `pane_alive` liveness. |
+| `tree` | `Topology`+`Fs` | root, tl | Read-only: the caller's subtree (recursive ledger fold) + parent + per-node `pane_alive` liveness. |
 
 Every tool implements `Tool::description()`; `exo-node`'s `tools/list` emits it, so the toolset is
 self-documenting — an agent learns the local-merge loop (commit → `submit_branch` → parent `merge`,

@@ -166,9 +166,7 @@ mod tests {
             let expected_stop = match kind {
                 ExoRole::Root => stop_allow::<MockRuntime> as *const () as usize,
                 ExoRole::Reviewer => stop_reviewer::<MockRuntime> as *const () as usize,
-                ExoRole::Dev | ExoRole::Worker => {
-                    stop_notify::<MockRuntime> as *const () as usize
-                }
+                ExoRole::Dev | ExoRole::Worker => stop_notify::<MockRuntime> as *const () as usize,
                 ExoRole::Tl => stop::<MockRuntime> as *const () as usize,
             };
             assert_eq!(rd.stop as usize, expected_stop, "Role {:?} stop fn", kind);
@@ -193,6 +191,57 @@ mod tests {
             assert!(!p.contains("file_pr"), "{kind:?} mentions classic file_pr");
             assert!(!p.contains("Copilot"), "{kind:?} mentions Copilot");
         }
+    }
+
+    #[tokio::test]
+    async fn role_tool_matrix() {
+        for kind in ExoRole::all() {
+            let rd = role_def::<MockRuntime>(*kind);
+            let mut names: Vec<String> = rd.tools.iter().map(|t| t.name().to_string()).collect();
+            names.sort();
+            let expected = match kind {
+                ExoRole::Root => vec![
+                    "fork_wave",
+                    "merge",
+                    "send_message",
+                    "spawn_gemini",
+                    "spawn_worker",
+                    "tree",
+                ],
+                ExoRole::Tl => vec![
+                    "fork_wave",
+                    "merge",
+                    "notify_parent",
+                    "send_message",
+                    "spawn_gemini",
+                    "spawn_worker",
+                    "submit_branch",
+                    "tree",
+                ],
+                ExoRole::Dev => vec!["notify_parent", "submit_branch"],
+                ExoRole::Worker => vec!["notify_parent"],
+                ExoRole::Reviewer => vec!["notify_parent", "verdict"],
+            };
+            assert_eq!(names, expected, "Tool matrix mismatch for {:?}", kind);
+        }
+    }
+
+    #[test]
+    fn exo_role_metadata() {
+        use std::collections::HashSet;
+        assert_eq!(ExoRole::all().len(), 5);
+        let mut strs = HashSet::new();
+        for kind in ExoRole::all() {
+            strs.insert(kind.role_str());
+            let agent = kind.agent_type();
+            match kind {
+                ExoRole::Root | ExoRole::Tl => assert_eq!(agent, AgentType::Claude),
+                ExoRole::Dev | ExoRole::Worker | ExoRole::Reviewer => {
+                    assert_eq!(agent, AgentType::Gemini)
+                }
+            }
+        }
+        assert_eq!(strs.len(), 5, "role_str must be unique");
     }
 
     #[tokio::test]

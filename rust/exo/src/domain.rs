@@ -1,6 +1,6 @@
 //! [`ExoDomain`] — the `exo` domain's [`Exomonad`] impl, the binary's composition root for the
 //! engine. A ZST that fixes the four associated types to the concrete `exo` choices (`Runtime` caps,
-//! `NodeKind` roles, the [`ReviewSystem`] inter-node payload, the [`ExoSpawn`] spawn intent) and
+//! `ExoRole` roles, the [`ReviewSystem`] inter-node payload, the [`ExoSpawn`] spawn intent) and
 //! resolves roles / handles system messages through the lib. The binary monomorphizes the whole
 //! engine once here (`run_node::<ExoDomain>`); nothing else names a concrete domain.
 //!

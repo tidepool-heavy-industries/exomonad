@@ -11,7 +11,7 @@ use exo_caps::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use exo_framework::{ok_json, parse, schema_json, Tool, ToolOutput};
 
@@ -63,7 +63,7 @@ impl Tree {
     async fn collect_status<C: Fs>(
         ctx: &C,
         node: &TreeNode,
-        home: &PathBuf,
+        home: &Path,
         run_id: &str,
         map: &mut HashMap<String, NodeStatus>,
     ) {
@@ -143,7 +143,9 @@ impl Tree {
 
             // Add node's own status
             if let Some(status) = status_map.get(&name) {
-                obj.insert("status".to_string(), serde_json::to_value(status).unwrap());
+                if let Ok(val) = serde_json::to_value(status) {
+                    obj.insert("status".to_string(), val);
+                }
             }
 
             // Add busy bit from parent

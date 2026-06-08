@@ -154,7 +154,10 @@ mod tests {
             Ok(self.head.clone())
         }
         async fn deliver_parent(&self, msg: Message) -> CapResult<()> {
-            self.parent.lock().unwrap().push(msg.summary.as_str().to_string());
+            self.parent
+                .lock()
+                .unwrap()
+                .push(msg.summary.as_str().to_string());
             Ok(())
         }
         async fn deliver_to_self(&self, _from: &str, summary: &str, _text: &str) -> CapResult<()> {
@@ -185,7 +188,12 @@ mod tests {
         };
         let outcome = handle_review_system(&ctx, &from(), &sys).await.unwrap();
         assert_eq!(outcome, SystemOutcome::ReclaimSender);
-        assert!(ctx.parent.lock().unwrap().iter().any(|s| s.contains("[READY]")));
+        assert!(ctx
+            .parent
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|s| s.contains("[READY]")));
     }
 
     #[tokio::test]
@@ -211,5 +219,42 @@ mod tests {
         let outcome = handle_review_system(&ctx, &from(), &sys).await.unwrap();
         assert_eq!(outcome, SystemOutcome::ReclaimSender);
         assert!(!ctx.to_self.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn changes_wakes_llm_and_reclaims() {
+        let ctx = mock("root.dev-0", "abc");
+        let sys = ReviewSystem::ReviewChanges {
+            branch: Branch::new("root.dev-0".into()).unwrap(),
+            sha: "abc".into(),
+            changes_branch: Branch::new("root.reviewer-0".into()).unwrap(),
+            message: "improved".into(),
+        };
+        let outcome = handle_review_system(&ctx, &from(), &sys).await.unwrap();
+        assert_eq!(outcome, SystemOutcome::ReclaimSender);
+        assert!(!ctx.to_self.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn aborted_wakes_llm_and_reclaims() {
+        let ctx = mock("root.dev-0", "abc");
+        let sys = ReviewSystem::ReviewAborted {
+            reason: "exited".into(),
+        };
+        let outcome = handle_review_system(&ctx, &from(), &sys).await.unwrap();
+        assert_eq!(outcome, SystemOutcome::ReclaimSender);
+        assert!(!ctx.to_self.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn branch_mismatch_approval_does_not_escalate_but_reclaims() {
+        let ctx = mock("root.dev-0", "abc");
+        let sys = ReviewSystem::ReviewApproved {
+            branch: Branch::new("root.other-9".into()).unwrap(),
+            sha: "abc".into(),
+        };
+        let outcome = handle_review_system(&ctx, &from(), &sys).await.unwrap();
+        assert_eq!(outcome, SystemOutcome::ReclaimSender);
+        assert!(ctx.parent.lock().unwrap().is_empty());
     }
 }
