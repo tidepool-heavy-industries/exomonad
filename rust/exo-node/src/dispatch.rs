@@ -11,11 +11,12 @@
 //! This is pure last-hop dispatch; it focuses on the agent-facing write for entries
 //! that have already been routed to this node.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use chrono::Utc;
 use exo_caps::{
-    AgentType, IngestionEntry, Message, MessageBody, MessageKind, Persona, RoleKind, Summary,
+    AgentType, Fs, IngestionEntry, Message, MessageBody, MessageKind, Persona, RoleKind, Summary,
     SyntheticName, Tmux,
 };
 use exo_framework::Exomonad;
@@ -23,6 +24,9 @@ use tracing::{error, info, warn};
 
 use crate::bootstrap::NodeContext;
 use crate::error::{NodeError, NodeResult};
+
+static SPILL_COUNTER: AtomicU64 = AtomicU64::new(0);
+const MAX_INLINE_PASTE_BYTES: usize = 480;
 
 /// Deliver one ingestion entry into this node's own agent (the runtime-specific last hop).
 #[tracing::instrument(skip(ctx, entry), fields(node = %ctx.runtime.name().as_str(), from = ?entry.from, kind = ?entry.msg.kind))]
@@ -73,7 +77,7 @@ pub async fn dispatch<D: Exomonad>(
         }
         LastHop::TmuxPaste => {
             info!(outcome = "tmux_paste", "dispatching via tmux paste");
-            let rendered = render_entry(entry);
+            let rendered = prepare_tmux_payload(ctx, agent_type, entry).await;
             match Tmux::paste(&*ctx.runtime, &ctx.own_pane, &rendered).await {
                 Ok(()) => {
                     info!("dispatch via tmux paste OK");
@@ -164,6 +168,82 @@ fn render_entry(entry: &IngestionEntry) -> String {
         entry.msg.summary.as_str(),
         entry.msg.text.as_str()
     )
+}
+
+/// What to actually push over a tmux paste for one entry.
+#[derive(Debug, PartialEq, Eq)]
+enum PastePlan {
+    /// Safe to paste directly: a single line, no shell-mode trigger.
+    Inline(String),
+    /// Body must be spilled to a file; this is the full text to write.
+    Spill { file_body: String },
+}
+
+/// Decide inline-vs-spill. A message is safe to paste inline only if it is a single short line
+/// with no body — and, for Gemini, contains no `!` (which would flip the CLI into shell mode).
+/// Everything else (any text body, multi-line, oversized, or Gemini+`!`) spills to a file so we
+/// can deliver a one-line `@`-reference instead.
+fn plan_paste(
+    persona: &str,
+    summary: &str,
+    text: &str,
+    full_render: &str,
+    is_gemini: bool,
+) -> PastePlan {
+    let oneline = format!("[from {}] {}", persona, summary);
+    let can_inline = text.trim().is_empty()
+        && !oneline.contains('\n')
+        && oneline.len() <= MAX_INLINE_PASTE_BYTES
+        && !(is_gemini && oneline.contains('!'));
+    if can_inline {
+        PastePlan::Inline(oneline)
+    } else {
+        PastePlan::Spill {
+            file_body: full_render.to_string(),
+        }
+    }
+}
+
+/// Build the single-line `@`-reference paste that points at the spilled file. MUST be one line
+/// with no `!` (Gemini shell-mode trigger).
+fn render_atref(persona: &str, summary: &str, rel_path: &str) -> String {
+    let snippet: String = summary
+        .chars()
+        .filter(|c| *c != '\n' && *c != '!')
+        .take(80)
+        .collect();
+    format!(
+        "New message from {} — read @{} and act on it. ({})",
+        persona, rel_path, snippet
+    )
+}
+
+async fn prepare_tmux_payload<D: Exomonad>(
+    ctx: &Arc<NodeContext<D>>,
+    agent_type: AgentType,
+    entry: &IngestionEntry,
+) -> String {
+    let full_render = render_entry(entry);
+    let persona = render_persona(&entry.from);
+    let summary = entry.msg.summary.as_str();
+    let text = entry.msg.text.as_str();
+    let is_gemini = agent_type == AgentType::Gemini;
+
+    match plan_paste(&persona, summary, text, &full_render, is_gemini) {
+        PastePlan::Inline(s) => s,
+        PastePlan::Spill { file_body } => {
+            let id = SPILL_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let rel = format!(".exo/tmp/inbox-{}-{}.md", std::process::id(), id);
+            let path = ctx.runtime.working_dir().join(&rel);
+            match Fs::write_atomic(&*ctx.runtime, &path, file_body.as_bytes()).await {
+                Ok(()) => render_atref(&persona, summary, &rel),
+                Err(e) => {
+                    warn!(node = %ctx.runtime.name().as_str(), "failed to spill large paste to {rel}, pasting inline (degraded): {e}");
+                    file_body
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -263,5 +343,64 @@ mod tests {
         let rendered = render_entry(&entry);
         assert!(rendered.contains("[from: github, kind: event]"));
         assert!(rendered.contains("\n\n[PR READY]\nPR #1 Approved"));
+    }
+
+    #[test]
+    fn test_plan_paste_inline() {
+        let plan = plan_paste("alice", "hello", "", "full", false);
+        if let PastePlan::Inline(s) = plan {
+            assert_eq!(s, "[from alice] hello");
+            assert!(!s.contains('\n'));
+        } else {
+            panic!("expected inline");
+        }
+    }
+
+    #[test]
+    fn test_plan_paste_spill_on_body() {
+        let plan = plan_paste("alice", "hello", "body", "full", false);
+        assert_eq!(
+            plan,
+            PastePlan::Spill {
+                file_body: "full".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_plan_paste_gemini_shell_trigger() {
+        // contains '!' -> spill for gemini
+        let plan = plan_paste("alice", "bang!", "", "full", true);
+        assert_eq!(
+            plan,
+            PastePlan::Spill {
+                file_body: "full".to_string()
+            }
+        );
+
+        // but inline for others
+        let plan2 = plan_paste("alice", "bang!", "", "full", false);
+        assert!(matches!(plan2, PastePlan::Inline(_)));
+    }
+
+    #[test]
+    fn test_plan_paste_oversized() {
+        let long_summary = "a".repeat(MAX_INLINE_PASTE_BYTES + 1);
+        let plan = plan_paste("alice", &long_summary, "", "full", false);
+        assert_eq!(
+            plan,
+            PastePlan::Spill {
+                file_body: "full".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_render_atref() {
+        let atref = render_atref("alice", "Greeting!\nNext line", ".exo/tmp/file.md");
+        assert!(atref.contains(".exo/tmp/file.md"));
+        assert!(!atref.contains('!'));
+        assert!(!atref.contains('\n'));
+        assert!(atref.contains("Greeting"));
     }
 }
