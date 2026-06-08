@@ -130,14 +130,18 @@ pub fn stop_allow<R: Send + Sync>(_ctx: &R) -> BoxFuture<'_, StopDecision> {
     Box::pin(async move { StopDecision::Allow })
 }
 
-/// Stop hook for Gemini leaves (dev, worker): notify the parent this node yielded control, then
-/// ALWAYS allow exit. It NEVER blocks — Gemini's `AfterAgent` `deny` can infinite-loop
-/// (gemini-cli #20426), so a Gemini role must not block at stop. The committed-before-fold
-/// guarantee for a dev is enforced by `submit_branch`'s committed-check, not here; a worker is
-/// inline with no branch to fold.
-pub fn stop_notify<'a, R: Bus + Log + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, StopDecision> {
+/// Stop hook for Gemini leaves (dev, worker): notify the parent this node yielded control (but
+/// ONLY when the subtree is quiescent; skip if a child is busy), then ALWAYS allow exit. It NEVER
+/// blocks — Gemini's `AfterAgent` `deny` can infinite-loop (gemini-cli #20426), so a Gemini role
+/// must not block at stop. The committed-before-fold guarantee for a dev is enforced by
+/// `submit_branch`'s committed-check, not here; a worker is inline with no branch to fold.
+pub fn stop_notify<'a, R: Bus + Log + ChildLiveness + Send + Sync>(
+    ctx: &'a R,
+) -> BoxFuture<'a, StopDecision> {
     Box::pin(async move {
-        notify_parent_idle(ctx).await;
+        if !subtree_busy(ctx).await {
+            notify_parent_idle(ctx).await;
+        }
         StopDecision::Allow
     })
 }
@@ -274,10 +278,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stop_notify_allows_and_notifies() {
-        let ctx = MockRuntime::default();
+    async fn test_stop_notify_notifies_when_idle() {
+        let ctx = MockRuntime {
+            child_busy: false,
+            ..Default::default()
+        };
         assert_eq!(stop_notify(&ctx).await, StopDecision::Allow);
         assert!(delivered_child_idle_to_parent(&ctx.calls_made()));
+    }
+
+    #[tokio::test]
+    async fn test_stop_notify_suppresses_when_busy() {
+        let ctx = MockRuntime::default(); // child_busy = true
+        assert_eq!(stop_notify(&ctx).await, StopDecision::Allow);
+        assert!(
+            !delivered_child_idle_to_parent(&ctx.calls_made()),
+            "a node with active children must not signal idle"
+        );
     }
 
     #[tokio::test]
