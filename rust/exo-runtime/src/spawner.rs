@@ -276,7 +276,6 @@ impl Runtime {
             }
         }
     }
-
 }
 
 impl Runtime {
@@ -628,8 +627,7 @@ impl Spawner for Runtime {
         // Resolve the child's role-steering protocol (override-or-const) while the role is still
         // typed. Threaded onto `BirthCore` for both Gemini (written to its `context.fileName`) and
         // Claude (passed via `--append-system-prompt`).
-        let protocol =
-            resolve_protocol(&self.working_dir, role.role_str(), role.protocol()).await;
+        let protocol = resolve_protocol(&self.working_dir, role.role_str(), role.protocol()).await;
         let role = RoleRecord::new(&role).map_err(|e| SpawnError::Failed {
             op: "role_record",
             child: Some(name.clone()),
@@ -683,10 +681,14 @@ impl Spawner for Runtime {
                 let working_dir = self.working_dir.clone();
                 // Innermost first
                 for path in to_remove.into_iter().rev() {
-                    let child_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    let child_name = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
                     let path_str = path.to_string_lossy().to_string();
                     let cwd = working_dir.clone();
-                    
+
                     let res = retry_teardown("reclaim_worktree", &child_name, || {
                         let path_str = path_str.clone();
                         let cwd = cwd.clone();
@@ -712,7 +714,8 @@ impl Spawner for Runtime {
                             }
                             Ok(())
                         }
-                    }).await;
+                    })
+                    .await;
 
                     if let Err(e) = res {
                         if path == base_path {
@@ -726,7 +729,7 @@ impl Spawner for Runtime {
                         }
                     }
                 }
-                
+
                 Ok(())
             }
             ChildKind::Inline => Ok(()),
@@ -860,5 +863,50 @@ mod tests {
         assert!(s.contains("run-42"));
         assert!(s.contains("pane-317.jsonl"));
     }
-}
 
+    #[tokio::test]
+    async fn test_retry_teardown_success_on_first_try() {
+        let mut calls = 0;
+        let res: Result<u32, &str> = retry_teardown("test", "child", || {
+            calls += 1;
+            async move { Ok(42) }
+        })
+        .await;
+
+        assert_eq!(res.unwrap(), 42);
+        assert_eq!(calls, 1);
+    }
+
+    #[tokio::test]
+    async fn test_retry_teardown_success_on_retry() {
+        let mut calls = 0;
+        let res: Result<u32, &str> = retry_teardown("test", "child", || {
+            calls += 1;
+            async move {
+                if calls < 2 {
+                    Err("transient")
+                } else {
+                    Ok(42)
+                }
+            }
+        })
+        .await;
+
+        assert_eq!(res.unwrap(), 42);
+        assert_eq!(calls, 2);
+    }
+
+    #[tokio::test]
+    async fn test_retry_teardown_failure_after_max_attempts() {
+        let mut calls = 0;
+        let res: Result<u32, &str> = retry_teardown("test", "child", || {
+            calls += 1;
+            async move { Err("persistent") }
+        })
+        .await;
+
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), "persistent");
+        assert_eq!(calls, MAX_TEARDOWN_ATTEMPTS as usize);
+    }
+}

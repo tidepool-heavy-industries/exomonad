@@ -1,9 +1,9 @@
-use exo::roles::ExoRole;
 use exo::review::ReviewSystem;
-use exo::tools::submit::SubmitBranchArgs;
+use exo::roles::ExoRole;
 use exo::tools::merge::MergeArgs;
-use exo::tools::verdict::{VerdictArgs, Decision};
+use exo::tools::submit::SubmitBranchArgs;
 use exo::tools::tree::TreeArgs;
+use exo::tools::verdict::{Decision, VerdictArgs};
 use exo_caps::Branch;
 use serde_json::json;
 
@@ -52,7 +52,9 @@ fn test_review_system_roundtrip() {
             changes_branch: Branch::new("rev.patch".into()).unwrap(),
             message: "fixed".into(),
         },
-        ReviewSystem::ReviewAborted { reason: "timeout".into() },
+        ReviewSystem::ReviewAborted {
+            reason: "timeout".into(),
+        },
     ];
     for v in variants {
         let back = assert_roundtrip(&v);
@@ -62,10 +64,13 @@ fn test_review_system_roundtrip() {
 
 #[test]
 fn test_review_system_wire_pinning() {
-    let approved: ReviewSystem = serde_json::from_str(r#"{"type":"review_approved","branch":"b","sha":"s"}"#).unwrap();
+    let approved: ReviewSystem =
+        serde_json::from_str(r#"{"type":"review_approved","branch":"b","sha":"s"}"#).unwrap();
     assert!(matches!(approved, ReviewSystem::ReviewApproved { .. }));
 
-    let denied: ReviewSystem = serde_json::from_str(r#"{"type":"review_denied","branch":"b","sha":"s","message":"m"}"#).unwrap();
+    let denied: ReviewSystem =
+        serde_json::from_str(r#"{"type":"review_denied","branch":"b","sha":"s","message":"m"}"#)
+            .unwrap();
     assert!(matches!(denied, ReviewSystem::ReviewDenied { .. }));
 }
 
@@ -77,7 +82,10 @@ fn test_submit_branch_args_roundtrip() {
     };
     let back = assert_roundtrip(&args);
     assert_eq!(args.note, back.note);
-    assert_eq!(args.dangerously_skip_reviewer, back.dangerously_skip_reviewer);
+    assert_eq!(
+        args.dangerously_skip_reviewer,
+        back.dangerously_skip_reviewer
+    );
 }
 
 #[test]
