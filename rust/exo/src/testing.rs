@@ -1,5 +1,5 @@
 //! A shared mock runtime for unit-testing policy tools/hooks against **mock caps, zero IO**
-//! — the seam's payoff the WASM guest couldn't have. Every leaf (P1–P7) tests its `run`
+//! — the seam's payoff of unit-testing domain logic in pure Rust. Every tool tests its `run`
 //! against this one mock instead of writing its own, so the mocks don't diverge.
 //!
 //! [`MockRuntime`] impls every `exo-caps` trait (so it is `PolicyCaps`). It **records** the
@@ -71,7 +71,7 @@ pub enum Call {
 
 /// Canned return values + a recording log. Interior-mutable so the cap methods take `&self`
 /// (as the traits require) while still recording. Fields are `pub` so a test can set up the
-/// exact scenario (e.g. `mock.pr_for_branch = Some(7)` then assert `stop` blocks).
+/// exact scenario (e.g. `mock.is_clean = false` then assert `stop` blocks).
 pub struct MockRuntime {
     pub calls: Mutex<Vec<Call>>,
     pub kv: Mutex<HashMap<String, String>>,
