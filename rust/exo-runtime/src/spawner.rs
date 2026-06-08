@@ -135,9 +135,9 @@ pub(crate) struct BirthCore {
     pub name: AgentName,
     pub branch: Branch,
     pub task: String,
-    /// The child's resolved role-steering protocol (override-or-const). Only consumed for a Gemini
-    /// child (written to its `context.fileName`); a Claude child gets its protocol via the
-    /// SessionStart hook instead, so this is unused for Claude. Empty ⇒ no steering injected.
+    /// The child's resolved role-steering protocol (override-or-const). Consumed for both
+    /// Gemini (written to its `context.fileName`) and Claude (passed via
+    /// `--append-system-prompt`). Empty ⇒ no steering injected.
     pub protocol: String,
     /// Opt-in context inheritance. When true AND this is a Claude worktree child, the
     /// launch resolves the parent's Claude session UUID (via `exo-scry`) and starts the
@@ -626,8 +626,8 @@ impl Spawner for Runtime {
         };
         let agent_type = RoleKind::agent_type(&role);
         // Resolve the child's role-steering protocol (override-or-const) while the role is still
-        // typed. Threaded onto `BirthCore` for a Gemini child's `context.fileName`; a Claude child
-        // gets its protocol via the SessionStart hook, so this is unused there.
+        // typed. Threaded onto `BirthCore` for both Gemini (written to its `context.fileName`) and
+        // Claude (passed via `--append-system-prompt`).
         let protocol =
             resolve_protocol(&self.working_dir, role.role_str(), role.protocol()).await;
         let role = RoleRecord::new(&role).map_err(|e| SpawnError::Failed {
