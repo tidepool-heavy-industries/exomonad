@@ -47,3 +47,44 @@ pub struct ActiveTeam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub me: Option<crate::teams::Teammate>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pid_display() {
+        assert_eq!(format!("{}", Pid(42)), "42");
+    }
+
+    #[test]
+    fn team_name_display() {
+        assert_eq!(format!("{}", TeamName("alpha".into())), "alpha");
+    }
+
+    #[test]
+    fn active_team_serde_skips_none_optionals() {
+        let at = ActiveTeam {
+            claude_pid: None,
+            team: TeamName("t".into()),
+            tasks_dir: PathBuf::from("/x"),
+            lead_inbox: Some("lead".into()),
+            lead_session_id: None,
+            me: None,
+        };
+        let val: serde_json::Value = serde_json::to_value(&at).unwrap();
+        let obj = val.as_object().unwrap();
+
+        assert!(obj.contains_key("team"));
+        assert!(obj.contains_key("tasks_dir"));
+        assert!(obj.contains_key("lead_inbox"));
+
+        // These should be skipped because they are None and have skip_serializing_if
+        assert!(!obj.contains_key("claude_pid"));
+        assert!(!obj.contains_key("me"));
+
+        // This one is None but DOES NOT have skip_serializing_if
+        assert!(obj.contains_key("lead_session_id"));
+        assert!(obj["lead_session_id"].is_null());
+    }
+}
