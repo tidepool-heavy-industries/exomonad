@@ -580,6 +580,8 @@ impl Runtime {
             None
         };
 
+        // The protocol string is passed via --append-system-prompt for Claude.
+        // For Gemini, the settings.json context file (written above) is its system-prompt equivalent.
         let launch_cmd = format!(
             "{}\n",
             exomonad_shared::services::agent_control::launch::build_agent_command(
@@ -591,6 +593,7 @@ impl Runtime {
                 None,      // claude_flags
                 yolo,      // yolo → gemini --yolo (inherited launch policy)
                 wrap_nix,  // wrap_nix: nix develop wrap (inherited launch policy)
+                Some(&core.protocol),
             )
         );
 

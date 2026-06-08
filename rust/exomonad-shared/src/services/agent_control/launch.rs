@@ -35,6 +35,7 @@ pub fn build_agent_command(
     // Wrap in `nix develop` when `cwd` has a flake (classic mode runs agents in the dev
     // shell). Experimental node mode launches plain, matching its root, so passes `false`.
     wrap_nix: bool,
+    append_system_prompt: Option<&str>,
 ) -> String {
     let cmd = agent_type.command();
 
@@ -60,6 +61,14 @@ pub fn build_agent_command(
                     flags.push_str(&shell_escape::escape(tool.into()));
                 }
             }
+
+            if let Some(p) = append_system_prompt {
+                if !p.trim().is_empty() {
+                    flags.push_str(" --append-system-prompt ");
+                    flags.push_str(&escape_for_shell_command(p));
+                }
+            }
+
             flags
         }
         AgentType::Gemini => {
