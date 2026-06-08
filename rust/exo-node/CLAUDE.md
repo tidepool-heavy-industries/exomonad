@@ -27,7 +27,7 @@ Assembles `exo-runtime` (all caps) + a domain `D: Exomonad` (the domain's tools/
 
 The sidecar initializes a persistent file subscriber at startup (in the binary composition root). Logs are written to the **project root** (the main repo's `.exo/` dir, NOT the worktree's) so they survive worktree teardown:
 
-- **Path:** `<project-root>/.exo/logs/sidecar/<run_id>/<node_name>.log`
+- **Path:** `<project-root>/.exo/logs/sidecar/<run_id>/<branch>.log`
 - **Configuration:** Respects `RUST_LOG` (default: `info`).
 - **Mechanism:** Uses `tracing-subscriber` with a non-blocking `tracing-appender`.
 - **Instrumentation:** The inbound loop (`Domain`/`Lifecycle` arms), `handle_system` outcomes, and delivery sites (`deliver_parent`/`deliver_to_self`) are instrumented with detailed success/failure logs.

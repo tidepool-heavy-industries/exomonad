@@ -95,7 +95,7 @@ async fn main() -> anyhow::Result<()> {
                 .context("node self-ID / bootstrap")?;
 
             // Wire persistent file logging for the sidecar.
-            let _guard = init_logging(&ctx.run_id, ctx.runtime.name().as_str())
+            let _guard = init_logging(&ctx.run_id, ctx.runtime.branch().as_str())
                 .context("initializing persistent logging")?;
 
             exo_node::run_node(ctx).await.context("node run")
@@ -109,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
             // Hooks also benefit from logging if papers are available.
             let cwd = std::env::current_dir().context("resolving node cwd")?;
             if let Ok(ctx) = exo_node::bootstrap::<ExoDomain>(&papers, cwd) {
-                let _guard = init_logging(&ctx.run_id, ctx.runtime.name().as_str()).ok();
+                let _guard = init_logging(&ctx.run_id, ctx.runtime.branch().as_str()).ok();
                 hook::run(event, papers).await
             } else {
                 hook::run(event, papers).await
@@ -140,13 +140,13 @@ fn get_project_root() -> anyhow::Result<std::path::PathBuf> {
 
 fn init_logging(
     run_id: &str,
-    node_name: &str,
+    node_id: &str,
 ) -> anyhow::Result<tracing_appender::non_blocking::WorkerGuard> {
     let project_root = get_project_root()?;
     let log_dir = project_root.join(".exo/logs/sidecar").join(run_id);
     std::fs::create_dir_all(&log_dir).context("creating log directory")?;
 
-    let file_appender = tracing_appender::rolling::never(log_dir, format!("{}.log", node_name));
+    let file_appender = tracing_appender::rolling::never(log_dir, format!("{}.log", node_id));
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
