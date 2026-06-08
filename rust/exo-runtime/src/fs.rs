@@ -27,6 +27,15 @@ impl Fs for Runtime {
         let parent = path.parent().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no parent")
         })?;
+
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| FsError::At {
+                op: "write_atomic (create parent dir)",
+                path: parent.display().to_string(),
+                source: e,
+            })?;
+
         let file_name = path
             .file_name()
             .ok_or_else(|| {
@@ -52,5 +61,39 @@ impl Fs for Runtime {
                 path: path.display().to_string(),
                 source: e,
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use exo_caps::{AgentName, Branch, NodePath, PaneId};
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn test_write_atomic_creates_parent_dir() {
+        let dir = tempdir().unwrap();
+        let nested_path = dir.path().join("a/b/c.txt");
+        
+        let node_path = NodePath::new(vec![AgentName::new("test".into()).unwrap()]).unwrap();
+        let runtime = Runtime::new(
+            node_path,
+            Branch::new("main".into()).unwrap(),
+            dir.path().to_path_buf(),
+            None,
+            "run-1".into(),
+            "session-1".into(),
+            PaneId::new("%1".into()).unwrap(),
+        );
+
+        let content = b"hello world";
+        runtime.write_atomic(&nested_path, content).await.expect("should succeed");
+
+        assert!(nested_path.exists());
+        let read_back = tokio::fs::read(&nested_path).await.unwrap();
+        assert_eq!(read_back, content);
+        
+        // Verify parent dirs were created
+        assert!(dir.path().join("a/b").is_dir());
     }
 }
