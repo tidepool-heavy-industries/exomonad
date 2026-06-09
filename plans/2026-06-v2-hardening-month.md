@@ -13,6 +13,12 @@ signals); week 3 is the refactor centerpiece (cap supertraits + engine-goes-gene
 scaffold-first; week 4 trues tests and docs against the new foundation. Hardening lands
 first so the refactor waves run under a gate we trust.
 
+> **Execution re-sequenced 2026-06-09:** the remaining open tasks run as one recursive
+> swarm per [`2026-06-orchestration-tree.md`](2026-06-orchestration-tree.md) — T3.7 (DSL,
+> design accepted) lands FIRST because it reshapes the files the W1/W2 trust tasks touch;
+> trust tasks are then written against the new surface. Task content below stays canonical;
+> sequencing there supersedes the wave graph here.
+
 **Implementer key:** `G` = Gemini leaf (one narrow task, judgment pre-decided, full-code
 spec where mechanical). `C` = Claude leaf (judgment work; bar-not-bytes spec). `TL` =
 root/TL writes it directly (scaffold commits only). Sizes: S (≤½ day), M (1 day), L
