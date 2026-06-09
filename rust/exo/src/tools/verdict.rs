@@ -33,17 +33,17 @@ pub struct Verdict;
 impl Verdict {
     pub async fn run<C: Bus + Kv>(ctx: &C, args: VerdictArgs) -> CapResult<ToolOutput> {
         if args.summary.trim().is_empty() {
-            return Err(CapError::invalid(
-                "verdict",
-                "summary must not be empty",
-            ));
+            return Err(CapError::invalid("verdict", "summary must not be empty"));
         }
 
         for finding in &args.findings {
             if finding.severity == Severity::Error && finding.body.trim().is_empty() {
                 return Err(CapError::invalid(
                     "verdict",
-                    format!("Error-severity finding for file {} must have a non-empty body", finding.file),
+                    format!(
+                        "Error-severity finding for file {} must have a non-empty body",
+                        finding.file
+                    ),
                 ));
             }
         }
@@ -57,7 +57,11 @@ impl Verdict {
         };
 
         let blocked = args.findings.iter().any(|f| f.severity.blocks());
-        let outcome_label = if blocked { "CHANGES REQUESTED" } else { "APPROVED" };
+        let outcome_label = if blocked {
+            "CHANGES REQUESTED"
+        } else {
+            "APPROVED"
+        };
         let verdict_summary = format!("[VERDICT] {} {}", outcome_label, args.branch);
         let text = crate::review::render_findings(&args.summary, &args.findings);
 

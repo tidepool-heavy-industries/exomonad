@@ -14,15 +14,22 @@ where
 fn test_hook_decision_roundtrip() {
     let variants = [
         HookDecision::Allow,
-        HookDecision::Deny { reason: "blocked".into() },
-        HookDecision::Modify { input: json!({"arg": 1}) },
+        HookDecision::Deny {
+            reason: "blocked".into(),
+        },
+        HookDecision::Modify {
+            input: json!({"arg": 1}),
+        },
     ];
     for v in variants {
         assert_roundtrip(&v);
     }
 
     // Tag pinning
-    assert_eq!(serde_json::to_value(&HookDecision::Allow).unwrap(), json!({"decision": "allow"}));
+    assert_eq!(
+        serde_json::to_value(&HookDecision::Allow).unwrap(),
+        json!({"decision": "allow"})
+    );
     assert_eq!(
         serde_json::to_value(&HookDecision::Deny { reason: "r".into() }).unwrap(),
         json!({"decision": "deny", "reason": "r"})
@@ -33,20 +40,29 @@ fn test_hook_decision_roundtrip() {
 fn test_stop_decision_roundtrip() {
     let variants = [
         StopDecision::Allow,
-        StopDecision::Block { reason: "dirty".into() },
+        StopDecision::Block {
+            reason: "dirty".into(),
+        },
     ];
     for v in variants {
         assert_roundtrip(&v);
     }
 
     // Tag pinning
-    assert_eq!(serde_json::to_value(&StopDecision::Allow).unwrap(), json!({"decision": "allow"}));
+    assert_eq!(
+        serde_json::to_value(&StopDecision::Allow).unwrap(),
+        json!({"decision": "allow"})
+    );
 }
 
 #[test]
 fn test_session_start_output_roundtrip() {
-    let s1 = SessionStartOutput { additional_context: None };
-    let s2 = SessionStartOutput { additional_context: Some("hello".into()) };
+    let s1 = SessionStartOutput {
+        additional_context: None,
+    };
+    let s2 = SessionStartOutput {
+        additional_context: Some("hello".into()),
+    };
     assert_roundtrip(&s1);
     assert_roundtrip(&s2);
 }

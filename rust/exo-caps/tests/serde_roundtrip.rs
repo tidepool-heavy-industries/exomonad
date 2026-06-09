@@ -1,6 +1,6 @@
+use chrono::Utc;
 use exo_caps::*;
 use serde_json::json;
-use chrono::Utc;
 
 // Mock RoleKind for testing NodePapers and RoleRecord
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -42,7 +42,8 @@ fn test_node_path_roundtrip() {
     let np = NodePath::new(vec![
         AgentName::new("root".into()).unwrap(),
         AgentName::new("dev".into()).unwrap(),
-    ]).unwrap();
+    ])
+    .unwrap();
     assert_roundtrip(&np);
     // Wire form check
     let json = serde_json::to_string(&np).unwrap();
@@ -118,7 +119,10 @@ fn test_persona_roundtrip() {
 
     // Pin tag names
     assert_eq!(serde_json::to_value(&p1).unwrap(), json!({"agent": "dev"}));
-    assert_eq!(serde_json::to_value(&p2).unwrap(), json!({"synthetic": "github"}));
+    assert_eq!(
+        serde_json::to_value(&p2).unwrap(),
+        json!({"synthetic": "github"})
+    );
 }
 
 #[test]
@@ -156,8 +160,13 @@ fn test_message_kind_roundtrip() {
     let variants = [
         MessageKind::Chat,
         MessageKind::Event,
-        MessageKind::Control(ControlKind::Shutdown { grace_ms: 100, force: true }),
-        MessageKind::Lifecycle(Lifecycle::ChildIdle { summary: "done".into() }),
+        MessageKind::Control(ControlKind::Shutdown {
+            grace_ms: 100,
+            force: true,
+        }),
+        MessageKind::Lifecycle(Lifecycle::ChildIdle {
+            summary: "done".into(),
+        }),
     ];
     for v in variants {
         assert_roundtrip(&v);
@@ -172,7 +181,8 @@ fn test_message_kind_wire_pinning() {
     let event: MessageKind = serde_json::from_str(r#""event""#).unwrap();
     assert_eq!(event, MessageKind::Event);
 
-    let control: MessageKind = serde_json::from_str(r#"{"control":{"shutdown":{"grace_ms":100}}}"#).unwrap();
+    let control: MessageKind =
+        serde_json::from_str(r#"{"control":{"shutdown":{"grace_ms":100}}}"#).unwrap();
     if let MessageKind::Control(ControlKind::Shutdown { grace_ms, force }) = control {
         assert_eq!(grace_ms, 100);
         assert!(!force); // default
@@ -183,7 +193,10 @@ fn test_message_kind_wire_pinning() {
 
 #[test]
 fn test_control_kind_roundtrip() {
-    let c = ControlKind::Shutdown { grace_ms: 500, force: false };
+    let c = ControlKind::Shutdown {
+        grace_ms: 500,
+        force: false,
+    };
     assert_roundtrip(&c);
 }
 
@@ -196,8 +209,12 @@ fn test_shutdown_status_roundtrip() {
 #[test]
 fn test_lifecycle_roundtrip() {
     let variants = [
-        Lifecycle::ChildIdle { summary: "idle".into() },
-        Lifecycle::ChildExited { reason: "done".into() },
+        Lifecycle::ChildIdle {
+            summary: "idle".into(),
+        },
+        Lifecycle::ChildExited {
+            reason: "done".into(),
+        },
         Lifecycle::ShutdownResponse {
             status: ShutdownStatus::Accepted,
             live_children: vec!["a".into()],
@@ -215,10 +232,12 @@ fn test_lifecycle_wire_pinning() {
     let idle: Lifecycle = serde_json::from_str(r#"{"type":"child_idle","summary":"ok"}"#).unwrap();
     assert!(matches!(idle, Lifecycle::ChildIdle { .. }));
 
-    let exited: Lifecycle = serde_json::from_str(r#"{"type":"child_exited","reason":"bye"}"#).unwrap();
+    let exited: Lifecycle =
+        serde_json::from_str(r#"{"type":"child_exited","reason":"bye"}"#).unwrap();
     assert!(matches!(exited, Lifecycle::ChildExited { .. }));
 
-    let resp: Lifecycle = serde_json::from_str(r#"{"type":"shutdown_response","status":"accepted"}"#).unwrap();
+    let resp: Lifecycle =
+        serde_json::from_str(r#"{"type":"shutdown_response","status":"accepted"}"#).unwrap();
     if let Lifecycle::ShutdownResponse { status, .. } = resp {
         assert_eq!(status, ShutdownStatus::Accepted);
     } else {
@@ -233,12 +252,15 @@ fn test_node_status_roundtrip() {
         kind: "dev".into(),
         branch: "main".into(),
         shutdown_pending: false,
-        children: vec![ChildStatus { name: "c1".into(), busy: true }],
+        children: vec![ChildStatus {
+            name: "c1".into(),
+            busy: true,
+        }],
         ts: Utc::now(),
     };
     let json = serde_json::to_string(&s).expect("failed to serialize");
     let back: NodeStatus = serde_json::from_str(&json).expect("failed to deserialize");
-    
+
     // Manual comparison since NodeStatus doesn't impl PartialEq
     assert_eq!(s.node, back.node);
     assert_eq!(s.kind, back.kind);
@@ -266,7 +288,8 @@ fn test_node_papers_roundtrip() {
         Some(InboxPath::new("/tmp/inbox".into())),
         true,
         false,
-    ).unwrap();
+    )
+    .unwrap();
     assert_roundtrip(&papers);
 }
 
@@ -278,13 +301,19 @@ fn test_child_record_roundtrip() {
         pane: PaneId::new("%2".into()).unwrap(),
         inbox: InboxPath::new("/tmp/i".into()),
     };
-    let r2 = ChildRecord::Started { child: AgentName::new("a".into()).unwrap() };
+    let r2 = ChildRecord::Started {
+        child: AgentName::new("a".into()).unwrap(),
+    };
     assert_roundtrip(&r1);
     assert_roundtrip(&r2);
 
     // Tag pinning
-    assert!(serde_json::to_string(&r1).unwrap().contains(r#""record":"spawned""#));
-    assert!(serde_json::to_string(&r2).unwrap().contains(r#""record":"started""#));
+    assert!(serde_json::to_string(&r1)
+        .unwrap()
+        .contains(r#""record":"spawned""#));
+    assert!(serde_json::to_string(&r2)
+        .unwrap()
+        .contains(r#""record":"started""#));
 }
 
 #[test]

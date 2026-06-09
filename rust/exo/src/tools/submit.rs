@@ -248,7 +248,8 @@ impl SubmitBranch {
                                 .line
                                 .map(|l| format!("L{l}"))
                                 .unwrap_or_else(|| "     ".to_string());
-                            prior_round_context.push_str(&format!("- {} {}: {}\n", f.file, line, f.body));
+                            prior_round_context
+                                .push_str(&format!("- {} {}: {}\n", f.file, line, f.body));
                         }
                     }
                 }

@@ -100,7 +100,8 @@ pub async fn write_gemini_node_config(
     f.write_all(gemini_policy_toml().as_bytes()).await?;
     f.sync_all().await?;
 
-    let settings = gemini_settings_json(&p_raw, &p_esc, context_path.as_deref(), Some(&policy_path));
+    let settings =
+        gemini_settings_json(&p_raw, &p_esc, context_path.as_deref(), Some(&policy_path));
     let settings_json = serde_json::to_vec_pretty(&settings)
         .map_err(|e| std::io::Error::other(format!("gemini settings encode: {e}")))?;
 

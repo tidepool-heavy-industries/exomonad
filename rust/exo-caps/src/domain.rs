@@ -11,7 +11,9 @@
 
 use crate::bus::{Addressee, Bus};
 use crate::error::{CapError, CapResult};
-use crate::types::{AgentType, ChildKind, DomainPayload, Message, MessageBody, MessageKind, Summary};
+use crate::types::{
+    AgentType, ChildKind, DomainPayload, Message, MessageBody, MessageKind, Summary,
+};
 use crate::AgentName;
 use serde::{de::DeserializeOwned, Serialize};
 

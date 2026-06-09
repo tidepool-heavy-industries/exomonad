@@ -17,7 +17,7 @@ fn domain_message_in_ingestion_entry_round_trips() {
         bar: 42,
     };
     let json = serde_json::to_string(&system).unwrap();
-    
+
     let entry = IngestionEntry {
         v: 1,
         ts: Utc::now(),
@@ -32,8 +32,9 @@ fn domain_message_in_ingestion_entry_round_trips() {
     let serialized = serde_json::to_string(&entry).unwrap();
     // Prior to the fix, this would fail to deserialize because RawValue
     // cannot be read from the buffered Content map used by #[serde(flatten)].
-    let deserialized: IngestionEntry = serde_json::from_str(&serialized).expect("Failed to deserialize IngestionEntry with Domain payload");
-    
+    let deserialized: IngestionEntry = serde_json::from_str(&serialized)
+        .expect("Failed to deserialize IngestionEntry with Domain payload");
+
     assert_eq!(entry, deserialized);
 }
 
@@ -51,7 +52,8 @@ fn chat_message_in_ingestion_entry_round_trips() {
     };
 
     let serialized = serde_json::to_string(&entry).unwrap();
-    let deserialized: IngestionEntry = serde_json::from_str(&serialized).expect("Failed to deserialize IngestionEntry with Chat payload");
-    
+    let deserialized: IngestionEntry = serde_json::from_str(&serialized)
+        .expect("Failed to deserialize IngestionEntry with Chat payload");
+
     assert_eq!(entry, deserialized);
 }

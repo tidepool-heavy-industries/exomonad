@@ -149,9 +149,7 @@ pub fn stop_notify<'a, R: Bus + ChildLiveness + Send + Sync>(
 /// `ReviewAborted` to the parent. ALWAYS allows exit — never block a Gemini at stop (gemini-cli
 /// #20426). Biases LOUD: a kv-read error is treated as no-verdict (a spurious re-submit beats a
 /// silent stall).
-pub fn stop_reviewer<'a, R: Bus + Kv + Send + Sync>(
-    ctx: &'a R,
-) -> BoxFuture<'a, StopDecision> {
+pub fn stop_reviewer<'a, R: Bus + Kv + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, StopDecision> {
     Box::pin(async move {
         let produced = matches!(ctx.get("verdict_produced").await, Ok(Some(_)));
         if !produced {

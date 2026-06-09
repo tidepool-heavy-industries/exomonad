@@ -61,8 +61,10 @@ fn test_review_system_roundtrip() {
 
 #[test]
 fn test_review_system_wire_pinning() {
-    let reviewed: ReviewSystem =
-        serde_json::from_str(r#"{"type":"reviewed","branch":"b","sha":"s","summary":"ok","findings":[]}"#).unwrap();
+    let reviewed: ReviewSystem = serde_json::from_str(
+        r#"{"type":"reviewed","branch":"b","sha":"s","summary":"ok","findings":[]}"#,
+    )
+    .unwrap();
     assert!(matches!(reviewed, ReviewSystem::Reviewed { .. }));
 }
 

@@ -182,12 +182,8 @@ pub async fn handle_review_system<C: SystemCtx + ?Sized>(
                     my_branch.as_str()
                 );
             } else {
-                ctx.deliver_to_self(
-                    "reviewer",
-                    "[REVIEW]",
-                    &render_findings(summary, findings),
-                )
-                .await?;
+                ctx.deliver_to_self("reviewer", "[REVIEW]", &render_findings(summary, findings))
+                    .await?;
             }
 
             // BEST-EFFORT: Persist the review round to the durable log.
@@ -195,13 +191,15 @@ pub async fn handle_review_system<C: SystemCtx + ?Sized>(
             let path = std::path::PathBuf::from(format!(".exo/reviews/{safe}.json"));
 
             let mut log = match ctx.read_reviews(&path).await {
-                Ok(Some(bytes)) => serde_json::from_slice::<ReviewLog>(&bytes).unwrap_or_else(|e| {
-                    tracing::warn!("failed to parse review log at {:?}: {e}", path);
-                    ReviewLog {
-                        branch: my_branch.as_str().to_string(),
-                        rounds: vec![],
-                    }
-                }),
+                Ok(Some(bytes)) => {
+                    serde_json::from_slice::<ReviewLog>(&bytes).unwrap_or_else(|e| {
+                        tracing::warn!("failed to parse review log at {:?}: {e}", path);
+                        ReviewLog {
+                            branch: my_branch.as_str().to_string(),
+                            rounds: vec![],
+                        }
+                    })
+                }
                 Ok(None) => ReviewLog {
                     branch: my_branch.as_str().to_string(),
                     rounds: vec![],

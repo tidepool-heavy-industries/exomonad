@@ -34,11 +34,7 @@ pub struct WorktreeInfo {
 }
 
 /// Pure classification logic: given worktree facts, decide what to do.
-pub fn classify(
-    path: &Path,
-    root_path: &Path,
-    is_ancestor: bool,
-) -> WorktreeStatus {
+pub fn classify(path: &Path, root_path: &Path, is_ancestor: bool) -> WorktreeStatus {
     if path == root_path {
         WorktreeStatus::Current
     } else if is_ancestor {
@@ -52,9 +48,16 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
     let root_path = get_project_root()?;
     let (base_branch, base_head) = get_base_info()?;
 
-    println!("Auditing .exo/worktrees/ against base branch '{}' ({})", base_branch, &base_head[..8]);
+    println!(
+        "Auditing .exo/worktrees/ against base branch '{}' ({})",
+        base_branch,
+        &base_head[..8]
+    );
     println!("{:-<100}", "");
-    println!("{:<40} | {:<25} | {:<10} | {:<8}", "PATH", "BRANCH", "STATUS", "HEAD");
+    println!(
+        "{:<40} | {:<25} | {:<10} | {:<8}",
+        "PATH", "BRANCH", "STATUS", "HEAD"
+    );
     println!("{:-<100}", "");
 
     let mut worktrees = list_worktrees()?;
@@ -62,7 +65,8 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
     let mut unmerged_count = 0;
 
     // Filter to only those under .exo/worktrees/ or the root itself
-    worktrees.retain(|wt| wt.path == root_path || wt.path.starts_with(root_path.join(".exo/worktrees")));
+    worktrees
+        .retain(|wt| wt.path == root_path || wt.path.starts_with(root_path.join(".exo/worktrees")));
 
     for wt in &mut worktrees {
         let is_ancestor = if wt.path == root_path {
@@ -120,7 +124,10 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
         let should_remove = match wt.status {
             WorktreeStatus::Merged => true,
             WorktreeStatus::Unmerged if include_unmerged => {
-                println!("WARNING: Reclaiming UNMERGED worktree '{}' as requested.", wt.branch);
+                println!(
+                    "WARNING: Reclaiming UNMERGED worktree '{}' as requested.",
+                    wt.branch
+                );
                 true
             }
             _ => false,
@@ -145,10 +152,15 @@ fn get_project_root() -> Result<PathBuf> {
         .context("running git rev-parse --show-toplevel")?;
 
     if !output.status.success() {
-        anyhow::bail!("git rev-parse failed: {}", String::from_utf8_lossy(&output.stderr));
+        anyhow::bail!(
+            "git rev-parse failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
-    Ok(PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()))
+    Ok(PathBuf::from(
+        String::from_utf8_lossy(&output.stdout).trim(),
+    ))
 }
 
 fn get_base_info() -> Result<(String, String)> {
@@ -157,7 +169,9 @@ fn get_base_info() -> Result<(String, String)> {
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .output()
         .context("getting current branch name")?;
-    let branch = String::from_utf8_lossy(&branch_out.stdout).trim().to_string();
+    let branch = String::from_utf8_lossy(&branch_out.stdout)
+        .trim()
+        .to_string();
 
     // HEAD sha
     let head_out = Command::new("git")
@@ -176,7 +190,10 @@ fn list_worktrees() -> Result<Vec<WorktreeInfo>> {
         .context("listing worktrees")?;
 
     if !output.status.success() {
-        anyhow::bail!("git worktree list failed: {}", String::from_utf8_lossy(&output.stderr));
+        anyhow::bail!(
+            "git worktree list failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -188,7 +205,9 @@ fn list_worktrees() -> Result<Vec<WorktreeInfo>> {
     for line in stdout.lines() {
         if line.is_empty() {
             if let (Some(path), Some(head)) = (current_path.take(), current_head.take()) {
-                let branch = current_branch.take().unwrap_or_else(|| "detached".to_string());
+                let branch = current_branch
+                    .take()
+                    .unwrap_or_else(|| "detached".to_string());
                 worktrees.push(WorktreeInfo {
                     path,
                     branch,
@@ -250,9 +269,7 @@ fn remove_worktree(path: &Path, branch: &str) -> Result<()> {
 
     if branch != "detached" && branch != "main" && branch != "master" {
         println!("  Deleting branch: {}", branch);
-        let _ = Command::new("git")
-            .args(["branch", "-D", branch])
-            .status();
+        let _ = Command::new("git").args(["branch", "-D", branch]).status();
     }
 
     Ok(())
