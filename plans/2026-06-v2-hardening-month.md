@@ -116,22 +116,27 @@ whole-workspace build after every fold — these waves are cross-crate by nature
 
 ### Wave 4 — Cap inter-dependencies (supertraits)
 
-- **T3.0 — Scaffold (TL).** Composite caps gain primitive-cap supertraits per the queued
-  design: `Spawner: Tmux + Git + Fs`, `Bus: Fs`, `Topology: Tmux + Fs` (exact bounds
-  finalized at scaffold against real impl usage — bounds reflect what the runtime impls
-  already reach for, composites must not re-implement primitive domains). Scaffold commit =
-  new bounds in `rust/exo-caps/src/{spawner,bus,topology}.rs` + doc updates + whatever
-  default-stub plumbing keeps `cargo check --workspace` green.
-- **T3.1 — Migrate exo-runtime impls.** `G`, M. Mechanical: satisfy the new bounds, delete
-  any now-duplicated primitive logic inside composite impls (spec lists each duplication
-  explicitly — found at scaffold time).
+- **T3.0 — Scaffold (TL).** ✅ DONE (b3bbb414, done directly by the TL — fiddly type-system
+  work, per user instruction). Final bounds: `Spawner: Git + Tmux + Fs`, `Bus: Fs`,
+  `Topology: Tmux + Fs`, `ChildLiveness: Tmux + Fs`. New primitive method
+  `Tmux::list_panes` (the one liveness probe; `Err` = probe failure, never "no panes").
+  Deliberate non-migrations documented at the seam: no `Fs::append` (the two append
+  disciplines stay impl-internal), topology's recursive walk stays sync `std::fs` inside
+  `spawn_blocking`.
+- **T3.1 — Migrate exo-runtime impls.** ✅ DONE (b3bbb414, folded into the scaffold commit —
+  same hands, no leaf). Three duplications dissolved: raw `tmux list-panes` free fn →
+  `Tmux::list_panes`; raw `git worktree remove --force` in reclaim → `Git::worktree_remove`
+  (which gained `--force`/reclaim semantics); papers write → `Fs::write_atomic`. Ledger/
+  policy/protocol reads now via `Fs::read`.
 - **T3.2 — Mock/test-stub generator.** `G`, M. The mock tax is 4 sites per cap-signature
   change (trait, Runtime, MockRuntime, seam.rs). Add a `macro_rules!` default-unimplemented
   stub generator used by `rust/exo/src/testing.rs` and `rust/exo-framework/tests/seam.rs`
   so future signature changes touch 2 sites, not 4. Migrate both files onto it.
-- **T3.3 — Bounds ripple.** `G`, S. Update `exo-framework::PolicyCaps` and any `exo` tool
-  bounds that can now *narrow* (a tool needing `Spawner` no longer also names `Tmux`).
-  Spec enumerates exact signatures (TL greps at scaffold time).
+- **T3.3 — Bounds ripple.** ✅ RESOLVED by decision, opposite direction (documented in
+  `rust/exo-caps/CLAUDE.md`): tool bounds stay **explicit per-cap** — a tool's bound
+  documents what it *directly* calls (least-privilege spec); supertraits encode what an
+  *implementation* tier needs. Redundant bounds harmless; don't narrow. `PolicyCaps`
+  deliberately keeps the full nine-cap list. No code change.
 
 ### Wave 5 — Engine goes generic (D::System)
 
