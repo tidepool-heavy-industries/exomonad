@@ -60,9 +60,22 @@ signature (receiverless, `CapResult<ToolOutput>`), so the 20 typed test call sit
 (`Tree::run(&mock, args)`) compile unchanged (trait import aside; 3 messaging tests that call
 the *erased* `tool.call(...)` on the concrete value need a one-line rewrite each).
 
-### The gates file (`gates.rs` shape) — gates and observers, not monoliths
+### The stages — contrib in the framework, decisions in the domain
+
+**(Amended in review round 2 — the xmonad-contrib move.)** A stage lives in
+**`exo_framework::stages`** iff its body names only engine/caps vocabulary (cap traits,
+`HookInput`, engine-owned `Lifecycle`); it lives in the **domain** iff it names a domain
+decision (`D::System`, domain prose). Three of the four decomposed stages are engine
+machinery wearing domain clothes — `announce_idle` emits `Lifecycle::ChildIdle`, the signal
+the sidecar's own liveness tracking consumes (any second domain would have to reimplement it
+byte-for-byte or go blind); `deny_git_add_all` and `require_clean_tree` are generic to the
+engine's worktree/on-disk-merge model. They move to the framework. Rosters stay exhaustive
+and explicit — contrib provides stages you *list*; no defaults sneak back in.
 
 ```rust
+// exo_framework::stages — reusable, cap-generic. Single-arg stages use elided lifetimes;
+// only the two-borrow PreToolRule shape needs an explicit <'a>.
+
 /// PreToolUse rule: deny `git add .` / `git add -A` (stage by path). Default-allow nudge.
 pub fn deny_git_add_all<'a, R: Send + Sync>(_ctx: &'a R, input: &'a HookInput)
     -> BoxFuture<'a, CapResult<HookDecision>> { /* today's body, Ok-wrapped */ }
@@ -70,23 +83,29 @@ pub fn deny_git_add_all<'a, R: Send + Sync>(_ctx: &'a R, input: &'a HookInput)
 /// Stop GATE — may Block: hold exit while the worktree is dirty (a parent merges the
 /// *branch* off disk; uncommitted work is invisible to that merge). Errors propagate;
 /// the fold fails open.
-pub fn require_clean_tree<'a, R: Git + Send + Sync>(ctx: &'a R)
-    -> BoxFuture<'a, CapResult<StopDecision>> { /* is_clean? → Allow/Block */ }
+pub fn require_clean_tree<R: Git + Send + Sync>(ctx: &R)
+    -> BoxFuture<'_, CapResult<StopDecision>> { /* is_clean? → Allow/Block */ }
 
 /// Stop OBSERVER — cannot block (the type returns `()`): when the subtree is quiescent,
 /// deliver ChildIdle to the parent. Owns its errors (log + swallow), as today.
-pub fn announce_idle<'a, R: Bus + ChildLiveness + Send + Sync>(ctx: &'a R)
-    -> BoxFuture<'a, ()> { /* today's stop_notify body */ }
+pub fn announce_idle<R: Bus + ChildLiveness + Send + Sync>(ctx: &R)
+    -> BoxFuture<'_, ()> { /* today's stop_notify body */ }
+```
+
+```rust
+// exo/src/gates.rs — what remains is exactly the domain DECISIONS.
 
 /// Stop OBSERVER (reviewer): no `verdict_produced` flag → deliver ReviewAborted.
 /// Bias-LOUD: a kv Err counts as no-verdict (a spurious re-submit beats a silent stall).
-pub fn abort_if_no_verdict<'a, R: Bus + Kv + Send + Sync>(ctx: &'a R)
-    -> BoxFuture<'a, ()> { /* today's stop_reviewer body */ }
+/// Domain: names ReviewSystem.
+pub fn abort_if_no_verdict<R: Bus + Kv + Send + Sync>(ctx: &R)
+    -> BoxFuture<'_, ()> { /* today's stop_reviewer body */ }
 ```
 
 Each stage's cap bound narrows to what *it* touches (`require_clean_tree`: `Git` only;
 `announce_idle`: `Bus + ChildLiveness` only) — per-stage least-privilege, same doctrine as
-tools. Today's monolithic `stop` demanded the union.
+tools. Today's monolithic `stop` demanded the union. The framework CLAUDE.md doctrine line
+amends to: "no *domain* tools/roles/gates; reusable cap-generic stages live in `stages`."
 
 ### The roster (`roles.rs` shape) — the fully legible policy table
 
@@ -135,6 +154,43 @@ assertion** (`rd.stop.is_empty()` for every role with `agent_type() == Gemini`),
 behavioral test. (Caveat for the legibility claim: if stages ever go phase-conditional over
 `Kv`, the table shows stage names, not phase-dependent behavior — legibility is of the
 *composition*, not the bodies.)
+
+### The RoleKind table (added in review round 2)
+
+The first draft reshaped `role_def` but left its four sibling matches untouched — the same
+column-store opacity the Problem statement condemns. Adding a role was 7 production sites;
+per-role facts were scattered across `all`/`agent_type`/`role_str`/`protocol`. Since edits
+here are row-wise (you add a *role*, not a *question*), the domain co-locates a row-major
+spec; the `RoleKind` methods become field reads:
+
+```rust
+struct RoleSpec {
+    agent_type: AgentType,
+    role_str: &'static str,
+    protocol: &'static str,
+}
+
+impl ExoRole {
+    fn spec(self) -> RoleSpec {
+        match self {
+            ExoRole::Root => RoleSpec { agent_type: AgentType::Claude, role_str: "root", protocol: protocol::ROOT },
+            // … one row per role; adding a role = this arm + the role_def arm (+ all()).
+        }
+    }
+}
+```
+
+Two trap-closing tests ride along (both found in review, both silent-drift hazards today):
+
+- **`role_str` ↔ serde conformance**: papers record the role through serde
+  (`rename_all = "lowercase"`); `role_str` independently feeds the protocol-override
+  filename and status snapshots. Nothing ties the encodings. Test: for every role,
+  `serde_json::to_value(r) == json!(r.role_str())`.
+- **`all()` totality canary**: the total #20426 assertion quantifies over `RoleKind::all()`,
+  and nothing forces `all()` to list a new variant — a forgotten entry silently exempts the
+  new role from every roster test. Test: an exhaustive `match` over the variants inside the
+  same test that asserts `all().len()`, so adding a variant fails compilation next to the
+  list it must extend.
 
 ---
 
@@ -281,7 +337,17 @@ during implementation.
 
 ## Review provenance
 
-Two independent adversarial reviews (2026-06-09), conclusions folded in above:
+Three review rounds (2026-06-09), conclusions folded in above. **Round 2 (ambition/
+completeness)** audited every authoring touchpoint against the xmonad bar and forced four
+amendments: the `RoleKind`→`RoleSpec` co-location + its two trap tests (above), the
+`exo_framework::stages` contrib module (above), elided-lifetime stage signatures in all
+examples (only `PreToolRule` needs `<'a>`), and a follow-on list (below). It also
+*confirmed* stopping points: tool-add (3 sites) and stage-add (2 sites) are at the bar;
+submit.rs's `Check` list stays domain (its fail-closed fold is the opposite error doctrine —
+the rejected-`Pipeline<S>` reasoning applies); `render_spec_prompt`/`write_acceptance`/
+review-round persistence stay domain.
+
+Rounds 1a/1b (mechanics + design), conclusions folded in above:
 
 - **Mechanics**: the full contract was transcribed into a scratch crate against the workspace's
   exact dep versions (async-trait 0.1.89, schemars 0.8.22) — compiled as written, 12/12 tests
@@ -332,6 +398,24 @@ Two independent adversarial reviews (2026-06-09), conclusions folded in above:
 - **A single generic `Pipeline<S>`** over the slots — the folds have genuinely different
   semantics (threading vs short-circuit-then-observers); concrete aliases + two fold methods
   beat one abstraction with behavior knobs.
+- **`baseline_rules()` factoring of the five-fold `pre_tool_use: vec![deny_git_add_all]`** —
+  hiding one stage behind a name to save 4 lines; the repetition IS the table showing
+  policy. **Trigger to revisit**: when the classic-antipattern port makes the shared
+  pre-rule list exceed ~2 entries.
+- **Composed tool lists** (`conductor_tools().chain(…)` for the Root/Tl overlap) — makes
+  "what does Tl serve" a two-hop read; the `role_tool_matrix` golden table catches dual-edit
+  drift loudly. Explicitness wins for a policy table.
+
+## Follow-ons (recorded, not in T3.7 scope)
+
+- **`SystemCtx::{read_reviews,persist_reviews}` → `{read_state,persist_state}`** — domain
+  vocabulary ("review") in a framework trait; a second domain would use this slot for
+  non-review state. ~6 mechanical sites; rides T3.7's wave C as a rider (it serves the same
+  zero-domain-vocabulary doctrine the seam audit checks).
+- **`SpecFields` flatten-dedup** of the three spawn `Args` (7 fields × 3 +
+  `render_spec_prompt`'s 7-arg signature) — ~60 lines removed, but `#[serde(flatten)]`'s
+  schema expansion must be byte-diffed against `tools/list` first, and it collides with
+  T1.1's spawn.rs work this month. Next month.
 
 ## Implementation map (two phases, two commits)
 
@@ -349,11 +433,17 @@ Two independent adversarial reviews (2026-06-09), conclusions folded in above:
 
 **Phase B — hook pipelines:**
 - `exo-framework/src/roles.rs`: aliases + `RoleDef` fields + the two fold methods; add
-  `tracing` to `exo-framework/Cargo.toml` (verified absent).
-- `exo/src/gates.rs`: decompose per the map; gates return `CapResult`, observers `()`;
-  delete the monoliths; port gate tests to roster-level pipeline tests
-  (`role_def::<MockRuntime>(Tl).run_stop(&ctx)`); add the structural Gemini test + keep the
-  behavioral one; assert the flagged git-error delta as intended.
+  `tracing` to `exo-framework/Cargo.toml` (verified absent). **Plus
+  `exo-framework/src/stages.rs`** (round-2): `deny_git_add_all`, `require_clean_tree`,
+  `announce_idle` — written scaffold-side (this concentrates the most behavior-sensitive
+  decomposition in TL-written code and shrinks the domain leaf's diff). Module rustdoc gets
+  the stage-authoring example (one elided-lifetime gate, one observer, one roster row).
+- `exo/src/gates.rs`: shrinks to `abort_if_no_verdict` + `session_start` + imports from
+  `exo_framework::stages`; delete the monoliths; port gate tests to roster-level pipeline
+  tests (`role_def::<MockRuntime>(Tl).run_stop(&ctx)`); add the structural Gemini test +
+  keep the behavioral one; assert the flagged git-error delta as intended.
+- `exo/src/roles.rs` (round-2 riders): `RoleSpec` co-location; `role_str`↔serde conformance
+  test; `all()` totality canary.
 - Engine invocations → fold methods: `exo-node/src/hook.rs:110,129` and
   `hooksock/server.rs:142,175` (`session_start` call sites unchanged). Give hook.rs's
   in-process Stop arm the agent-type shaping or document it socket-only.
@@ -366,8 +456,12 @@ Two independent adversarial reviews (2026-06-09), conclusions folded in above:
   document before the classic antipattern port lands Modify-producing rules.
 
 **Docs:** `exo/CLAUDE.md` (Shape rows, "The gates" section, Roles table, drop the
-authoring-DSL gap bullet), `exo-framework/CLAUDE.md` (modules table, least-privilege section),
-module headers in framework + domain, `rust/CLAUDE.md` one-liners, month-plan T3.7.
+authoring-DSL gap bullet, **plus a four-row "to add a role / tool / stage / backend, touch
+exactly these sites" cookbook table**), `exo-framework/CLAUDE.md` (modules table + new
+`stages` row, amended doctrine line, least-privilege section), module headers in framework +
+domain, `rust/CLAUDE.md` one-liners, month-plan T3.7. **Wave C rider:** the
+`read_reviews`/`persist_reviews` → `read_state`/`persist_state` seam rename (see Follow-ons —
+pulled into wave C so the seam audit finds it already done).
 
 ## Verification
 

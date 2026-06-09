@@ -4,6 +4,14 @@ description: "ExoMonad agent orchestration rules — loaded into every agent's c
 
 # ExoMonad Agent Rules
 
+> **⚠️ v2 NODE-MODE SESSIONS:** parts of this file predate v2 and describe the Classic
+> loop. In a v2 session your session-start protocol and your spawn spec/charter override
+> this file wherever they conflict. Known-stale here: there is no `file_pr`/`merge_pr` and
+> no Copilot — v2 converges via `submit_branch` → reviewer `verdict` → parent `merge`
+> (local git); `fork_wave`'s `fork_session` defaults to **false** (context inheritance is
+> opt-in); the notification vocabulary is `[READY]`/`[idle]`/`[FAILED: id]`. Full trueing
+> is scheduled (T4.5).
+
 ## Model
 
 ExoMonad is a hylomorphism over context windows. Unfold = plan + scaffold + spawn. Fold = merge + integrate + PR upward. Each agent is a triad: worktree (filesystem) + context window (attention) + actor (messages). See `CLAUDE.md` § Model for the full conceptual framework.

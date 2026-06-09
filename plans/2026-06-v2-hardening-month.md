@@ -40,9 +40,8 @@ root/TL writes it directly (scaffold commits only). Sizes: S (≤½ day), M (1 d
 
 ## Week 0 — Prologue (before wave 1; no leaves)
 
-- **P0.1 — Land the in-flight hooksock logging diff.** Already reviewed clean; includes the
-  Log-cap removal. Fold in the stale "Wave-0 scaffold" banner fix in
-  `rust/exo-caps/src/lib.rs:7-10` (the seam is long past Wave 1). `TL`, S.
+- **P0.1 — Land the in-flight hooksock logging diff.** ✅ DONE (`0d12c92b` — Log-cap
+  removal + logging-hygiene pass; the stale banner went with it).
 - **P0.2 — Deploy + restart.** `just install-all-dev` and recreate the session so running
   sidecars pick up the `stop_reviewer`/ReviewAborted fix that is currently
   source-only. This is the live instance of the drift problem T2.1 solves. `TL`, S.
@@ -60,16 +59,18 @@ Wave 1 tasks are independent; wave 2 builds on wave 1's merged state.
   - At spawn, write the spec's `boundary` (file/glob list) to KV: key `boundary:{child_agent_name}`, value JSON array. At review-request build time, read it and inject a "scope" section into the reviewer's context: the boundary + instruction to flag any changed file outside it as a structured finding (not an auto-reject).
   - Files: `rust/exo/src/tools/spawn.rs` (write), `rust/exo/src/review.rs` (read + inject), `rust/exo/src/testing.rs` (MockRuntime KV already exists).
   - Pre-decided: KV is the storage (not papers — papers are engine-owned and immutable); missing boundary key ⇒ review proceeds without a scope section (older children), never an error.
+  - Also (2026-06-09 review finding): anchor the review-log path at the **project root** — today `.exo/reviews/{safe}.json` resolves against the submitter's worktree cwd, so the log is destroyed when the worktree is reclaimed at merge; mirror the sidecar-log path scheme.
   - Verify: `cargo test -p exo`, new unit test that a built review prompt contains the boundary block.
 - **T1.2 — Unsubmitted-work signal at dev stop.** `G`, M.
   - Known edge (validated 2026-06-05): devs commit but never `submit_branch`; the clean-gate passes and the work silently stalls. In `stop_notify`: if `fork_point()` shows the branch ahead of base AND no `submitted:{branch}` KV flag (set by `submit_branch`), (a) deliver a one-shot synthetic self-nudge "you have unsubmitted commits — call submit_branch" (KV-deduped), (b) tag the `ChildIdle` summary with `unsubmitted-commits` so the parent sees it.
   - Files: `rust/exo/src/gates.rs`, `rust/exo/src/tools/submit.rs` (set flag), tests in `rust/exo/src/gates.rs`.
   - Anti-pattern (load-bearing): NEVER block a Gemini at stop (gemini-cli #20426). This is signal-only.
   - Verify: `cargo test -p exo`; unit tests for all four (ahead × flag) cases.
-- **T1.3 — Reviewer intent-cue anchoring fix.** `G`, S.
-  - Known failure: reviewer rubber-stamps real bugs when the diff is labeled "throwaway/probe/WIP". Add an explicit rubric line to the reviewer protocol/prompt: intent labels in code or commit messages do not lower the review bar; review every diff as production code.
-  - Files: reviewer prompt construction in `rust/exo/src/review.rs` and/or the reviewer role protocol in `rust/exo/src/roles.rs`.
-  - Verify: `cargo test -p exo`; prompt-content unit test.
+- **T1.3 — Reviewer intent-cue anchoring fix.** ✅ DONE 2026-06-09, pulled into wave 0
+  (root TL-wrote it so the P0.2 deploy carries it — every review in the swarm benefits).
+  Rubric line landed in BOTH `protocol.rs::REVIEWER` and `submit.rs::review_task`, with
+  prompt-content assertions in `spawns_reviewer_with_diff_instruction` and
+  `test_role_protocol_maps_per_variant`.
 - **T1.4 — Review on/off config.** `G`, S.
   - `.exo/config.toml`: `[review] enabled = true` (default true; absent table ⇒ enabled). When disabled, `submit_branch` skips reviewer spawn and notifies the parent directly (the pre-review behavior).
   - Files: `rust/exo/src/config.rs`, the reviewer-spawn call site in `rust/exo/src/tools/submit.rs` or `review.rs`.
@@ -173,10 +174,14 @@ whole-workspace build after every fold — these waves are cross-crate by nature
 
 ### Wave 6 (parallel)
 
-- **T4.1 — Birth E2E test.** `G`, M. `birth` has zero automated coverage (needs live
-  tmux+git — the E2E harness has both). Add `tests/e2e` case: spawn a child →
+- **T4.1 — Birth E2E test.** `G`, M (+ TL scaffold). `birth` has zero automated coverage
+  (needs live tmux+git — the E2E harness has both). Add a case: spawn a child →
   assert papers written, inbox path derived, `children.jsonl` `Spawned`+`Started`, pane
-  live → teardown → assert reclaim. Follow `tests/e2e/CLAUDE.md` conventions exactly.
+  live → teardown → assert reclaim. **Harness gap (2026-06-09 review finding):
+  `tests/e2e/` is a CLASSIC harness** (`run.sh` runs `exomonad init`, WASM, interactive
+  attach) — a v2 case needs a non-interactive `exo init` runner; the TL scaffolds that
+  skeleton, the leaf fills assertions. Do not instruct the leaf to follow
+  `tests/e2e/CLAUDE.md` blindly.
 - **T4.2 — Portable-resolution fallback test.** `G`, S. The `resolve_via_transcript` rung
   has effectively never run (Linux `resolve_self` always wins). Add an env-var test seam
   (`EXO_SCRY_FORCE_PORTABLE=1` ⇒ skip `resolve_self`) + a test exercising the portable
