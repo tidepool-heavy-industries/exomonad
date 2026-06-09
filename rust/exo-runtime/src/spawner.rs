@@ -58,6 +58,22 @@ const MAX_TEARDOWN_ATTEMPTS: u32 = 3;
 /// Linear backoff base between teardown retries (`base * attempt`).
 const TEARDOWN_BACKOFF_BASE: Duration = Duration::from_millis(150);
 
+/// Read `$HOME` for deriving a child's inbox/papers/settings path. Behavior-preserving fallback to
+/// `"."`, but NOT silent: bootstrap hard-fails on a missing `$HOME` precisely because a `"."`
+/// fallback derives an inbox path the parent never writes (the child then silently receives
+/// nothing). We can't hard-fail here without a signature change, so at least make the fallback
+/// loud — a `warn!` naming the call site so the wrong-path symptom is diagnosable.
+fn home_or_warn(site: &str) -> String {
+    std::env::var("HOME").unwrap_or_else(|_| {
+        tracing::warn!(
+            site,
+            "$HOME unset; falling back to '.' for path derivation — the child's inbox/papers path \
+             may not match what the parent writes, and the child may silently receive nothing"
+        );
+        ".".to_string()
+    })
+}
+
 /// Run a best-effort teardown op with **bounded** retry + linear backoff. Each transient failure
 /// is logged at `warn`; a final failure after [`MAX_TEARDOWN_ATTEMPTS`] is logged LOUD and
 /// structured (`op` + `child` + `attempts`) and the last error is returned.
@@ -218,7 +234,7 @@ impl Runtime {
     /// `~/.claude/exo/inboxes/{run_id}/pane-{N}.jsonl`.
     /// Stored in the child's `Spawned` record so the parent can address DOWN to it.
     pub(crate) fn child_inbox_path(&self, pane: &PaneId) -> InboxPath {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let home = home_or_warn("child_inbox_path");
         exo_caps::paths::inbox_path(Path::new(&home), &self.run_id, pane)
     }
 
@@ -419,7 +435,7 @@ impl Runtime {
         let papers_path = match core.kind {
             ChildKind::Worktree => child_dir.join(".exo/node.json"),
             ChildKind::Inline => {
-                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                let home = home_or_warn("inline_papers_path");
                 exo_caps::paths::papers_path(Path::new(&home), &self.run_id, pane)
             }
         };
@@ -471,7 +487,7 @@ impl Runtime {
                 // Settings go to a PER-PANE path (not the child's worktree): inline siblings share
                 // the parent's worktree, so a worktree-local settings.json would clobber each
                 // other's papers pointer → identity collision (both read the last writer's papers).
-                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                let home = home_or_warn("gemini_settings_path");
                 let settings_path =
                     exo_caps::paths::gemini_settings_path(Path::new(&home), &self.run_id, pane);
                 crate::node_config::write_gemini_node_config(

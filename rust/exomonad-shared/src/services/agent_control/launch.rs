@@ -147,6 +147,8 @@ pub async fn write_prompt_file(
     tokio::fs::write(&path, prompt)
         .await
         .context("Failed to write prompt file")?;
-    info!(path = %path.display(), agent = %agent_name, "Wrote prompt to temp file");
+    // Log only the file name (the dir is always `<project>/.exo/tmp`) — the full path is $HOME-rooted.
+    let file = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+    info!(file = %file, agent = %agent_name, "Wrote prompt to .exo/tmp");
     Ok(path)
 }

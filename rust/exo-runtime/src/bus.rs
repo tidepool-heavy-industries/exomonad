@@ -100,14 +100,14 @@ impl Bus for Runtime {
             .await?;
 
         if let Err(e) = file.write_all(line.as_bytes()).await {
-            error!(to = ?to, summary = %summary, "Bus::deliver FAILED: {e}");
+            error!(to = %to, summary = %summary, "Bus::deliver FAILED: {e}");
             return Err(e.into());
         }
         // tokio's File buffers and does NOT flush on drop — without this the line is lost.
         // This is a kernel-buffer flush, not fsync: the bytes reach the page cache (surviving
         // a process crash), matching the "no fsync" durability level.
         file.flush().await?;
-        info!(to = ?to, summary = %summary, "Bus::deliver OK");
+        info!(to = %to, summary = %summary, "Bus::deliver OK");
         Ok(())
     }
 }

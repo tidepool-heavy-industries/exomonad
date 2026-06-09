@@ -40,6 +40,7 @@ use exo_caps::{
 use exo_framework::{Exomonad, SystemCtx, SystemOutcome};
 
 use crate::bootstrap::NodeContext;
+use crate::dispatch::{kind_label, persona_label};
 use crate::error::NodeResult;
 
 /// Watch the node's own ingestion inbox and route each new entry until shutdown.
@@ -184,12 +185,10 @@ impl<D: Exomonad> SystemCtx for NodeSystemCtx<'_, D> {
         Ok(exo_caps::Git::head_sha(&*self.ctx.runtime).await?)
     }
     async fn deliver_parent(&self, msg: Message) -> CapResult<()> {
-        info!(summary = %msg.summary.as_str(), "delivering message to parent");
+        // `Bus::deliver` logs the authoritative OK line (with `to`/`summary`); only the error path
+        // adds context here, so the success case stays a single log line, not three.
         match exo_caps::Bus::deliver(&*self.ctx.runtime, Addressee::Parent, msg).await {
-            Ok(()) => {
-                info!("delivered message to parent OK");
-                Ok(())
-            }
+            Ok(()) => Ok(()),
             Err(e) => {
                 error!("FAILED to deliver message to parent: {e}");
                 Err(exo_caps::CapError::Bus(e))
@@ -197,16 +196,11 @@ impl<D: Exomonad> SystemCtx for NodeSystemCtx<'_, D> {
         }
     }
     async fn deliver_to_self(&self, from: &str, summary: &str, text: &str) -> CapResult<()> {
-        info!(from = %from, summary = %summary, "delivering synthetic message to self");
-        match crate::dispatch::deliver_synthetic(self.ctx, from, summary, text)
-            .await
-        {
-            Ok(()) => {
-                info!("delivered synthetic message to self OK");
-                Ok(())
-            }
+        // `dispatch` logs the last-hop outcome (tmux paste / Teams inbox); don't double-log the OK.
+        match crate::dispatch::deliver_synthetic(self.ctx, from, summary, text).await {
+            Ok(()) => Ok(()),
             Err(e) => {
-                error!("FAILED to deliver synthetic message to self: {e}");
+                error!(from = %from, summary = %summary, "FAILED to deliver synthetic message to self: {e}");
                 Err(exo_caps::CapError::invalid("deliver_to_self", e.to_string()))
             }
         }
@@ -238,7 +232,7 @@ impl<D: Exomonad> SystemCtx for NodeSystemCtx<'_, D> {
 
 #[async_trait]
 impl<D: Exomonad> InboundHandler for RealHandler<D> {
-    #[tracing::instrument(skip(self, entry), fields(node = %self.ctx.runtime.name().as_str(), from = ?entry.from, kind = ?entry.msg.kind))]
+    #[tracing::instrument(skip(self, entry), fields(node = %self.ctx.runtime.name().as_str(), from = %persona_label(&entry.from), kind = %kind_label(&entry.msg.kind)))]
     async fn handle(&self, entry: &IngestionEntry) -> NodeResult<Option<bool>> {
         match &entry.msg.kind {
             // Both chat and event notifications are delivered to the agent's native interface.
@@ -249,16 +243,15 @@ impl<D: Exomonad> InboundHandler for RealHandler<D> {
             MessageKind::Control(ControlKind::Shutdown { grace_ms, force }) => {
                 self.handle_shutdown(*grace_ms, *force).await
             }
-            // Engine-owned lifecycle signals — the sidecar acts on them itself.
+            // Engine-owned lifecycle signals — the sidecar acts on them itself. The enclosing span
+            // already carries `from`/`kind`; the per-arm logs in `handle_lifecycle` carry the variant.
             MessageKind::Lifecycle(lc) => {
-                info!(from = ?entry.from, kind = ?lc, "lifecycle payload received");
                 self.handle_lifecycle(&entry.from, lc).await?;
                 Ok(Some(false))
             }
             // Domain-opaque inter-node payload — deserialize to the (transitional) review verdict
             // and act on it. (Generalized to `D::handle_system` when the engine goes generic.)
             MessageKind::Domain(payload) => {
-                info!(from = ?entry.from, "domain payload received");
                 self.handle_domain(&entry.from, payload).await?;
                 Ok(Some(false))
             }
@@ -269,7 +262,7 @@ impl<D: Exomonad> InboundHandler for RealHandler<D> {
 impl<D: Exomonad> RealHandler<D> {
     /// Handle an engine-owned [`Lifecycle`] signal (sidecar-side; never injected into the LLM
     /// except via the render helpers). These are the closed set the engine acts on itself.
-    #[tracing::instrument(skip(self, lc), fields(node = %self.ctx.runtime.name().as_str(), from = ?from, kind = "lifecycle"))]
+    #[tracing::instrument(skip(self, lc), fields(from = %persona_label(from), kind = "lifecycle"))]
     async fn handle_lifecycle(&self, from: &Persona, lc: &Lifecycle) -> NodeResult<()> {
         match lc {
             // A child yielded control. Flip its busy-bit to idle (the idle gate reads this), then
@@ -316,24 +309,29 @@ impl<D: Exomonad> RealHandler<D> {
     /// The engine performs the lifecycle action the domain returns: [`SystemOutcome::ReclaimSender`]
     /// tears down the sender (e.g. a one-shot reviewer — the engine owns `kill_pane`/`reclaim`).
     /// An undeserializable payload is logged + skipped (tolerant, like a malformed bus line).
-    #[tracing::instrument(skip(self, payload), fields(node = %self.ctx.runtime.name().as_str(), from = ?from, kind = "domain"))]
+    #[tracing::instrument(skip(self, payload), fields(from = %persona_label(from), kind = "domain"))]
     async fn handle_domain(&self, from: &Persona, payload: &DomainPayload) -> NodeResult<()> {
         let system: D::System = match serde_json::from_str(&payload.0) {
             Ok(v) => v,
             Err(e) => {
+                // Truncate: a malformed Domain payload is often the multi-KB findings JSON, and a
+                // failed parse is exactly when it's large/garbled — don't splat the whole blob.
+                // (`from` is already on the span.)
+                let preview: String = payload.0.chars().take(200).collect();
+                let truncated = payload.0.len() > preview.len();
                 warn!(
-                    "FAILED to deserialize domain payload: {e}. Raw payload: {}",
-                    payload.0
+                    "FAILED to deserialize domain payload: {e}. Raw payload ({} bytes){}: {preview}",
+                    payload.0.len(),
+                    if truncated { ", first 200 chars" } else { "" }
                 );
                 return Ok(());
             }
         };
-        info!(from = ?from, "dispatching handle_system");
         let sctx = NodeSystemCtx { ctx: &self.ctx };
         let outcome = D::handle_system::<NodeSystemCtx<D>>(&sctx, from, &system)
             .await
             .map_err(|e| std::io::Error::other(e.to_string()))?;
-        info!(from = ?from, ?outcome, "handle_system completed");
+        info!(?outcome, "handle_system completed");
         match outcome {
             SystemOutcome::Done => {}
             SystemOutcome::ReclaimSender => {

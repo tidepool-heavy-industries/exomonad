@@ -24,7 +24,6 @@ mod fs;
 mod git;
 mod kv;
 mod liveness;
-mod log;
 pub mod node_config;
 mod process;
 pub mod session_boot;

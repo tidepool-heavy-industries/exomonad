@@ -13,7 +13,7 @@
 use async_trait::async_trait;
 use exo_caps::{
     Addressee, AgentName, Branch, Bus, BusError, ChildKind, ChildLiveness, Fs, FsError, Git,
-    GitError, Kv, KvError, Log, Message, PaneId, Process, ProcessError, RoleKind, SpawnError,
+    GitError, Kv, KvError, Message, PaneId, Process, ProcessError, RoleKind, SpawnError,
     SpawnSpec, Spawner, Tmux, TmuxError, Topology, TopologyError, TopologyView, TreeNode,
 };
 use std::collections::HashMap;
@@ -54,12 +54,6 @@ pub enum Call {
     },
     FsWrite {
         path: String,
-    },
-    LogInfo {
-        msg: String,
-    },
-    LogError {
-        msg: String,
     },
     KillPane {
         child: AgentName,
@@ -322,15 +316,6 @@ impl Process for MockRuntime {
             stdout: Vec::new(),
             stderr: Vec::new(),
         })
-    }
-}
-
-impl Log for MockRuntime {
-    fn info(&self, msg: &str) {
-        self.record(Call::LogInfo { msg: msg.into() });
-    }
-    fn error(&self, msg: &str) {
-        self.record(Call::LogError { msg: msg.into() });
     }
 }
 

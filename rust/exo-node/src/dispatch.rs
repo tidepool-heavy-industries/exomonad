@@ -29,28 +29,37 @@ static SPILL_COUNTER: AtomicU64 = AtomicU64::new(0);
 const MAX_INLINE_PASTE_BYTES: usize = 480;
 
 /// Deliver one ingestion entry into this node's own agent (the runtime-specific last hop).
-#[tracing::instrument(skip(ctx, entry), fields(node = %ctx.runtime.name().as_str(), from = ?entry.from, kind = ?entry.msg.kind))]
+#[tracing::instrument(skip(ctx, entry), fields(node = %ctx.runtime.name().as_str(), from = %persona_label(&entry.from), kind = %kind_label(&entry.msg.kind)))]
 pub async fn dispatch<D: Exomonad>(
     ctx: &Arc<NodeContext<D>>,
     entry: &IngestionEntry,
 ) -> NodeResult<()> {
     let agent_type = ctx.kind.agent_type();
 
-    // Resolve THIS agent's own team. `resolve_self_or_portable` tries `resolve_self` first — it
-    // walks from the sidecar up to its parent `claude` process and reads that process's
-    // inotify-bound `tasks/{team}` dir, finding the agent's own (solo) team without needing a
-    // `tmux_pane_id` (which CC never writes into its team config; that's why `resolve_by_pane`
-    // always missed and native delivery never fired). On its failure (no team, or a transient
-    // `/proc`/config race) it falls back to the portable cwd→transcript path before giving up.
-    // On non-Linux the portable cwd reader is unavailable, so this yields `None` (wired but
-    // untested off-Linux). Resolution failure is non-fatal: fall back to paste rather than wedge
-    // delivery — but log it, so a Claude node silently degrading to paste is visible, not a mystery.
-    let active_team = match exo_scry::resolve_self_or_portable() {
-        Ok(team) => team,
-        Err(e) => {
-            warn!(node = %ctx.runtime.name().as_str(), "team resolution failed; falling back to tmux paste for this delivery: {e}");
-            None
+    // Resolve THIS agent's own team — but ONLY for a Claude node, since `decide_lasthop` consults
+    // the team only for Claude (a Gemini leaf always tmux-pastes). Resolving for Gemini would walk
+    // `/proc` looking for a `claude` ancestor it never has, then discard the `None` — and log a
+    // spurious WARN on every single delivery. So skip it entirely for non-Claude.
+    //
+    // `resolve_self_or_portable` tries `resolve_self` first — it walks from the sidecar up to its
+    // parent `claude` process and reads that process's inotify-bound `tasks/{team}` dir, finding
+    // the agent's own (solo) team without needing a `tmux_pane_id` (which CC never writes into its
+    // team config; that's why `resolve_by_pane` always missed and native delivery never fired). On
+    // its failure (no team, or a transient `/proc`/config race) it falls back to the portable
+    // cwd→transcript path before giving up. On non-Linux the portable cwd reader is unavailable, so
+    // this yields `None` (wired but untested off-Linux). For a Claude node, resolution failure is
+    // non-fatal but noteworthy: fall back to paste, and WARN so a Claude node silently degrading to
+    // paste is visible, not a mystery.
+    let active_team = if agent_type == AgentType::Claude {
+        match exo_scry::resolve_self_or_portable() {
+            Ok(team) => team,
+            Err(e) => {
+                warn!(node = %ctx.runtime.name().as_str(), "team resolution failed; falling back to tmux paste for this delivery: {e}");
+                None
+            }
         }
+    } else {
+        None
     };
 
     let lasthop = decide_lasthop(agent_type, active_team);
@@ -65,10 +74,9 @@ pub async fn dispatch<D: Exomonad>(
                 entry.msg.text.as_str(),
                 entry.msg.summary.as_str(),
             ) {
-                Ok(_) => {
-                    info!("dispatch via Teams inbox OK");
-                    Ok(())
-                }
+                // The `outcome = "teams_inbox"` line above already records the attempt; on success
+                // there's nothing to add, so don't double-log. Only the failure path is noteworthy.
+                Ok(_) => Ok(()),
                 Err(e) => {
                     error!("FAILED to dispatch via Teams inbox: {e}");
                     Err(NodeError::Scry(e.to_string()))
@@ -79,10 +87,8 @@ pub async fn dispatch<D: Exomonad>(
             info!(outcome = "tmux_paste", "dispatching via tmux paste");
             let rendered = prepare_tmux_payload(ctx, agent_type, entry).await;
             match Tmux::paste(&*ctx.runtime, &ctx.own_pane, &rendered).await {
-                Ok(()) => {
-                    info!("dispatch via tmux paste OK");
-                    Ok(())
-                }
+                // `outcome = "tmux_paste"` above already records the attempt; don't double-log OK.
+                Ok(()) => Ok(()),
                 Err(e) => {
                     error!("FAILED to dispatch via tmux paste: {e}");
                     Err(NodeError::Scry(format!("Tmux paste failed: {}", e)))
@@ -144,27 +150,37 @@ fn decide_lasthop(agent_type: AgentType, active_team: Option<exo_scry::ActiveTea
     LastHop::TmuxPaste
 }
 
-fn render_persona(persona: &Persona) -> String {
+/// Short, log-friendly label for a persona: the bare agent/synthetic name, no `Agent(AgentName(..))`
+/// Debug wrapping. Borrows from the persona, so it's free to record into a tracing span field.
+pub(crate) fn persona_label(persona: &Persona) -> &str {
     match persona {
-        Persona::Agent(name) => name.as_str().to_string(),
-        Persona::Synthetic(name) => name.as_str().to_string(),
+        Persona::Agent(name) => name.as_str(),
+        Persona::Synthetic(name) => name.as_str(),
     }
 }
 
-fn render_entry(entry: &IngestionEntry) -> String {
-    let persona = render_persona(&entry.from);
-    let kind_str = match &entry.msg.kind {
+/// Short, log-friendly discriminant for a message kind — NEVER includes the payload. Recording a
+/// `MessageKind` via Debug would splat the whole `Domain(DomainPayload("..."))` blob (often a
+/// multi-KB findings JSON) into every nested span line; this is the one-word stand-in.
+pub(crate) fn kind_label(kind: &MessageKind) -> &'static str {
+    match kind {
         MessageKind::Chat => "chat",
         MessageKind::Event => "event",
         MessageKind::Control(_) => "control",
         MessageKind::Lifecycle(_) => "lifecycle",
         MessageKind::Domain(_) => "domain",
-    };
+    }
+}
 
+fn render_persona(persona: &Persona) -> String {
+    persona_label(persona).to_string()
+}
+
+fn render_entry(entry: &IngestionEntry) -> String {
     format!(
         "[from: {}, kind: {}]\n\n{}\n{}",
-        persona,
-        kind_str,
+        render_persona(&entry.from),
+        kind_label(&entry.msg.kind),
         entry.msg.summary.as_str(),
         entry.msg.text.as_str()
     )

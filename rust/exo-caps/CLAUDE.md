@@ -19,11 +19,11 @@ This is the seam that replaces the old Haskell-WASM boundary. WASM *physically* 
 | `papers` | `NodePapers` (`node.json`) — a node's immutable birth identity |
 | `paths` | Inbox/papers path scheme (`~/.claude/exo/inboxes/{run_id}/pane-N.jsonl`) |
 | `invocation` | Single source of truth for a child's `exo node/hook` argv |
-| `git` `tmux` `fs` `kv` `process` `log` | The IO capability traits (signatures only) |
+| `git` `tmux` `fs` `kv` `process` | The IO capability traits (signatures only) |
 
 ## The capability traits
 
-Ten caps, each one trait per file. `exo-runtime::Runtime` implements all of them; `exo::testing::MockRuntime` mocks all of them.
+Nine caps, each one trait per file. `exo-runtime::Runtime` implements all of them; `exo::testing::MockRuntime` mocks all of them. (There is **no `Log` cap** — sidecar code logs via `tracing` directly; a separate `Log` cap was a redundant unbounded file channel and was removed.)
 
 - **`Git`** — `current_branch`, `head_sha` (sha-tag review verdicts), `merge_base` (fork-point base for a reviewer's `git diff`), `is_clean`, `fetch`, **`merge`** (the local on-disk fold — v2 convergence), `worktree_add`/`worktree_remove`. **No `GitHub` cap** — v2 convergence is local git, no PR/Copilot (cut 2026-06-01; see `reactive-github-layer-stays` memory).
 - **`Bus`** — `deliver(Addressee, Message)`. The append half only; the read/cursor/watch half is the sidecar's inbound loop. Delivery mechanism (Teams vs tmux) is the *recipient's* last-hop concern — policy never names it.
@@ -32,7 +32,6 @@ Ten caps, each one trait per file. `exo-runtime::Runtime` implements all of them
 - **`Fs`** — `read`, `write_atomic`.
 - **`Kv`** — `get`, `set`.
 - **`Process`** — `run`.
-- **`Log`** — `info`, `error` (sync, infallible).
 - **`Topology`** — `topology()` → the caller's subtree (folded recursively from the per-node `children.jsonl` ledgers) + parent + per-node pane-liveness. Backs the `tree` tool.
 - **`ChildLiveness`** — `any_child_busy()` → is any *direct* child still working? Idle is tracked from messages (busy at birth + on every poke; idle on `ChildIdle`), combined with pane-death as a one-way override. Distinct from `Topology`'s pane-**existence**: a live pane ≠ busy (a Gemini child idles with its `--prompt-interactive` pane alive), but a dead pane ⇒ idle. In-memory, non-persisted (a sidecar restart re-seeds conservatively: unknown ⇒ busy if the pane is alive). Backs the `stop` idle gate.
 

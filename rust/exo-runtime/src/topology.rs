@@ -136,8 +136,18 @@ pub(crate) async fn live_panes() -> Option<HashSet<String>> {
                 .filter(|l| !l.is_empty())
                 .collect(),
         ),
-        _ => {
-            tracing::warn!("topology: `tmux list-panes` failed; liveness unknown");
+        // Stays at WARN — a real tmux failure forces a false idle and must stay visible — but
+        // carries the exit code + stderr so the warn is actionable, not a context-free "failed".
+        Ok(out) => {
+            tracing::warn!(
+                exit = ?out.status.code(),
+                stderr = %String::from_utf8_lossy(&out.stderr).trim(),
+                "topology: `tmux list-panes -a` failed; liveness unknown"
+            );
+            None
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "topology: could not spawn `tmux list-panes`; liveness unknown");
             None
         }
     }

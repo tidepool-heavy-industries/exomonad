@@ -8,7 +8,7 @@
 
 use crate::review::ReviewSystem;
 use exo_caps::{
-    deliver_domain, Addressee, Bus, CapResult, ChildLiveness, Git, Kv, Lifecycle, Log, Message,
+    deliver_domain, Addressee, Bus, CapResult, ChildLiveness, Git, Kv, Lifecycle, Message,
     MessageBody, MessageKind, Summary,
 };
 use exo_framework::{BoxFuture, HookDecision, HookInput, SessionStartOutput, StopDecision};
@@ -68,16 +68,14 @@ fn child_idle_message() -> CapResult<Message> {
 /// Best-effort turn-end signal: deliver a `ChildIdle` to the parent. Logs and swallows any error
 /// — a stop hook must never fail an agent's exit over a missed notification. Root has no parent,
 /// so it never calls this (it uses `stop_allow`).
-async fn notify_parent_idle<R: Bus + Log>(ctx: &R) {
+async fn notify_parent_idle<R: Bus>(ctx: &R) {
     match child_idle_message() {
         Ok(msg) => {
             if let Err(e) = ctx.deliver(Addressee::Parent, msg).await {
-                ctx.error(&format!("stop hook: failed to notify parent of idle: {e}"));
+                tracing::error!("stop hook: failed to notify parent of idle: {e}");
             }
         }
-        Err(e) => ctx.error(&format!(
-            "stop hook: could not build ChildIdle message: {e}"
-        )),
+        Err(e) => tracing::error!("stop hook: could not build ChildIdle message: {e}"),
     }
 }
 
@@ -96,7 +94,7 @@ async fn subtree_busy<R: ChildLiveness>(ctx: &R) -> bool {
 /// went idle — but ONLY when the whole subtree is quiescent (no busy children); a TL mid-flow with
 /// active children is not idle. Fails OPEN on any git error — a hook must never wedge an agent in
 /// its turn-loop (that bricks the session).
-pub fn stop<'a, R: Git + Log + Bus + ChildLiveness + Send + Sync>(
+pub fn stop<'a, R: Git + Bus + ChildLiveness + Send + Sync>(
     ctx: &'a R,
 ) -> BoxFuture<'a, StopDecision> {
     Box::pin(async move {
@@ -114,9 +112,7 @@ pub fn stop<'a, R: Git + Log + Bus + ChildLiveness + Send + Sync>(
                     .into(),
             },
             Err(e) => {
-                ctx.error(&format!(
-                    "stop gate: could not read git status, allowing exit: {e}"
-                ));
+                tracing::error!("stop gate: could not read git status, allowing exit: {e}");
                 StopDecision::Allow
             }
         }
@@ -135,7 +131,7 @@ pub fn stop_allow<R: Send + Sync>(_ctx: &R) -> BoxFuture<'_, StopDecision> {
 /// blocks — Gemini's `AfterAgent` `deny` can infinite-loop (gemini-cli #20426), so a Gemini role
 /// must not block at stop. The committed-before-fold guarantee for a dev is enforced by
 /// `submit_branch`'s committed-check, not here; a worker is inline with no branch to fold.
-pub fn stop_notify<'a, R: Bus + Log + ChildLiveness + Send + Sync>(
+pub fn stop_notify<'a, R: Bus + ChildLiveness + Send + Sync>(
     ctx: &'a R,
 ) -> BoxFuture<'a, StopDecision> {
     Box::pin(async move {
@@ -153,7 +149,7 @@ pub fn stop_notify<'a, R: Bus + Log + ChildLiveness + Send + Sync>(
 /// `ReviewAborted` to the parent. ALWAYS allows exit — never block a Gemini at stop (gemini-cli
 /// #20426). Biases LOUD: a kv-read error is treated as no-verdict (a spurious re-submit beats a
 /// silent stall).
-pub fn stop_reviewer<'a, R: Bus + Kv + Log + Send + Sync>(
+pub fn stop_reviewer<'a, R: Bus + Kv + Send + Sync>(
     ctx: &'a R,
 ) -> BoxFuture<'a, StopDecision> {
     Box::pin(async move {
@@ -174,9 +170,7 @@ pub fn stop_reviewer<'a, R: Bus + Kv + Log + Send + Sync>(
             )
             .await
             {
-                ctx.error(&format!(
-                    "stop_reviewer: failed to deliver ReviewAborted: {e}"
-                ));
+                tracing::error!("stop_reviewer: failed to deliver ReviewAborted: {e}");
             }
         }
         StopDecision::Allow

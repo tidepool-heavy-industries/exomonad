@@ -21,6 +21,19 @@ pub enum Addressee {
     WorktreeChild(AgentName),
 }
 
+/// Log-friendly rendering: `parent` or the bare child name — not the `WorktreeChild(AgentName(..))`
+/// Debug wrapping. Use `%addr` at log sites; `?addr` (Debug) is for diagnostics that need the variant.
+impl std::fmt::Display for Addressee {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Addressee::Parent => f.write_str("parent"),
+            Addressee::InlineChild(name) | Addressee::WorktreeChild(name) => {
+                f.write_str(name.as_str())
+            }
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum BusError {
     /// The addressee couldn't be resolved to an inbox (unknown child, no parent).

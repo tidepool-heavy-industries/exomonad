@@ -16,7 +16,7 @@ The single concrete `Runtime` struct that implements **every** `exo-caps` trait.
 | `spawner` | `impl Spawner` — the recursion (birth + teardown). See below. |
 | `tmux` | `impl Tmux` — delegates to exomonad-shared `TmuxIpc::inject_input` (hardened buffer-paste). |
 | `liveness` | `impl ChildLiveness` — the idle gate's read: any *direct* child still working? Combines the in-memory busy-bit map (mutated at birth in `spawner`, on child-deliver in `bus`, on `ChildIdle` in `exo-node`) with a tmux pane probe (`topology::live_panes`); a dead pane forces idle. Pure truth table split out + unit-tested. |
-| `fs` `kv` `log` `process` | The remaining cap impls. |
+| `fs` `kv` `process` | The remaining cap impls. |
 | `node_config` | `write_node_agent_config` (Claude: `.mcp.json` + `.claude/settings.local.json` in the child's worktree, CWD-discovered) / `write_gemini_node_config` (Gemini: `settings.json` at a **per-pane** path `paths::gemini_settings_path`, env-var-discovered; also writes the role steering protocol to a sibling `protocol.md` and references it in `context.fileName` — Gemini's session-start steering channel, mirroring classic). Gemini's is per-pane, NOT worktree-local, because **inline** siblings share the parent's worktree — a worktree-local file would clobber each other's papers pointer → identity collision. Also generates a `policy.toml` with `allowRedirection = true` (and points to it via `adminPolicyPaths` in `settings.json`) so compound/redirected shell commands don't trigger permission prompts even under `--yolo`. The `settings.json` wiring is the primary mechanism; `--admin-policy` is the fallback wiring. |
 | `session_boot` | `boot_root_session` — creates the detached `{session}` tmux window for the root, returns its pane. |
 

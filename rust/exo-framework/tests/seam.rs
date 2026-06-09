@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use exo_caps::{
     Addressee, AgentName, AgentType, Branch, Bus, BusError, CapResult, ChildKind, ChildLiveness,
-    Fs, FsError, Git, GitError, Kv, KvError, Log, Message, PaneId, Persona, Process, ProcessError,
+    Fs, FsError, Git, GitError, Kv, KvError, Message, PaneId, Persona, Process, ProcessError,
     RoleKind, SpawnError, SpawnSpec, Spawner, Tmux, TmuxError, Topology, TopologyError,
     TopologyView,
 };
@@ -52,6 +52,9 @@ impl Git for TestCaps {
         unimplemented!()
     }
     async fn merge_base(&self, _refish: &str) -> Result<Option<String>, GitError> {
+        unimplemented!()
+    }
+    async fn fork_point(&self) -> Result<Option<String>, GitError> {
         unimplemented!()
     }
     async fn is_clean(&self) -> Result<bool, GitError> {
@@ -138,14 +141,6 @@ impl Process for TestCaps {
     }
 }
 
-impl Log for TestCaps {
-    fn info(&self, _msg: &str) {
-        unimplemented!()
-    }
-    fn error(&self, _msg: &str) {
-        unimplemented!()
-    }
-}
 
 #[async_trait]
 impl Topology for TestCaps {

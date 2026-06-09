@@ -96,11 +96,21 @@ fn pre_merge_checks<C: Process + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), Stri
                 Ok(r) if r.pass => {}
                 Ok(r) => failures.push(format!("{path}: {}", r.detail)),
                 // A check that doesn't honour the `{"pass":bool,"detail":...}` contract is
-                // misconfigured/broken — fail closed rather than silently passing the gate.
-                Err(_) => failures.push(format!(
-                    "{path}: did not emit valid {{\"pass\":bool,\"detail\":...}} JSON (exit {})",
-                    out.status
-                )),
+                // misconfigured/broken — fail closed rather than silently passing the gate. Include
+                // the script's stderr so the misconfiguration is debuggable, not just "(exit N)".
+                Err(_) => {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    let stderr = stderr.trim();
+                    let tail = if stderr.is_empty() {
+                        String::new()
+                    } else {
+                        format!("; stderr: {stderr}")
+                    };
+                    failures.push(format!(
+                        "{path}: did not emit valid {{\"pass\":bool,\"detail\":...}} JSON (exit {}){tail}",
+                        out.status
+                    ));
+                }
             }
         }
         if failures.is_empty() {

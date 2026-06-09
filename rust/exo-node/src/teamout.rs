@@ -330,14 +330,32 @@ mod linux {
     }
 
     fn save_cursor(path: &Path, cursor: &HashMap<String, usize>) {
+        // Best-effort, but NOT silent: a failed cursor write means we re-forward already-bridged
+        // outbound messages on the next run (silent duplicates). Log each step's failure so that's
+        // diagnosable, not a mystery.
         if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(bytes) = serde_json::to_vec(cursor) {
-            let tmp = PathBuf::from(format!("{}.tmp", path.display()));
-            if std::fs::write(&tmp, &bytes).is_ok() {
-                let _ = std::fs::rename(&tmp, path);
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                warn!("teamout cursor: mkdir {} failed: {e}", parent.display());
             }
+        }
+        let bytes = match serde_json::to_vec(cursor) {
+            Ok(b) => b,
+            Err(e) => {
+                warn!("teamout cursor: serialize failed: {e}");
+                return;
+            }
+        };
+        let tmp = PathBuf::from(format!("{}.tmp", path.display()));
+        if let Err(e) = std::fs::write(&tmp, &bytes) {
+            warn!("teamout cursor: write {} failed: {e}", tmp.display());
+            return;
+        }
+        if let Err(e) = std::fs::rename(&tmp, path) {
+            warn!(
+                "teamout cursor: rename {} -> {} failed: {e}",
+                tmp.display(),
+                path.display()
+            );
         }
     }
 

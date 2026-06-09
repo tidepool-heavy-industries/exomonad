@@ -9,24 +9,12 @@
 //! `Send + Sync + 'static` is required because the sidecar drives tools/hooks across tokio
 //! tasks (`R: Send + Sync + 'static` at the dispatch boundary).
 
-use exo_caps::{Bus, ChildLiveness, Fs, Git, Kv, Log, Process, Spawner, Tmux, Topology};
+use exo_caps::{Bus, ChildLiveness, Fs, Git, Kv, Process, Spawner, Tmux, Topology};
 
 /// The full cap set a runtime must provide to back a role. A blanket impl (below) makes this
 /// automatic for any type that impls all the caps — never implemented by hand.
 pub trait PolicyCaps:
-    Git
-    + Bus
-    + Spawner
-    + Kv
-    + Fs
-    + Tmux
-    + Process
-    + Log
-    + Topology
-    + ChildLiveness
-    + Send
-    + Sync
-    + 'static
+    Git + Bus + Spawner + Kv + Fs + Tmux + Process + Topology + ChildLiveness + Send + Sync + 'static
 {
 }
 
@@ -38,7 +26,6 @@ impl<T> PolicyCaps for T where
         + Fs
         + Tmux
         + Process
-        + Log
         + Topology
         + ChildLiveness
         + Send

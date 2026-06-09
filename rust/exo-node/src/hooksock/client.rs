@@ -16,7 +16,9 @@ use crate::error::{NodeError, NodeResult};
 ///
 /// Framing: write the request JSON, half-close the write side (EOF signals end-of-request to the
 /// server), then read the response JSON to EOF.
-#[tracing::instrument(skip(req), fields(node = %node, event = ?req.event, socket = %sock.display()))]
+// `socket` records only the `pane-N.sock` file name, not the full $HOME-rooted path; `node` already
+// identifies the agent. Logged on every tool-use, so keep it cheap and leak-free.
+#[tracing::instrument(skip(req), fields(node = %node, event = ?req.event, socket = %sock.file_name().and_then(|n| n.to_str()).unwrap_or("?")))]
 pub async fn client_request(node: &str, sock: &Path, req: &HookRequest) -> NodeResult<HookVerdict> {
     tracing::debug!(node = %node, "hook client: connecting to socket");
     let verdict = timeout(Duration::from_secs(5), async {

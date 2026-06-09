@@ -4,10 +4,9 @@
 //! (`exo-runtime`) implements them. Unlike the old WASM boundary this is NOT enforced —
 //! policy MAY drop to raw IO as an escape hatch; good caps make it rarely want to.
 //!
-//! **Status: Wave-0 scaffold (the frozen contract).** The domain types and the
-//! `Bus`/`Spawner` seam are settled; newtype constructor *bodies* and the IO cap method
-//! *signatures* firm up in Wave 1 (adapt from exomonad-core services). The skeleton
-//! `cargo check`s — that is the Wave-0 gate everything forks from.
+//! The contract is settled: nine caps (one trait per file), validated domain newtypes,
+//! and the message/identity vocabulary. `exo-runtime::Runtime` implements every cap;
+//! `exo::testing::MockRuntime` mocks every cap.
 
 pub mod bus;
 pub mod domain;
@@ -26,7 +25,6 @@ pub mod types;
 pub mod fs;
 pub mod git;
 pub mod kv;
-pub mod log;
 pub mod process;
 pub mod tmux;
 
@@ -39,7 +37,6 @@ pub use hook_rpc::{HookEvent, HookRequest, HookVerdict};
 pub use kv::{Kv, KvError};
 pub use lifecycle::{fold_children, Child, ChildLifecycle, ChildRecord};
 pub use liveness::ChildLiveness;
-pub use log::Log;
 pub use papers::{NodePapers, RoleRecord};
 pub use process::{Process, ProcessError};
 pub use spawner::{SpawnError, Spawner};

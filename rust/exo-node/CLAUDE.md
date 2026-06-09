@@ -30,7 +30,7 @@ The sidecar initializes a persistent file subscriber at startup (in the binary c
 - **Path:** `<project-root>/.exo/logs/sidecar/<run_id>/<branch>.log`
 - **Configuration:** Respects `RUST_LOG` (default: `info`).
 - **Mechanism:** Uses `tracing-subscriber` with a non-blocking `tracing-appender`.
-- **Instrumentation:** The inbound loop (`Domain`/`Lifecycle` arms), `handle_system` outcomes, and delivery sites (`deliver_parent`/`deliver_to_self`) are instrumented with detailed success/failure logs.
+- **Instrumentation:** The inbound loop (`Domain`/`Lifecycle` arms) and `handle_system` outcomes are span-instrumented. Spans carry **log-friendly labels, never payloads** — `kind` is the one-word discriminant (`kind_label`), `from` is the bare name (`persona_label`); recording a `MessageKind` via Debug would splat the whole `Domain` findings JSON onto every nested line. Inner spans (`handle_lifecycle`/`handle_domain`) don't re-record `node` (the per-node log filename already names it). Success is logged **once at the authoritative layer** — `Bus::deliver` for sends, `dispatch` for last-hop — so the `deliver_parent`/`deliver_to_self` wrappers log only on failure, not a redundant start+OK pair.
 
 ## The inbound → dispatch path
 

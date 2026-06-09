@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use exo_caps::{Branch, Git, GitError};
 use std::path::Path;
 use tokio::process::Command;
+use tracing::debug;
 
 #[async_trait]
 impl Git for Runtime {
@@ -149,6 +150,11 @@ impl Git for Runtime {
 
 impl Runtime {
     async fn git(&self, args: &[&str]) -> Result<std::process::Output, GitError> {
+        // DEBUG (not info/error): `git()` is generic and some callers treat a non-zero exit as
+        // expected control flow (e.g. `fork_point` probes merge-bases that legitimately fail), so
+        // an error-level log here would cry wolf. The stderr still rides in `GitError::Failed`, so
+        // callers that treat the failure as fatal surface it themselves.
+        debug!(cwd = %self.working_dir().display(), args = ?args, "git: exec");
         let output = Command::new("git")
             .current_dir(self.working_dir())
             .args(args)
@@ -156,6 +162,13 @@ impl Runtime {
             .await?;
 
         if !output.status.success() {
+            debug!(
+                cwd = %self.working_dir().display(),
+                args = ?args,
+                exit = ?output.status.code(),
+                stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+                "git: non-zero exit"
+            );
             return Err(GitError::Failed {
                 op: "git",
                 detail: String::from_utf8_lossy(&output.stderr).trim().to_string(),
