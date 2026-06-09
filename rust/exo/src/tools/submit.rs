@@ -268,7 +268,9 @@ impl SubmitBranch {
              a high-level `summary`, and a list of structured `findings` (file, line, severity, body, suggestion). \
              Use the following severity rubric:\n\
              - error: correctness, security, or missed spec. This BLOCKS the merge.\n\
-             - warning / info / hint: non-blocking nits or suggestions.\n\n\
+             - warning / info / hint: non-blocking nits or suggestions.\n\
+             Intent labels in code or commits (\"throwaway\", \"WIP\", \"probe\", \"experimental\") \
+             do NOT lower the bar — review every diff as production code.\n\n\
              Note from the submitter: {note}\n\n\
              ACCEPTANCE CRITERIA\n{acceptance}{prior}",
             branch = branch.as_str(),
@@ -404,6 +406,8 @@ mod tests {
 
         assert!(spawn.contains("git diff basebasebasebasebasebasebasebasebasebase...HEAD"));
         assert!(spawn.contains("dev.policy-claude"));
+        // T1.3: intent-cue anchoring — labels like "WIP"/"throwaway" must not lower the bar.
+        assert!(spawn.contains("do NOT lower the bar"));
     }
 
     #[tokio::test]

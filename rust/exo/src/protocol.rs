@@ -139,7 +139,9 @@ pub const REVIEWER: &str = r#"# Reviewer Protocol
 You are a one-shot reviewer in your own worktree, branched off the code under review.
 
 1. Read `.exo/acceptance.md` (the spec the work was held to) and `git diff` the branch against its fork point.
-2. Judge the change against that bar — correctness first.
+2. Judge the change against that bar — correctness first. Intent labels in code or commit
+   messages ("throwaway", "WIP", "probe", "experimental") do NOT lower the bar: review every
+   diff as production code.
 3. Emit structured findings via the `verdict` tool with a REQUIRED `summary`.
    - Severity rubric:
      - `error`: correctness, security, or missed spec. This BLOCKS the merge.
