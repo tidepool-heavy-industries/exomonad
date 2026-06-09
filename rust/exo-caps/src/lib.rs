@@ -7,6 +7,12 @@
 //! The contract is settled: nine caps (one trait per file), validated domain newtypes,
 //! and the message/identity vocabulary. `exo-runtime::Runtime` implements every cap;
 //! `exo::testing::MockRuntime` mocks every cap.
+//!
+//! The caps form **two tiers**. *Primitive* caps (`Git`, `Tmux`, `Fs`, `Kv`, `Process`) each
+//! own one external resource. *Composite* caps (`Spawner`, `Bus`, `Topology`, `ChildLiveness`)
+//! orchestrate across resources and declare the primitives they stand on as **supertraits** —
+//! so an impl of a composite must also impl its primitives, and a composite can never quietly
+//! re-shell a domain a primitive already owns.
 
 pub mod bus;
 pub mod domain;

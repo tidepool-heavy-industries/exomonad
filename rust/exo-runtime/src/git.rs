@@ -1,8 +1,5 @@
-//! `impl Git for Runtime` — local git operations.
-//!
-//! **Leaf R1.** Adapt exomonad-core `GitService` (`services/git.rs`). Use
-//! `tokio::process::Command` (or `spawn_blocking` around the existing sync executor) —
-//! NEVER block the tokio executor inside an `async fn`.
+//! `impl Git for Runtime` — local git operations via `tokio::process::Command`
+//! (NEVER block the tokio executor inside an `async fn`).
 
 use crate::runtime::Runtime;
 use async_trait::async_trait;
@@ -142,7 +139,11 @@ impl Git for Runtime {
     }
 
     async fn worktree_remove(&self, at: &Path) -> Result<(), GitError> {
-        self.git(&["worktree", "remove", &at.to_string_lossy()])
+        // `--force` is the cap's contracted reclaim semantics: discard whatever state the
+        // worktree DIRECTORY holds (dirty files, untracked artifacts) — the branch ref is
+        // untouched, so committed work survives. Without it, a child that left any dirt
+        // would wedge both callers (birth rollback, post-merge reclaim).
+        self.git(&["worktree", "remove", "--force", &at.to_string_lossy()])
             .await?;
         Ok(())
     }

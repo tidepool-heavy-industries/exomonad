@@ -1,5 +1,7 @@
 //! `Fs` capability — file IO (papers, side-files for oversized message bodies).
-//! `write_atomic` is temp+rename. Signatures firm up in Wave 1.
+//! `write_atomic` is temp+rename. Deliberately NO `append`: the two append disciplines
+//! (single-writer ledger, multi-writer PIPE_BUF bus) live inside the `Spawner`/`Bus`
+//! impls — a raw policy-reachable append would weaken them.
 
 use async_trait::async_trait;
 use std::path::Path;

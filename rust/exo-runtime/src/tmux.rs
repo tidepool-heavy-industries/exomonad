@@ -1,20 +1,16 @@
-//! `impl Tmux for Runtime` — pane lifecycle + the tmux-paste delivery last-hop.
-//!
-//! **Leaf R2.** Adapt exomonad-core `TmuxIpc` (`services/tmux_ipc.rs`): `split_window`
-//! or `new_window` for `new_pane`, the buffer-paste pattern (`load-buffer` +
-//! `paste-buffer` + `send-keys Enter`) in `inject_input` for `paste`,
-//! `kill_pane` for `kill_pane`. Those are already async (`tokio::process`
-//! under the hood) — do NOT reintroduce blocking calls.
-//!
+//! `impl Tmux for Runtime` — pane lifecycle, the pane-liveness probe, and the tmux-paste
+//! delivery last-hop. `paste` delegates to exomonad-shared's hardened `TmuxIpc::inject_input`;
+//! everything else is direct `tokio::process` tmux CLI (do NOT reintroduce blocking calls).
 //! `self.tmux_session` is the session name to target.
 //!
-//! Consumers (why this cap stays, despite "provisional"): the `Bus` last-hop (`paste`)
-//! and the `Spawner` (`new_pane`/`kill_pane`) both call it — it is runtime-internal, not
-//! policy-facing, but it is NOT zero-consumer.
+//! Consumers: the `Bus` last-hop (`paste`), the `Spawner` (`new_pane`/`new_window`/`paste`/
+//! `kill_pane`), and the `Topology`/`ChildLiveness` probes (`list_panes`) — all through the
+//! supertrait edges, runtime-internal rather than policy-facing.
 
 use crate::runtime::Runtime;
 use async_trait::async_trait;
 use exo_caps::{PaneId, Tmux, TmuxError};
+use std::collections::HashSet;
 use std::path::Path;
 
 #[async_trait]
@@ -45,6 +41,19 @@ impl Tmux for Runtime {
         self.tmux("kill_pane", &["kill-pane", "-t", pane.as_str()])
             .await?;
         Ok(())
+    }
+
+    async fn list_panes(&self) -> Result<HashSet<String>, TmuxError> {
+        // `-a` = all sessions: a child's pane lives in this session, but the probe is a raw
+        // existence set, so the wider net costs nothing and never misses a relocated pane.
+        let output = self
+            .tmux("list_panes", &["list-panes", "-a", "-F", "#{pane_id}"])
+            .await?;
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect())
     }
 }
 

@@ -128,6 +128,9 @@ impl Tmux for TestCaps {
     async fn kill_pane(&self, _pane: &PaneId) -> Result<(), TmuxError> {
         unimplemented!()
     }
+    async fn list_panes(&self) -> Result<std::collections::HashSet<String>, TmuxError> {
+        unimplemented!()
+    }
 }
 
 #[async_trait]
@@ -140,7 +143,6 @@ impl Process for TestCaps {
         unimplemented!()
     }
 }
-
 
 #[async_trait]
 impl Topology for TestCaps {

@@ -36,7 +36,9 @@ impl Merge {
 
         if let Some(name_str) = child_candidate {
             if let Ok(child) = AgentName::new(name_str) {
-                let killed = ctx.kill_pane(&child).await;
+                // UFCS: `Spawner::kill_pane` (by child name) — `Tmux::kill_pane` (by pane id)
+                // is also in scope via the supertrait, so the bare method call is ambiguous.
+                let killed = Spawner::kill_pane(ctx, &child).await;
                 let reclaimed = ctx.reclaim_worktree(&child).await;
 
                 let k_msg = match killed {

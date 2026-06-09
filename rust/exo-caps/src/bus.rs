@@ -2,6 +2,7 @@
 //! inbox). The Teams-vs-tmux last-hop lives in the *recipient's* inbound loop, so policy
 //! never names a delivery mechanism.
 
+use crate::fs::Fs;
 use crate::types::{AgentName, Message};
 use async_trait::async_trait;
 use thiserror::Error;
@@ -45,8 +46,12 @@ pub enum BusError {
     Io(#[from] std::io::Error),
 }
 
+/// **Composite cap** — resolution (`Addressee` → `InboxPath`) reads the child ledger and
+/// papers through the `Fs` supertrait. The inbox *append* itself is deliberately NOT an `Fs`
+/// op (there is no `Fs::append`): the multi-writer PIPE_BUF discipline lives inside the `Bus`
+/// impl, where policy can't reach for a raw append that would weaken it.
 #[async_trait]
-pub trait Bus {
+pub trait Bus: Fs {
     /// Append `msg` to the target's ingestion inbox. The runtime stamps the envelope
     /// (`from`/`id`/`ts`/`v` — see [`IngestionEntry`](crate::IngestionEntry)); policy
     /// supplies only the [`Message`]. Resolution (`Addressee` → `InboxPath`) is internal.

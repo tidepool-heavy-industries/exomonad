@@ -9,6 +9,9 @@
 //! builds a `D::Spawn`, **not** a new `Spawner` method (an `exo-caps` edit). The role-fixing moved
 //! out of the cap and into the domain.
 
+use crate::fs::Fs;
+use crate::git::Git;
+use crate::tmux::Tmux;
 use crate::types::AgentName;
 use crate::SpawnSpec;
 use async_trait::async_trait;
@@ -29,8 +32,12 @@ pub enum SpawnError {
     Io(#[from] std::io::Error),
 }
 
+/// **Composite cap** — birth orchestrates across the primitives it declares as supertraits:
+/// `Git` (worktree add/remove), `Tmux` (holding-shell pane + launch paste + teardown), `Fs`
+/// (papers). An impl must also impl those primitives, so a `Spawner` can never quietly
+/// re-shell a domain a primitive already owns.
 #[async_trait]
-pub trait Spawner {
+pub trait Spawner: Git + Tmux + Fs {
     /// Birth one child from a domain spawn intent. The `(role, kind)` are read off the spec (fixed
     /// by whichever domain tool built it), so an illegal pairing is unnameable at that boundary.
     /// Fully generic over the domain's role — the runtime records the role erased ([`RoleRecord`](crate::RoleRecord)).

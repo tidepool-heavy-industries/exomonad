@@ -13,8 +13,8 @@
 use async_trait::async_trait;
 use exo_caps::{
     Addressee, AgentName, Branch, Bus, BusError, ChildKind, ChildLiveness, Fs, FsError, Git,
-    GitError, Kv, KvError, Message, PaneId, Process, ProcessError, RoleKind, SpawnError,
-    SpawnSpec, Spawner, Tmux, TmuxError, Topology, TopologyError, TopologyView, TreeNode,
+    GitError, Kv, KvError, Message, PaneId, Process, ProcessError, RoleKind, SpawnError, SpawnSpec,
+    Spawner, Tmux, TmuxError, Topology, TopologyError, TopologyView, TreeNode,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -300,6 +300,11 @@ impl Tmux for MockRuntime {
     }
     async fn kill_pane(&self, _pane: &PaneId) -> Result<(), TmuxError> {
         Ok(())
+    }
+    async fn list_panes(&self) -> Result<std::collections::HashSet<String>, TmuxError> {
+        // A successful probe of an empty world. Liveness behavior is tested via the canned
+        // `Topology`/`ChildLiveness` impls below, not through this set.
+        Ok(std::collections::HashSet::new())
     }
 }
 

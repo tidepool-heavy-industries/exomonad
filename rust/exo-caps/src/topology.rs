@@ -9,6 +9,8 @@
 //! pane is still there) — a true sidecar round-trip ping isn't available (the sidecar is
 //! stdio-bound to its agent, not socket-pingable).
 
+use crate::fs::Fs;
+use crate::tmux::Tmux;
 use crate::types::ChildKind;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -54,8 +56,10 @@ pub struct TopologyView {
     pub path: Vec<String>,
 }
 
+/// **Composite cap** — the tree walk reads the per-node ledgers (`Fs`) and probes pane
+/// liveness ([`Tmux::list_panes`]); the supertraits name those powers.
 #[async_trait]
-pub trait Topology {
+pub trait Topology: Tmux + Fs {
     /// The caller's subtree + parent + per-node pane-liveness. Liveness is best-effort: a tmux
     /// probe failure marks nodes not-alive rather than failing the whole call.
     async fn topology(&self) -> Result<TopologyView, TopologyError>;

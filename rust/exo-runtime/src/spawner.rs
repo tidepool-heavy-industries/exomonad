@@ -42,7 +42,7 @@
 use crate::runtime::Runtime;
 use async_trait::async_trait;
 use exo_caps::{
-    fold_children, AgentName, AgentType, Branch, Child, ChildKind, ChildRecord, InboxPath,
+    fold_children, AgentName, AgentType, Branch, Child, ChildKind, ChildRecord, FsError, InboxPath,
     NodePapers, PaneId, RoleKind, RoleRecord, SpawnError, SpawnSpec, Spawner,
 };
 use std::collections::BTreeMap;
@@ -126,19 +126,6 @@ where
     Err(err)
 }
 
-/// Resolve a role's steering protocol: the optional on-disk override
-/// (`{working_dir}/.exo/roles/devswarm/context/{role}.md`) if it exists, else the domain's
-/// baked-in const (`RoleKind::protocol`). The compiled const is the source of truth; the file just
-/// overrides it during prompt-tuning. Mirrors the same resolution `exo-node`'s SessionStart hook
-/// applies for Claude — here it feeds a Gemini child's `context.fileName`.
-async fn resolve_protocol(working_dir: &Path, role_str: &str, baked: &str) -> String {
-    let path = working_dir.join(format!(".exo/roles/devswarm/context/{role_str}.md"));
-    match tokio::fs::read_to_string(&path).await {
-        Ok(s) => s,
-        Err(_) => baked.to_string(),
-    }
-}
-
 /// The fixed triple + identity each op hands to the shared `birth` tail. Constructed by
 /// the per-op method (the single place a triple is named); `birth` branches only on `kind`.
 #[derive(Debug, Clone)]
@@ -203,10 +190,14 @@ impl Runtime {
     /// A missing file means no children yet → empty, not an error.
     pub(crate) async fn read_child_records(&self) -> Result<Vec<ChildRecord>, SpawnError> {
         let path = self.children_log_path();
-        let data = match tokio::fs::read(&path).await {
+        let data = match exo_caps::Fs::read(self, &path).await {
             Ok(d) => d,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(e.into()),
+            Err(FsError::At { source, .. } | FsError::Io(source))
+                if source.kind() == std::io::ErrorKind::NotFound =>
+            {
+                return Ok(Vec::new())
+            }
+            Err(FsError::At { source, .. } | FsError::Io(source)) => return Err(source.into()),
         };
 
         let mut records = Vec::new();
@@ -252,7 +243,7 @@ impl Runtime {
                 .join(format!(".exo/node/{}/root.json", self.run_id)),
         ];
         for path in candidates {
-            match tokio::fs::read(&path).await {
+            match exo_caps::Fs::read(self, &path).await {
                 Ok(bytes) => match serde_json::from_slice::<NodePapers>(&bytes) {
                     Ok(p) => return (p.yolo, p.wrap_nix),
                     Err(e) => {
@@ -263,6 +254,30 @@ impl Runtime {
             }
         }
         (NodePapers::DEFAULT_YOLO, NodePapers::DEFAULT_WRAP_NIX)
+    }
+
+    /// Resolve a role's steering protocol: the optional on-disk override
+    /// (`{working_dir}/.exo/roles/devswarm/context/{role}.md`) if it exists, else the domain's
+    /// baked-in const (`RoleKind::protocol`). The compiled const is the source of truth; the file
+    /// just overrides it during prompt-tuning. Mirrors the same resolution `exo-node`'s
+    /// SessionStart hook applies for Claude — here it feeds a Gemini child's `context.fileName`.
+    async fn resolve_protocol(&self, role_str: &str, baked: &str) -> String {
+        let path = self
+            .working_dir
+            .join(format!(".exo/roles/devswarm/context/{role_str}.md"));
+        match exo_caps::Fs::read(self, &path).await {
+            Ok(bytes) => match String::from_utf8(bytes) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(
+                        "protocol override {} is not UTF-8 ({e}); using the baked-in const",
+                        path.display()
+                    );
+                    baked.to_string()
+                }
+            },
+            Err(_) => baked.to_string(),
+        }
     }
 
     pub(crate) async fn resolve_child_name(
@@ -440,16 +455,20 @@ impl Runtime {
             }
         };
 
-        if let Some(parent) = papers_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-
         let papers_json = serde_json::to_vec_pretty(&papers).map_err(|e| SpawnError::Failed {
             op: "serialize_papers",
             child: Some(core.name.clone()),
             detail: e.to_string(),
         })?;
-        tokio::fs::write(&papers_path, papers_json).await?;
+        // Atomic (temp + rename, parent dirs created) via the `Fs` supertrait — the child's
+        // bootstrap must never read half-written papers.
+        exo_caps::Fs::write_atomic(self, &papers_path, &papers_json)
+            .await
+            .map_err(|e| SpawnError::Failed {
+                op: "write_papers",
+                child: Some(core.name.clone()),
+                detail: e.to_string(),
+            })?;
 
         // The node's spec (the reviewer's acceptance bar) is persisted to `.exo/acceptance.md` by
         // the spawning DOMAIN tool via the `Fs` cap, NOT here — the runtime no longer knows the
@@ -643,7 +662,9 @@ impl Spawner for Runtime {
         // Resolve the child's role-steering protocol (override-or-const) while the role is still
         // typed. Threaded onto `BirthCore` for both Gemini (written to its `context.fileName`) and
         // Claude (passed via `--append-system-prompt`).
-        let protocol = resolve_protocol(&self.working_dir, role.role_str(), role.protocol()).await;
+        let protocol = self
+            .resolve_protocol(role.role_str(), role.protocol())
+            .await;
         let role = RoleRecord::new(&role).map_err(|e| SpawnError::Failed {
             op: "role_record",
             child: Some(name.clone()),
@@ -694,42 +715,18 @@ impl Spawner for Runtime {
                     }
                 }
 
-                let working_dir = self.working_dir.clone();
-                // Innermost first
+                // Innermost first. Removal is the `Git` supertrait's `worktree_remove`
+                // (force/reclaim semantics: the directory's state is discarded, the branch
+                // ref — a reviewer's committed fixup — survives).
                 for path in to_remove.into_iter().rev() {
                     let child_name = path
                         .file_name()
                         .unwrap_or_default()
                         .to_string_lossy()
                         .to_string();
-                    let path_str = path.to_string_lossy().to_string();
-                    let cwd = working_dir.clone();
 
                     let res = retry_teardown("reclaim_worktree", &child_name, || {
-                        let path_str = path_str.clone();
-                        let cwd = cwd.clone();
-                        async move {
-                            // SAFE: `git worktree remove --force` removes only the working directory + admin entry;
-                            // it does NOT delete the branch ref, so a reviewer's committed fixup on its branch survives.
-                            let out = tokio::process::Command::new("git")
-                                .current_dir(&cwd)
-                                .args(["worktree", "remove", "--force", &path_str])
-                                .output()
-                                .await
-                                .map_err(|e| SpawnError::Failed {
-                                    op: "git_worktree_remove",
-                                    child: None,
-                                    detail: e.to_string(),
-                                })?;
-                            if !out.status.success() {
-                                return Err(SpawnError::Failed {
-                                    op: "git_worktree_remove",
-                                    child: None,
-                                    detail: String::from_utf8_lossy(&out.stderr).to_string(),
-                                });
-                            }
-                            Ok(())
-                        }
+                        exo_caps::Git::worktree_remove(self, &path)
                     })
                     .await;
 

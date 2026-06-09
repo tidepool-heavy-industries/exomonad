@@ -23,17 +23,24 @@ This is the seam that replaces the old Haskell-WASM boundary. WASM *physically* 
 
 ## The capability traits
 
-Nine caps, each one trait per file. `exo-runtime::Runtime` implements all of them; `exo::testing::MockRuntime` mocks all of them. (There is **no `Log` cap** — sidecar code logs via `tracing` directly; a separate `Log` cap was a redundant unbounded file channel and was removed.)
+Nine caps, each one trait per file, in **two tiers**: *primitive* caps own one external resource each; *composite* caps orchestrate across resources and declare the primitives they stand on as **supertraits** (`Spawner: Git + Tmux + Fs`, `Bus: Fs`, `Topology: Tmux + Fs`, `ChildLiveness: Tmux + Fs`). An impl of a composite must also impl its primitives, so a composite can never quietly re-shell a domain a primitive already owns. `exo-runtime::Runtime` implements all of them; `exo::testing::MockRuntime` mocks all of them. (There is **no `Log` cap** — sidecar code logs via `tracing` directly; a separate `Log` cap was a redundant unbounded file channel and was removed.)
 
-- **`Git`** — `current_branch`, `head_sha` (sha-tag review verdicts), `merge_base` (fork-point base for a reviewer's `git diff`), `is_clean`, `fetch`, **`merge`** (the local on-disk fold — v2 convergence), `worktree_add`/`worktree_remove`. **No `GitHub` cap** — v2 convergence is local git, no PR/Copilot (cut 2026-06-01; see `reactive-github-layer-stays` memory).
-- **`Bus`** — `deliver(Addressee, Message)`. The append half only; the read/cursor/watch half is the sidecar's inbound loop. Delivery mechanism (Teams vs tmux) is the *recipient's* last-hop concern — policy never names it.
-- **`Spawner`** — ONE generic `spawn(D::Spawn)` (the recursion; the domain's spawn intent fixes `(role, kind)` at the tool boundary) + a `fork_wave` vec wrapper (default method) + `reclaim_worktree` / `kill_pane` (teardown). Replaces the old per-archetype methods: a new archetype is a new domain role + a thin domain tool, not a `Spawner` edit. Fully generic `spawn<S: SpawnSpec>` over the domain role (the runtime records the role erased).
-- **`Tmux`** — `new_pane`, `new_window`, `paste`, `kill_pane`.
-- **`Fs`** — `read`, `write_atomic`.
+**Primitives:**
+
+- **`Git`** — `current_branch`, `head_sha` (sha-tag review verdicts), `merge_base` (fork-point base for a reviewer's `git diff`), `is_clean`, `fetch`, **`merge`** (the local on-disk fold — v2 convergence), `worktree_add`/`worktree_remove` (**force/reclaim semantics**: the worktree directory's state is discarded, the branch ref survives). **No `GitHub` cap** — v2 convergence is local git, no PR/Copilot (cut 2026-06-01; see `reactive-github-layer-stays` memory).
+- **`Tmux`** — `new_pane`, `new_window`, `paste`, `kill_pane`, `list_panes` (the liveness probe: `Err` = probe *failure*, never "no panes" — each consumer applies its own default).
+- **`Fs`** — `read`, `write_atomic` (temp+rename, creates parent dirs). Deliberately **no `append`**: the two append disciplines (single-writer ledger, multi-writer PIPE_BUF bus) live inside the `Spawner`/`Bus` impls, out of policy's reach.
 - **`Kv`** — `get`, `set`.
 - **`Process`** — `run`.
-- **`Topology`** — `topology()` → the caller's subtree (folded recursively from the per-node `children.jsonl` ledgers) + parent + per-node pane-liveness. Backs the `tree` tool.
-- **`ChildLiveness`** — `any_child_busy()` → is any *direct* child still working? Idle is tracked from messages (busy at birth + on every poke; idle on `ChildIdle`), combined with pane-death as a one-way override. Distinct from `Topology`'s pane-**existence**: a live pane ≠ busy (a Gemini child idles with its `--prompt-interactive` pane alive), but a dead pane ⇒ idle. In-memory, non-persisted (a sidecar restart re-seeds conservatively: unknown ⇒ busy if the pane is alive). Backs the `stop` idle gate.
+
+**Composites:**
+
+- **`Bus: Fs`** — `deliver(Addressee, Message)`. The append half only; the read/cursor/watch half is the sidecar's inbound loop. Delivery mechanism (Teams vs tmux) is the *recipient's* last-hop concern — policy never names it.
+- **`Spawner: Git + Tmux + Fs`** — ONE generic `spawn(D::Spawn)` (the recursion; the domain's spawn intent fixes `(role, kind)` at the tool boundary) + a `fork_wave` vec wrapper (default method) + `reclaim_worktree` / `kill_pane` (teardown). Replaces the old per-archetype methods: a new archetype is a new domain role + a thin domain tool, not a `Spawner` edit. Fully generic `spawn<S: SpawnSpec>` over the domain role (the runtime records the role erased). NB: `Spawner::kill_pane(&AgentName)` and `Tmux::kill_pane(&PaneId)` collide on a composite receiver — call them UFCS-qualified.
+- **`Topology: Tmux + Fs`** — `topology()` → the caller's subtree (folded recursively from the per-node `children.jsonl` ledgers) + parent + per-node pane-liveness. Backs the `tree` tool.
+- **`ChildLiveness: Tmux + Fs`** — `any_child_busy()` → is any *direct* child still working? Idle is tracked from messages (busy at birth + on every poke; idle on `ChildIdle`), combined with pane-death as a one-way override. Distinct from `Topology`'s pane-**existence**: a live pane ≠ busy (a Gemini child idles with its `--prompt-interactive` pane alive), but a dead pane ⇒ idle. In-memory, non-persisted (a sidecar restart re-seeds conservatively: unknown ⇒ busy if the pane is alive). Backs the `stop` idle gate.
+
+Tool bounds in `exo` stay **explicit per-cap** (`C: Git + Spawner`, not just `C: Spawner`): a tool's bound documents what it *directly* calls — its least-privilege spec — while the supertraits encode what an *implementation* tier needs. Redundant bounds are harmless; don't narrow them.
 
 ## Domain types (the invariants worth knowing)
 

@@ -11,10 +11,15 @@
 //! idle (it's gone — it isn't working), so it forces idle regardless of a stale busy bit. A live
 //! pane decides nothing on its own.
 
+use crate::fs::Fs;
+use crate::tmux::Tmux;
 use async_trait::async_trait;
 
+/// **Composite cap** — the gate reads the child ledger (`Fs`) and probes pane liveness
+/// ([`Tmux::list_panes`]); the supertraits name those powers. The busy-bit map itself is
+/// impl-internal in-memory state, not a cap.
 #[async_trait]
-pub trait ChildLiveness {
+pub trait ChildLiveness: Tmux + Fs {
     /// True if any **direct** child is still working: its busy-bit is set AND its pane is not
     /// known-dead. Best-effort and infallible — a liveness-probe failure is treated as "alive"
     /// (trust the busy-bit), so a transient probe hiccup never manufactures a false idle.

@@ -1,5 +1,4 @@
-//! `Git` capability — local git operations. Signatures firm up in Wave 1 (adapt
-//! exomonad-core `GitService`).
+//! `Git` capability — local git operations.
 
 use crate::types::Branch;
 use async_trait::async_trait;
@@ -36,5 +35,9 @@ pub trait Git {
     /// Merge `branch` into the current branch (the local fold; no remote). Non-interactive.
     async fn merge(&self, branch: &Branch) -> Result<(), GitError>;
     async fn worktree_add(&self, branch: &Branch, at: &Path) -> Result<(), GitError>;
+    /// Remove the worktree at `at` — **force/reclaim semantics**: uncommitted state in the
+    /// worktree *directory* (dirty files, untracked artifacts) is discarded, but the branch
+    /// ref is untouched, so committed work survives. Both callers (birth rollback, post-merge
+    /// reclaim) want exactly that.
     async fn worktree_remove(&self, at: &Path) -> Result<(), GitError>;
 }

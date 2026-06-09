@@ -6,7 +6,6 @@
 //! children exist; the bit and the probe decide whether each is working.
 
 use crate::runtime::Runtime;
-use crate::topology::live_panes;
 use async_trait::async_trait;
 use exo_caps::{AgentName, ChildLiveness};
 use std::collections::{HashMap, HashSet};
@@ -47,8 +46,16 @@ impl ChildLiveness for Runtime {
             return false; // no children → nothing to wait on
         }
 
-        // Probe pane liveness once. `None` = probe failed → liveness unknown.
-        let alive = live_panes().await;
+        // Probe pane liveness once ([`exo_caps::Tmux::list_panes`]). A probe failure maps to
+        // `None` = liveness unknown ⇒ trust the busy-bit — NEVER to an empty set, which would
+        // read as "all panes dead" and force a false idle.
+        let alive = match exo_caps::Tmux::list_panes(self).await {
+            Ok(set) => Some(set),
+            Err(e) => {
+                tracing::warn!(error = %e, "any_child_busy: pane probe failed; liveness unknown — trusting busy-bits");
+                None
+            }
+        };
         let bits = self.children_busy.lock().unwrap().clone();
 
         any_busy(

@@ -1,8 +1,9 @@
-//! `Tmux` capability — pane lifecycle + the tmux-paste delivery last-hop. Signatures
-//! firm up in Wave 1 (adapt exomonad-core `TmuxIpc`, incl. the buffer-paste pattern).
+//! `Tmux` capability — pane lifecycle, the pane-liveness probe, and the tmux-paste
+//! delivery last-hop.
 
 use crate::types::PaneId;
 use async_trait::async_trait;
+use std::collections::HashSet;
 use std::path::Path;
 use thiserror::Error;
 
@@ -24,4 +25,10 @@ pub trait Tmux {
     /// The non-CC delivery last-hop: paste rendered `[from: X] …` text into the pane.
     async fn paste(&self, pane: &PaneId, text: &str) -> Result<(), TmuxError>;
     async fn kill_pane(&self, pane: &PaneId) -> Result<(), TmuxError>;
+    /// The set of currently-existing pane ids (raw `%N` strings) across ALL sessions —
+    /// the liveness probe. An `Err` is a probe **failure** (liveness unknown), NOT an
+    /// empty set: a caller must never read a failed probe as "all panes dead". Each
+    /// consumer applies its own default (tree view → all-dead; idle gate → trust the
+    /// busy-bit; see `Topology` / `ChildLiveness`).
+    async fn list_panes(&self) -> Result<HashSet<String>, TmuxError>;
 }

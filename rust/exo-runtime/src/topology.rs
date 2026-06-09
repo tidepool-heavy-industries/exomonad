@@ -2,9 +2,11 @@
 //! ledgers + a tmux pane-liveness probe.
 //!
 //! The runtime owns identity (`node_path`, `working_dir`, `own_pane`), so it does the walk; the
-//! policy `tree` tool is a thin shim. The recursive ledger read is sync fs work, run inside
-//! `spawn_blocking` so it never blocks the tokio executor (the crate's HARD RULE); the one tmux
-//! probe is async and best-effort.
+//! policy `tree` tool is a thin shim. The recursive ledger read is **deliberately sync `std::fs`**
+//! (not the async `Fs` cap, despite `Topology: Fs`): the whole walk runs inside one
+//! `spawn_blocking` so it never blocks the tokio executor (the crate's HARD RULE), and an async
+//! cap can't be awaited from a blocking closure. The pane-liveness probe is the `Tmux` supertrait
+//! (`list_panes`), async and best-effort.
 
 use crate::runtime::Runtime;
 use async_trait::async_trait;
@@ -22,9 +24,16 @@ const MAX_DEPTH: usize = 32;
 impl Topology for Runtime {
     async fn topology(&self) -> Result<TopologyView, TopologyError> {
         // For the tree view a probe failure reads as "all panes dead" (the documented best-effort
-        // behaviour) — `None` → empty set. (The idle gate, via `ChildLiveness`, treats a probe
-        // failure differently: unknown ⇒ trust the busy-bit; see `liveness.rs`.)
-        let alive = live_panes().await.unwrap_or_default();
+        // behaviour) — `Err` → empty set, with a WARN so a real tmux failure stays visible. (The
+        // idle gate, via `ChildLiveness`, treats a probe failure differently: unknown ⇒ trust the
+        // busy-bit; see `liveness.rs`.)
+        let alive = match exo_caps::Tmux::list_panes(self).await {
+            Ok(set) => set,
+            Err(e) => {
+                tracing::warn!(error = %e, "topology: pane probe failed; tree view reads all panes as dead");
+                HashSet::new()
+            }
+        };
         let wd = self.working_dir().to_path_buf();
         let children = tokio::task::spawn_blocking(move || subtree(&wd, &alive, MAX_DEPTH))
             .await
@@ -116,41 +125,6 @@ fn read_records(path: &Path) -> Vec<ChildRecord> {
             }
         })
         .collect()
-}
-
-/// The set of currently-existing tmux pane ids. **Best-effort**, and the `Option` distinguishes
-/// the two outcomes a caller must treat differently: `Some(set)` is a successful probe (an empty
-/// set genuinely means "no panes exist"); `None` is a probe *failure* (liveness unknown). A
-/// failure must NOT be confused with "all panes dead" — the idle gate would then force a false
-/// idle. Each consumer applies its own default (tree view → all-dead; idle gate → trust the bit).
-pub(crate) async fn live_panes() -> Option<HashSet<String>> {
-    match tokio::process::Command::new("tmux")
-        .args(["list-panes", "-a", "-F", "#{pane_id}"])
-        .output()
-        .await
-    {
-        Ok(out) if out.status.success() => Some(
-            String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .map(|l| l.trim().to_string())
-                .filter(|l| !l.is_empty())
-                .collect(),
-        ),
-        // Stays at WARN — a real tmux failure forces a false idle and must stay visible — but
-        // carries the exit code + stderr so the warn is actionable, not a context-free "failed".
-        Ok(out) => {
-            tracing::warn!(
-                exit = ?out.status.code(),
-                stderr = %String::from_utf8_lossy(&out.stderr).trim(),
-                "topology: `tmux list-panes -a` failed; liveness unknown"
-            );
-            None
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "topology: could not spawn `tmux list-panes`; liveness unknown");
-            None
-        }
-    }
 }
 
 #[cfg(test)]
