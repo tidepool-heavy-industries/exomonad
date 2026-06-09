@@ -20,9 +20,7 @@ use crate::bootstrap::NodeContext;
 use crate::error::NodeResult;
 
 /// Serve the policy toolset over rmcp/stdio until the stream closes.
-pub async fn serve<D: Exomonad<Caps = Runtime>>(
-    ctx: Arc<NodeContext<D>>,
-) -> NodeResult<()> {
+pub async fn serve<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
     let tools = D::role_def(ctx.kind).tools;
     let stdin = tokio::io::stdin();
     let mut reader = BufReader::new(stdin).lines();

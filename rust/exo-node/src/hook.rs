@@ -303,9 +303,12 @@ mod tests {
         let add_ctx = val["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap();
-        
+
         assert!(add_ctx.contains("tl-node"));
-        assert!(!add_ctx.contains("TEST-TL-PROTOCOL-MARKER"), "Protocol must NOT be appended in the hook: {add_ctx}");
+        assert!(
+            !add_ctx.contains("TEST-TL-PROTOCOL-MARKER"),
+            "Protocol must NOT be appended in the hook: {add_ctx}"
+        );
     }
 
     fn mock_stop_block<'a>(_: &'a exo_runtime::Runtime) -> BoxFuture<'a, StopDecision> {

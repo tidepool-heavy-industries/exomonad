@@ -111,7 +111,8 @@ pub(crate) async fn deliver_synthetic<D: Exomonad>(
         v: 1,
         ts: Utc::now(),
         from: Persona::Synthetic(
-            SyntheticName::new(from.to_string()).map_err(|e| std::io::Error::other(e.to_string()))?,
+            SyntheticName::new(from.to_string())
+                .map_err(|e| std::io::Error::other(e.to_string()))?,
         ),
         msg: Message {
             text: MessageBody::new(text.to_string())

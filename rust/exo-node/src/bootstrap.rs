@@ -129,10 +129,13 @@ pub fn bootstrap<D: Exomonad<Caps = Runtime>>(
     let node_path: NodePath = papers.path.clone();
     let branch: Branch = papers.branch.clone();
     // The role is recorded erased; type it back to this domain's role enum (the one typed read).
-    let kind: D::Role = papers.role.typed::<D::Role>().map_err(|e| NodeError::Papers {
-        path: papers_path.display().to_string(),
-        detail: format!("role: {e}"),
-    })?;
+    let kind: D::Role = papers
+        .role
+        .typed::<D::Role>()
+        .map_err(|e| NodeError::Papers {
+            path: papers_path.display().to_string(),
+            detail: format!("role: {e}"),
+        })?;
     let parent_inbox: Option<InboxPath> = papers.parent_inbox.clone();
 
     let runtime = Runtime::new(
@@ -211,8 +214,7 @@ mod tests {
 
         // 2. Missing env case
         std::env::remove_var("EXOMONAD_SWARM_RUN_ID");
-        let res =
-            bootstrap::<crate::test_support::TestDomain>(&papers_path, working_dir.clone());
+        let res = bootstrap::<crate::test_support::TestDomain>(&papers_path, working_dir.clone());
         assert!(res.is_err());
 
         // Cleanup env

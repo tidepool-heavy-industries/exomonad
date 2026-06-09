@@ -25,9 +25,7 @@ use crate::error::{NodeError, NodeResult};
 /// Spawned as a background task by [`run_node`](crate::run_node) and aborted when the outbound
 /// serve loop returns; an error here is logged, never fatal.
 #[tracing::instrument(skip(ctx), fields(node = %ctx.runtime.name().as_str()))]
-pub async fn serve<D: Exomonad<Caps = Runtime>>(
-    ctx: Arc<NodeContext<D>>,
-) -> NodeResult<()> {
+pub async fn serve<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
     let home = std::env::var("HOME").map_err(|_| NodeError::MissingContext("HOME"))?;
     let sock = exo_caps::paths::hook_sock(Path::new(&home), &ctx.run_id, &ctx.own_pane);
 
@@ -106,10 +104,7 @@ async fn handle_conn<D: Exomonad<Caps = Runtime>>(
 
 /// Run the role's hook fn on the LIVE runtime, then shape stdout for the node's agent_type.
 #[tracing::instrument(skip(ctx, req), fields(node = %ctx.runtime.name().as_str(), event = ?req.event))]
-async fn run<D: Exomonad<Caps = Runtime>>(
-    ctx: &NodeContext<D>,
-    req: &HookRequest,
-) -> HookVerdict {
+async fn run<D: Exomonad<Caps = Runtime>>(ctx: &NodeContext<D>, req: &HookRequest) -> HookVerdict {
     let rd = D::role_def(ctx.kind);
     let agent_type = ctx.kind.agent_type();
     let stdout = match req.event {
