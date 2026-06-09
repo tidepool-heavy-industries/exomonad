@@ -154,9 +154,12 @@ whole-workspace build after every fold — these waves are cross-crate by nature
 
 ### Stretch (only if waves 4–5 fold clean by Friday)
 
-- **T3.7 — RoleDef authoring polish.** `C`, L. The deferred builder/trait reshape of
-  `RoleDef<R>` toward the "Rust DSL" north star (big framework, minimal domain crate).
-  Judgment-heavy; if it slips, it's the natural centerpiece of *next* month.
+- **T3.7 — RoleDef authoring polish.** `C`, L. ✅ **DESIGN ACCEPTED** (2026-06-09) — the
+  judgment half is done: adversarially reviewed + scratch-crate compile-proven, recorded in
+  `docs/decisions/exo-authoring-dsl.md` (typed `Tool`/`ErasedTool` flip, gates-vs-observers
+  stop split making #20426 structural, hook pipelines; session_start stays a plain fn).
+  Remaining: two mechanical implementation phases (A: tool flip, wire-identical; B:
+  pipelines) — leaf-delegable straight from the doc's implementation map.
 
 ---
 

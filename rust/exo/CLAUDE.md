@@ -113,4 +113,4 @@ tool that skips review. The reviewer is torn down (best-effort) as soon as the `
 - **Reviewers:** review is currently always-on (no config to disable); a two-way colleague back-channel (submitter→reviewer reply) needs `send_message` on dev.
 - `pre_tool_use` is intentionally minimal (one nudge); classic exomonad's richer antipattern set + PII rewrite are not ported.
 - `stop`'s dirty-gate can wedge an agent that holds untracked artifacts it won't commit.
-- **Phases / authoring-DSL polish** are a deliberate follow-on — `RoleDef<R>` is relocated as-is, not yet reshaped into a builder/trait.
+- **Authoring-DSL reshape: designed, not yet implemented** — typed `Tool` + `ErasedTool` flip, gate/observer stop pipelines (making #20426 structural); see [`docs/decisions/exo-authoring-dsl.md`](../../docs/decisions/exo-authoring-dsl.md). `RoleDef<R>` keeps the relocated as-is shape until that lands.
