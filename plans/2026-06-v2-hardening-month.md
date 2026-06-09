@@ -140,15 +140,17 @@ whole-workspace build after every fold — these waves are cross-crate by nature
 
 ### Wave 5 — Engine goes generic (D::System)
 
-- **T3.4 — Scaffold (TL).** Move `ReviewVerdict` out of `exo-caps` into the `exo` domain
-  (`rust/exo/src/review.rs`); the inbound Domain arm and `SystemCtx`/`handle_system` become
-  fully generic over `D::System` (the wiring already exists transitionally —
-  `rust/exo-node/src/inbound.rs:252` marks the spot). exo-caps ends the wave with zero
-  review vocabulary.
-- **T3.5 — Migrate exo-node + exo call sites.** `G`, M. Mechanical relocation per scaffold.
+- **T3.4 — Scaffold (TL).** ✅ ALREADY LANDED pre-plan (fa245df8): the engine is fully
+  generic over `D::System` / `D::handle_system`, and the review vocabulary is domain-owned
+  (`exo::ReviewSystem`, `rust/exo/src/review.rs`) — exo-caps carries none. This task was
+  drafted against a stale "transitional" comment at `inbound.rs:252` (the code below it was
+  already generic); the comment + its two CLAUDE.md echoes were fixed at Wave-4 close.
+- **T3.5 — Migrate exo-node + exo call sites.** ✅ ALREADY LANDED (fa245df8 + f5dc9fa9
+  structured findings).
 - **T3.6 — Seam audit.** `C`, S. One Claude leaf reads the post-refactor `exo-caps` public
   API and confirms: no domain vocabulary left in the engine crates, docs match the new
-  trait graph, every gap note still true. Output: a findings report + doc patch.
+  trait graph, every gap note still true. Output: a findings report + doc patch. (Already
+  proved its worth — the stale "transitional" markers were exactly this class of drift.)
 
 ### Stretch (only if waves 4–5 fold clean by Friday)
 

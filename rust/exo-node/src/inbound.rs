@@ -201,7 +201,10 @@ impl<D: Exomonad> SystemCtx for NodeSystemCtx<'_, D> {
             Ok(()) => Ok(()),
             Err(e) => {
                 error!(from = %from, summary = %summary, "FAILED to deliver synthetic message to self: {e}");
-                Err(exo_caps::CapError::invalid("deliver_to_self", e.to_string()))
+                Err(exo_caps::CapError::invalid(
+                    "deliver_to_self",
+                    e.to_string(),
+                ))
             }
         }
     }
@@ -249,8 +252,8 @@ impl<D: Exomonad> InboundHandler for RealHandler<D> {
                 self.handle_lifecycle(&entry.from, lc).await?;
                 Ok(Some(false))
             }
-            // Domain-opaque inter-node payload — deserialize to the (transitional) review verdict
-            // and act on it. (Generalized to `D::handle_system` when the engine goes generic.)
+            // Domain-opaque inter-node payload — typed back to the concrete `D::System` and
+            // handed to `D::handle_system` (the one place the erased wire payload is deserialized).
             MessageKind::Domain(payload) => {
                 self.handle_domain(&entry.from, payload).await?;
                 Ok(Some(false))
@@ -337,7 +340,10 @@ impl<D: Exomonad> RealHandler<D> {
             SystemOutcome::ReclaimSender => {
                 if let Persona::Agent(sender) = from {
                     if let Err(e) = exo_caps::Spawner::kill_pane(&*self.ctx.runtime, sender).await {
-                        warn!("sender teardown: kill_pane({}) failed: {e}", sender.as_str());
+                        warn!(
+                            "sender teardown: kill_pane({}) failed: {e}",
+                            sender.as_str()
+                        );
                     }
                     if let Err(e) =
                         exo_caps::Spawner::reclaim_worktree(&*self.ctx.runtime, sender).await
