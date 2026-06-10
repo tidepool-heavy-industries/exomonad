@@ -90,6 +90,27 @@ pub fn build_agent_command(
                 cmd, perms_flags, escaped_session, escaped_path
             )
         }
+        (Some(pf), None) if agent_type == AgentType::Gemini => {
+            // Gemini `@`-expands its `-i` prompt, so passing the spec inline (`"$(cat file)"`)
+            // makes any `@/`, `@scoped`, `@types`, etc. in the spec be read as FILE references —
+            // e.g. `@/` → "read `/`" → the folder-trust modal that hangs the leaf. Instead, deliver
+            // the prompt as a single `@`-reference to the file: the spec's `@`-tokens then arrive as
+            // literal file CONTENT (an included file's text is not itself re-scanned for `@`-refs),
+            // and the only reference in the arg is our own. The file is under the agent's cwd
+            // (`<worktree>/.exo/tmp/…`), so a relative path resolves; fall back to the absolute path.
+            let rel = pf.strip_prefix(cwd).unwrap_or(pf).display().to_string();
+            let init = format!(
+                "Your complete task spec is in the file @{rel} — read it in full and carry it out. \
+                 Treat that file's contents as literal text.",
+            );
+            format!(
+                "{}{} {} {}",
+                cmd,
+                perms_flags,
+                agent_type.prompt_flag(),
+                escape_for_shell_command(&init)
+            )
+        }
         (Some(pf), None) => {
             let escaped_path = escape_for_shell_command(&pf.display().to_string());
             let flag = agent_type.prompt_flag();
@@ -151,4 +172,64 @@ pub async fn write_prompt_file(
     let file = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
     info!(file = %file, agent = %agent_name, "Wrote prompt to .exo/tmp");
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_init_prompt_is_an_atref_not_inline_content() {
+        // The whole point: Gemini `@`-expands its `-i` prompt, so the spec must NOT be inlined
+        // (`"$(cat file)"`) — a `@/` or `@scoped` token in the spec would be read as a file ref and
+        // brick the leaf on the folder-trust modal. It must be delivered as an `@`-reference to the
+        // file (relative to cwd), so the spec's `@`-tokens arrive as literal included content.
+        let cwd = Path::new("/home/u/dev/proj/.exo/worktrees/leaf");
+        let pf = cwd.join(".exo/tmp/prompt-1-2.txt");
+        let env = HashMap::new();
+        let cmd = build_agent_command(
+            AgentType::Gemini,
+            Some(&pf),
+            None,
+            &env,
+            cwd,
+            None,
+            true,
+            false,
+            None,
+        );
+        assert!(
+            cmd.contains("@.exo/tmp/prompt-1-2.txt"),
+            "Gemini init prompt must be an @-reference relative to cwd: {cmd}"
+        );
+        assert!(
+            !cmd.contains("$(cat"),
+            "Gemini must NOT inline-cat the prompt (that re-enables @-expansion of spec tokens): {cmd}"
+        );
+        assert!(cmd.contains("--yolo"));
+    }
+
+    #[test]
+    fn claude_init_prompt_still_inlined_via_cat() {
+        // Claude is a separate, not-yet-proven-broken path — leave it on `"$(cat file)"`.
+        let cwd = Path::new("/home/u/dev/proj/.exo/worktrees/leaf");
+        let pf = cwd.join(".exo/tmp/prompt-1-2.txt");
+        let env = HashMap::new();
+        let cmd = build_agent_command(
+            AgentType::Claude,
+            Some(&pf),
+            None,
+            &env,
+            cwd,
+            None,
+            false,
+            false,
+            None,
+        );
+        assert!(cmd.contains("$(cat"), "Claude path should still cat the prompt file: {cmd}");
+        assert!(
+            !cmd.contains("@.exo/tmp"),
+            "Claude path should not use the Gemini @-reference form: {cmd}"
+        );
+    }
 }
