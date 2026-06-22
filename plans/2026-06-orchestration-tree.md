@@ -83,8 +83,12 @@ root (hooksock) — decompose, spawn, idle, merge. NEVER implements (wave-0-clas
 ├─ WAVE 3 (parallel, post-redeploy)
 │  ├─ rmcp       (Claude child, solo) ─ T4.3, riskiest, fold last. Optional: one
 │  │             spawn_worker research probe (rmcp-crate API survey) before coding.
-│  └─ seam-audit (Claude leaf, solo)  ─ T3.6 (after trust: audits T2.3's possible cap
-│                split + the wave-C seam rename as landed facts, not races)
+│  ├─ seam-audit (Claude leaf, solo)  ─ T3.6 (after trust: audits T2.3's possible cap
+│  │             split + the wave-C seam rename as landed facts, not races)
+│  └─ gradient   (Claude leaf, solo)  ─ MG.1 model-gradient forking v1 (added 2026-06-10,
+│                post-review insertion). Wave 3 because trust's T1.1 touches spawn.rs (same
+│                file as ForkChildArgs.model) and the surface is post-DSL by then. Design:
+│                docs/decisions/model-gradient-forking.md.
 │
 └─ WAVE 4 (close-out)
    ├─ docs-trueing (Claude leaf) ─ T4.5
@@ -140,7 +144,7 @@ T2.2a/b corroboration data). After the FIRST dsl-leaf approve: check the sidecar
 plans/2026-06-orchestration-tree.md § your name, then the references it names. Execute
 scaffold-fork-converge per the charter. Other sections of that file are not your task."*)
 → idle. Both folded → spawn `trust` → idle. Trust folded → **mid-run redeploy checkpoint**
-→ spawn `rmcp` + `seam-audit` → idle. Folded → wave 4.
+→ spawn `rmcp` + `seam-audit` + `gradient` → idle. Folded → wave 4.
 
 **Failure paths:**
 - *Leaf silent past its size*: `tmux capture-pane -t <pane> -p -S -300` before assuming
@@ -280,14 +284,25 @@ monolith edits) + `rust/exo/src/review.rs`. T1.3 is DONE (wave 0) — not yours.
   `cargo test -p exo-node --test converge` (the converge test is a cargo integration test,
   NOT `tests/e2e/`) — the live wire smoke happens at the FINAL deploy step. Optional
   spawn_worker probe for rmcp-crate API survey first.
+- **`gradient`** (Claude, MG.1, wave 3; added 2026-06-10 post-review): per-child `model` on
+  `fork_wave` — the monotone descent lattice. Read
+  `docs/decisions/model-gradient-forking.md` IN FULL (design settled, zero latitude; its
+  [Implementation map] is the step list, [Tests] the verify bar). Static enum v1 — per-node
+  schema rendering is explicitly OUT (post-T3.7 follow-up). Boundary: `rust/exo-caps/src/`,
+  `rust/exo/src/{tools/spawn.rs,spawn.rs}`, `rust/exo-runtime/src/spawner.rs`,
+  `rust/exomonad-shared/src/services/agent_control/{types.rs,launch.rs}`,
+  `.exo/roles/devswarm/context/model-transition.md` (new). Verify:
+  `cargo test --workspace`. Its live probe rides the FINAL deploy smoke (one sonnet
+  downshift fork; see the record's [Validation]).
 - **`docs-trueing`** (Claude, T4.5, wave 4): after everything folds.
 
 ---
 
 ## Done criteria (the whole tree)
 
-- Month plan tasks T1.1–T1.6, T2.1–T2.4, T3.2, T3.6, T3.7, T4.1–T4.5 all ✅ with their
-  verify commands green; `cargo test --workspace` green on hooksock.
+- Month plan tasks T1.1–T1.6, T2.1–T2.4, T3.2, T3.6, T3.7, T4.1–T4.5 — plus MG.1 (added
+  2026-06-10) — all ✅ with their verify commands green; `cargo test --workspace` green on
+  hooksock.
 - The roster reads per the decision doc; `rd.stop.is_empty()` holds for every Gemini role.
 - **The final deploy + live smoke has run** (wave 4): recreate, rmcp wire smoke, one live
   converge round. Source-level green alone does not close the month.
