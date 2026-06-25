@@ -37,6 +37,7 @@ fn test_ctx(
         run_id.clone(),
         "test-session".into(),
         own_pane.clone(),
+        exo_caps::ChildKind::Worktree,
     );
     let own_inbox = InboxPath::new(dir.join("own-inbox.jsonl"));
     Arc::new(NodeContext {

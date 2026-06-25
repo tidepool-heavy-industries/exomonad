@@ -208,6 +208,7 @@ mod tests {
             "run".into(),
             "session".into(),
             PaneId::new("%9".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         );
 
         let view = rt.topology().await.unwrap();

@@ -26,6 +26,7 @@ fn test_ctx(dir: &std::path::Path, run_id: &str) -> Arc<NodeContext<common::Test
         run_id.to_string(),
         "test-session".into(),
         own_pane.clone(),
+        exo_caps::ChildKind::Worktree,
     );
     Arc::new(NodeContext {
         runtime: Arc::new(runtime),

@@ -61,7 +61,7 @@ fn identity_context<D: Exomonad>(ctx: &NodeContext<D>) -> String {
     // siblings → TeamCreate fails → the node leads no team → delivery degrades to tmux paste.
     // Mint a run-scoped unique name here instead. Every tree node is a Claude instance; a non-Claude
     // companion (Shoal) gets no team instruction (it receives via paste).
-    let team_line = if ctx.kind.agent_type() == exo_caps::AgentType::Claude {
+    let team_line = if ctx.kind.agent_type() == exo_caps::AgentType::Claude && !ctx.runtime.is_inline() {
         let run8: String = ctx.run_id.chars().take(8).collect();
         let safe_name: String = name
             .as_str()
@@ -195,6 +195,7 @@ mod tests {
             "run-123".into(),
             "session-123".into(),
             PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         );
 
         NodeContext {

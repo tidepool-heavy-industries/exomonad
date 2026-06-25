@@ -73,15 +73,22 @@ pub async fn run_node<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> 
         }
     });
 
-    // N6 — outbound Teams bridge (Claude nodes). Background; an error is logged, not fatal.
-    let teamout = tokio::spawn({
-        let ctx = ctx.clone();
-        async move {
-            if let Err(e) = teamout::watch(ctx).await {
-                tracing::error!("teamout loop exited with error: {e}");
+    // N6 — outbound Teams bridge (Claude worktree nodes only). An inline worker shares the
+    // parent's cwd → its team resolution would land in the parent's team (the leak). Skip
+    // the bridge for inline nodes; their outbound path is always the MCP tools (notify_parent
+    // etc.) or tmux-paste, never native Teams.
+    let teamout = if !ctx.runtime.is_inline() {
+        Some(tokio::spawn({
+            let ctx = ctx.clone();
+            async move {
+                if let Err(e) = teamout::watch(ctx).await {
+                    tracing::error!("teamout loop exited with error: {e}");
+                }
             }
-        }
-    });
+        }))
+    } else {
+        None
+    };
 
     // Periodic status publisher — writes the node's status snapshot to disk for visibility.
     let status = tokio::spawn({
@@ -117,7 +124,9 @@ pub async fn run_node<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> 
     // Agent stream closed (or serve errored) → reap the background loops.
     inbound.abort();
     hooksock.abort();
-    teamout.abort();
+    if let Some(t) = teamout {
+        t.abort();
+    }
     status.abort();
 
     result

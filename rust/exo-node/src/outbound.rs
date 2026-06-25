@@ -189,6 +189,7 @@ mod tests {
             "test-run".into(),
             "test-session".into(),
             PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         )
     }
 

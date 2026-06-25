@@ -206,6 +206,7 @@ mod tests {
             "run".into(),
             "session".into(),
             PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         )
     }
 

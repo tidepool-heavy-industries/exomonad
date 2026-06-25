@@ -225,6 +225,13 @@ impl Runtime {
     /// *target* child can't be found. Mirrors the inbound loop's tolerant parse.
     /// A missing file means no children yet → empty, not an error.
     pub(crate) async fn read_child_records(&self) -> Result<Vec<ChildRecord>, SpawnError> {
+        // An inline node shares the parent's worktree, so `children_log_path()` points at the
+        // parent's ledger. Inline nodes have no spawn tools and genuinely never have children;
+        // reading here would surface the parent's children as phantoms (causing shutdown to defer
+        // and the idle gate to misread). Return empty unconditionally instead.
+        if self.is_inline() {
+            return Ok(Vec::new());
+        }
         let path = self.children_log_path();
         let data = match exo_caps::Fs::read(self, &path).await {
             Ok(d) => d,
@@ -488,6 +495,7 @@ impl Runtime {
             parent_inbox,
             yolo,
             wrap_nix,
+            kind: core.kind,
         };
 
         let papers_path = match core.kind {
@@ -551,7 +559,11 @@ impl Runtime {
                     })?;
                 // Enable Claude Code Teams so the Bus→Teams last hop (dispatch.rs) can
                 // deliver as a native `<teammate-message>` instead of falling back to paste.
-                env_vars.insert("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".into(), "1".into());
+                // Worktree children only — inline workers share the parent's worktree and cwd,
+                // so their Teams resolution would land in the parent's team (the leak this PR fixes).
+                if core.kind == ChildKind::Worktree {
+                    env_vars.insert("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".into(), "1".into());
+                }
 
                 // Launch-profiled child only: translate the opaque profile to ANTHROPIC_* on THIS
                 // claude (the token stays in memory — never in papers). The model is applied below
@@ -898,6 +910,7 @@ mod tests {
             "test-run".into(),
             "test-session".into(),
             PaneId::new("%100".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         );
 
         let pane = PaneId::new("%1".into()).unwrap();
@@ -931,6 +944,7 @@ mod tests {
             "run".into(),
             "session".into(),
             PaneId::new("%100".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         );
 
         // 1. Unnamed → worker-0
@@ -979,6 +993,7 @@ mod tests {
             "run-42".into(),
             "session".into(),
             PaneId::new("%100".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         );
 
         let path = rt.child_inbox_path(&PaneId::new("%317".into()).unwrap());
@@ -1031,5 +1046,85 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), "persistent");
         assert_eq!(calls, MAX_TEARDOWN_ATTEMPTS as usize);
+    }
+
+    #[test]
+    fn is_inline_reflects_own_kind() {
+        let tmp = tempdir().unwrap();
+
+        let rt_worktree = Runtime::new(
+            NodePath::new(vec![an("root")]).unwrap(),
+            Branch::new("main".into()).unwrap(),
+            tmp.path().to_path_buf(),
+            None,
+            "run".into(),
+            "session".into(),
+            PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
+        );
+        assert!(!rt_worktree.is_inline());
+
+        let rt_inline = Runtime::new(
+            NodePath::new(vec![an("root"), an("w")]).unwrap(),
+            Branch::new("root".into()).unwrap(),
+            tmp.path().to_path_buf(),
+            None,
+            "run".into(),
+            "session".into(),
+            PaneId::new("%2".into()).unwrap(),
+            exo_caps::ChildKind::Inline,
+        );
+        assert!(rt_inline.is_inline());
+    }
+
+    #[tokio::test]
+    async fn inline_node_read_child_records_returns_empty() {
+        let tmp = tempdir().unwrap();
+
+        // Parent (worktree) writes a child record into its ledger.
+        let rt_parent = Runtime::new(
+            NodePath::new(vec![an("root")]).unwrap(),
+            Branch::new("main".into()).unwrap(),
+            tmp.path().to_path_buf(),
+            None,
+            "test-run".into(),
+            "test-session".into(),
+            PaneId::new("%100".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
+        );
+        let pane = PaneId::new("%1".into()).unwrap();
+        rt_parent
+            .append_child_record(&ChildRecord::Spawned {
+                child: an("worker-1"),
+                kind: ChildKind::Inline,
+                pane: pane.clone(),
+                inbox: rt_parent.child_inbox_path(&pane),
+                model_label: None,
+            })
+            .await
+            .unwrap();
+
+        // Inline worker uses the SAME working_dir but is tagged Inline.
+        let rt_inline = Runtime::new(
+            NodePath::new(vec![an("root"), an("worker-1")]).unwrap(),
+            Branch::new("root".into()).unwrap(),
+            tmp.path().to_path_buf(),
+            None,
+            "test-run".into(),
+            "test-session".into(),
+            pane.clone(),
+            exo_caps::ChildKind::Inline,
+        );
+
+        // Inline node must report no children even though the ledger (the parent's) has records.
+        let records = rt_inline.read_child_records().await.unwrap();
+        assert!(
+            records.is_empty(),
+            "inline node must not read the parent's ledger"
+        );
+
+        // The parent still reads its own ledger correctly.
+        let parent_records = rt_parent.read_child_records().await.unwrap();
+        assert_eq!(parent_records.len(), 1);
     }
 }

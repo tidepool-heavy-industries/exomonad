@@ -44,10 +44,14 @@ pub struct Runtime {
     /// clone sees the same map). Read by the [`ChildLiveness`](exo_caps::ChildLiveness) cap, which
     /// combines it with pane-liveness — a dead pane is idle regardless of a stale bit.
     pub(crate) children_busy: Arc<Mutex<HashMap<AgentName, bool>>>,
+    /// Whether this node is `Inline` (shares the parent's worktree) or `Worktree` (own dir).
+    /// Drives team isolation, children-ledger access, and teamout spawning — see `is_inline()`.
+    pub(crate) own_kind: ChildKind,
 }
 
 impl Runtime {
     /// Construct a node runtime from its resolved birth identity + ambient context.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         node_path: NodePath,
         branch: Branch,
@@ -56,6 +60,7 @@ impl Runtime {
         run_id: String,
         tmux_session: String,
         own_pane: PaneId,
+        own_kind: ChildKind,
     ) -> Self {
         Runtime {
             node_path,
@@ -66,7 +71,15 @@ impl Runtime {
             tmux_session,
             own_pane,
             children_busy: Arc::new(Mutex::new(HashMap::new())),
+            own_kind,
         }
+    }
+
+    /// `true` when this node shares its parent's worktree (an inline worker). Inline nodes
+    /// report no children (they have no spawn tools) and run without a CC team (their
+    /// cwd-resolution would land in the parent's team).
+    pub fn is_inline(&self) -> bool {
+        self.own_kind == ChildKind::Inline
     }
 
     /// Mark a direct child as working — at birth, and whenever this node delivers a message down to

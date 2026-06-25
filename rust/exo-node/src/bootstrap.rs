@@ -146,6 +146,7 @@ pub fn bootstrap<D: Exomonad<Caps = Runtime>>(
         run_id.clone(),
         tmux_session,
         own_pane.clone(),
+        papers.kind,
     );
 
     Ok(NodeContext {

@@ -136,6 +136,7 @@ mod tests {
             "run-1".into(),
             "session-1".into(),
             PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         );
 
         let msg = Message {
@@ -171,6 +172,7 @@ mod tests {
             "run-1".into(),
             "session-1".into(),
             PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         );
 
         // Build a body that is large enough that when combined with the envelope it exceeds 4096.
@@ -218,6 +220,7 @@ mod tests {
             "run-1".into(),
             "session-1".into(),
             PaneId::new("%100".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         );
 
         let resolved = runtime
@@ -242,6 +245,7 @@ mod tests {
             "run-1".into(),
             "session-1".into(),
             PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         );
 
         // Max MessageBody is 4096, which GUARANTEES the total line exceeds 4096.
@@ -323,6 +327,7 @@ mod tests {
             "run-1".into(),
             "session-1".into(),
             PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         );
 
         let msg = Message {
@@ -368,6 +373,7 @@ mod tests {
             "run-1".into(),
             "session-1".into(),
             PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         );
 
         let msg1 = Message {
@@ -434,6 +440,7 @@ mod tests {
             "run-1".into(),
             "session-1".into(),
             PaneId::new("%100".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         );
 
         let resolved = runtime

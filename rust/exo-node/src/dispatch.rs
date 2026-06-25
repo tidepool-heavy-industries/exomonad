@@ -50,7 +50,10 @@ pub async fn dispatch<D: Exomonad>(
     // this yields `None` (wired but untested off-Linux). For a Claude node, resolution failure is
     // non-fatal but noteworthy: fall back to paste, and WARN so a Claude node silently degrading to
     // paste is visible, not a mystery.
-    let active_team = if agent_type == AgentType::Claude {
+    // Inline workers share the parent's cwd, so `resolve_self_or_portable()`'s cwd→transcript
+    // fallback would resolve into the parent's team — leaking messages into the parent's
+    // conversation. Skip team resolution entirely for inline nodes; they always tmux-paste.
+    let active_team = if agent_type == AgentType::Claude && !ctx.runtime.is_inline() {
         match exo_scry::resolve_self_or_portable() {
             Ok(team) => team,
             Err(e) => {

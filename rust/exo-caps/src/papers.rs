@@ -15,7 +15,7 @@
 //! resolver, …) that only needs the non-role fields.
 
 use crate::error::{CapError, CapResult};
-use crate::types::{AgentName, Branch, NodePath, PaneId};
+use crate::types::{AgentName, Branch, ChildKind, NodePath, PaneId};
 use crate::{InboxPath, RoleKind};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -85,6 +85,11 @@ pub struct NodePapers {
     /// Defaulted `false` — node children launch plain, matching the root.
     #[serde(default = "default_wrap_nix")]
     pub wrap_nix: bool,
+    /// Whether this node shares its parent's worktree (Inline) or lives in its own (Worktree).
+    /// Defaulted `Worktree` so papers written by older binaries (which had no `kind` field)
+    /// still parse correctly — they are always worktree nodes.
+    #[serde(default = "default_kind")]
+    pub kind: ChildKind,
 }
 
 fn default_papers_version() -> u32 {
@@ -97,6 +102,10 @@ fn default_yolo() -> bool {
 
 fn default_wrap_nix() -> bool {
     NodePapers::DEFAULT_WRAP_NIX
+}
+
+fn default_kind() -> ChildKind {
+    ChildKind::Worktree
 }
 
 impl NodePapers {
@@ -127,6 +136,7 @@ impl NodePapers {
             parent_inbox,
             yolo,
             wrap_nix,
+            kind: ChildKind::Worktree,
         })
     }
 
@@ -214,6 +224,8 @@ mod tests {
         assert_eq!(papers.yolo, NodePapers::DEFAULT_YOLO);
         assert_eq!(papers.wrap_nix, NodePapers::DEFAULT_WRAP_NIX);
         assert_eq!(papers.role.typed::<TestRole>().unwrap(), TestRole::Root);
+        // `kind` is absent from older papers — defaults to Worktree (back-compat).
+        assert_eq!(papers.kind, ChildKind::Worktree);
     }
 
     #[test]

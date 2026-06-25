@@ -50,7 +50,7 @@ mod linux {
     use super::SHUTDOWN_GRACE_MS;
     use crate::bootstrap::NodeContext;
     use crate::error::{NodeError, NodeResult};
-    use exo_caps::{AgentName, Bus, ControlKind, Message, MessageBody, MessageKind, Summary};
+    use exo_caps::{AgentName, Bus, ControlKind, Message, MessageBody, MessageKind, Spawner, Summary};
     use exo_framework::Exomonad;
     use exo_scry::inbox::InboxMessage;
     use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
@@ -255,6 +255,28 @@ mod linux {
         };
 
         let action = classify(&msg.text);
+
+        // Inline-child shutdown: the worker has no team and can't self-reap cooperatively.
+        // The parent kills the pane directly instead of forwarding a Control(Shutdown) onto
+        // the bus (which would never be received — the inline node has no teamout bridge).
+        if matches!(action, Action::Shutdown) {
+            if let exo_caps::Addressee::InlineChild(ref child_name) = addressee {
+                match Spawner::kill_pane(&*ctx.runtime, child_name).await {
+                    Ok(_) => info!(
+                        outcome = "killed_pane",
+                        to = %member,
+                        "teamout: inline child shutdown → parent kill_pane"
+                    ),
+                    Err(e) => warn!(
+                        outcome = "error_kill_pane",
+                        to = %member,
+                        "teamout: kill_pane for inline child failed: {e}"
+                    ),
+                }
+                return;
+            }
+        }
+
         let (text, summary, kind) = match action {
             Action::Chat => (
                 msg.text.clone(),

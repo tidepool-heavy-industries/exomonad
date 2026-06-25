@@ -10,10 +10,10 @@ The single concrete `Runtime` struct that implements **every** `exo-caps` trait.
 
 | File | Cap / role |
 |------|-----------|
-| `runtime` | The `Runtime` struct: birth identity (`node_path`, `branch`, `own_pane`) + ambient context (`working_dir`, `parent_inbox`, `run_id`, `tmux_session`). Identity baked in at construction — always present, no `Option`, no task-locals. |
+| `runtime` | The `Runtime` struct: birth identity (`node_path`, `branch`, `own_pane`) + ambient context (`working_dir`, `parent_inbox`, `run_id`, `tmux_session`) + `own_kind: ChildKind`. Identity baked in at construction — always present, no `Option`, no task-locals. `Runtime::is_inline()` (`own_kind == Inline`) gates team isolation and the children-ledger shortcircuit. |
 | `git` | `impl Git` — `tokio::process` git. `merge` = `git merge --no-edit <branch>` (the local fold). |
 | `bus` | `impl Bus` — **the genuinely-new piece.** Append a line to the target's jsonl inbox; resolve `Addressee`→`InboxPath` (Parent = papers pointer; child = fold `children.jsonl`); stamp the envelope; assert line ≤ `PIPE_BUF` (4096) and **never spill**; append + flush, no fsync. **Instrumented with detailed success/failure logs.** |
-| `spawner` | `impl Spawner` — the recursion (birth + teardown). See below. |
+| `spawner` | `impl Spawner` — the recursion (birth + teardown). `read_child_records` returns `Ok(Vec::new())` immediately when `self.is_inline()` (chokepoint for `any_child_busy` + `read_children` + shutdown live-children count). See below. |
 | `tmux` | `impl Tmux` — `paste` delegates to exomonad-shared `TmuxIpc::inject_input` (hardened buffer-paste); `list_panes` (`tmux list-panes -a`) is the one liveness probe both `Topology` and `ChildLiveness` consume (an `Err` is a probe failure, never "no panes"). |
 | `liveness` | `impl ChildLiveness` — the idle gate's read: any *direct* child still working? Combines the in-memory busy-bit map (mutated at birth in `spawner`, on child-deliver in `bus`, on `ChildIdle` in `exo-node`) with the `Tmux::list_panes` probe (probe failure ⇒ trust the bit); a dead pane forces idle. Pure truth table split out + unit-tested. |
 | `fs` `kv` `process` | The remaining cap impls. |
@@ -40,7 +40,7 @@ race guard** — do not reorder:
 4. Write the child's `node.json` papers (`parent_inbox` = my own inbox).
 5. Write the node's MCP config (`write_node_agent_config`), then `Tmux::paste` the launch command (via exomonad-shared's `build_agent_command` + `write_prompt_file` — prompt goes in a file, never inline) into the holding shell. The role protocol (override-or-const) is passed via `--append-system-prompt`. The per-role model (`RoleKind::model()` → `BirthCore.model` → `ClaudeSpawnFlags.model`) becomes `build_agent_command`'s `--model` flag — `sonnet` for dev/worker/reviewer leaves, session-default (no flag) for root/tl.
 
-**Do not collapse steps 2+5** into a one-shot `new_pane(cwd, launch_cmd)` — that reopens the orphan window the two-phase split closes. Every child is a Claude instance and gets `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` so the Bus→Teams last hop can deliver native `<teammate-message>`s.
+**Do not collapse steps 2+5** into a one-shot `new_pane(cwd, launch_cmd)` — that reopens the orphan window the two-phase split closes. Worktree children get `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` so the Bus→Teams last hop can deliver native `<teammate-message>`s. **Inline workers do NOT get this flag** — they share the parent's cwd, so team resolution would land in the parent's team (team-leak fix). `birth_finish` also stamps `kind: core.kind` into the child's papers so bootstrap reads it back and calls `Runtime::is_inline()` correctly.
 
 ### Launch profiles (`RoleKind::launch_profile_env_prefix`) — per-role non-default brain
 

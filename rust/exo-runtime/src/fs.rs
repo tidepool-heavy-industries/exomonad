@@ -83,6 +83,7 @@ mod tests {
             "run-1".into(),
             "session-1".into(),
             PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
         );
 
         let content = b"hello world";
