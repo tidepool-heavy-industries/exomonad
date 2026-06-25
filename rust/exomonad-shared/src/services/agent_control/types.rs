@@ -130,6 +130,8 @@ pub struct ClaudeSpawnFlags {
     pub allowed_tools: Vec<String>,
     /// Tool patterns to disallow (e.g., "Bash").
     pub disallowed_tools: Vec<String>,
+    /// `--model` to launch with (e.g. "sonnet"). `None` inherits the launcher's default model.
+    pub model: Option<String>,
 }
 
 #[cfg(test)]

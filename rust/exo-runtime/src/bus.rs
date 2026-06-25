@@ -203,6 +203,7 @@ mod tests {
             kind: exo_caps::ChildKind::Inline,
             pane: exo_caps::PaneId::new("%1".into()).unwrap(),
             inbox: child_inbox.clone(),
+            model_label: None,
         };
 
         let line = serde_json::to_string(&record).unwrap() + "\n";
@@ -291,12 +292,14 @@ mod tests {
                 kind: exo_caps::ChildKind::Inline,
                 pane: PaneId::new("%2".into()).unwrap(),
                 inbox: inline_inbox,
+                model_label: None,
             },
             ChildRecord::Spawned {
                 child: worktree_name.clone(),
                 kind: exo_caps::ChildKind::Worktree,
                 pane: PaneId::new("%3".into()).unwrap(),
                 inbox: worktree_inbox,
+                model_label: None,
             },
         ];
 
@@ -412,6 +415,7 @@ mod tests {
             kind: exo_caps::ChildKind::Inline,
             pane: PaneId::new("%1".into()).unwrap(),
             inbox: good_inbox.clone(),
+            model_label: None,
         };
 
         // garbage line, then a good record (mirrors a crash-torn append followed by a fresh one)

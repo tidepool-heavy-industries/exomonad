@@ -13,9 +13,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HookEvent {
-    /// Before a tool call (CC `PreToolUse` / Gemini `BeforeTool`).
+    /// Before a tool call (CC `PreToolUse`).
     PreToolUse,
-    /// The agent finished a turn and is yielding control (CC `Stop` / Gemini `AfterAgent`).
+    /// The agent finished a turn and is yielding control (CC `Stop`).
     Stop,
     /// Session bootstrap (CC `SessionStart`). Handled one-shot, NOT over the socket — included
     /// here only so the client can recognise and route it.
@@ -31,9 +31,8 @@ pub struct HookRequest {
     pub stdin_json: String,
 }
 
-/// The sidecar's reply: the exact stdout the thin client prints to the harness, already shaped
-/// for the node's `agent_type` (Claude vs Gemini verdict JSON). The client is dumb — it prints
-/// `stdout` and exits 0.
+/// The sidecar's reply: the exact stdout the thin client prints to the harness, already shaped in
+/// the CC hook-output JSON. The client is dumb — it prints `stdout` and exits 0.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookVerdict {
     pub stdout: String,

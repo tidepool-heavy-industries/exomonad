@@ -33,10 +33,8 @@ impl RoleKind for TestRole {
         ]
     }
     fn agent_type(&self) -> AgentType {
-        match self {
-            TestRole::Root | TestRole::Tl => AgentType::Claude,
-            TestRole::Dev | TestRole::Worker | TestRole::Reviewer => AgentType::Gemini,
-        }
+        // Mirrors `exo::ExoRole`: every tree node is a Claude instance.
+        AgentType::Claude
     }
     fn role_str(&self) -> &'static str {
         match self {
@@ -49,7 +47,7 @@ impl RoleKind for TestRole {
     }
     fn protocol(&self) -> &'static str {
         // Distinct markers per role so the engine's injection tests can assert which prose lands
-        // (Claude → session-start additionalContext; Gemini → context file, NOT additionalContext).
+        // (delivered via the launch-time --append-system-prompt, NOT session-start additionalContext).
         match self {
             TestRole::Tl => "TEST-TL-PROTOCOL-MARKER",
             TestRole::Dev => "TEST-DEV-PROTOCOL-MARKER",

@@ -1,9 +1,8 @@
 //! `ChildLiveness` capability — does this node have any still-*working* child?
 //!
 //! Distinct from [`Topology`](crate::Topology), which reports pane **existence**. A pane existing
-//! does NOT mean its agent is working: a Gemini child launched `--prompt-interactive` keeps its
-//! pane (and process) alive while it sits idle waiting for input. So aliveness can never prove
-//! "busy".
+//! does NOT mean its agent is working: a child agent keeps its pane (and process) alive while it
+//! sits idle waiting for input. So aliveness can never prove "busy".
 //!
 //! Idleness is instead tracked from the messages the sidecar already sees — a child is busy from
 //! birth and from every poke (a message delivered down to it), and idle once it reports

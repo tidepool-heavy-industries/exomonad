@@ -1,4 +1,4 @@
-//! `exo hook <event> --papers <path>` — handle a CC/Gemini hook via the node's `exo` gates
+//! `exo hook <event> --papers <path>` — handle a CC hook via the node's `exo` gates
 //! against its papers, with NO central server.
 //!
 //! SessionStart runs one-shot in-process (it must survive a cold-start race before the sidecar
@@ -10,20 +10,10 @@ use anyhow::{Context, Result};
 use exomonad_shared::protocol::HookEventType;
 use std::path::Path;
 
-/// The allow-shaped hook stdout for a node, by its agent type. Used to fail open when the sidecar
-/// socket is unreachable. Defaults to the Claude allow if papers can't be read (exit 0 is allow
-/// for both harnesses anyway, so this only affects the printed JSON).
-fn fail_open_shape(papers_path: &Path) -> &'static str {
-    use exo_caps::RoleKind;
-    let agent_type = std::fs::read(papers_path)
-        .ok()
-        .and_then(|b| serde_json::from_slice::<exo_caps::NodePapers>(&b).ok())
-        .and_then(|p| p.role.typed::<exo::ExoRole>().ok())
-        .map(|r| r.agent_type());
-    match agent_type {
-        Some(exo_caps::AgentType::Gemini) => "{}",
-        _ => r#"{"continue":true}"#,
-    }
+/// The allow-shaped hook stdout. Used to fail open when the sidecar socket is unreachable. Every
+/// tree node is a Claude instance, so the Claude allow shape is universal.
+fn fail_open_shape(_papers_path: &Path) -> &'static str {
+    r#"{"continue":true}"#
 }
 
 pub async fn run(event: HookEventType, papers: std::path::PathBuf) -> Result<()> {

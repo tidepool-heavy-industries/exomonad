@@ -173,7 +173,7 @@ impl RoleKind for TestRole {
     fn agent_type(&self) -> AgentType {
         match self {
             TestRole::Lead => AgentType::Claude,
-            TestRole::Reviewer => AgentType::Gemini,
+            TestRole::Reviewer => AgentType::Shoal,
         }
     }
     fn role_str(&self) -> &'static str {
@@ -357,7 +357,7 @@ fn role_protocol_default_is_empty_and_override_nonempty() {
     assert_eq!(TestRole::Reviewer.protocol(), "review protocol");
 
     assert_eq!(TestRole::Lead.agent_type(), AgentType::Claude);
-    assert_eq!(TestRole::Reviewer.agent_type(), AgentType::Gemini);
+    assert_eq!(TestRole::Reviewer.agent_type(), AgentType::Shoal);
 }
 
 struct MockCtx {

@@ -10,7 +10,7 @@
 use crate::gates::{pre_tool_use, session_start, stop, stop_allow, stop_notify, stop_reviewer};
 use crate::tools::merge::Merge;
 use crate::tools::messaging::{NotifyParent, SendMessage};
-use crate::tools::spawn::{ForkWave, SpawnGemini, SpawnWorker};
+use crate::tools::spawn::{ForkWave, SpawnDev, SpawnWorker};
 use crate::tools::submit::SubmitBranch;
 use crate::tools::tree::Tree;
 use crate::tools::verdict::Verdict;
@@ -29,8 +29,8 @@ pub enum ExoRole {
     Tl,
     Dev,
     Worker,
-    /// A short-lived Gemini spawned by a submitting node to review its branch. Works in its own
-    /// worktree off the under-review code and emits a `verdict`. Not a tree-building archetype.
+    /// A short-lived Sonnet Claude spawned by a submitting node to review its branch. Works in its
+    /// own worktree off the under-review code and emits a `verdict`. Not a tree-building archetype.
     Reviewer,
 }
 
@@ -45,10 +45,8 @@ impl RoleKind for ExoRole {
         ]
     }
     fn agent_type(&self) -> AgentType {
-        match self {
-            ExoRole::Root | ExoRole::Tl => AgentType::Claude,
-            ExoRole::Dev | ExoRole::Worker | ExoRole::Reviewer => AgentType::Gemini,
-        }
+        // Every tree node is a Claude instance; the model is what varies (see `model`).
+        AgentType::Claude
     }
     fn role_str(&self) -> &'static str {
         match self {
@@ -57,6 +55,23 @@ impl RoleKind for ExoRole {
             ExoRole::Dev => "dev",
             ExoRole::Worker => "worker",
             ExoRole::Reviewer => "reviewer",
+        }
+    }
+    fn model(&self) -> Option<&'static str> {
+        match self {
+            // Expensive decomposition stays on the session default (the human runs Opus); cheap
+            // leaves — implement / review — run on Sonnet.
+            ExoRole::Root | ExoRole::Tl => None,
+            ExoRole::Dev | ExoRole::Worker | ExoRole::Reviewer => Some("sonnet"),
+        }
+    }
+    fn launch_profile_env_prefix(&self) -> Option<&'static str> {
+        match self {
+            // The reviewer can run on a non-Claude brain (e.g. Kimi via a local proxy) when the
+            // operator sets `EXO_REVIEWER_{BASE_URL,MODEL,AUTH_TOKEN,LABEL}`. Backend-agnostic +
+            // opt-in: unset env ⇒ a normal Sonnet reviewer. Adding another role is one more arm.
+            ExoRole::Reviewer => Some("EXO_REVIEWER"),
+            ExoRole::Root | ExoRole::Tl | ExoRole::Dev | ExoRole::Worker => None,
         }
     }
     fn protocol(&self) -> &'static str {
@@ -80,7 +95,7 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
         ExoRole::Root => RoleDef {
             tools: vec![
                 Box::new(ForkWave),
-                Box::new(SpawnGemini),
+                Box::new(SpawnDev),
                 Box::new(SpawnWorker),
                 Box::new(Merge),
                 Box::new(SendMessage),
@@ -96,7 +111,7 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
         ExoRole::Tl => RoleDef {
             tools: vec![
                 Box::new(ForkWave),
-                Box::new(SpawnGemini),
+                Box::new(SpawnDev),
                 Box::new(SpawnWorker),
                 Box::new(Merge),
                 Box::new(NotifyParent),
@@ -108,8 +123,9 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
             stop,
             session_start,
         },
-        // A dev leaf works on its own branch and submits it for the parent to merge. It NEVER blocks at
-        // stop (Gemini #20426); the committed-before-fold guarantee is enforced by submit_branch.
+        // A dev leaf works on its own branch and submits it for the parent to merge. It notifies on
+        // turn-end but never blocks at stop; the committed-before-fold guarantee is enforced by
+        // submit_branch's committed-check.
         ExoRole::Dev => RoleDef {
             tools: vec![Box::new(NotifyParent), Box::new(SubmitBranch)],
             pre_tool_use,
@@ -160,8 +176,8 @@ mod tests {
                 rd.pre_tool_use as usize,
                 pre_tool_use::<MockRuntime> as *const () as usize
             );
-            // Root never yields work to fold → stop_allow. Reviewer (Gemini) signals ReviewAborted
-            // if no verdict → stop_reviewer. Dev/Worker (Gemini) notify the parent then allow
+            // Root never yields work to fold → stop_allow. Reviewer signals ReviewAborted
+            // if no verdict → stop_reviewer. Dev/Worker notify the parent then allow
             // (never block). Tl keeps the dirty-gate (stop).
             let expected_stop = match kind {
                 ExoRole::Root => stop_allow::<MockRuntime> as *const () as usize,
@@ -206,7 +222,7 @@ mod tests {
                     "fork_wave",
                     "merge",
                     "send_message",
-                    "spawn_gemini",
+                    "spawn_dev",
                     "spawn_worker",
                     "tree",
                 ],
@@ -215,7 +231,7 @@ mod tests {
                     "merge",
                     "notify_parent",
                     "send_message",
-                    "spawn_gemini",
+                    "spawn_dev",
                     "spawn_worker",
                     "submit_branch",
                     "tree",
@@ -235,12 +251,20 @@ mod tests {
         let mut strs = HashSet::new();
         for kind in ExoRole::all() {
             strs.insert(kind.role_str());
-            let agent = kind.agent_type();
+            // Every role is a Claude instance now; the model is the axis that varies.
+            assert_eq!(kind.agent_type(), AgentType::Claude);
             match kind {
-                ExoRole::Root | ExoRole::Tl => assert_eq!(agent, AgentType::Claude),
+                ExoRole::Root | ExoRole::Tl => assert_eq!(kind.model(), None),
                 ExoRole::Dev | ExoRole::Worker | ExoRole::Reviewer => {
-                    assert_eq!(agent, AgentType::Gemini)
+                    assert_eq!(kind.model(), Some("sonnet"))
                 }
+            }
+            // Only the reviewer carries a launch-profile prefix (opt-in non-Claude brain).
+            match kind {
+                ExoRole::Reviewer => {
+                    assert_eq!(kind.launch_profile_env_prefix(), Some("EXO_REVIEWER"))
+                }
+                _ => assert_eq!(kind.launch_profile_env_prefix(), None),
             }
         }
         assert_eq!(strs.len(), 5, "role_str must be unique");

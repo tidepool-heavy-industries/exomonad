@@ -32,7 +32,7 @@
 //!   3. Append `Spawned { child, kind, pane: %N, inbox }` to `children.jsonl`. ← THE GUARD.
 //!   4. Write the child's `node.json` papers (`parent_inbox` = *my* inbox).
 //!   5. `Tmux::paste(%N, "<launch cmd>\n")` — inject the agent command into the holding
-//!      shell, starting `claude`/`gemini` (+ its `exo node` sidecar via .mcp.json).
+//!      shell, starting `claude` (+ its `exo node` sidecar via .mcp.json).
 //!
 //! The record precedes the **agent** launch (step 3 before step 5). The holding shell
 //! (step 2) carries no agent, so a crash before step 5 leaves only a bare shell — nothing
@@ -126,6 +126,36 @@ where
     Err(err)
 }
 
+/// A per-role launch redirect resolved from `{prefix}_*` env at `Spawner::spawn`. Points a child's
+/// Claude at a non-default Anthropic-compatible endpoint + model (e.g. a local
+/// [`claude-code-proxy`](https://github.com/raine/claude-code-proxy) serving Kimi). Runtime-internal
+/// and **backend-agnostic** — the secret `auth_token` lives in memory only and is never written to
+/// papers; only the non-secret `label` is recorded (window + `tree`).
+#[derive(Debug, Clone)]
+pub(crate) struct LaunchProfile {
+    pub base_url: Option<String>,
+    pub model: Option<String>,
+    pub auth_token: String,
+    pub label: Option<String>,
+}
+
+impl LaunchProfile {
+    /// Resolve a role's launch profile from a `{prefix}_*` env lookup. Returns `None` when the role
+    /// declares no prefix OR no `{prefix}_AUTH_TOKEN` is set — a half-set env (only `BASE_URL`/
+    /// `MODEL`) must NOT half-activate the redirect. `getenv` is injected so the gating logic is
+    /// testable without mutating the process environment.
+    fn resolve(prefix: Option<&str>, getenv: impl Fn(&str) -> Option<String>) -> Option<Self> {
+        let prefix = prefix?;
+        let auth_token = getenv(&format!("{prefix}_AUTH_TOKEN"))?;
+        Some(LaunchProfile {
+            base_url: getenv(&format!("{prefix}_BASE_URL")),
+            model: getenv(&format!("{prefix}_MODEL")),
+            auth_token,
+            label: getenv(&format!("{prefix}_LABEL")),
+        })
+    }
+}
+
 /// The fixed triple + identity each op hands to the shared `birth` tail. Constructed by
 /// the per-op method (the single place a triple is named); `birth` branches only on `kind`.
 #[derive(Debug, Clone)]
@@ -138,10 +168,16 @@ pub(crate) struct BirthCore {
     pub name: AgentName,
     pub branch: Branch,
     pub task: String,
-    /// The child's resolved role-steering protocol (override-or-const). Consumed for both
-    /// Gemini (written to its `context.fileName`) and Claude (passed via
-    /// `--append-system-prompt`). Empty ⇒ no steering injected.
+    /// The child's resolved role-steering protocol (override-or-const), passed to Claude via
+    /// `--append-system-prompt`. Empty ⇒ no steering injected.
     pub protocol: String,
+    /// The child's `--model` (from [`RoleKind::model`](exo_caps::RoleKind)). `None` ⇒ inherit the
+    /// launcher's default model. `exo` pins its leaf roles (dev/worker/reviewer) to `sonnet`.
+    pub model: Option<String>,
+    /// Optional per-role launch redirect (from [`RoleKind::launch_profile_env_prefix`]): point this
+    /// child's Claude at a non-default Anthropic-compatible endpoint/model (e.g. a local proxy
+    /// serving Kimi). `None` ⇒ default Claude launch. Carries the auth token **in memory only**.
+    pub launch_profile: Option<LaunchProfile>,
     /// Opt-in context inheritance. When true AND this is a Claude worktree child, the
     /// launch resolves the parent's Claude session UUID (via `exo-scry`) and starts the
     /// child with `--resume --fork-session <uuid>`. Set only by `fork_wave` (from
@@ -260,7 +296,8 @@ impl Runtime {
     /// (`{working_dir}/.exo/roles/devswarm/context/{role}.md`) if it exists, else the domain's
     /// baked-in const (`RoleKind::protocol`). The compiled const is the source of truth; the file
     /// just overrides it during prompt-tuning. Mirrors the same resolution `exo-node`'s
-    /// SessionStart hook applies for Claude — here it feeds a Gemini child's `context.fileName`.
+    /// SessionStart hook applies — the resolved protocol is passed to the child Claude via
+    /// `--append-system-prompt`.
     async fn resolve_protocol(&self, role_str: &str, baked: &str) -> String {
         let path = self
             .working_dir
@@ -348,10 +385,14 @@ impl Runtime {
         // Name the window after the agent (emoji + slug), not the bare `claude`/shell process.
         let emoji = match core.agent_type {
             AgentType::Claude => "🤖",
-            AgentType::Gemini => "💎",
             AgentType::Shoal => "🌊",
         };
-        let window_name = format!("{} {}", emoji, core.name.as_str());
+        // A launch-profiled child (e.g. a Kimi reviewer) is still a 🤖 Claude process; tag the
+        // window with its model label so the heterogeneity is legible at a glance.
+        let window_name = match core.launch_profile.as_ref().and_then(|p| p.label.as_deref()) {
+            Some(label) => format!("{} {} ({})", emoji, core.name.as_str(), label),
+            None => format!("{} {}", emoji, core.name.as_str()),
+        };
         let pane = match core.kind {
             ChildKind::Worktree => {
                 exo_caps::Tmux::new_window(self, &window_name, &child_dir, &shell).await
@@ -425,6 +466,8 @@ impl Runtime {
             kind: core.kind,
             pane: pane.clone(),
             inbox,
+            // Non-secret cosmetic tag (e.g. "kimi") so the `tree` tool can show it; never the token.
+            model_label: core.launch_profile.as_ref().and_then(|p| p.label.clone()),
         };
         self.append_child_record(&record).await?;
 
@@ -486,6 +529,17 @@ impl Runtime {
         env_vars.insert("EXOMONAD_SWARM_RUN_ID".into(), self.run_id.clone());
         env_vars.insert("EXOMONAD_TMUX_SESSION".into(), self.tmux_session.clone());
 
+        // Propagate every role's launch-profile config DOWN the tree, so a deep node that spawns a
+        // profiled child (e.g. a dev calling `submit_branch` → reviewer) still carries it. Opaque
+        // `EXO_*_{BASE_URL,MODEL,AUTH_TOKEN,LABEL}` — NEVER `ANTHROPIC_*` — so a non-profiled child
+        // is never redirected. Pattern-matched, so a new role/backend needs no edit here.
+        const PROFILE_SUFFIXES: [&str; 4] = ["_BASE_URL", "_MODEL", "_AUTH_TOKEN", "_LABEL"];
+        for (k, v) in std::env::vars() {
+            if k.starts_with("EXO_") && PROFILE_SUFFIXES.iter().any(|s| k.ends_with(s)) {
+                env_vars.insert(k, v);
+            }
+        }
+
         let agent_type = match core.agent_type {
             AgentType::Claude => {
                 crate::node_config::write_node_agent_config(child_dir, &papers_path)
@@ -498,33 +552,21 @@ impl Runtime {
                 // Enable Claude Code Teams so the Bus→Teams last hop (dispatch.rs) can
                 // deliver as a native `<teammate-message>` instead of falling back to paste.
                 env_vars.insert("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".into(), "1".into());
+
+                // Launch-profiled child only: translate the opaque profile to ANTHROPIC_* on THIS
+                // claude (the token stays in memory — never in papers). The model is applied below
+                // via claude_flags. A single-model proxy (kimi-for-coding) needs the background /
+                // small-fast calls mapped to the same model too, or they 404.
+                if let Some(p) = &core.launch_profile {
+                    if let Some(url) = &p.base_url {
+                        env_vars.insert("ANTHROPIC_BASE_URL".into(), url.clone());
+                    }
+                    env_vars.insert("ANTHROPIC_AUTH_TOKEN".into(), p.auth_token.clone());
+                    if let Some(m) = &p.model {
+                        env_vars.insert("ANTHROPIC_SMALL_FAST_MODEL".into(), m.clone());
+                    }
+                }
                 exomonad_shared::services::agent_control::AgentType::Claude
-            }
-            AgentType::Gemini => {
-                // Gemini discovers the node MCP server via GEMINI_CLI_SYSTEM_SETTINGS_PATH, and
-                // fires hooks through the same `exo hook` thin client as Claude.
-                // Settings go to a PER-PANE path (not the child's worktree): inline siblings share
-                // the parent's worktree, so a worktree-local settings.json would clobber each
-                // other's papers pointer → identity collision (both read the last writer's papers).
-                let home = home_or_warn("gemini_settings_path");
-                let settings_path =
-                    exo_caps::paths::gemini_settings_path(Path::new(&home), &self.run_id, pane);
-                crate::node_config::write_gemini_node_config(
-                    &settings_path,
-                    &papers_path,
-                    &core.protocol,
-                )
-                .await
-                .map_err(|e| SpawnError::Failed {
-                    op: "write_gemini_node_config",
-                    child: Some(core.name.clone()),
-                    detail: e.to_string(),
-                })?;
-                env_vars.insert(
-                    "GEMINI_CLI_SYSTEM_SETTINGS_PATH".into(),
-                    settings_path.to_string_lossy().into_owned(),
-                );
-                exomonad_shared::services::agent_control::AgentType::Gemini
             }
 
             AgentType::Shoal => {
@@ -614,8 +656,22 @@ impl Runtime {
             None
         };
 
+        // The launch model: a launch profile's model (e.g. kimi-for-coding) wins over the role's
+        // default (`exo` pins leaves to sonnet); `None` inherits the launcher's default. Threaded
+        // via the Claude-spawn flags bag → `build_agent_command`'s `--model`.
+        let launch_model = core
+            .launch_profile
+            .as_ref()
+            .and_then(|p| p.model.clone())
+            .or_else(|| core.model.clone());
+        let claude_flags = launch_model.map(|m| {
+            exomonad_shared::services::agent_control::ClaudeSpawnFlags {
+                model: Some(m),
+                ..Default::default()
+            }
+        });
+
         // The protocol string is passed via --append-system-prompt for Claude.
-        // For Gemini, the settings.json context file (written above) is its system-prompt equivalent.
         let launch_cmd = format!(
             "{}\n",
             exomonad_shared::services::agent_control::launch::build_agent_command(
@@ -623,10 +679,10 @@ impl Runtime {
                 Some(&prompt_file),
                 fork_session_id.as_deref(),
                 &env_vars,
-                child_dir, // cwd (flake detection for wrap_nix)
-                None,      // claude_flags
-                yolo,      // yolo → gemini --yolo (inherited launch policy)
-                wrap_nix,  // wrap_nix: nix develop wrap (inherited launch policy)
+                child_dir,           // cwd (flake detection for wrap_nix)
+                claude_flags.as_ref(), // claude_flags (carries --model)
+                yolo,                // yolo (inherited launch policy)
+                wrap_nix,            // wrap_nix: nix develop wrap (inherited launch policy)
                 Some(&core.protocol),
             )
         );
@@ -659,9 +715,16 @@ impl Spawner for Runtime {
             ChildKind::Inline => self.branch().clone(),
         };
         let agent_type = RoleKind::agent_type(&role);
+        // The role's launch model (`exo` pins leaves to sonnet); resolved while the role is typed.
+        let model = RoleKind::model(&role).map(|m| m.to_string());
+        // The role's optional launch profile: resolve `{prefix}_*` from this node's own env while
+        // the role is typed. The token lives only here + in the child's launch env (never papers).
+        let launch_profile =
+            LaunchProfile::resolve(RoleKind::launch_profile_env_prefix(&role), |k| {
+                std::env::var(k).ok()
+            });
         // Resolve the child's role-steering protocol (override-or-const) while the role is still
-        // typed. Threaded onto `BirthCore` for both Gemini (written to its `context.fileName`) and
-        // Claude (passed via `--append-system-prompt`).
+        // typed. Threaded onto `BirthCore` and passed to Claude via `--append-system-prompt`.
         let protocol = self
             .resolve_protocol(role.role_str(), role.protocol())
             .await;
@@ -681,6 +744,8 @@ impl Spawner for Runtime {
             name,
             task,
             protocol,
+            model,
+            launch_profile,
             fork_session,
         };
         self.birth(core).await
@@ -779,6 +844,49 @@ mod tests {
         AgentName::new(s.into()).unwrap()
     }
 
+    #[test]
+    fn launch_profile_resolves_only_with_auth_token() {
+        let full = std::collections::HashMap::from([
+            ("EXO_REVIEWER_AUTH_TOKEN".to_string(), "unused".to_string()),
+            (
+                "EXO_REVIEWER_BASE_URL".to_string(),
+                "http://localhost:18765".to_string(),
+            ),
+            (
+                "EXO_REVIEWER_MODEL".to_string(),
+                "kimi-for-coding".to_string(),
+            ),
+            ("EXO_REVIEWER_LABEL".to_string(), "kimi".to_string()),
+        ]);
+        // No prefix (a non-profiled role) → None regardless of env.
+        assert!(LaunchProfile::resolve(None, |k: &str| full.get(k).cloned()).is_none());
+
+        // Full env → resolved with every field.
+        let p = LaunchProfile::resolve(Some("EXO_REVIEWER"), |k: &str| full.get(k).cloned())
+            .expect("resolves");
+        assert_eq!(p.auth_token, "unused");
+        assert_eq!(p.base_url.as_deref(), Some("http://localhost:18765"));
+        assert_eq!(p.model.as_deref(), Some("kimi-for-coding"));
+        assert_eq!(p.label.as_deref(), Some("kimi"));
+
+        // Half-set env (BASE_URL/MODEL but NO auth token) must NOT activate the redirect.
+        let half = std::collections::HashMap::from([(
+            "EXO_REVIEWER_BASE_URL".to_string(),
+            "http://localhost:18765".to_string(),
+        )]);
+        assert!(LaunchProfile::resolve(Some("EXO_REVIEWER"), |k: &str| half.get(k).cloned()).is_none());
+
+        // Token only → resolves with the rest None (e.g. a real Anthropic key, default model).
+        let token_only = std::collections::HashMap::from([(
+            "EXO_REVIEWER_AUTH_TOKEN".to_string(),
+            "sk-xxx".to_string(),
+        )]);
+        let p = LaunchProfile::resolve(Some("EXO_REVIEWER"), |k: &str| token_only.get(k).cloned())
+            .expect("resolves");
+        assert_eq!(p.auth_token, "sk-xxx");
+        assert!(p.base_url.is_none() && p.model.is_none() && p.label.is_none());
+    }
+
     #[tokio::test]
     async fn test_ledger_append_and_read() {
         let tmp = tempdir().unwrap();
@@ -798,6 +906,7 @@ mod tests {
             kind: ChildKind::Inline,
             pane: pane.clone(),
             inbox: rt.child_inbox_path(&pane),
+            model_label: None,
         };
 
         rt.append_child_record(&record).await.unwrap();
@@ -835,6 +944,7 @@ mod tests {
             kind: ChildKind::Inline,
             pane: pane.clone(),
             inbox: rt.child_inbox_path(&pane),
+            model_label: None,
         })
         .await
         .unwrap();

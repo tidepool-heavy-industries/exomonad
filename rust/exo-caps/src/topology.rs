@@ -38,6 +38,10 @@ pub struct TreeNode {
     pub pane: String,
     /// Liveness proxy: the node's tmux pane still exists.
     pub pane_alive: bool,
+    /// Cosmetic model tag (e.g. `"kimi"`) for a node launched on a non-default model via a
+    /// launch profile; `None` for default Claude / the caller itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_label: Option<String>,
     /// Children folded from this node's ledger (recursive; worktree children only — inline
     /// children share the parent's worktree and spawn nothing).
     pub children: Vec<TreeNode>,

@@ -39,6 +39,25 @@ pub trait RoleKind:
     fn agent_type(&self) -> AgentType;
     /// The role's stable wire/papers key (also the `role_def` lookup key).
     fn role_str(&self) -> &'static str;
+    /// The `--model` to launch this role's Claude agent with. **Defaults to `None`** (inherit the
+    /// launcher's default model — what the human runs). A domain overrides per-role to put cheap
+    /// leaves on a smaller model while expensive TLs ride the default — e.g. `exo` runs its
+    /// dev/worker/reviewer leaves on `sonnet` and leaves root/tl unpinned.
+    fn model(&self) -> Option<&'static str> {
+        None
+    }
+    /// The env-var **prefix** for a per-role *launch profile* that redirects this role's Claude to a
+    /// non-default Anthropic-compatible endpoint/model (e.g. a reviewer pointed at a local
+    /// [`claude-code-proxy`](https://github.com/raine/claude-code-proxy) serving Kimi, later a worker
+    /// on ChatGPT). The runtime reads `{prefix}_BASE_URL` / `{prefix}_MODEL` / `{prefix}_AUTH_TOKEN` /
+    /// `{prefix}_LABEL` live from its own environment at launch and **translates** them to `ANTHROPIC_*`
+    /// on the spawned process — the auth token is never persisted to papers; only the non-secret
+    /// `LABEL` is recorded (for the window + `tree`). **Backend-agnostic**: the domain names a prefix,
+    /// never a vendor. **Defaults to `None`** (the role launches with the swarm's default Claude), so
+    /// non-`exo` impls compile unchanged and every non-overriding role stays byte-identical.
+    fn launch_profile_env_prefix(&self) -> Option<&'static str> {
+        None
+    }
     /// The role's **decomposition-steering protocol** — the prose the engine injects at
     /// `session_start` so a node receives its role contract (cost model, scaffold-fork-converge,
     /// idle-after-spawn, never-implement). **Defaults to empty**: a domain opts in per-role, and a

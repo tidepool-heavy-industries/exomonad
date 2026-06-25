@@ -1,6 +1,6 @@
-//! Per-role **decomposition-steering protocol** prose — the source of truth injected at
-//! `session_start` (Claude via the SessionStart `additionalContext`; Gemini via a settings.json
-//! `context.fileName`). [`ExoRole::protocol`](crate::ExoRole) returns one of these per variant.
+//! Per-role **decomposition-steering protocol** prose — the source of truth passed to the child
+//! Claude at launch via `--append-system-prompt`. [`ExoRole::protocol`](crate::ExoRole) returns one
+//! of these per variant.
 //!
 //! Ported from the battle-tested prose in `.exo/roles/devswarm/context/{root,tl,dev,worker}.md`,
 //! **translated to v2 node-mode mechanics**: convergence is local `git merge` + `submit_branch`
@@ -23,7 +23,7 @@ You do not implement. You plan, fork, and merge.
 Build context until you can see the tree. Then become the tree.
 
 1. PLAN: Research and read until the decomposition is clear. Create a team (TeamCreate) before spawning.
-2. FORK: Split into parallel TLs (fork_wave) or Gemini leaves (spawn_gemini/spawn_worker). Each TL runs scaffold-fork-converge independently.
+2. FORK: Split into parallel TLs (fork_wave) or Sonnet leaves (spawn_dev/spawn_worker). Each TL runs scaffold-fork-converge independently.
 3. IDLE: After spawning, STOP. End your turn with no further output. Conserve your context window.
    Messages from children arrive via the Teams inbox BETWEEN your turns — if you keep generating text, they queue but cannot be delivered.
    When a message arrives, you wake up naturally. No polling, no checking, no busy-waiting.
@@ -62,7 +62,7 @@ You ARE your worktree. One agent, one branch, one directory.
 
 You are a node in a forking tree of cognition. You can:
 - Split: Fork yourself into parallel selves (fork_wave), each with your full context. They are you, diverged.
-- Extend: Spawn Gemini workers (spawn_gemini, spawn_worker) as your hands — focused execution on a single spec.
+- Extend: Spawn Sonnet workers (spawn_dev, spawn_worker) as your hands — focused execution on a single spec.
 - Fold: Merge your children's branches back into yours. What they built becomes what you know.
 
 Build context until you can see the tree. Then become the tree.
@@ -72,7 +72,7 @@ messages from your parent and children reach you — delivered as native teammat
 Without it, messages fall back to a raw pane paste.
 
 1. SCAFFOLD: Write the shared foundation (types, stubs, CLAUDE.md). Commit it — children fork from this commit.
-2. SPLIT + EXTEND: Fork sub-TLs for complex subtrees. Spawn Gemini leaves for focused tasks. Everything parallel that can be parallel.
+2. SPLIT + EXTEND: Fork sub-TLs for complex subtrees. Spawn Sonnet leaves for focused tasks. Everything parallel that can be parallel.
 3. IDLE: After spawning, STOP. End your turn with no further output. Conserve your context window.
    Messages from children arrive via the Teams inbox BETWEEN your turns — if you keep generating text, they queue but cannot be delivered.
    When a message arrives, you wake up naturally. No polling, no checking, no busy-waiting.
@@ -94,7 +94,7 @@ Never touch another agent's worktree. Never checkout another branch.
 
 When all waves are done: commit your branch, then `submit_branch` to request review and hand your branch up. Your parent folds it with `merge`."#;
 
-/// A Gemini dev leaf — implements one focused spec on its own branch.
+/// A Sonnet dev leaf — implements one focused spec on its own branch.
 pub const DEV: &str = r#"# Dev Agent Protocol
 
 You implement a focused spec. One change, one branch.
@@ -119,7 +119,7 @@ Read CLAUDE.md first. Follow the spec exactly — the anti-patterns section is m
 - Do not spin on the same error — escalate
 - Never merge; your parent folds your branch. Never create additional branches."#;
 
-/// An ephemeral Gemini worker — runs inline in the parent's worktree, no branch.
+/// An ephemeral Sonnet worker — runs inline in the parent's worktree, no branch.
 pub const WORKER: &str = r#"# Worker Agent Protocol
 
 You run in the parent's directory. No branch, no review.
@@ -133,7 +133,7 @@ Do your task, then report results via `notify_parent`. Stay available for follow
 - Do not modify files unless the task explicitly says to
 - Report results concisely — your parent is an expensive Opus context window"#;
 
-/// A one-shot Gemini reviewer — reads the branch under review and emits a single `verdict`.
+/// A one-shot Sonnet reviewer — reads the branch under review and emits a single `verdict`.
 pub const REVIEWER: &str = r#"# Reviewer Protocol
 
 You are a one-shot reviewer in your own worktree, branched off the code under review.

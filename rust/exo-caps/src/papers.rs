@@ -77,7 +77,8 @@ pub struct NodePapers {
     /// Launch policy for this node's CHILDREN, inherited down the tree: a spawning node
     /// stamps each child's papers with its own policy and reads these back to decide how to
     /// launch the next generation. Defaulted on read so papers written by an older binary
-    /// preserve today's behavior. `yolo` → pass `--yolo` to Gemini children (auto-approve).
+    /// preserve today's behavior. `yolo` is a launch-policy knob inherited down the tree
+    /// (retained for the Shoal/companion launch path and config round-tripping).
     #[serde(default = "default_yolo")]
     pub yolo: bool,
     /// Wrap a child's launch command in `nix develop` when its cwd has a `flake.nix`.
@@ -168,8 +169,7 @@ mod tests {
         }
         fn agent_type(&self) -> AgentType {
             match self {
-                TestRole::Root => AgentType::Claude,
-                TestRole::Dev => AgentType::Gemini,
+                TestRole::Root | TestRole::Dev => AgentType::Claude,
             }
         }
         fn role_str(&self) -> &'static str {
@@ -183,8 +183,8 @@ mod tests {
     #[test]
     fn papers_round_trip_through_json() {
         let papers = NodePapers::new(
-            NodePath::new(vec![an("dev"), an("oauth-gemini")]).unwrap(),
-            Branch::new("dev.oauth-gemini".into()).unwrap(),
+            NodePath::new(vec![an("dev"), an("oauth-dev")]).unwrap(),
+            Branch::new("dev.oauth-dev".into()).unwrap(),
             TestRole::Dev,
             PaneId::new("%317".into()).unwrap(),
             Some(InboxPath::new(

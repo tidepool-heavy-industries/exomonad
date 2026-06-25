@@ -9,8 +9,9 @@ description: "ExoMonad agent orchestration rules — loaded into every agent's c
 > this file wherever they conflict. Known-stale here: there is no `file_pr`/`merge_pr` and
 > no Copilot — v2 converges via `submit_branch` → reviewer `verdict` → parent `merge`
 > (local git); `fork_wave`'s `fork_session` defaults to **false** (context inheritance is
-> opt-in); the notification vocabulary is `[READY]`/`[idle]`/`[FAILED: id]`. Full trueing
-> is scheduled (T4.5).
+> opt-in); the notification vocabulary is `[READY]`/`[idle]`/`[FAILED: id]`; and v2 leaves
+> (dev/worker/reviewer) are now **Sonnet Claude**, not Gemini (`spawn_gemini` → `spawn_dev`).
+> Full trueing is scheduled (T4.5).
 
 ## Model
 
@@ -23,8 +24,8 @@ Use exomonad MCP tools for orchestration. Git and GitHub operations use `git` an
 | Tool | Role | What it does |
 |------|------|-------------|
 | `fork_wave` | root, tl | Fork N parallel Claude agents (own worktrees, context inherited by default via `fork_session`) |
-| `spawn_gemini` | root, tl | Spawn Gemini agent in own worktree+branch (files PR). Structured spec fields: steps, verify, boundary, context, read_first |
-| `spawn_worker` | root, tl | Spawn ephemeral Gemini worker in tmux pane (no branch, no PR). Just name + task |
+| `spawn_dev` | root, tl | Spawn a Sonnet Claude dev in own worktree+branch. Structured spec fields: steps, verify, boundary, context, read_first |
+| `spawn_worker` | root, tl | Spawn ephemeral Sonnet Claude worker in tmux pane (no branch). Just name + task |
 | `file_pr` | tl, dev | Create/update PR (base branch auto-detected from branch naming) |
 | `merge_pr` | root, tl | Merge a child's PR |
 | `notify_parent` | tl, dev, worker | Send message to parent agent |
@@ -35,9 +36,9 @@ Use exomonad MCP tools for orchestration. Git and GitHub operations use `git` an
 
 ## Agent Hierarchy
 
-- **TL (Tech Lead)**: Claude (Opus). Decomposes, specs, scaffolds, spawns, merges. Never implements directly.
-- **Dev (Leaf)**: Gemini. Implements a focused spec, files PR. No spawning.
-- **Worker**: Gemini. Ephemeral pane, no branch. Research or in-place edits.
+- **TL (Tech Lead)**: Claude (Opus / session default). Decomposes, specs, scaffolds, spawns, merges. Never implements directly.
+- **Dev (Leaf)**: Sonnet Claude. Implements a focused spec, commits, `submit_branch`. No spawning.
+- **Worker**: Sonnet Claude. Ephemeral pane, no branch. Research or in-place edits.
 
 ## The TL Protocol: Scaffold-Fork-Converge
 
@@ -59,8 +60,8 @@ Commit and push. Children fork from this commit.
 Spawn children for wave N. Zero dependencies between siblings in the same wave.
 
 - **Sub-TLs**: `fork_wave` (Claude). They inherit full conversation context — they already know the plan and the scaffolding.
-- **Devs**: `spawn_gemini` (Gemini, worktree). They get a self-contained spec. The CLAUDE.md from the scaffolding commit gives them project context.
-- **Workers**: `spawn_worker` (Gemini, ephemeral pane). Research, boilerplate, or non-conflicting edits.
+- **Devs**: `spawn_dev` (Sonnet Claude, worktree). They get a self-contained spec. The CLAUDE.md from the scaffolding commit gives them project context.
+- **Workers**: `spawn_worker` (Sonnet Claude, ephemeral pane). Research, boilerplate, or non-conflicting edits.
 
 ### 3. Converge (merge wave)
 

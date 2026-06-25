@@ -4,8 +4,8 @@
 //! shipping `exo::ExoDomain` — using **only** the engine's public API (`exo-caps` / `exo-framework`
 //! / `exo-node` / `exo-runtime`). It exercises all four extensibility seams the refactor closed:
 //!
-//! 1. **a new role / backend mapping** (`ProofRole`, incl. a **Claude** reviewer — `exo`'s reviewer
-//!    is Gemini — and a brand-new `Auditor` archetype absent from `exo`),
+//! 1. **a new role / backend mapping** (`ProofRole`, incl. a brand-new `Auditor` archetype absent
+//!    from `exo` that maps to a **different backend** (Shoal) than its other roles),
 //! 2. **a novel inter-node System payload** (`ProofSystem::AuditComplete`),
 //! 3. **a novel inter-node tool** (`SubmitAudit`, which emits that payload via `deliver_domain`),
 //! 4. **a domain spawn intent** (`ProofSpawn`).
@@ -29,16 +29,16 @@ use serde::{Deserialize, Serialize};
 
 // ── seam #1: a brand-new role set with its own role→backend mapping ──────────────────────────
 
-/// A role set that is NOT `exo::ExoRole`: it has a novel `Auditor` archetype and maps its reviewer
-/// to the **Claude** backend (vs `exo`'s Gemini reviewer) — proving a domain owns both the role
-/// enum (leak #1) and the role→backend mapping (leak #2).
+/// A role set that is NOT `exo::ExoRole`: it has a novel `Auditor` archetype mapped to the **Shoal**
+/// backend (vs its Claude-backed siblings) — proving a domain owns both the role enum (leak #1) and
+/// the role→backend mapping (leak #2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum ProofRole {
     Overseer,
-    /// A brand-new archetype with no analogue in `exo`.
+    /// A brand-new archetype with no analogue in `exo`, mapped to a non-Claude backend.
     Auditor,
-    /// A reviewer mapped to Claude (not Gemini).
+    /// A reviewer mapped to the Claude backend.
     ClaudeReviewer,
 }
 
@@ -52,9 +52,9 @@ impl RoleKind for ProofRole {
     }
     fn agent_type(&self) -> AgentType {
         match self {
-            // The overseer + the Claude reviewer run on Claude; the auditor on Gemini.
+            // The overseer + the Claude reviewer run on Claude; the auditor on Shoal.
             ProofRole::Overseer | ProofRole::ClaudeReviewer => AgentType::Claude,
-            ProofRole::Auditor => AgentType::Gemini,
+            ProofRole::Auditor => AgentType::Shoal,
         }
     }
     fn role_str(&self) -> &'static str {
@@ -224,9 +224,9 @@ fn engine_accepts_a_brand_new_domain() {
         let rd = ProofDomain::role_def(*role);
         assert!(rd.tools.iter().any(|t| t.name() == "submit_audit"));
     }
-    // The role→backend mapping is the domain's: a Claude reviewer, a new Gemini archetype.
+    // The role→backend mapping is the domain's: a Claude reviewer, a new Shoal-backed archetype.
     assert_eq!(ProofRole::ClaudeReviewer.agent_type(), AgentType::Claude);
-    assert_eq!(ProofRole::Auditor.agent_type(), AgentType::Gemini);
+    assert_eq!(ProofRole::Auditor.agent_type(), AgentType::Shoal);
     assert_eq!(ProofRole::all().len(), 3);
 }
 

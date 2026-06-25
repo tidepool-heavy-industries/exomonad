@@ -43,7 +43,7 @@ Within a single TL's scope, work proceeds in waves. Wave N produces merged code.
 
 ### Branch Naming as Coordinate System
 
-`{parent}.{name}` (dot separator) encodes tree address, where `name = {slug}-{type}` (e.g., `auth-claude`, `oauth-provider-gemini`). `dev.auth-claude.oauth-provider-gemini` tells you: root is `dev`, first-level TL is `auth` (Claude), leaf is `oauth-provider` (Gemini). The last dot-segment IS the `AgentName` — one namespace, zero translation. Branches converge to the parent branch, not main — folded up the tree (v2: local `git merge`; Classic: PR). The git DAG IS the computation trace.
+`{parent}.{name}` (dot separator) encodes tree address, where `name = {slug}-{type}` (e.g., `auth-claude`, `oauth-provider-dev`). `dev.auth-claude.oauth-provider-dev` tells you: root is `dev`, first-level TL is `auth`, leaf is `oauth-provider` (a dev leaf). The last dot-segment IS the `AgentName` — one namespace, zero translation. Branches converge to the parent branch, not main — folded up the tree (v2: local `git merge`; Classic: PR). The git DAG IS the computation trace.
 
 ---
 
@@ -125,11 +125,11 @@ WASM build pipeline → [`haskell/wasm-guest/CLAUDE.md`](haskell/wasm-guest/CLAU
 Spawn a recursive tree of heterogeneous agents:
 
 - **`fork_wave`** — N parallel Claude TL children, each in its own worktree + branch, context inherited by default.
-- **`spawn_gemini`** — Gemini dev leaf in its own worktree + branch with a self-contained spec; commits and calls `submit_branch` when ready.
-- **`spawn_worker`** — ephemeral Gemini worker in a tmux pane (no branch, no merge); reports via `notify_parent`.
+- **`spawn_dev`** (v2; `spawn_gemini` in Classic) — a dev leaf in its own worktree + branch with a self-contained spec; commits and calls `submit_branch` when ready. v2 leaves are Sonnet Claude.
+- **`spawn_worker`** — ephemeral worker in a tmux pane (no branch, no merge); reports via `notify_parent`. v2: Sonnet Claude.
 - **`merge`** — fold a child's submitted branch into yours (v2: local `git merge`; Classic: PR via `merge_pr`).
 
-**Agent types:** Claude 🤖, Gemini 💎, Shoal 🌊 (custom binary agents over rmcp + HTTP-over-UDS). **Identity** = birth-branch (immutable, deterministic); root = `root`. The filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/`.
+**Agent types:** v2 node-mode is all Claude 🤖 — Opus TLs (root/tl, session default) + Sonnet leaves (dev/worker/reviewer) — plus Shoal 🌊 (custom binary agents over rmcp + HTTP-over-UDS) as an external companion backend. (Gemini 💎 was the v2 leaf runtime before the cut and is now Classic-only.) **Identity** = birth-branch (immutable, deterministic); root = `root`. The filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/`.
 
 **Coordination is push-based** via the Claude Code Teams inbox: a child calls `notify_parent` (or `send_message` for peer-to-peer), the message lands in the parent's inbox and arrives as a native `<teammate-message>` between turns. The TL idles — no polling, no blocking. Fallback is tmux STDIN injection.
 
@@ -139,7 +139,7 @@ Tool/role matrix → [`.claude/rules/exomonad.md`](.claude/rules/exomonad.md). R
 
 ## Architecture
 
-Two tracks over shared `exomonad-core` services. Isolation = git worktrees (no Docker); multiplexing = tmux windows (Claude subtrees) and panes (Gemini workers). Each agent = worktree + window/pane, managed by the Rust runtime.
+Two tracks over shared `exomonad-core` services. Isolation = git worktrees (no Docker); multiplexing = tmux windows (subtrees) and panes (ephemeral workers). Each agent = worktree + window/pane, managed by the Rust runtime.
 
 - **v2 Node-Mode crates:** `exo-caps` (capability seam — traits + types, no IO), `exo-node` (per-agent sidecar; outbound MCP + inbound inbox-watch loops), `exo-runtime` (IO implementations), `exo-policy` (tool/hook/role logic, generic over caps), `exo-scry` (native Teams discovery from live OS state).
 - **Classic:** the `exomonad` binary (MCP server + hook handler) hosting Haskell WASM; Rust executes the effects the WASM yields.

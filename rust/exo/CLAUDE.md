@@ -32,8 +32,8 @@ lib (`lib.rs` + `tools/` + `gates.rs` + `roles.rs`) stays generic over the caps 
 | `main.rs` | The CLI dispatcher (bin): clap `Cli` → `init` / `node` / `hook`. `node` is the composition root — `exo node --papers <path>` → `exo_node::bootstrap::<ExoDomain>(papers, cwd)` → `run_node::<ExoDomain>`. |
 | `init.rs` | `exo init [--session <s>] [--recreate]` — bootstrap a node-mode ROOT (own tmux session, root papers, no server). Reuses `exo-runtime`/`exomonad-shared`. |
 | `doctor.rs` | `exo doctor [--fix] [--include-unmerged]` — health-check + cleanup tool for worktrees. |
-| `hook.rs` | `exo hook <event> --papers <path>` — handle a CC/Gemini hook via the node's `exo` gate (SessionStart in-process; everything else routes to the sidecar hook socket, fail-open). |
-| `config.rs` | Minimal node-mode init config read (`tmux_session`, `model`, + the child-launch policy `yolo`/`wrap_nix` stamped onto the root's papers and inherited down the tree) — classic `exomonad` owns the full `Config`. |
+| `hook.rs` | `exo hook <event> --papers <path>` — handle a CC hook via the node's `exo` gate (SessionStart in-process; everything else routes to the sidecar hook socket, fail-open). |
+| `config.rs` | Minimal node-mode init config read (`tmux_session`, `model`, the child-launch policy `yolo`/`wrap_nix`, and `[launch_profile.<role>]` tables flattened to `EXO_<ROLE>_*` for the reviewer-brain redirect) — classic `exomonad` owns the full `Config`. |
 | `tools/` | One module per tool — a type + `Args` (derives `Deserialize + JsonSchema`) + generic-over-caps `run` + a ~6-line hand-written `Tool<R>` adapter (NO macro). Each ships mock-cap unit tests. |
 | `gates.rs` | The concrete hook bodies: `pre_tool_use` (antipattern nudges), `stop` (the convergence gate) + per-role variants (`stop_allow`/`stop_notify`/`stop_reviewer`), `session_start`. Functions generic over the caps they need. |
 | `roles.rs` | `ExoRole` (the domain's `D::Role`, impl `RoleKind`) + `role_def(ExoRole)` — the hand-written table (the single place a role's tool list + hooks are named), resolved through `ExoDomain`'s `Exomonad::role_def`. `RoleKind::protocol` is overridden here to map each variant to its `protocol.rs` const. |
@@ -48,14 +48,14 @@ contract ([`exo-framework`](../exo-framework/CLAUDE.md)); this crate provides th
 | Tool | Caps | Roles | What it does |
 |------|------|-------|--------------|
 | `fork_wave` | `Spawner` | root, tl | Fork N Claude TL children (own worktrees). Per-child opt-in `fork_session: bool` (default false) inherits the parent's context via `--resume --fork-session`; default-false launches fresh. |
-| `spawn_gemini` | `Spawner` | root, tl | Spawn a Gemini dev in its own worktree. |
-| `spawn_worker` | `Spawner` | root, tl | Spawn an ephemeral Gemini worker (inline pane). |
+| `spawn_dev` | `Spawner` | root, tl | Spawn a Sonnet Claude dev in its own worktree. |
+| `spawn_worker` | `Spawner` | root, tl | Spawn an ephemeral Sonnet Claude worker (inline pane). |
 | `merge` | `Git`+`Spawner` | root, tl | **The local fold:** `git merge <child-branch>`, followed by best-effort teardown (`kill_pane` + `reclaim_worktree`) of the child. |
 | `submit_branch` | `Git`+`Process`+`Spawner`+`Fs`+`Bus` | tl, dev | **Request review.** Runs the precondition checks (committed + `.exo/checks/pre-merge/*` scripts), then spawns a **reviewer** off this branch (fork-point `git diff` base via `Git::merge_base`) and returns "stop & wait". It does NOT deliver `[READY]` — only the sidecar does, on an approve-verdict (the structural gate). **Continuity:** reads the latest `ReviewLog` and appends unresolved Error findings from the prior round to the reviewer task. Escape hatch: `dangerously_skip_reviewer: true`. |
 | `verdict` | `Bus`+`Kv` | reviewer | A reviewer's one output → a `System(Reviewed)` message to its parent: `summary` + structured `findings` {`file`, `line`, `severity`, `body`, `suggestion`?}. Triggers reviewer teardown (handled in `exo-node`). |
 | `notify_parent` | `Bus` | tl, dev, worker, reviewer | Status/failure update to `Addressee::Parent` (NOT the done-signal). |
 | `send_message` | `Bus` | root, tl | Deliver to a child (`Inline`/`Worktree`) — **tree-edges only**. |
-| `tree` | `Topology`+`Fs` | root, tl | Read-only: the caller's subtree (recursive ledger fold) + parent + per-node `pane_alive` liveness. |
+| `tree` | `Topology`+`Fs` | root, tl | Read-only: the caller's subtree (recursive ledger fold) + parent + per-node `pane_alive` liveness, plus a `(label)` for any launch-profiled node (e.g. a Kimi reviewer). |
 
 ## exo doctor
 
@@ -77,18 +77,30 @@ fn-pointer list** (`tools/submit.rs`) mirroring the role hook fn-pointers.
 `role_def(kind)` returns a `RoleDef<R> { tools, pre_tool_use, stop, session_start }`; `ExoDomain::role_def`
 resolves through it (the domain's `Exomonad` impl), replacing the deleted `RoleRegistry`. Hooks compose by pointing several roles at the same fn.
 
+Every role is a Claude instance; the **model** varies per role via `ExoRole::model()` (the `RoleKind::model` seam): `Some("sonnet")` for dev/worker/reviewer leaves, `None` (session default — the human's Opus) for root/tl. The model flows `RoleKind::model()` → `BirthCore.model` → `ClaudeSpawnFlags.model` → `build_agent_command`'s `--model`.
+
 | Role | agent | tools | stop gate |
 |------|-------|-------|-----------|
-| **Root** | Claude | fork_wave, spawn_gemini, spawn_worker, merge, send_message, tree | `stop_allow` (never gate the human's session; no parent to notify) |
-| **Tl** | Claude | spawns, merge, notify_parent, send_message, submit_branch, tree | `stop` (clean-gate + notify parent on clean-allow) |
-| **Dev** | Gemini | notify_parent, submit_branch | `stop_notify` (notify parent, always allow — never block Gemini) |
-| **Worker** | Gemini | notify_parent | `stop_notify` (inline child, no branch to fold, but still signals on yield) |
-| **Reviewer** | Gemini | verdict, notify_parent | `stop_reviewer` (ephemeral; its `verdict` is its done-signal; emits `ReviewAborted` if it exits without one) |
+| **Root** | Claude (session default) | fork_wave, spawn_dev, spawn_worker, merge, send_message, tree | `stop_allow` (never gate the human's session; no parent to notify) |
+| **Tl** | Claude (session default) | spawns, merge, notify_parent, send_message, submit_branch, tree | `stop` (clean-gate + notify parent on clean-allow) |
+| **Dev** | Claude (Sonnet) | notify_parent, submit_branch | `stop_notify` (notify parent, always allow) |
+| **Worker** | Claude (Sonnet) | notify_parent | `stop_notify` (inline child, no branch to fold, but still signals on yield) |
+| **Reviewer** | Claude (Sonnet, or a launch-profile brain) | verdict, notify_parent | `stop_reviewer` (ephemeral; its `verdict` is its done-signal; emits `ReviewAborted` if it exits without one) |
+
+The reviewer is the one role with a **launch profile** (`ExoRole::launch_profile_env_prefix` → `Some("EXO_REVIEWER")`): its Claude can be redirected to a non-default Anthropic-compatible endpoint/model (e.g. Kimi via a local `claude-code-proxy`) — still a Claude process, so Teams/hooks/MCP are unchanged. Configure it in `.exo/config.toml` (the convenient path):
+```toml
+[launch_profile.reviewer]
+base_url = "http://localhost:18765"
+model = "kimi-for-coding"
+auth_token = "unused"      # the proxy ignores it; a real key can instead live in the env (env wins)
+label = "kimi"             # tags the window + tree
+```
+`config.rs` flattens `[launch_profile.<role>]` → `EXO_<ROLE_UPPER>_*`, `init.rs` embeds them in the root launch (a matching shell `EXO_*` overrides, so a secret key needn't be in the file), and the tree propagates + `exo-runtime` resolves them (see its CLAUDE.md). Unset ⇒ a normal Sonnet reviewer. Adding another role/backend = one arm in `launch_profile_env_prefix` + a `[launch_profile.<role>]` block.
 
 ## The review gate (how `submit_branch` → `merge` is gated)
 
 A node commits, then calls `submit_branch`. It runs the checks, then spawns a **reviewer** (a full
-Gemini in its own worktree branched off the under-review code) handed the diff + `.exo/acceptance.md`.
+Sonnet Claude in its own worktree branched off the under-review code) handed the diff + `.exo/acceptance.md`.
 **Cross-round continuity:** `submit_branch` reads the latest `.exo/reviews/{safe-branch}.json` and
 appends any unresolved Error findings from the prior round to the reviewer's task string.
 The reviewer calls `verdict`, which rides the bus as a `System` message to the submitter's
@@ -103,10 +115,10 @@ tool that skips review. The reviewer is torn down (best-effort) as soon as the `
 
 - **`pre_tool_use`** — default-**ALLOW** antipattern *nudge* (NOT a security gate). Currently one rule: deny `git add .` / `git add -A` (stage by path). Can `Deny` with guidance or `Modify` to rewrite.
 - **`stop`** (tl) — the **local convergence gate** (`R: Git + Log + Bus + ChildLiveness`). Blocks exit while the worktree is dirty (a parent folds a child by merging its *branch* off disk, so uncommitted work is invisible). On a **clean** exit (Allow) it delivers a `System(ChildIdle)` to the parent — but **only when the subtree is idle** (`ChildLiveness::any_child_busy`). **Fails OPEN** on any git error.
-- **`stop_notify`** (dev, worker) — Gemini turn-end hook (`R: Bus + Log + ChildLiveness`): deliver `System(ChildIdle)` (but only when the subtree is idle; skip if a child is busy), then **always Allow**. **Never blocks** — Gemini's `AfterAgent` `deny` can infinite-loop (gemini-cli #20426).
+- **`stop_notify`** (dev, worker) — leaf turn-end hook (CC `Stop`; `R: Bus + Log + ChildLiveness`): deliver `System(ChildIdle)` (but only when the subtree is idle; skip if a child is busy), then **always Allow**.
 - **`stop_allow`** (root) — unconditional Allow. Root has no parent.
 - **`stop_reviewer`** (reviewer) — silent on the happy path (verdict produced); emits a loud `ReviewAborted` to the parent if the reviewer exits without a verdict. Always allows exit.
-- **`session_start`** — identity bootstrap (the node-identity context is prepended by `exo-node`). The role's **steering protocol** (`RoleKind::protocol`, mapped to a `protocol.rs` const, override-or-const) is injected here too: appended to the Claude `additionalContext` by `exo-node`'s hook, or written to a Gemini child's `context.fileName` at spawn by `exo-runtime`.
+- **`session_start`** — identity bootstrap (the node-identity context is prepended by `exo-node`). The role's **steering protocol** (`RoleKind::protocol`, mapped to a `protocol.rs` const, override-or-const) is delivered via the launch-time `--append-system-prompt` flag at spawn; the SessionStart hook only appends the node-identity + team lines to `additionalContext`.
 
 ## Gaps / not-yet
 

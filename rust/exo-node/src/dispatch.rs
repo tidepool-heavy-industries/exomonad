@@ -5,7 +5,7 @@
 //! Delivery mechanisms:
 //! - **Claude Code in a team**: Writes to the CC Teams inbox, which is then picked up
 //!   by the InboxPoller and delivered as a `<teammate-message>`.
-//! - **Claude Code (no team) or Gemini**: Uses tmux injection (buffer pattern) to paste
+//! - **Claude Code with no team**: Uses tmux injection (buffer pattern) to paste
 //!   the message directly into the agent's pane, rendered with a `[from: X, kind: Y]` header.
 //!
 //! This is pure last-hop dispatch; it focuses on the agent-facing write for entries
@@ -37,9 +37,9 @@ pub async fn dispatch<D: Exomonad>(
     let agent_type = ctx.kind.agent_type();
 
     // Resolve THIS agent's own team — but ONLY for a Claude node, since `decide_lasthop` consults
-    // the team only for Claude (a Gemini leaf always tmux-pastes). Resolving for Gemini would walk
-    // `/proc` looking for a `claude` ancestor it never has, then discard the `None` — and log a
-    // spurious WARN on every single delivery. So skip it entirely for non-Claude.
+    // the team only for Claude. A non-Claude companion (Shoal) always tmux-pastes; resolving its
+    // team would walk `/proc` for a `claude` ancestor it never has and log a spurious WARN on every
+    // delivery. So skip it entirely for non-Claude.
     //
     // `resolve_self_or_portable` tries `resolve_self` first — it walks from the sidecar up to its
     // parent `claude` process and reads that process's inotify-bound `tasks/{team}` dir, finding
@@ -85,7 +85,7 @@ pub async fn dispatch<D: Exomonad>(
         }
         LastHop::TmuxPaste => {
             info!(outcome = "tmux_paste", "dispatching via tmux paste");
-            let rendered = prepare_tmux_payload(ctx, agent_type, entry).await;
+            let rendered = prepare_tmux_payload(ctx, entry).await;
             match Tmux::paste(&*ctx.runtime, &ctx.own_pane, &rendered).await {
                 // `outcome = "tmux_paste"` above already records the attempt; don't double-log OK.
                 Ok(()) => Ok(()),
@@ -135,7 +135,7 @@ fn decide_lasthop(agent_type: AgentType, active_team: Option<exo_scry::ActiveTea
     // A node delivers into its OWN agent's conversation. For a Claude node that leads a team
     // (solo-team-per-session — `resolve_self` resolves the team the agent is bound to, where it
     // IS the lead), write that team's lead inbox: the agent's own CC InboxPoller renders it as
-    // a native `<teammate-message>`. With no team (a Gemini leaf, or before `TeamCreate`), the
+    // a native `<teammate-message>`. With no team (before `TeamCreate`, or a Shoal companion), the
     // sidecar tmux-pastes instead. Messaging is tree-edges only (the Bus); nothing reads
     // another node's inbox — the lead inbox here is the agent's *own*.
     if agent_type == AgentType::Claude {
@@ -197,21 +197,13 @@ enum PastePlan {
 }
 
 /// Decide inline-vs-spill. A message is safe to paste inline only if it is a single short line
-/// with no body — and, for Gemini, contains no `!` (which would flip the CLI into shell mode).
-/// Everything else (any text body, multi-line, oversized, or Gemini+`!`) spills to a file so we
+/// with no body. Everything else (any text body, multi-line, or oversized) spills to a file so we
 /// can deliver a one-line `@`-reference instead.
-fn plan_paste(
-    persona: &str,
-    summary: &str,
-    text: &str,
-    full_render: &str,
-    is_gemini: bool,
-) -> PastePlan {
+fn plan_paste(persona: &str, summary: &str, text: &str, full_render: &str) -> PastePlan {
     let oneline = format!("[from {}] {}", persona, summary);
     let can_inline = text.trim().is_empty()
         && !oneline.contains('\n')
-        && oneline.len() <= MAX_INLINE_PASTE_BYTES
-        && !(is_gemini && oneline.contains('!'));
+        && oneline.len() <= MAX_INLINE_PASTE_BYTES;
     if can_inline {
         PastePlan::Inline(oneline)
     } else {
@@ -221,12 +213,11 @@ fn plan_paste(
     }
 }
 
-/// Build the single-line `@`-reference paste that points at the spilled file. MUST be one line
-/// with no `!` (Gemini shell-mode trigger).
+/// Build the single-line `@`-reference paste that points at the spilled file. MUST be one line.
 fn render_atref(persona: &str, summary: &str, rel_path: &str) -> String {
     let snippet: String = summary
         .chars()
-        .filter(|c| *c != '\n' && *c != '!')
+        .filter(|c| *c != '\n')
         .take(80)
         .collect();
     format!(
@@ -237,16 +228,14 @@ fn render_atref(persona: &str, summary: &str, rel_path: &str) -> String {
 
 async fn prepare_tmux_payload<D: Exomonad>(
     ctx: &Arc<NodeContext<D>>,
-    agent_type: AgentType,
     entry: &IngestionEntry,
 ) -> String {
     let full_render = render_entry(entry);
     let persona = render_persona(&entry.from);
     let summary = entry.msg.summary.as_str();
     let text = entry.msg.text.as_str();
-    let is_gemini = agent_type == AgentType::Gemini;
 
-    match plan_paste(&persona, summary, text, &full_render, is_gemini) {
+    match plan_paste(&persona, summary, text, &full_render) {
         PastePlan::Inline(s) => s,
         PastePlan::Spill { file_body } => {
             let id = SPILL_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -288,8 +277,8 @@ mod tests {
     }
 
     #[test]
-    fn test_decide_lasthop_gemini() {
-        let hop = decide_lasthop(AgentType::Gemini, None);
+    fn test_decide_lasthop_shoal() {
+        let hop = decide_lasthop(AgentType::Shoal, None);
         assert_eq!(hop, LastHop::TmuxPaste);
     }
 
@@ -364,7 +353,7 @@ mod tests {
 
     #[test]
     fn test_plan_paste_inline() {
-        let plan = plan_paste("alice", "hello", "", "full", false);
+        let plan = plan_paste("alice", "hello", "", "full");
         if let PastePlan::Inline(s) = plan {
             assert_eq!(s, "[from alice] hello");
             assert!(!s.contains('\n'));
@@ -375,35 +364,19 @@ mod tests {
 
     #[test]
     fn test_plan_paste_spill_on_body() {
-        let plan = plan_paste("alice", "hello", "body", "full", false);
+        let plan = plan_paste("alice", "hello", "body", "full");
         assert_eq!(
             plan,
             PastePlan::Spill {
                 file_body: "full".to_string()
             }
         );
-    }
-
-    #[test]
-    fn test_plan_paste_gemini_shell_trigger() {
-        // contains '!' -> spill for gemini
-        let plan = plan_paste("alice", "bang!", "", "full", true);
-        assert_eq!(
-            plan,
-            PastePlan::Spill {
-                file_body: "full".to_string()
-            }
-        );
-
-        // but inline for others
-        let plan2 = plan_paste("alice", "bang!", "", "full", false);
-        assert!(matches!(plan2, PastePlan::Inline(_)));
     }
 
     #[test]
     fn test_plan_paste_oversized() {
         let long_summary = "a".repeat(MAX_INLINE_PASTE_BYTES + 1);
-        let plan = plan_paste("alice", &long_summary, "", "full", false);
+        let plan = plan_paste("alice", &long_summary, "", "full");
         assert_eq!(
             plan,
             PastePlan::Spill {
@@ -414,9 +387,8 @@ mod tests {
 
     #[test]
     fn test_render_atref() {
-        let atref = render_atref("alice", "Greeting!\nNext line", ".exo/tmp/file.md");
+        let atref = render_atref("alice", "Greeting\nNext line", ".exo/tmp/file.md");
         assert!(atref.contains(".exo/tmp/file.md"));
-        assert!(!atref.contains('!'));
         assert!(!atref.contains('\n'));
         assert!(atref.contains("Greeting"));
     }

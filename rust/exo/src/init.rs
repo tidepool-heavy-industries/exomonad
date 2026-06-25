@@ -76,6 +76,7 @@ pub async fn run(
     model: Option<&str>,
     yolo: bool,
     wrap_nix: bool,
+    profile_env: &[(String, String)],
     session: Option<String>,
     recreate: bool,
 ) -> Result<()> {
@@ -147,8 +148,24 @@ pub async fn run(
     // conversation so the restart doesn't discard the human's context — `claude --continue`
     // resumes the most recent conversation in this cwd. A fresh `init` has nothing to continue.
     let continue_flag = if recreate { " --continue" } else { "" };
+    // Carry any per-role launch-profile vars into the ROOT launch (the root pane predates the
+    // session-env, so they're embedded inline like the boot vars above). `birth_finish` re-copies
+    // them onto every descendant; only a profiled role's own launch translates them to `ANTHROPIC_*`.
+    // Source = `.exo/config.toml` (`[launch_profile.<role>]`, the `profile_env` param), overlaid by
+    // any matching `EXO_*` already in the shell (so a secret key can stay out of the file). Absent ⇒
+    // empty ⇒ launch byte-identical.
+    const PROFILE_SUFFIXES: [&str; 4] = ["_BASE_URL", "_MODEL", "_AUTH_TOKEN", "_LABEL"];
+    let mut profile_vars: std::collections::BTreeMap<String, String> =
+        profile_env.iter().cloned().collect();
+    profile_vars.extend(std::env::vars().filter(|(k, _)| {
+        k.starts_with("EXO_") && PROFILE_SUFFIXES.iter().any(|s| k.ends_with(s))
+    }));
+    let profile_env: String = profile_vars
+        .into_iter()
+        .map(|(k, v)| format!("{k}={} ", shell_escape::escape(v.into())))
+        .collect();
     let launch = format!(
-        "EXOMONAD_SWARM_RUN_ID={run_id_esc} EXOMONAD_TMUX_SESSION={session_esc} CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude{continue_flag} --dangerously-skip-permissions{model_flag}"
+        "{profile_env}EXOMONAD_SWARM_RUN_ID={run_id_esc} EXOMONAD_TMUX_SESSION={session_esc} CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude{continue_flag} --dangerously-skip-permissions{model_flag}"
     );
 
     exomonad_shared::services::tmux_ipc::TmuxIpc::new(&session)

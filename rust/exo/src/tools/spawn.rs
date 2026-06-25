@@ -1,8 +1,9 @@
 //! **P3 leaf.** The three **per-op** spawn tools over the [`Spawner`] cap: `spawn_worker`
-//! (→ Inline/Worker/Gemini), `spawn_gemini` (→ Worktree/Dev/Gemini), `fork_wave`
-//! (→ Worktree/Tl/Claude). Each is a thin wrapper type: an `Args` carrying ONLY task content
-//! (the `(role, agent_type, kind)` triple is fixed by which op, never a caller field), a
-//! generic-over-caps `run<C: Spawner>`, and a `Tool<R>` adapter. Ships mock-cap unit tests
+//! (→ Inline/Worker), `spawn_dev` (→ Worktree/Dev), `fork_wave` (→ Worktree/Tl). Every spawn is a
+//! Claude instance — the role's model is what varies (leaves on Sonnet, TLs on the session
+//! default; see [`ExoRole::model`](crate::ExoRole)). Each tool is a thin wrapper type: an `Args`
+//! carrying ONLY task content (the `(role, kind)` pair is fixed by which op, never a caller field),
+//! a generic-over-caps `run<C: Spawner>`, and a `Tool<R>` adapter. Ships mock-cap unit tests
 //! (assert the right `Spawner` method recorded) in this file.
 
 use crate::roles::ExoRole;
@@ -38,7 +39,7 @@ impl SpawnWorker {
             Some(n) => Some(AgentName::new(n)?),
             None => None,
         };
-        // The tool fixes the (role, kind): an ephemeral inline Gemini worker.
+        // The tool fixes the (role, kind): an ephemeral inline worker (Sonnet Claude).
         let spec = ExoSpawn {
             role: ExoRole::Worker,
             kind: ChildKind::Inline,
@@ -69,12 +70,12 @@ impl<R: Spawner + Send + Sync> Tool<R> for SpawnWorker {
         "spawn_worker"
     }
     fn description(&self) -> &str {
-        "Spawn an ephemeral Gemini worker in a pane inside YOUR worktree (no own branch, no \
-         review). PREFER DELEGATING OVER DOING WORK YOURSELF — a Gemini leaf costs ~10-30x less \
-         than your Opus tokens, so every line you implement yourself is wasted budget. Give it \
+        "Spawn an ephemeral Sonnet worker in a pane inside YOUR worktree (no own branch, no \
+         review). PREFER DELEGATING OVER DOING WORK YOURSELF — a Sonnet leaf costs far less than \
+         your own tokens, so every line you implement yourself is wasted budget. Give it \
          acceptance criteria, key file paths, and anti-patterns — not line-by-line code. For \
          research or non-conflicting in-place edits; it reports back with `notify_parent`. There \
-         is nothing to merge — for work that should land on its own branch, use `spawn_gemini`. \
+         is nothing to merge — for work that should land on its own branch, use `spawn_dev`. \
          After spawning, return immediately — idle and wait, do not poll."
     }
     fn schema(&self) -> serde_json::Value {
@@ -88,7 +89,7 @@ impl<R: Spawner + Send + Sync> Tool<R> for SpawnWorker {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct SpawnGeminiArgs {
+pub struct SpawnDevArgs {
     pub name: Option<String>,
     pub task: String,
     #[serde(default)]
@@ -105,10 +106,10 @@ pub struct SpawnGeminiArgs {
     pub read_first: Vec<String>,
 }
 
-pub struct SpawnGemini;
+pub struct SpawnDev;
 
-impl SpawnGemini {
-    async fn run<C: Spawner + Fs>(ctx: &C, args: SpawnGeminiArgs) -> CapResult<ToolOutput> {
+impl SpawnDev {
+    async fn run<C: Spawner + Fs>(ctx: &C, args: SpawnDevArgs) -> CapResult<ToolOutput> {
         let name = match args.name {
             Some(n) => Some(AgentName::new(n)?),
             None => None,
@@ -122,7 +123,7 @@ impl SpawnGemini {
             args.context.as_ref(),
             &args.done_criteria,
         );
-        // The tool fixes the (role, kind): a Gemini dev leaf in its own worktree.
+        // The tool fixes the (role, kind): a Sonnet dev leaf in its own worktree.
         let spec = ExoSpawn {
             role: ExoRole::Dev,
             kind: ChildKind::Worktree,
@@ -142,14 +143,14 @@ impl SpawnGemini {
 }
 
 #[async_trait::async_trait]
-impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnGemini {
+impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnDev {
     fn name(&self) -> &str {
-        "spawn_gemini"
+        "spawn_dev"
     }
     fn description(&self) -> &str {
-        "Spawn a Gemini dev leaf in its OWN worktree + branch with a self-contained spec. PREFER \
-         DELEGATING OVER DOING WORK YOURSELF — a Gemini leaf costs ~10-30x less than your Opus \
-         tokens; every line you implement yourself is wasted budget. Use the structured fields \
+        "Spawn a Sonnet dev leaf in its OWN worktree + branch with a self-contained spec. PREFER \
+         DELEGATING OVER DOING WORK YOURSELF — a Sonnet leaf costs far less than your own tokens; \
+         every line you implement yourself is wasted budget. Use the structured fields \
          (steps, verify, boundary, read_first) for precise specs — give it acceptance criteria \
          and file paths, not line-by-line code. It commits to that branch and calls \
          `submit_branch` when ready; a one-shot reviewer checks it, then you `merge` the branch \
@@ -157,7 +158,7 @@ impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnGemini {
          — idle and wait for [READY], do not poll."
     }
     fn schema(&self) -> serde_json::Value {
-        schema_json(schemars::schema_for!(SpawnGeminiArgs))
+        schema_json(schemars::schema_for!(SpawnDevArgs))
     }
     async fn call(&self, ctx: &R, args: serde_json::Value) -> CapResult<serde_json::Value> {
         let parsed = parse(args)?;
@@ -340,10 +341,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_spawn_gemini() {
+    async fn test_spawn_dev() {
         let mock = MockRuntime::default();
-        let args = SpawnGeminiArgs {
-            name: Some("gemini-1".to_string()),
+        let args = SpawnDevArgs {
+            name: Some("dev-1".to_string()),
             task: "do something else".to_string(),
             steps: vec![],
             verify: vec![],
@@ -352,7 +353,7 @@ mod tests {
             boundary: vec![],
             read_first: vec![],
         };
-        let out = SpawnGemini::run(&mock, args).await.unwrap();
+        let out = SpawnDev::run(&mock, args).await.unwrap();
         assert!(out.text.contains("Spawned dev"));
         let calls = mock.calls_made();
         // The spawn, then the acceptance.md write (relocated into the domain tool).
@@ -361,7 +362,7 @@ mod tests {
             .any(|c| matches!(c, Call::Spawn { role, task, .. }
             if role == "dev" && task.contains("do something else"))));
         assert!(calls.iter().any(|c| matches!(c, Call::FsWrite { path }
-            if path.contains("gemini-1") && path.ends_with(".exo/acceptance.md"))));
+            if path.contains("dev-1") && path.ends_with(".exo/acceptance.md"))));
     }
 
     #[tokio::test]

@@ -34,10 +34,8 @@ impl RoleKind for TestRole {
         ]
     }
     fn agent_type(&self) -> AgentType {
-        match self {
-            TestRole::Root | TestRole::Tl => AgentType::Claude,
-            _ => AgentType::Gemini,
-        }
+        // Mirrors `exo::ExoRole`: every tree node is a Claude instance.
+        AgentType::Claude
     }
     fn role_str(&self) -> &'static str {
         match self {

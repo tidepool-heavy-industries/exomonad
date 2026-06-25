@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn idle_bit_is_idle_even_with_live_pane() {
-        // The whole point: a Gemini child sits idle with a live pane. Bit wins.
+        // The whole point: a child sits idle with a live pane. Bit wins.
         let a = an("a");
         let bits = HashMap::from([(a.clone(), false)]);
         let alive = HashSet::from(["%1".to_string()]);

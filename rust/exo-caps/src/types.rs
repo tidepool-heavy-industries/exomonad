@@ -300,14 +300,14 @@ impl TryFrom<String> for Summary {
 // [`RoleKind`](crate::RoleKind) seam. The engine never names a role variant. (Before the trait
 // refactor a closed `NodeKind` lived here — that was leak #1.)
 
-/// Runtime — used by the **delivery last-hop only** (the Claude/Gemini/Shoal switch).
+/// Runtime — used by the **delivery last-hop only** (the Claude/Shoal switch).
 /// For a tree node it equals `node_kind.agent_type()`. Shoal is a companion /
-/// external-rmcp participant, **not** a per-op spawn archetype.
+/// external-rmcp participant, **not** a per-op spawn archetype — so every spawnable tree
+/// node is a Claude instance (TLs on the session default, leaves on Sonnet).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentType {
     Claude,
-    Gemini,
     Shoal,
 }
 
@@ -519,8 +519,8 @@ mod tests {
 
     #[test]
     fn node_path_name_parent_child() {
-        let p = NodePath::new(vec![an("dev"), an("auth-claude"), an("oauth-gemini")]).unwrap();
-        assert_eq!(p.name().as_str(), "oauth-gemini");
+        let p = NodePath::new(vec![an("dev"), an("auth-claude"), an("oauth-dev")]).unwrap();
+        assert_eq!(p.name().as_str(), "oauth-dev");
         assert_eq!(p.parent().unwrap().name().as_str(), "auth-claude");
         let root = NodePath::new(vec![an("dev")]).unwrap();
         assert!(root.parent().is_none());

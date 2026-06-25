@@ -334,6 +334,7 @@ impl Topology for MockRuntime {
                 kind: None,
                 pane: "%0".into(),
                 pane_alive: true,
+                model_label: None,
                 children: vec![TreeNode {
                     name: "child-a".into(),
                     kind: Some(ChildKind::Worktree),
@@ -341,6 +342,7 @@ impl Topology for MockRuntime {
                     // Topology reports pane *existence* only (for the `tree` tool); idle is a
                     // separate axis, modelled by `child_busy` via the `ChildLiveness` impl below.
                     pane_alive: true,
+                    model_label: Some("kimi".into()),
                     children: vec![],
                 }],
             },

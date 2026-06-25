@@ -271,6 +271,7 @@ fn claude_spawn_flags(
         permission_mode: mode,
         allowed_tools,
         disallowed_tools,
+        ..Default::default()
     }
 }
 

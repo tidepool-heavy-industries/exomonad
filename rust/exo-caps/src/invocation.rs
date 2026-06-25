@@ -19,15 +19,6 @@ pub const PRE_TOOL_USE: &str = "pre-tool-use";
 pub const STOP: &str = "stop";
 pub const SESSION_START: &str = "session-start";
 
-/// Gemini CLI `settings.json` hook KEYS — the harness event names, distinct from the CLI event
-/// args above ([`PRE_TOOL_USE`]/[`STOP`]/[`SESSION_START`]). `AfterAgent` is Gemini's turn-end
-/// (the `Stop` equivalent); `BeforeTool` is its pre-tool event; `SessionStart` mirrors Claude.
-/// A Gemini hook entry maps one of these keys to the same `exo hook <arg>` command — so
-/// `AfterAgent` runs `... hook stop`, `BeforeTool` runs `... hook pre-tool-use`.
-pub const GEMINI_AFTER_AGENT: &str = "AfterAgent";
-pub const GEMINI_BEFORE_TOOL: &str = "BeforeTool";
-pub const GEMINI_SESSION_START: &str = "SessionStart";
-
 /// MCP sidecar args for a child's `.mcp.json` (the `"command"` is [`BIN`]):
 /// `exo node --papers <papers>`.
 pub fn node_args(papers: &str) -> [String; 3] {

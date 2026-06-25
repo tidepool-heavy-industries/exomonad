@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::Arc;
 
-use exo_caps::{AgentType, HookEvent, HookRequest, HookVerdict, RoleKind};
+use exo_caps::{HookEvent, HookRequest, HookVerdict};
 use exo_framework::{Exomonad, HookDecision, HookInput, RoleDef, StopDecision};
 use exo_runtime::Runtime;
 use serde_json::json;
@@ -19,8 +19,8 @@ use crate::error::{NodeError, NodeResult};
 /// (remove-before-bind to clear a stale socket, then `0o600`), accepts connections, and for each
 /// [`HookRequest`](exo_caps::HookRequest) runs the role's hook fn against the **live**
 /// `ctx.runtime` (NOT a fresh `bootstrap()` Runtime), then replies with a
-/// [`HookVerdict`](exo_caps::HookVerdict) shaped for the node's `agent_type` — **never a Gemini
-/// Stop `deny`** (gemini-cli #20426 can infinite-loop on `AfterAgent` deny).
+/// [`HookVerdict`](exo_caps::HookVerdict) in the Claude hook-output shape (every tree node is a
+/// Claude instance).
 ///
 /// Spawned as a background task by [`run_node`](crate::run_node) and aborted when the outbound
 /// serve loop returns; an error here is logged, never fatal.
@@ -106,12 +106,9 @@ async fn handle_conn<D: Exomonad<Caps = Runtime>>(
 #[tracing::instrument(skip(ctx, req), fields(node = %ctx.runtime.name().as_str(), event = ?req.event))]
 async fn run<D: Exomonad<Caps = Runtime>>(ctx: &NodeContext<D>, req: &HookRequest) -> HookVerdict {
     let rd = D::role_def(ctx.kind);
-    let agent_type = ctx.kind.agent_type();
     let stdout = match req.event {
-        HookEvent::PreToolUse => {
-            shape_pre_tool_use(&rd, &ctx.runtime, &req.stdin_json, agent_type).await
-        }
-        HookEvent::Stop => shape_stop(&rd, &ctx.runtime, agent_type).await,
+        HookEvent::PreToolUse => shape_pre_tool_use(&rd, &ctx.runtime, &req.stdin_json).await,
+        HookEvent::Stop => shape_stop(&rd, &ctx.runtime).await,
         HookEvent::SessionStart => {
             // SessionStart is handled one-shot by the client, never over the socket. A hook must
             // never wedge an agent, so be defensive and fail-safe allow if one ever arrives.
@@ -119,7 +116,7 @@ async fn run<D: Exomonad<Caps = Runtime>>(ctx: &NodeContext<D>, req: &HookReques
                 outcome = "allow_fallback",
                 "hooksock: unexpected SessionStart over socket; returning allow"
             );
-            allow_json(agent_type)
+            allow_json()
         }
     };
     info!(outcome = "success", "hooksock: hook execution complete");
@@ -130,127 +127,67 @@ async fn shape_pre_tool_use(
     rd: &RoleDef<exo_runtime::Runtime>,
     rt: &exo_runtime::Runtime,
     stdin_json: &str,
-    agent_type: AgentType,
 ) -> String {
     let input: HookInput = match serde_json::from_str(stdin_json) {
         Ok(i) => i,
         Err(e) => {
             warn!("hooksock: bad PreToolUse stdin ({e}); allowing");
-            return allow_json(agent_type);
+            return allow_json();
         }
     };
-    let decision = (rd.pre_tool_use)(rt, &input).await;
-    match agent_type {
-        AgentType::Claude | AgentType::Shoal => match decision {
-            HookDecision::Allow => json!({"continue": true}).to_string(),
-            HookDecision::Deny { reason } => {
-                json!({"continue": true, "systemMessage": reason}).to_string()
-            }
-            HookDecision::Modify { input } => json!({
-                "continue": true,
-                "hookSpecificOutput": {"hookEventName": "PreToolUse", "toolInput": input}
-            })
-            .to_string(),
-        },
-        AgentType::Gemini => match decision {
-            HookDecision::Allow => json!({}).to_string(),
-            // BeforeTool deny is safe (delivered as a tool error, no retry loop).
-            HookDecision::Deny { reason } => {
-                json!({"decision": "deny", "reason": reason}).to_string()
-            }
-            // Gemini BeforeTool has no tool-input rewrite shape; surface nothing and allow.
-            HookDecision::Modify { .. } => {
-                warn!("hooksock: dropping Gemini PreToolUse Modify (no BeforeTool rewrite shape)");
-                json!({}).to_string()
-            }
-        },
+    match (rd.pre_tool_use)(rt, &input).await {
+        HookDecision::Allow => json!({"continue": true}).to_string(),
+        HookDecision::Deny { reason } => {
+            json!({"continue": true, "systemMessage": reason}).to_string()
+        }
+        HookDecision::Modify { input } => json!({
+            "continue": true,
+            "hookSpecificOutput": {"hookEventName": "PreToolUse", "toolInput": input}
+        })
+        .to_string(),
     }
 }
 
-async fn shape_stop(
-    rd: &RoleDef<exo_runtime::Runtime>,
-    rt: &exo_runtime::Runtime,
-    agent_type: AgentType,
-) -> String {
-    stop_verdict((rd.stop)(rt).await, agent_type)
+async fn shape_stop(rd: &RoleDef<exo_runtime::Runtime>, rt: &exo_runtime::Runtime) -> String {
+    stop_verdict((rd.stop)(rt).await)
 }
 
-/// Pure agent-shaping of a [`StopDecision`] (split out so the wire shapes — and the #20426 safety
-/// net — are unit-testable without a live runtime).
-fn stop_verdict(decision: StopDecision, agent_type: AgentType) -> String {
-    match agent_type {
-        AgentType::Claude | AgentType::Shoal => match decision {
-            StopDecision::Allow => json!({"continue": true}).to_string(),
-            StopDecision::Block { reason } => {
-                json!({"decision": "block", "reason": reason}).to_string()
-            }
-        },
-        // SAFETY NET: never emit a Gemini Stop deny. `AfterAgent` deny can infinite-loop
-        // (gemini-cli #20426). Policy already must not block Gemini at stop; this downgrade is
-        // defence in depth.
-        AgentType::Gemini => match decision {
-            StopDecision::Allow => json!({}).to_string(),
-            StopDecision::Block { reason } => {
-                warn!("hooksock: downgrading Gemini Stop block to allow (gemini-cli #20426): {reason}");
-                json!({}).to_string()
-            }
-        },
+/// Pure Claude-shaping of a [`StopDecision`] (split out so the wire shape is unit-testable without
+/// a live runtime).
+fn stop_verdict(decision: StopDecision) -> String {
+    match decision {
+        StopDecision::Allow => json!({"continue": true}).to_string(),
+        StopDecision::Block { reason } => {
+            json!({"decision": "block", "reason": reason}).to_string()
+        }
     }
 }
 
-fn allow_json(agent_type: AgentType) -> String {
-    match agent_type {
-        AgentType::Claude | AgentType::Shoal => json!({"continue": true}).to_string(),
-        AgentType::Gemini => json!({}).to_string(),
-    }
+fn allow_json() -> String {
+    json!({"continue": true}).to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{allow_json, stop_verdict};
-    use exo_caps::AgentType;
     use exo_framework::StopDecision;
 
     #[test]
-    fn allow_shape_per_agent_type() {
-        assert_eq!(allow_json(AgentType::Claude), r#"{"continue":true}"#);
-        assert_eq!(allow_json(AgentType::Shoal), r#"{"continue":true}"#);
-        assert_eq!(allow_json(AgentType::Gemini), "{}");
+    fn allow_shape_is_claude() {
+        assert_eq!(allow_json(), r#"{"continue":true}"#);
     }
 
     #[test]
-    fn stop_allow_shapes_per_agent_type() {
-        assert_eq!(
-            stop_verdict(StopDecision::Allow, AgentType::Claude),
-            r#"{"continue":true}"#
-        );
-        assert_eq!(stop_verdict(StopDecision::Allow, AgentType::Gemini), "{}");
+    fn stop_allow_shape_is_claude() {
+        assert_eq!(stop_verdict(StopDecision::Allow), r#"{"continue":true}"#);
     }
 
     #[test]
-    fn stop_block_emits_block_for_claude() {
-        let out = stop_verdict(
-            StopDecision::Block {
-                reason: "commit first".into(),
-            },
-            AgentType::Claude,
-        );
+    fn stop_block_emits_block() {
+        let out = stop_verdict(StopDecision::Block {
+            reason: "commit first".into(),
+        });
         assert!(out.contains(r#""decision":"block""#));
         assert!(out.contains("commit first"));
-    }
-
-    #[test]
-    fn stop_block_is_downgraded_to_allow_for_gemini() {
-        // The #20426 safety net: a Gemini Stop block must NEVER reach the agent as `deny`
-        // (it can infinite-loop). It is downgraded to the allow shape.
-        let out = stop_verdict(
-            StopDecision::Block {
-                reason: "should be swallowed".into(),
-            },
-            AgentType::Gemini,
-        );
-        assert_eq!(out, "{}");
-        assert!(!out.contains("deny"));
-        assert!(!out.contains("should be swallowed"));
     }
 }

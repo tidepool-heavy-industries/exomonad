@@ -26,9 +26,8 @@ pub fn pre_tool_use<'a, R: Send + Sync>(
     let tool_input = input.tool_input.clone();
 
     Box::pin(async move {
-        // Antipattern: Avoid `git add .` or `git add -A`.
-        // Appears in Gemini's `run_shell_command` and Claude's `Bash`.
-        if tool_name == "run_shell_command" || tool_name == "Bash" {
+        // Antipattern: Avoid `git add .` or `git add -A` (Claude's `Bash` tool).
+        if tool_name == "Bash" {
             if let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) {
                 let parts: Vec<&str> = cmd.split_whitespace().collect();
                 for i in 0..parts.len() {
@@ -126,11 +125,11 @@ pub fn stop_allow<R: Send + Sync>(_ctx: &R) -> BoxFuture<'_, StopDecision> {
     Box::pin(async move { StopDecision::Allow })
 }
 
-/// Stop hook for Gemini leaves (dev, worker): notify the parent this node yielded control (but
-/// ONLY when the subtree is quiescent; skip if a child is busy), then ALWAYS allow exit. It NEVER
-/// blocks — Gemini's `AfterAgent` `deny` can infinite-loop (gemini-cli #20426), so a Gemini role
-/// must not block at stop. The committed-before-fold guarantee for a dev is enforced by
-/// `submit_branch`'s committed-check, not here; a worker is inline with no branch to fold.
+/// Stop hook for leaves (dev, worker): notify the parent this node yielded control (but ONLY when
+/// the subtree is quiescent; skip if a child is busy), then ALWAYS allow exit. It NEVER blocks —
+/// a leaf has no subtree to fold, so gating its exit would only risk wedging it. The
+/// committed-before-fold guarantee for a dev is enforced by `submit_branch`'s committed-check, not
+/// here; a worker is inline with no branch to fold.
 pub fn stop_notify<'a, R: Bus + ChildLiveness + Send + Sync>(
     ctx: &'a R,
 ) -> BoxFuture<'a, StopDecision> {
@@ -142,13 +141,12 @@ pub fn stop_notify<'a, R: Bus + ChildLiveness + Send + Sync>(
     })
 }
 
-/// Stop hook for a reviewer (Gemini, one-shot). A reviewer's `verdict` IS its done-signal, so on
-/// the happy path (verdict produced) this stays SILENT — the sidecar already escalated `[READY]`
-/// with no LLM turn. But a reviewer that ends its turn WITHOUT a verdict (e.g. it emitted the call
-/// as prose) would otherwise vanish silently and stall the submitter forever, so deliver a loud
-/// `ReviewAborted` to the parent. ALWAYS allows exit — never block a Gemini at stop (gemini-cli
-/// #20426). Biases LOUD: a kv-read error is treated as no-verdict (a spurious re-submit beats a
-/// silent stall).
+/// Stop hook for a reviewer (one-shot). A reviewer's `verdict` IS its done-signal, so on the happy
+/// path (verdict produced) this stays SILENT — the sidecar already escalated `[READY]` with no LLM
+/// turn. But a reviewer that ends its turn WITHOUT a verdict (e.g. it emitted the call as prose)
+/// would otherwise vanish silently and stall the submitter forever, so deliver a loud
+/// `ReviewAborted` to the parent. ALWAYS allows exit (it's ephemeral — nothing to fold). Biases
+/// LOUD: a kv-read error is treated as no-verdict (a spurious re-submit beats a silent stall).
 pub fn stop_reviewer<'a, R: Bus + Kv + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, StopDecision> {
     Box::pin(async move {
         let produced = matches!(ctx.get("verdict_produced").await, Ok(Some(_)));
@@ -292,7 +290,7 @@ mod tests {
     #[tokio::test]
     async fn test_stop_notify_never_blocks_even_if_deliver_fails() {
         let ctx = MockRuntime::failing("deliver");
-        // Even when the bus delivery errors, a Gemini stop must allow exit (never block).
+        // Even when the bus delivery errors, a leaf's stop must allow exit (never block).
         assert_eq!(stop_notify(&ctx).await, StopDecision::Allow);
     }
 
@@ -309,7 +307,7 @@ mod tests {
     #[tokio::test]
     async fn test_pre_tool_use_git_add_antipattern_denied() {
         let ctx = MockRuntime::default();
-        let tools = ["run_shell_command", "Bash"];
+        let tools = ["Bash"];
 
         for tool in tools {
             let input = HookInput {
@@ -357,7 +355,7 @@ mod tests {
 
         for cmd in cases {
             let input = HookInput {
-                tool_name: "run_shell_command".into(),
+                tool_name: "Bash".into(),
                 tool_input: json!({ "command": cmd }),
             };
             assert_eq!(

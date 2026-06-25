@@ -16,8 +16,7 @@ impl RoleKind for TestRole {
     }
     fn agent_type(&self) -> AgentType {
         match self {
-            TestRole::Root => AgentType::Claude,
-            TestRole::Dev => AgentType::Gemini,
+            TestRole::Root | TestRole::Dev => AgentType::Claude,
         }
     }
     fn role_str(&self) -> &'static str {
@@ -98,7 +97,7 @@ fn test_summary_roundtrip() {
 
 #[test]
 fn test_agent_type_roundtrip() {
-    for variant in [AgentType::Claude, AgentType::Gemini, AgentType::Shoal] {
+    for variant in [AgentType::Claude, AgentType::Shoal] {
         assert_roundtrip(&variant);
     }
 }
@@ -300,6 +299,7 @@ fn test_child_record_roundtrip() {
         kind: ChildKind::Worktree,
         pane: PaneId::new("%2".into()).unwrap(),
         inbox: InboxPath::new("/tmp/i".into()),
+        model_label: None,
     };
     let r2 = ChildRecord::Started {
         child: AgentName::new("a".into()).unwrap(),
@@ -329,11 +329,13 @@ fn test_topology_roundtrip() {
         kind: None,
         pane: "%1".into(),
         pane_alive: true,
+        model_label: None,
         children: vec![TreeNode {
             name: "child".into(),
             kind: Some(ChildKind::Worktree),
             pane: "%2".into(),
             pane_alive: false,
+            model_label: Some("kimi".into()),
             children: vec![],
         }],
     };

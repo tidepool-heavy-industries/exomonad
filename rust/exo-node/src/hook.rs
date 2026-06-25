@@ -59,8 +59,8 @@ fn identity_context<D: Exomonad>(ctx: &NodeContext<D>) -> String {
     // Claude nodes lead a solo team so the Bus's last hop can deliver native <teammate-message>s.
     // Team names are a GLOBAL namespace, so the agent picking its own collides across re-runs /
     // siblings → TeamCreate fails → the node leads no team → delivery degrades to tmux paste.
-    // Mint a run-scoped unique name here instead. Gemini has no TeamCreate (it receives via
-    // paste), so it gets no team instruction.
+    // Mint a run-scoped unique name here instead. Every tree node is a Claude instance; a non-Claude
+    // companion (Shoal) gets no team instruction (it receives via paste).
     let team_line = if ctx.kind.agent_type() == exo_caps::AgentType::Claude {
         let run8: String = ctx.run_id.chars().take(8).collect();
         let safe_name: String = name
@@ -222,13 +222,17 @@ mod tests {
         assert!(id.contains("(role: dev)"));
         assert!(id.contains("on branch 'main.root.dev-node'"));
         assert!(id.contains("Parent: root"));
-        // Gemini (Dev) receives via tmux paste — it must NOT be told to create a team.
+        // Dev is a Claude instance now — it leads a solo team so its parent can reach it natively.
         assert!(
-            !id.contains("TeamCreate"),
-            "Gemini must get no team instruction: {id}"
+            id.contains("TeamCreate"),
+            "Claude dev must get a team instruction: {id}"
+        );
+        assert!(
+            id.contains("exo-dev-node-run-123"),
+            "expected run-scoped team name: {id}"
         );
 
-        // Claude (Tl) leads a solo team with a run-scoped, globally-unique name (`run-123`[..8]).
+        // Tl also leads a solo team with a run-scoped, globally-unique name (`run-123`[..8]).
         let ctx_tl = mock_ctx(
             TestRole::Tl,
             vec!["root", "tl-node"],
@@ -281,11 +285,11 @@ mod tests {
             .unwrap();
         assert!(add_ctx.contains("dev-node"));
         assert!(add_ctx.contains("role: dev"));
-        // Dev is Gemini — its protocol goes via the settings.json context file, NEVER appended to
-        // the session-start additionalContext.
+        // A role's protocol is delivered via the launch-time --append-system-prompt, NEVER appended
+        // to the session-start additionalContext.
         assert!(
             !add_ctx.contains("TEST-DEV-PROTOCOL-MARKER"),
-            "Gemini protocol must not be appended to additionalContext: {add_ctx}"
+            "role protocol must not be appended to additionalContext: {add_ctx}"
         );
     }
 

@@ -6,7 +6,7 @@
 //! ```text
 //!   exo init [--session <s>] [--recreate]   # bootstrap a node-mode ROOT (own tmux session, no server)
 //!   exo node --papers <path>                # run the node-mode sidecar for the node described by <path>
-//!   exo hook <event> --papers <path>        # handle a CC/Gemini hook via the node's exo gates
+//!   exo hook <event> --papers <path>        # handle a CC hook via the node's exo gates
 //! ```
 
 mod config;
@@ -59,7 +59,7 @@ enum Commands {
         #[arg(value_enum)]
         event: HookEventType,
 
-        /// The runtime environment (Claude or Gemini). Reserved/unused in this path.
+        /// The agent runtime. Reserved/unused in this path (every node-mode agent is Claude).
         #[arg(long, default_value = "claude")]
         runtime: HookRuntime,
 
@@ -92,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
                 cfg.model.as_deref(),
                 cfg.yolo,
                 cfg.wrap_nix,
+                &cfg.profile_env,
                 session,
                 recreate,
             )

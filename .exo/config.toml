@@ -9,3 +9,11 @@ otlp_endpoint = "http://localhost:4317"
 type = "stdio"
 command = "vendor/notebooklm-mcp/result/bin/notebooklm-mcp"
 args = []
+
+# Run the reviewer on Kimi-K2 via the local claude-code-proxy (still a Claude process,
+# so Teams/hooks/MCP are unchanged). Unset this table ⇒ a normal Sonnet reviewer.
+[launch_profile.reviewer]
+base_url = "http://localhost:18765"
+model = "kimi-for-coding"
+auth_token = "unused"   # proxy holds the real OAuth; this value is ignored
+label = "kimi"

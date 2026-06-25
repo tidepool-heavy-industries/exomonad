@@ -27,6 +27,13 @@ pub enum ChildRecord {
         kind: ChildKind,
         pane: PaneId,
         inbox: InboxPath,
+        /// Non-secret cosmetic tag for a node whose Claude is launched on a non-default model via a
+        /// [`launch_profile_env_prefix`](crate::RoleKind::launch_profile_env_prefix) (e.g. `"kimi"`).
+        /// `None` for a default-Claude node. Surfaced in the tmux window + the `tree` tool; the
+        /// auth token behind the redirect is **never** recorded here. Defaulted on read so existing
+        /// ledgers parse.
+        #[serde(default)]
+        model_label: Option<String>,
     },
     /// Appended by the **child** on boot (its check-in). A `Spawned` with no matching
     /// `Started` after a timeout is a failed/ghost spawn → the parent reaps/retries.
@@ -65,6 +72,8 @@ pub struct Child {
     pub pane: PaneId,
     pub inbox: InboxPath,
     pub lifecycle: ChildLifecycle,
+    /// Cosmetic model tag (e.g. `"kimi"`) folded from the `Spawned` record; `None` for default Claude.
+    pub model_label: Option<String>,
 }
 
 /// Fold append-only records into the current child set, **keyed by name** — uniqueness
@@ -81,6 +90,7 @@ pub fn fold_children(records: &[ChildRecord]) -> BTreeMap<AgentName, Child> {
                 kind,
                 pane,
                 inbox,
+                model_label,
             } => {
                 map.insert(
                     child.clone(),
@@ -90,6 +100,7 @@ pub fn fold_children(records: &[ChildRecord]) -> BTreeMap<AgentName, Child> {
                         pane: pane.clone(),
                         inbox: inbox.clone(),
                         lifecycle: ChildLifecycle::Spawned,
+                        model_label: model_label.clone(),
                     },
                 );
             }
@@ -125,12 +136,14 @@ mod tests {
                 kind: ChildKind::Worktree,
                 pane: pane("%1"),
                 inbox: inbox(),
+                model_label: None,
             },
             ChildRecord::Spawned {
                 child: name("b"),
                 kind: ChildKind::Inline,
                 pane: pane("%2"),
                 inbox: inbox(),
+                model_label: Some("kimi".into()),
             },
             ChildRecord::Started { child: name("a") },
         ];
@@ -138,6 +151,9 @@ mod tests {
         assert_eq!(kids.len(), 2);
         assert_eq!(kids[&name("a")].lifecycle, ChildLifecycle::Started);
         assert_eq!(kids[&name("b")].lifecycle, ChildLifecycle::Spawned); // ghost-spawn candidate
+        // the cosmetic model tag folds through from the Spawned record
+        assert_eq!(kids[&name("a")].model_label, None);
+        assert_eq!(kids[&name("b")].model_label.as_deref(), Some("kimi"));
     }
 
     #[test]
@@ -148,12 +164,14 @@ mod tests {
                 kind: ChildKind::Worktree,
                 pane: pane("%1"),
                 inbox: inbox(),
+                model_label: None,
             },
             ChildRecord::Spawned {
                 child: name("a"),
                 kind: ChildKind::Worktree,
                 pane: pane("%9"),
                 inbox: inbox(),
+                model_label: None,
             },
         ];
         let kids = fold_children(&recs);

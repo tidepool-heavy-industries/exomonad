@@ -59,10 +59,10 @@ Human in tmux session
     └── Claude Code (main window, role=tl)
             ├── MCP server: exomonad mcp-stdio
             ├── WASM: loaded from .exo/wasm/ at runtime
-            └── fork_wave / spawn_gemini creates:
-                ├── Window subtree-1 (Claude, worktree off current branch, role=tl)
-                ├── Window leaf-1 (Gemini, worktree off current branch, role=dev)
-                ├── Pane worker-a (Gemini, in parent dir, ephemeral, role=worker)
+            └── fork_wave / spawn_dev creates:
+                ├── Window subtree-1 (Claude session-default, worktree off current branch, role=tl)
+                ├── Window leaf-1 (Claude Sonnet, worktree off current branch, role=dev)
+                ├── Pane worker-a (Claude Sonnet, in parent dir, ephemeral, role=worker)
                 └── ... (recursive tree of worktrees + workers)
 ```
 
@@ -75,15 +75,15 @@ Each subtree agent (`spawn_subtree`):
 - PRs target parent branch, not main — merged via recursive fold
 - Runs in tmux window with `claude 'task'` (positional arg), auto-closes on exit
 
-Each leaf agent (`spawn_gemini` with worktree/standalone isolation):
+Each leaf agent (`spawn_dev` with worktree isolation):
 - Same worktree isolation as `spawn_subtree` (own branch, own directory)
-- Gemini — dev role (no spawn tools)
-- Runs in tmux window, files PR against parent branch
+- Sonnet Claude — dev role (no spawn tools)
+- Runs in tmux window, commits and `submit_branch`es against parent branch
 
-Each worker agent (`spawn_gemini` with inline isolation):
+Each worker agent (`spawn_worker`, inline isolation):
 - Runs in a tmux pane in the parent's directory (no branch, no worktree, ephemeral)
-- Always Gemini — lightweight, focused execution
-- MCP config in `.exo/agents/{name}/settings.json`, pointed via `GEMINI_CLI_SYSTEM_SETTINGS_PATH`
+- Sonnet Claude — lightweight, focused execution
+- `.mcp.json` + `.claude/settings.local.json` in the parent's worktree (CWD-discovered)
 
 ## Documentation Tree
 

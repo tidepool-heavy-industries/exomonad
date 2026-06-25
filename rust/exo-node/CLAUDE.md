@@ -14,10 +14,10 @@ Assembles `exo-runtime` (all caps) + a domain `D: Exomonad` (the domain's tools/
 |--------|------|------|
 | `outbound` (N1) | serve | Serve `role_def(kind).tools` as MCP over stdio (`tools/list` emits each tool's `name`/`description`/`inputSchema`, so the toolset is self-documenting). **Owns stdin/stdout → the node's lifetime anchor** (when it closes, the node ends). |
 | `inbound` (N2b) | watch | Watch the node's own ingestion inbox (byte-offset cursor + `notify` watch), route each new entry. |
-| `hooksock` (N5) | serve | Per-agent UDS hook-RPC channel — runs the role hook fn on the live runtime and shapes the verdict per agent_type (never a Gemini Stop deny). |
+| `hooksock` (N5) | serve | Per-agent UDS hook-RPC channel — runs the role hook fn on the live runtime and shapes the verdict as the Claude hook-output JSON (`{"continue":true}` / `{"decision":"block",...}`). |
 | `teamout` (N6) | watch | **Outbound Teams bridge (Claude-only, Linux-only).** Watches this node's own CC team inboxes for messages the agent *sent* to a teammate (native `SendMessage` / `shutdown_request`), maps the recipient name → tree-edge `Addressee`, and forwards onto the bus. The reverse of `dispatch`. No roster authored (a child self-registers as a teammate when it first messages up); sidecar-owned processed-count cursor, never writes CC's inboxes. |
 | `dispatch` (N2a) | — | The **last hop**: deliver one entry into the agent's native interface (Teams inbox or tmux paste). |
-| `hook` (N4) | one-shot | `exo hook <event>` → bootstrap from papers → run the role's `pre_tool_use`/`stop`/`session_start` → print the verdict. No server. On SessionStart for a **Claude** node it appends the node identity + team lines to the `additionalContext`; its role protocol is delivered via the launch-time system prompt instead. |
+| `hook` (N4) | one-shot | `exo hook <event>` → bootstrap from papers → run the role's `pre_tool_use`/`stop`/`session_start` → print the verdict. No server. On SessionStart it appends the node identity + team lines to the `additionalContext`; the role protocol is delivered via the launch-time `--append-system-prompt` instead. |
 | `bootstrap` | — | Self-ID: read `--papers` → `NodePapers`, enrich with ambient env (`$TMUX_PANE`, `EXOMONAD_SWARM_RUN_ID`, `EXOMONAD_TMUX_SESSION`, `$HOME`), build `NodeContext<D> { runtime, kind, own_inbox, parent_inbox, ... }`. |
 | `error` | — | `NodeError`. |
 
@@ -49,11 +49,11 @@ The sidecar initializes a persistent file subscriber at startup (in the binary c
 `dispatch` decides the last hop by the node's `agent_type`:
 
 - **Claude in a team** → write the team's **lead inbox**; the agent's own CC `InboxPoller` renders it as a native `<teammate-message>`. The team is resolved via **`exo_scry::resolve_self_or_portable()`** (solo-team-per-session): primary path is `resolve_self()`, which walks the sidecar → parent `claude` process and reads that process's inotify-bound team dir — without a `tmux_pane_id` (which CC omits from team config — that's why `resolve_by_pane` never fired and native delivery used to fail; see `node-native-teams-delivery` memory). On `resolve_self`'s failure (no team, or a transient `/proc`/config race) it falls back to the portable `resolve_via_transcript` path (cwd→transcript→`resolve_by_session`). **This portable fallback is WIRED but UNTESTED on non-Linux:** its cwd reader is currently Linux-only, so off-Linux `resolve_self_or_portable()` returns `None` and the node degrades to tmux paste. On Linux, `resolve_self` succeeds in the common case, so the fallback rung is rarely hit and is itself effectively untested.
-- **Claude with no team, or Gemini** → `Tmux::paste` into the pane.
+- **Claude with no team (or a Shoal companion)** → `Tmux::paste` into the pane.
 
 Delivery always works, only degrades — Teams is a *nicety*, tmux-paste is the floor. The `SessionStart` hook tells a Claude node to `TeamCreate` if it doesn't already lead a team.
 
-The bridge is **bidirectional** for Claude nodes: `dispatch` is the inbound last hop (bus → the agent's lead inbox → native `<teammate-message>`), and `teamout` (N6) is the outbound one (the agent's native `SendMessage`/`shutdown_request` → bus → the addressed tree edge). So a Claude node can just use its native team tools to talk to its parent/children — no exomonad-specific tool required (the MCP `send_message`/`notify_parent` tools remain for Gemini, which has no team, and as a fallback).
+The bridge is **bidirectional** for every tree node (all Claude): `dispatch` is the inbound last hop (bus → the agent's lead inbox → native `<teammate-message>`), and `teamout` (N6) is the outbound one (the agent's native `SendMessage`/`shutdown_request` → bus → the addressed tree edge). So a node can just use its native team tools to talk to its parent/children — no exomonad-specific tool required. The MCP `send_message`/`notify_parent` tools remain as a fallback (and for a teamless node or a Shoal companion, which have no native team).
 
 ## Gaps / not-yet
 

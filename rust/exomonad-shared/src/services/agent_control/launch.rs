@@ -69,6 +69,13 @@ pub fn build_agent_command(
                 }
             }
 
+            if let Some(model) = claude_flags.and_then(|f| f.model.as_deref()) {
+                if !model.trim().is_empty() {
+                    flags.push_str(" --model ");
+                    flags.push_str(&shell_escape::escape(model.into()));
+                }
+            }
+
             flags
         }
         AgentType::Gemini => {
@@ -231,5 +238,53 @@ mod tests {
             !cmd.contains("@.exo/tmp"),
             "Claude path should not use the Gemini @-reference form: {cmd}"
         );
+    }
+
+    #[test]
+    fn claude_model_flag_emitted_from_spawn_flags() {
+        // The node-mode leaf path pins cheap roles to a model via ClaudeSpawnFlags::model.
+        let cwd = Path::new("/home/u/dev/proj/.exo/worktrees/leaf");
+        let pf = cwd.join(".exo/tmp/prompt.txt");
+        let env = HashMap::new();
+        let flags = ClaudeSpawnFlags {
+            model: Some("sonnet".into()),
+            ..Default::default()
+        };
+        let cmd = build_agent_command(
+            AgentType::Claude,
+            Some(&pf),
+            None,
+            &env,
+            cwd,
+            Some(&flags),
+            false,
+            false,
+            None,
+        );
+        assert!(cmd.contains("--model sonnet"), "expected --model sonnet: {cmd}");
+        assert!(
+            cmd.contains("--dangerously-skip-permissions"),
+            "model flag must not disturb the default permission mode: {cmd}"
+        );
+    }
+
+    #[test]
+    fn claude_no_model_flag_when_unset() {
+        // root/tl pass no model → no --model flag (inherit the launcher default).
+        let cwd = Path::new("/home/u/dev/proj/.exo/worktrees/tl");
+        let pf = cwd.join(".exo/tmp/prompt.txt");
+        let env = HashMap::new();
+        let cmd = build_agent_command(
+            AgentType::Claude,
+            Some(&pf),
+            None,
+            &env,
+            cwd,
+            None,
+            false,
+            false,
+            None,
+        );
+        assert!(!cmd.contains("--model"), "no model flag expected when unset: {cmd}");
     }
 }

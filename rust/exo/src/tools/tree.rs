@@ -93,6 +93,11 @@ impl Tree {
 
         let mut status_bits = Vec::new();
 
+        // 0. Model label (e.g. "kimi") for a node on a non-default brain via a launch profile.
+        if let Some(label) = &node.model_label {
+            status_bits.push(label.as_str());
+        }
+
         // 1. Busy bit (from parent's view)
         if let Some(ps) = parent_status {
             if let Some(cs) = ps.children.iter().find(|c| c.name == node.name) {

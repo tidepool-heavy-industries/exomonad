@@ -27,19 +27,6 @@ pub fn status_path(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
         .join(format!("pane-{n}.json"))
 }
 
-/// A Gemini child's `settings.json`: `{home}/.claude/exo/agents/{run_id}/pane-{n}/settings.json`.
-/// Per-pane (NOT under the child's worktree) because **inline** children share their parent's
-/// worktree as cwd — writing `settings.json` there would have siblings clobber each other's
-/// config (and thus their identity). Gemini reads it via the absolute `GEMINI_CLI_SYSTEM_SETTINGS_PATH`
-/// env var, so the location is free to be per-pane.
-pub fn gemini_settings_path(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
-    let n = pane.as_str().trim_start_matches('%');
-    home.join(".claude/exo/agents")
-        .join(run_id)
-        .join(format!("pane-{n}"))
-        .join("settings.json")
-}
-
 /// Sidecar-owned cursor for the outbound Teams watcher: a JSON map `{member → processed-count}`
 /// at `{home}/.claude/exo/teamcursor/{run_id}/pane-{n}.json`. We track our OWN high-water-mark
 /// here rather than marking CC's inbox `read` — CC is the concurrent writer of those inboxes, so
@@ -84,22 +71,6 @@ mod tests {
             papers,
             Path::new("/home/user/.claude/exo/papers/run-42/pane-317.json")
         );
-
-        let settings = gemini_settings_path(home, run_id, &pane);
-        assert_eq!(
-            settings,
-            Path::new("/home/user/.claude/exo/agents/run-42/pane-317/settings.json")
-        );
-    }
-
-    #[test]
-    fn gemini_settings_path_is_per_pane() {
-        // The whole point of the fix: two inline siblings (sharing a worktree) get DISTINCT
-        // settings files, so neither clobbers the other's papers pointer / identity.
-        let home = Path::new("/home/user");
-        let a = gemini_settings_path(home, "run", &PaneId::new("%31".into()).unwrap());
-        let b = gemini_settings_path(home, "run", &PaneId::new("%32".into()).unwrap());
-        assert_ne!(a, b);
     }
 
     #[test]
