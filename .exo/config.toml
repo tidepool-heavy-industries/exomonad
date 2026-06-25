@@ -17,3 +17,10 @@ base_url = "http://localhost:18765"
 model = "kimi-for-coding"
 auth_token = "unused"   # proxy holds the real OAuth; this value is ignored
 label = "kimi"
+
+# Ephemeral in-pane workers (spawn_worker) on Kimi too — the old Gemini-worker slot.
+[launch_profile.worker]
+base_url = "http://localhost:18765"
+model = "kimi-for-coding"
+auth_token = "unused"
+label = "kimi"

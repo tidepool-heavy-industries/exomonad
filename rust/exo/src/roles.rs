@@ -67,11 +67,13 @@ impl RoleKind for ExoRole {
     }
     fn launch_profile_env_prefix(&self) -> Option<&'static str> {
         match self {
-            // The reviewer can run on a non-Claude brain (e.g. Kimi via a local proxy) when the
-            // operator sets `EXO_REVIEWER_{BASE_URL,MODEL,AUTH_TOKEN,LABEL}`. Backend-agnostic +
-            // opt-in: unset env ⇒ a normal Sonnet reviewer. Adding another role is one more arm.
+            // The reviewer and ephemeral in-pane workers can run on a non-Claude brain (e.g. Kimi
+            // via a local proxy) when the operator sets `EXO_<ROLE>_{BASE_URL,MODEL,AUTH_TOKEN,LABEL}`
+            // (or the `[launch_profile.<role>]` config). Backend-agnostic + opt-in: unset ⇒ a normal
+            // Sonnet leaf. TLs/root/dev stay on Claude. Adding another role is one more arm.
             ExoRole::Reviewer => Some("EXO_REVIEWER"),
-            ExoRole::Root | ExoRole::Tl | ExoRole::Dev | ExoRole::Worker => None,
+            ExoRole::Worker => Some("EXO_WORKER"),
+            ExoRole::Root | ExoRole::Tl | ExoRole::Dev => None,
         }
     }
     fn protocol(&self) -> &'static str {
@@ -261,10 +263,13 @@ mod tests {
                     assert_eq!(kind.model(), Some("sonnet"))
                 }
             }
-            // Only the reviewer carries a launch-profile prefix (opt-in non-Claude brain).
+            // Reviewer + worker carry a launch-profile prefix (opt-in non-Claude brain).
             match kind {
                 ExoRole::Reviewer => {
                     assert_eq!(kind.launch_profile_env_prefix(), Some("EXO_REVIEWER"))
+                }
+                ExoRole::Worker => {
+                    assert_eq!(kind.launch_profile_env_prefix(), Some("EXO_WORKER"))
                 }
                 _ => assert_eq!(kind.launch_profile_env_prefix(), None),
             }

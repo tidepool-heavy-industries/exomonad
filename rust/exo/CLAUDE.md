@@ -87,9 +87,9 @@ Every role is a Claude instance; the **model** varies per role via `ExoRole::mod
 | **Worker** | Claude (Sonnet) | notify_parent | `stop_notify` (inline child, no branch to fold, but still signals on yield) |
 | **Reviewer** | Claude (Sonnet, or a launch-profile brain) | verdict, notify_parent | `stop_reviewer` (ephemeral; its `verdict` is its done-signal; emits `ReviewAborted` if it exits without one) |
 
-The reviewer is the one role with a **launch profile** (`ExoRole::launch_profile_env_prefix` → `Some("EXO_REVIEWER")`): its Claude can be redirected to a non-default Anthropic-compatible endpoint/model (e.g. Kimi via a local `claude-code-proxy`) — still a Claude process, so Teams/hooks/MCP are unchanged. Configure it in `.exo/config.toml` (the convenient path):
+The **reviewer** and ephemeral in-pane **worker** roles carry a **launch profile** (`ExoRole::launch_profile_env_prefix` → `Some("EXO_REVIEWER")` / `Some("EXO_WORKER")`): their Claude can be redirected to a non-default Anthropic-compatible endpoint/model (e.g. Kimi via a local `claude-code-proxy`) — still a Claude process, so Teams/hooks/MCP are unchanged (the old Gemini-worker slot, now Kimi). Configure per-role in `.exo/config.toml` (the convenient path):
 ```toml
-[launch_profile.reviewer]
+[launch_profile.reviewer]   # and/or [launch_profile.worker]
 base_url = "http://localhost:18765"
 model = "kimi-for-coding"
 auth_token = "unused"      # the proxy ignores it; a real key can instead live in the env (env wins)
