@@ -235,7 +235,7 @@ impl<R: Send + Sync> Tool<R> for EchoTool {
         "echo description"
     }
     fn schema(&self) -> Value {
-        schema_json(schemars::schema_for!(EchoArgs))
+        schema_json::<EchoArgs>()
     }
     async fn call(&self, _ctx: &R, j: Value) -> CapResult<Value> {
         let args: EchoArgs = parse(j)?;

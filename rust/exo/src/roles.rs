@@ -202,7 +202,9 @@ mod tests {
         assert!(ExoRole::Worker.protocol().contains("Worker Agent Protocol"));
         assert!(ExoRole::Reviewer.protocol().contains("Reviewer Protocol"));
         // T1.3: intent-cue anchoring lives in the protocol too, not just the spawn task.
-        assert!(ExoRole::Reviewer.protocol().contains("do NOT lower the bar"));
+        assert!(ExoRole::Reviewer
+            .protocol()
+            .contains("do NOT lower the bar"));
         // v2-accurate: no classic plumbing leaked into the steering prose.
         for kind in ExoRole::all() {
             let p = kind.protocol();

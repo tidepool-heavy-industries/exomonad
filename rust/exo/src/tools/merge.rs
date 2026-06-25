@@ -80,7 +80,7 @@ impl<R: Git + Spawner + Send + Sync> Tool<R> for Merge {
     }
 
     fn schema(&self) -> serde_json::Value {
-        schema_json(schemars::schema_for!(MergeArgs))
+        schema_json::<MergeArgs>()
     }
 
     async fn call(&self, ctx: &R, args: serde_json::Value) -> CapResult<serde_json::Value> {

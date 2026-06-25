@@ -157,9 +157,11 @@ pub async fn run(
     const PROFILE_SUFFIXES: [&str; 4] = ["_BASE_URL", "_MODEL", "_AUTH_TOKEN", "_LABEL"];
     let mut profile_vars: std::collections::BTreeMap<String, String> =
         profile_env.iter().cloned().collect();
-    profile_vars.extend(std::env::vars().filter(|(k, _)| {
-        k.starts_with("EXO_") && PROFILE_SUFFIXES.iter().any(|s| k.ends_with(s))
-    }));
+    profile_vars.extend(
+        std::env::vars().filter(|(k, _)| {
+            k.starts_with("EXO_") && PROFILE_SUFFIXES.iter().any(|s| k.ends_with(s))
+        }),
+    );
     let profile_env: String = profile_vars
         .into_iter()
         .map(|(k, v)| format!("{k}={} ", shell_escape::escape(v.into())))

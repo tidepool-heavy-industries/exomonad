@@ -79,7 +79,7 @@ impl<R: Spawner + Send + Sync> Tool<R> for SpawnWorker {
          After spawning, return immediately — idle and wait, do not poll."
     }
     fn schema(&self) -> serde_json::Value {
-        schema_json(schemars::schema_for!(SpawnWorkerArgs))
+        schema_json::<SpawnWorkerArgs>()
     }
     async fn call(&self, ctx: &R, args: serde_json::Value) -> CapResult<serde_json::Value> {
         let parsed = parse(args)?;
@@ -158,7 +158,7 @@ impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnDev {
          — idle and wait for [READY], do not poll."
     }
     fn schema(&self) -> serde_json::Value {
-        schema_json(schemars::schema_for!(SpawnDevArgs))
+        schema_json::<SpawnDevArgs>()
     }
     async fn call(&self, ctx: &R, args: serde_json::Value) -> CapResult<serde_json::Value> {
         let parsed = parse(args)?;
@@ -275,7 +275,7 @@ impl<R: Spawner + Fs + Send + Sync> Tool<R> for ForkWave {
          poll."
     }
     fn schema(&self) -> serde_json::Value {
-        schema_json(schemars::schema_for!(ForkWaveArgs))
+        schema_json::<ForkWaveArgs>()
     }
     async fn call(&self, ctx: &R, args: serde_json::Value) -> CapResult<serde_json::Value> {
         let parsed = parse(args)?;

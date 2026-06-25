@@ -113,7 +113,7 @@ impl<R: Bus + Send + Sync> Tool<R> for SubmitAudit {
         "Emit an AuditComplete system signal to the parent."
     }
     fn schema(&self) -> serde_json::Value {
-        schema_json(schemars::schema_for!(SubmitAuditArgs))
+        schema_json::<SubmitAuditArgs>()
     }
     async fn call(&self, ctx: &R, j: serde_json::Value) -> CapResult<serde_json::Value> {
         ok_json(Self::run(ctx, parse(j)?).await?)

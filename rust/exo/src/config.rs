@@ -169,9 +169,15 @@ mod tests {
             env,
             vec![
                 ("EXO_REVIEWER_AUTH_TOKEN".to_string(), "unused".to_string()),
-                ("EXO_REVIEWER_BASE_URL".to_string(), "http://localhost:18765".to_string()),
+                (
+                    "EXO_REVIEWER_BASE_URL".to_string(),
+                    "http://localhost:18765".to_string()
+                ),
                 ("EXO_REVIEWER_LABEL".to_string(), "kimi".to_string()),
-                ("EXO_REVIEWER_MODEL".to_string(), "kimi-for-coding".to_string()),
+                (
+                    "EXO_REVIEWER_MODEL".to_string(),
+                    "kimi-for-coding".to_string()
+                ),
             ]
         );
     }
@@ -187,7 +193,10 @@ mod tests {
         // role name uppercased into the prefix; only the set field is emitted.
         assert_eq!(
             env,
-            vec![("EXO_WORKER_MODEL".to_string(), "kimi-for-coding".to_string())]
+            vec![(
+                "EXO_WORKER_MODEL".to_string(),
+                "kimi-for-coding".to_string()
+            )]
         );
     }
 

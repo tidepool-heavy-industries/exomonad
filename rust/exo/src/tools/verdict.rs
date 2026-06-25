@@ -92,7 +92,7 @@ impl<R: Bus + Kv + Send + Sync> Tool<R> for Verdict {
          The decision (approve vs request changes) is derived automatically from your findings."
     }
     fn schema(&self) -> serde_json::Value {
-        schema_json(schemars::schema_for!(VerdictArgs))
+        schema_json::<VerdictArgs>()
     }
     async fn call(&self, ctx: &R, j: serde_json::Value) -> CapResult<serde_json::Value> {
         ok_json(Self::run(ctx, parse(j)?).await?)
@@ -209,5 +209,24 @@ mod tests {
         )
         .await;
         assert!(res.is_err());
+    }
+}
+
+#[cfg(test)]
+mod schema_compat_tests {
+    use super::*;
+    use exo_framework::schema_json;
+    #[test]
+    fn verdict_schema_is_ref_free_for_strict_backends() {
+        let s = serde_json::to_string(&schema_json::<VerdictArgs>()).unwrap();
+        assert!(!s.contains("$ref"), "verdict schema still has $ref: {s}");
+        assert!(
+            !s.contains("definitions"),
+            "verdict schema still has definitions: {s}"
+        );
+        assert!(
+            s.contains("findings") && s.contains("severity"),
+            "findings inlined: {s}"
+        );
     }
 }

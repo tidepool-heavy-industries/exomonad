@@ -79,8 +79,15 @@ pub fn ok_json(out: ToolOutput) -> CapResult<Value> {
     })
 }
 
-/// Adapter helper: a tool's `schema()` body — `schema_json(schemars::schema_for!(MyArgs))`.
-pub fn schema_json(root: schemars::schema::RootSchema) -> Value {
+/// Adapter helper: a tool's `schema()` body — the JSON Schema for `T`, generated **inline**
+/// (`inline_subschemas`), so a nested type produces a self-contained object schema with **no
+/// `$ref` / `definitions`**. Anthropic resolves draft-07 `$ref`s fine, but stricter tool-schema
+/// validators reject them (Moonshot/Kimi only accept `#/$defs/` refs) — inlining sidesteps the
+/// dialect difference entirely, so the same tool works on Claude and on a proxy-backed brain.
+/// Usage: `fn schema(&self) -> Value { schema_json::<MyArgs>() }`.
+pub fn schema_json<T: schemars::JsonSchema>() -> Value {
+    let settings = schemars::gen::SchemaSettings::draft07().with(|s| s.inline_subschemas = true);
+    let root = settings.into_generator().into_root_schema_for::<T>();
     serde_json::to_value(root).expect("a derived JSON Schema always serializes")
 }
 
@@ -103,5 +110,30 @@ mod tests {
         let a: A = parse(serde_json::json!({ "n": 5 })).unwrap();
         assert_eq!(a.n, 5);
         assert!(parse::<A>(serde_json::json!({ "n": "not-a-number" })).is_err());
+    }
+
+    #[test]
+    fn schema_json_inlines_nested_structs_no_refs() {
+        // A tool schema with a nested struct must be self-contained: NO `$ref` / `definitions`.
+        // schemars' default (draft-07) emits `#/definitions/...` refs, which Anthropic resolves but
+        // Moonshot/Kimi reject — inlining keeps the same tool usable on every backend.
+        #[derive(schemars::JsonSchema)]
+        struct Inner {
+            x: u32,
+        }
+        #[derive(schemars::JsonSchema)]
+        struct Outer {
+            items: Vec<Inner>,
+        }
+        let text = serde_json::to_string(&schema_json::<Outer>()).unwrap();
+        assert!(!text.contains("$ref"), "schema must be ref-free: {text}");
+        assert!(
+            !text.contains("definitions"),
+            "schema must carry no definitions map: {text}"
+        );
+        assert!(
+            text.contains("items"),
+            "the nested array is still present: {text}"
+        );
     }
 }

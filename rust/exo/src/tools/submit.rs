@@ -318,7 +318,7 @@ impl<R: Git + Process + Spawner + Fs + Bus + Send + Sync> Tool<R> for SubmitBran
          auto-merged). After calling it, STOP and end your turn."
     }
     fn schema(&self) -> serde_json::Value {
-        schema_json(schemars::schema_for!(SubmitBranchArgs))
+        schema_json::<SubmitBranchArgs>()
     }
     async fn call(&self, ctx: &R, j: serde_json::Value) -> CapResult<serde_json::Value> {
         ok_json(Self::run(ctx, parse(j)?).await?)
