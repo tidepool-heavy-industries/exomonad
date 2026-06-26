@@ -7,7 +7,9 @@
 //! 1. **a new role / backend mapping** (`ProofRole`, incl. a brand-new `Auditor` archetype absent
 //!    from `exo` that maps to a **different backend** (Shoal) than its other roles),
 //! 2. **a novel inter-node System payload** (`ProofSystem::AuditComplete`),
-//! 3. **a novel inter-node tool** (`SubmitAudit`, which emits that payload via `deliver_domain`),
+//! 3. **a novel inter-node tool** (`SubmitAudit`, which emits that payload via `deliver_domain`;
+//!    implements [`ErasedTool`] directly — the open extensibility surface for runtime-named or
+//!    stateful tools, alongside the typed [`Tool`] authoring surface the 9 domain tools use),
 //! 4. **a domain spawn intent** (`ProofSpawn`).
 //!
 //! The proof is that this compiles and links `exo-node` (`run_node::<ProofDomain>` typechecks) with
@@ -20,8 +22,8 @@ use exo_caps::{
     Persona, RoleKind, SpawnSpec,
 };
 use exo_framework::{
-    ok_json, parse, schema_json, BoxFuture, Exomonad, RoleDef, SystemCtx, SystemOutcome, Tool,
-    ToolOutput,
+    ok_json, parse, schema_json, BoxFuture, ErasedTool, Exomonad, RoleDef, SystemCtx,
+    SystemOutcome, Tool, ToolOutput,
 };
 use exo_runtime::Runtime;
 use schemars::JsonSchema;
@@ -105,7 +107,7 @@ impl SubmitAudit {
 }
 
 #[async_trait]
-impl<R: Bus + Send + Sync> Tool<R> for SubmitAudit {
+impl<R: Bus + Send + Sync> ErasedTool<R> for SubmitAudit {
     fn name(&self) -> &str {
         "submit_audit"
     }
@@ -174,7 +176,7 @@ impl Exomonad for ProofDomain {
 
     fn role_def(role: ProofRole) -> RoleDef<Runtime> {
         // Every role gets the novel tool — direct construction in a match (struct-first).
-        let tools: Vec<Box<dyn Tool<Runtime>>> = match role {
+        let tools: Vec<Box<dyn ErasedTool<Runtime>>> = match role {
             ProofRole::Overseer | ProofRole::Auditor | ProofRole::ClaudeReviewer => {
                 vec![Box::new(SubmitAudit)]
             }

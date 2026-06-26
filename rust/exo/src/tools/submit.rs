@@ -18,7 +18,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use exo_framework::{ok_json, parse, schema_json, BoxFuture, Tool, ToolOutput};
+use exo_framework::{BoxFuture, Tool, ToolOutput};
 
 #[derive(serde::Deserialize)]
 struct CheckResult {
@@ -141,15 +141,24 @@ fn checks<C: Git + Process + Sync>() -> Vec<Check<C>> {
 /// The `submit_branch` tool.
 pub struct SubmitBranch;
 
-impl SubmitBranch {
-    pub async fn run<C: Git + Process + Spawner + Fs + Bus + Sync>(
-        ctx: &C,
-        args: SubmitBranchArgs,
-    ) -> CapResult<ToolOutput> {
+#[async_trait::async_trait]
+impl<R: Git + Process + Spawner + Fs + Bus + Send + Sync> Tool<R> for SubmitBranch {
+    const NAME: &'static str = "submit_branch";
+    const DESCRIPTION: &'static str =
+        "Request review of your branch. Commit everything first (it refuses on uncommitted changes \
+         or failing `.exo/checks/pre-merge` scripts), then it spawns a reviewer of your work and \
+         returns. Do NOT expect to merge yourself: on approval the sidecar escalates `[READY]` to \
+         your parent automatically; on deny / changes you'll be woken with feedback to address and \
+         re-submit. Set `dangerously_skip_reviewer: true` ONLY for a trivial/safe change to skip \
+         review and forward `[READY]` straight to your parent (it's flagged as unreviewed; not \
+         auto-merged). After calling it, STOP and end your turn.";
+    type Args = SubmitBranchArgs;
+
+    async fn run(ctx: &R, args: SubmitBranchArgs) -> CapResult<ToolOutput> {
         // Run the ordered preconditions; first failure blocks (surfaced as a tool error so the
         // agent sees the reason and can fix it before retrying). These run regardless of whether
         // review is skipped — committed + pre-merge checks are non-negotiable.
-        for check in checks::<C>() {
+        for check in checks::<R>() {
             if let Err(reason) = (check.run)(ctx).await {
                 return Err(CapError::invalid(
                     "submit_branch",
@@ -303,32 +312,11 @@ impl SubmitBranch {
     }
 }
 
-#[async_trait::async_trait]
-impl<R: Git + Process + Spawner + Fs + Bus + Send + Sync> Tool<R> for SubmitBranch {
-    fn name(&self) -> &str {
-        "submit_branch"
-    }
-    fn description(&self) -> &str {
-        "Request review of your branch. Commit everything first (it refuses on uncommitted changes \
-         or failing `.exo/checks/pre-merge` scripts), then it spawns a reviewer of your work and \
-         returns. Do NOT expect to merge yourself: on approval the sidecar escalates `[READY]` to \
-         your parent automatically; on deny / changes you'll be woken with feedback to address and \
-         re-submit. Set `dangerously_skip_reviewer: true` ONLY for a trivial/safe change to skip \
-         review and forward `[READY]` straight to your parent (it's flagged as unreviewed; not \
-         auto-merged). After calling it, STOP and end your turn."
-    }
-    fn schema(&self) -> serde_json::Value {
-        schema_json::<SubmitBranchArgs>()
-    }
-    async fn call(&self, ctx: &R, j: serde_json::Value) -> CapResult<serde_json::Value> {
-        ok_json(Self::run(ctx, parse(j)?).await?)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testing::{Call, MockRuntime};
+    use exo_framework::Tool;
 
     #[tokio::test]
     async fn submits_spawns_reviewer_when_clean() {

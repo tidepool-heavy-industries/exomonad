@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use exo_framework::{ok_json, parse, schema_json, Tool, ToolOutput};
+use exo_framework::{Tool, ToolOutput};
 
 /// Arguments for `verdict`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -30,8 +30,18 @@ pub struct VerdictArgs {
 /// The `verdict` tool.
 pub struct Verdict;
 
-impl Verdict {
-    pub async fn run<C: Bus + Kv>(ctx: &C, args: VerdictArgs) -> CapResult<ToolOutput> {
+#[async_trait::async_trait]
+impl<R: Bus + Kv + Send + Sync> Tool<R> for Verdict {
+    const NAME: &'static str = "verdict";
+    const DESCRIPTION: &'static str =
+        "Submit your review verdict on the branch you were spawned to review, then end your turn. \
+         Provide a high-level `summary` and a list of structured `findings`. Each finding has a \
+         `file`, `line`, `severity` (error, warning, info, hint), `body`, and optional `suggestion`. \
+         Any `error` severity finding will block the merge and require the submitter to address it. \
+         The decision (approve vs request changes) is derived automatically from your findings.";
+    type Args = VerdictArgs;
+
+    async fn run(ctx: &R, args: VerdictArgs) -> CapResult<ToolOutput> {
         if args.summary.trim().is_empty() {
             return Err(CapError::invalid("verdict", "summary must not be empty"));
         }
@@ -79,30 +89,11 @@ impl Verdict {
     }
 }
 
-#[async_trait::async_trait]
-impl<R: Bus + Kv + Send + Sync> Tool<R> for Verdict {
-    fn name(&self) -> &str {
-        "verdict"
-    }
-    fn description(&self) -> &str {
-        "Submit your review verdict on the branch you were spawned to review, then end your turn. \
-         Provide a high-level `summary` and a list of structured `findings`. Each finding has a \
-         `file`, `line`, `severity` (error, warning, info, hint), `body`, and optional `suggestion`. \
-         Any `error` severity finding will block the merge and require the submitter to address it. \
-         The decision (approve vs request changes) is derived automatically from your findings."
-    }
-    fn schema(&self) -> serde_json::Value {
-        schema_json::<VerdictArgs>()
-    }
-    async fn call(&self, ctx: &R, j: serde_json::Value) -> CapResult<serde_json::Value> {
-        ok_json(Self::run(ctx, parse(j)?).await?)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testing::{Call, MockRuntime};
+    use exo_framework::Tool;
 
     #[tokio::test]
     async fn approved_delivers_system_message_to_parent() {

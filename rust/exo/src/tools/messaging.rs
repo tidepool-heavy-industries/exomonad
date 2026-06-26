@@ -7,7 +7,7 @@
 use exo_caps::{
     Addressee, AgentName, Bus, CapResult, ControlKind, Message, MessageBody, MessageKind, Summary,
 };
-use exo_framework::{ok_json, parse, schema_json, Tool, ToolOutput};
+use exo_framework::{Tool, ToolOutput};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -25,9 +25,16 @@ pub struct NotifyParentArgs {
     pub kind: ToolMessageKind,
 }
 
-impl NotifyParent {
-    /// The typed logic: builds a [`Message`] and delivers it to [`Addressee::Parent`].
-    pub async fn run<C: Bus>(ctx: &C, args: NotifyParentArgs) -> CapResult<ToolOutput> {
+#[async_trait::async_trait]
+impl<R: Bus + Send + Sync> Tool<R> for NotifyParent {
+    const NAME: &'static str = "notify_parent";
+    const DESCRIPTION: &'static str =
+        "Send a status or failure update to your parent. This is NOT the done-signal — when your \
+         branch is committed and ready to merge, use `submit_branch` instead. Use this for \
+         progress notes or to escalate a failure you can't resolve.";
+    type Args = NotifyParentArgs;
+
+    async fn run(ctx: &R, args: NotifyParentArgs) -> CapResult<ToolOutput> {
         let msg = Message {
             text: MessageBody::new(args.text)?,
             summary: Summary::new(args.summary)?,
@@ -35,24 +42,6 @@ impl NotifyParent {
         };
         ctx.deliver(Addressee::Parent, msg).await?;
         Ok(ToolOutput::text("delivered"))
-    }
-}
-
-#[async_trait::async_trait]
-impl<R: Bus + Send + Sync> Tool<R> for NotifyParent {
-    fn name(&self) -> &str {
-        "notify_parent"
-    }
-    fn description(&self) -> &str {
-        "Send a status or failure update to your parent. This is NOT the done-signal — when your \
-         branch is committed and ready to merge, use `submit_branch` instead. Use this for \
-         progress notes or to escalate a failure you can't resolve."
-    }
-    fn schema(&self) -> serde_json::Value {
-        schema_json::<NotifyParentArgs>()
-    }
-    async fn call(&self, ctx: &R, j: serde_json::Value) -> CapResult<serde_json::Value> {
-        ok_json(Self::run(ctx, parse(j)?).await?)
     }
 }
 
@@ -113,9 +102,15 @@ impl From<ToolMessageKind> for MessageKind {
     }
 }
 
-impl SendMessage {
-    /// The typed logic: builds a [`Message`] and delivers it to the specified child.
-    pub async fn run<C: Bus>(ctx: &C, args: SendMessageArgs) -> CapResult<ToolOutput> {
+#[async_trait::async_trait]
+impl<R: Bus + Send + Sync> Tool<R> for SendMessage {
+    const NAME: &'static str = "send_message";
+    const DESCRIPTION: &'static str =
+        "Send a message to one of your children (a tree-edge: inline worker or worktree child). \
+         For messaging your parent use `notify_parent`.";
+    type Args = SendMessageArgs;
+
+    async fn run(ctx: &R, args: SendMessageArgs) -> CapResult<ToolOutput> {
         let to = match args.to {
             ChildTarget::Inline(name) => Addressee::InlineChild(AgentName::new(name)?),
             ChildTarget::Worktree(name) => Addressee::WorktreeChild(AgentName::new(name)?),
@@ -130,39 +125,22 @@ impl SendMessage {
     }
 }
 
-#[async_trait::async_trait]
-impl<R: Bus + Send + Sync> Tool<R> for SendMessage {
-    fn name(&self) -> &str {
-        "send_message"
-    }
-    fn description(&self) -> &str {
-        "Send a message to one of your children (a tree-edge: inline worker or worktree child). \
-         For messaging your parent use `notify_parent`."
-    }
-    fn schema(&self) -> serde_json::Value {
-        schema_json::<SendMessageArgs>()
-    }
-    async fn call(&self, ctx: &R, j: serde_json::Value) -> CapResult<serde_json::Value> {
-        ok_json(Self::run(ctx, parse(j)?).await?)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testing::{Call, MockRuntime};
+    use exo_framework::tool;
     use serde_json::json;
 
     #[tokio::test]
     async fn test_notify_parent() {
         let mock = MockRuntime::default();
-        let tool = NotifyParent;
         let args = json!({
             "text": "Hello parent",
             "summary": "Greeting"
         });
 
-        let res = tool.call(&mock, args).await.expect("tool call failed");
+        let res = tool(NotifyParent).call(&mock, args).await.expect("tool call failed");
         assert_eq!(res, json!({ "text": "delivered" }));
 
         let calls = mock.calls_made();
@@ -180,14 +158,13 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_inline() {
         let mock = MockRuntime::default();
-        let tool = SendMessage;
         let args = json!({
             "to": { "inline": "worker-1" },
             "text": "Hello worker",
             "summary": "Greeting"
         });
 
-        tool.call(&mock, args).await.expect("tool call failed");
+        tool(SendMessage).call(&mock, args).await.expect("tool call failed");
 
         let calls = mock.calls_made();
         assert_eq!(calls.len(), 1);
@@ -207,7 +184,6 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_shutdown() {
         let mock = MockRuntime::default();
-        let tool = SendMessage;
         let args = json!({
             "to": { "worktree": "child-1" },
             "text": "finish and exit",
@@ -215,7 +191,7 @@ mod tests {
             "kind": { "shutdown": { "grace_ms": 5000 } }
         });
 
-        tool.call(&mock, args).await.expect("tool call failed");
+        tool(SendMessage).call(&mock, args).await.expect("tool call failed");
 
         let calls = mock.calls_made();
         assert_eq!(calls.len(), 1);

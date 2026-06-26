@@ -10,7 +10,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use exo_framework::{ok_json, parse, schema_json, Tool, ToolOutput};
+use exo_framework::{Tool, ToolOutput};
 
 /// Arguments for the `merge` tool.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -24,8 +24,18 @@ pub struct MergeArgs {
 /// The `merge` tool: local fold of a child branch.
 pub struct Merge;
 
-impl Merge {
-    pub async fn run<C: Git + Spawner>(ctx: &C, args: MergeArgs) -> CapResult<ToolOutput> {
+#[async_trait::async_trait]
+impl<R: Git + Spawner + Send + Sync> Tool<R> for Merge {
+    const NAME: &'static str = "merge";
+    const DESCRIPTION: &'static str =
+        "Fold a child's branch into yours with a local `git merge` AND reclaim the child (kill its \
+         pane + remove its worktree) — one-step fold + cleanup. ALWAYS prefer this over a raw `git \
+         merge`, which leaks the child's pane and worktree. The child names its branch in its \
+         `submit_branch` [READY] message. Children are worktrees of the same repo, so this needs \
+         no remote, no PR. A merge conflict surfaces as an error for you to resolve.";
+    type Args = MergeArgs;
+
+    async fn run(ctx: &R, args: MergeArgs) -> CapResult<ToolOutput> {
         let branch = Branch::new(args.branch.clone())?;
         ctx.merge(&branch).await?;
 
@@ -65,35 +75,11 @@ impl Merge {
     }
 }
 
-#[async_trait::async_trait]
-impl<R: Git + Spawner + Send + Sync> Tool<R> for Merge {
-    fn name(&self) -> &str {
-        "merge"
-    }
-
-    fn description(&self) -> &str {
-        "Fold a child's branch into yours with a local `git merge` AND reclaim the child (kill its \
-         pane + remove its worktree) — one-step fold + cleanup. ALWAYS prefer this over a raw `git \
-         merge`, which leaks the child's pane and worktree. The child names its branch in its \
-         `submit_branch` [READY] message. Children are worktrees of the same repo, so this needs \
-         no remote, no PR. A merge conflict surfaces as an error for you to resolve."
-    }
-
-    fn schema(&self) -> serde_json::Value {
-        schema_json::<MergeArgs>()
-    }
-
-    async fn call(&self, ctx: &R, args: serde_json::Value) -> CapResult<serde_json::Value> {
-        let args: MergeArgs = parse(args)?;
-        let out = Self::run(ctx, args).await?;
-        ok_json(out)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testing::{Call, MockRuntime};
+    use exo_framework::Tool;
 
     #[tokio::test]
     async fn test_merge_local_fold() {

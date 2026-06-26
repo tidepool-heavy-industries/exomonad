@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use exo_framework::{Exomonad, Tool};
+use exo_framework::{ErasedTool, Exomonad};
 use exo_runtime::Runtime;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -53,7 +53,7 @@ pub async fn serve<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> Nod
 }
 
 async fn handle_rpc(
-    tools: &[Box<dyn Tool<Runtime>>],
+    tools: &[Box<dyn ErasedTool<Runtime>>],
     runtime: &Runtime,
     msg: Value,
 ) -> Option<Value> {
@@ -102,7 +102,7 @@ async fn handle_rpc(
 }
 
 async fn call_tool(
-    tools: &[Box<dyn Tool<Runtime>>],
+    tools: &[Box<dyn ErasedTool<Runtime>>],
     runtime: &Runtime,
     params: Option<&Value>,
 ) -> Result<Value, (i32, String)> {
@@ -203,7 +203,7 @@ mod tests {
         // domain's concern (tested in `exo`). Here a single named tool stands in for any roster.
         struct ListTestTool;
         #[async_trait::async_trait]
-        impl Tool<Runtime> for ListTestTool {
+        impl ErasedTool<Runtime> for ListTestTool {
             fn name(&self) -> &str {
                 "list_test_tool"
             }
@@ -217,7 +217,7 @@ mod tests {
                 Ok(json!({ "text": "" }))
             }
         }
-        let tools: Vec<Box<dyn Tool<Runtime>>> = vec![Box::new(ListTestTool)];
+        let tools: Vec<Box<dyn ErasedTool<Runtime>>> = vec![Box::new(ListTestTool)];
 
         let request = json!({
             "jsonrpc": "2.0",
@@ -261,7 +261,7 @@ mod tests {
         // Create a dummy tool that returns a predictable result
         struct TestTool;
         #[async_trait::async_trait]
-        impl Tool<Runtime> for TestTool {
+        impl ErasedTool<Runtime> for TestTool {
             fn name(&self) -> &str {
                 "test_tool"
             }
@@ -276,7 +276,7 @@ mod tests {
             }
         }
 
-        let tools: Vec<Box<dyn Tool<Runtime>>> = vec![Box::new(TestTool)];
+        let tools: Vec<Box<dyn ErasedTool<Runtime>>> = vec![Box::new(TestTool)];
 
         let request = json!({
             "jsonrpc": "2.0",

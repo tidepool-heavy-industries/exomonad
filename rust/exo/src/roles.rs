@@ -15,7 +15,7 @@ use crate::tools::submit::SubmitBranch;
 use crate::tools::tree::Tree;
 use crate::tools::verdict::Verdict;
 use exo_caps::{AgentType, RoleKind};
-use exo_framework::{PolicyCaps, RoleDef};
+use exo_framework::{tool, PolicyCaps, RoleDef};
 use serde::{Deserialize, Serialize};
 
 /// The `exo` domain's role enum — the closed set of node archetypes (its `D::Role`). Owned by the
@@ -96,12 +96,12 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
         // and folds them by merging their branches locally; that's it.
         ExoRole::Root => RoleDef {
             tools: vec![
-                Box::new(ForkWave),
-                Box::new(SpawnDev),
-                Box::new(SpawnWorker),
-                Box::new(Merge),
-                Box::new(SendMessage),
-                Box::new(Tree),
+                tool(ForkWave),
+                tool(SpawnDev),
+                tool(SpawnWorker),
+                tool(Merge),
+                tool(SendMessage),
+                tool(Tree),
             ],
             pre_tool_use,
             // Root has nothing to fold upward — never gate its exit (blocking it bricks the session).
@@ -112,14 +112,14 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
         // parent when done (and notifies for status/failure).
         ExoRole::Tl => RoleDef {
             tools: vec![
-                Box::new(ForkWave),
-                Box::new(SpawnDev),
-                Box::new(SpawnWorker),
-                Box::new(Merge),
-                Box::new(NotifyParent),
-                Box::new(SendMessage),
-                Box::new(SubmitBranch),
-                Box::new(Tree),
+                tool(ForkWave),
+                tool(SpawnDev),
+                tool(SpawnWorker),
+                tool(Merge),
+                tool(NotifyParent),
+                tool(SendMessage),
+                tool(SubmitBranch),
+                tool(Tree),
             ],
             pre_tool_use,
             stop,
@@ -129,7 +129,7 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
         // turn-end but never blocks at stop; the committed-before-fold guarantee is enforced by
         // submit_branch's committed-check.
         ExoRole::Dev => RoleDef {
-            tools: vec![Box::new(NotifyParent), Box::new(SubmitBranch)],
+            tools: vec![tool(NotifyParent), tool(SubmitBranch)],
             pre_tool_use,
             stop: stop_notify,
             session_start,
@@ -137,7 +137,7 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
         // A worker is an inline child sharing the parent's worktree — no own branch to submit, so it
         // only reports back, but it still signals the parent when it yields control.
         ExoRole::Worker => RoleDef {
-            tools: vec![Box::new(NotifyParent)],
+            tools: vec![tool(NotifyParent)],
             pre_tool_use,
             stop: stop_notify,
             session_start,
@@ -145,7 +145,7 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
         // A reviewer reads the under-review branch and emits a `verdict`, then exits. It does not
         // submit or merge; `notify_parent` is its colleague back-channel ("why'd you do this?").
         ExoRole::Reviewer => RoleDef {
-            tools: vec![Box::new(Verdict), Box::new(NotifyParent)],
+            tools: vec![tool(Verdict), tool(NotifyParent)],
             pre_tool_use,
             // Ephemeral; it exits after the verdict — nothing to fold, so don't gate (would only
             // risk wedging on stray review artifacts).

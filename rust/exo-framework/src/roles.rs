@@ -9,7 +9,7 @@
 //! [`Exomonad::role_def`](crate::exomonad::Exomonad::role_def), monomorphized at the binary.
 
 use crate::hooks::{HookDecision, HookInput, SessionStartOutput, StopDecision};
-use crate::tool::{BoxFuture, Tool};
+use crate::tool::{BoxFuture, ErasedTool};
 
 /// A hook is an async fn over the concrete runtime `R`. Stored as a plain fn-pointer so the
 /// role table stays a greppable struct literal; the `BoxFuture` return lets the body do
@@ -20,10 +20,10 @@ pub type PreToolUseFn<R> = for<'a> fn(&'a R, &'a HookInput) -> BoxFuture<'a, Hoo
 pub type StopFn<R> = for<'a> fn(&'a R) -> BoxFuture<'a, StopDecision>;
 pub type SessionStartFn<R> = for<'a> fn(&'a R) -> BoxFuture<'a, SessionStartOutput>;
 
-/// A role: its served tools + its three shared hook fns. `dyn Tool<R>` is dyn over the
+/// A role: its served tools + its three shared hook fns. `dyn ErasedTool<R>` is dyn over the
 /// CONCRETE `R`, not over `Caps`.
 pub struct RoleDef<R: Send + Sync> {
-    pub tools: Vec<Box<dyn Tool<R>>>,
+    pub tools: Vec<Box<dyn ErasedTool<R>>>,
     pub pre_tool_use: PreToolUseFn<R>,
     pub stop: StopFn<R>,
     pub session_start: SessionStartFn<R>,

@@ -15,7 +15,7 @@ Classic's Haskell-WASM DSL / Rust-host split). See [`docs/decisions/exo-framewor
 
 | Module | Contents |
 |--------|----------|
-| `tool` | The `Tool<R>` trait (object-safe over the concrete `R`) + JSON-edge helpers (`parse`/`ok_json`/`schema_json`) + `ToolOutput` + `BoxFuture`. |
+| `tool` | `Tool<R>` (typed authoring surface — what domain tools implement; const `NAME`/`DESCRIPTION`, assoc `Args`, receiverless async `run`) + `ErasedTool<R>` (object-safe runtime surface — what `RoleDef` stores; today's `Tool` trait renamed) + `tool()` roster constructor (wraps any `T: Tool<R>` in the one generic `Adapter`) + JSON-edge helpers (`parse`/`ok_json`/`schema_json`) + `ToolOutput` + `BoxFuture`. No per-tool adapter, no macro; direct `ErasedTool` impls remain open for runtime-named tools. |
 | `hooks` | The hook **contract**: the decision enums (`HookDecision`, `StopDecision`, `SessionStartOutput`) + the parsed `HookInput`. The concrete gate bodies that produce them are domain code. |
 | `roles` | `RoleDef<R>` (a role's tools + its three hook fn-pointers) + the fn-pointer type aliases (`PreToolUseFn`/`StopFn`/`SessionStartFn`). |
 | `caps` | `PolicyCaps` — a static bound-**union** for the dispatch boundary. NOT a god-trait: tools still declare their own narrow per-cap bounds. A blanket impl makes any all-caps type (`Runtime`, a test mock) `PolicyCaps` automatically. |
@@ -47,7 +47,7 @@ domain crate**.
 
 ## A tool's cap bounds *are* its least-privilege spec
 
-`fn run<C: Bus>` can only touch the bus; `fn run<C: Git>` only git. The bound is compiler-checked
-and surfaced in the hand-written `Tool<R>` adapter's `impl` header. `PolicyCaps` exists only so the
-roster's `role_def<R: PolicyCaps>` can name one bound that guarantees every cap is present at the
-dispatch boundary — it does not weaken the per-tool bounds.
+`async fn run(ctx: &R, args: Self::Args)` where `R: Bus` can only touch the bus; `R: Git` only git.
+The bound is compiler-checked in the `impl<R: …> Tool<R> for X` header. `PolicyCaps` exists only
+so the roster's `role_def<R: PolicyCaps>` can name one bound that guarantees every cap is present
+at the dispatch boundary — it does not weaken the per-tool bounds.

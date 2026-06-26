@@ -1,15 +1,20 @@
-//! The policy contract's core: the [`Tool`] trait, the JSON-edge helpers every tool's
-//! hand-written adapter calls (`parse` / `ok_json` / `schema_json`), and [`ToolOutput`].
+//! The policy contract's two tool surfaces:
 //!
-//! A tool is a **type**: an `Args` struct (deriving `Deserialize + JsonSchema`), a
-//! generic-over-caps `run` whose cap bounds *are* its least-privilege spec, and a ~6-line
-//! hand-written `Tool<R>` adapter (NO macro — the locked rule) that monomorphizes `run`
-//! at the concrete runtime `R` and erases args↔JSON.
+//! - [`Tool<R>`] — the **typed authoring surface** domain tools implement. One `impl Tool<R>`
+//!   per tool; the framework's [`Adapter`] handles the JSON erasure. Const `NAME`/`DESCRIPTION`,
+//!   associated `Args` type, receiverless async `run`. The impl header's cap bounds are the
+//!   tool's least-privilege spec (compiler-checked). NO per-tool adapter, NO macro.
+//! - [`ErasedTool<R>`] — the **object-safe runtime surface** `RoleDef` stores and the engine
+//!   dispatches. Open for direct impls: runtime-named or stateful tools implement this directly
+//!   (`run` is receiverless, so instance state is unreachable through `Tool` — by design).
+//! - [`tool`] — `vec![tool(ForkWave), …]` roster constructor. The value is a type witness
+//!   (`run` is receiverless) — any fields on it are dead.
 
 use exo_caps::{CapError, CapResult};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::future::Future;
+use std::marker::PhantomData;
 use std::pin::Pin;
 
 /// A boxed, `Send` future — the return shape of the async hook/event fn-pointers stored in
@@ -44,23 +49,61 @@ impl ToolOutput {
     }
 }
 
-/// An MCP tool, **object-safe over the concrete runtime `R`** (`Vec<Box<dyn Tool<R>>>`).
-/// `R` is the concrete type that impls the cap traits — NOT `dyn Caps`. The caps a tool
-/// needs are expressed as bounds on its `run` and surfaced in the adapter's `impl` header,
-/// so least-privilege is compiler-checked per tool.
+/// Typed authoring surface — what domain tools implement. One `impl Tool<R>` per tool; the
+/// framework's [`Adapter`] handles the JSON erasure. The impl header's cap bounds are the
+/// tool's least-privilege spec (compiler-checked). `run` is receiverless: instance state is
+/// unreachable by design.
 #[async_trait::async_trait]
 pub trait Tool<R: Send + Sync>: Send + Sync {
     /// The MCP tool name (the wire identifier).
+    const NAME: &'static str;
+    /// A one-line description surfaced in MCP `tools/list` — the toolset is self-documenting.
+    const DESCRIPTION: &'static str;
+    /// The typed argument struct (derives `DeserializeOwned + JsonSchema`).
+    type Args: DeserializeOwned + schemars::JsonSchema + Send;
+    /// The tool's logic — receiverless, cap bounds are the tool's least-privilege spec.
+    async fn run(ctx: &R, args: Self::Args) -> CapResult<ToolOutput>;
+}
+
+/// Object-safe runtime surface — what `RoleDef` stores and the engine dispatches.
+/// Open for direct impls: runtime-named or stateful tools implement this directly.
+/// (Today's `Tool` trait, renamed; methods unchanged.)
+#[async_trait::async_trait]
+pub trait ErasedTool<R: Send + Sync>: Send + Sync {
+    /// The MCP tool name (the wire identifier).
     fn name(&self) -> &str;
     /// A one-line description of what the tool does and where it sits in the local-merge loop.
-    /// Surfaced in MCP `tools/list` so the toolset is self-documenting — an agent learns the
-    /// convergence model (commit → `submit_branch` → parent `merge`, no PR/remote) from the
-    /// tools it actually has, not from out-of-band instructions.
+    /// Surfaced in MCP `tools/list` so the toolset is self-documenting.
     fn description(&self) -> &str;
     /// The JSON Schema for this tool's arguments — derived from `Args` (single source).
     fn schema(&self) -> Value;
     /// Dispatch: erase JSON → call the typed `run` → erase the result back to JSON.
     async fn call(&self, ctx: &R, args: Value) -> CapResult<Value>;
+}
+
+/// The ONE generic adapter (replaces nine hand-written ones). Private — use [`tool`].
+struct Adapter<T>(PhantomData<T>);
+
+#[async_trait::async_trait]
+impl<R: Send + Sync, T: Tool<R> + 'static> ErasedTool<R> for Adapter<T> {
+    fn name(&self) -> &str {
+        T::NAME
+    }
+    fn description(&self) -> &str {
+        T::DESCRIPTION
+    }
+    fn schema(&self) -> Value {
+        schema_json::<T::Args>()
+    }
+    async fn call(&self, ctx: &R, args: Value) -> CapResult<Value> {
+        ok_json(T::run(ctx, parse(args)?).await?)
+    }
+}
+
+/// Roster constructor: `vec![tool(ForkWave), …]`. The value is a type witness
+/// (`run` is receiverless) — any fields on it are dead.
+pub fn tool<R: Send + Sync, T: Tool<R> + 'static>(_witness: T) -> Box<dyn ErasedTool<R>> {
+    Box::new(Adapter::<T>(PhantomData))
 }
 
 /// Adapter helper: parse a tool's JSON arguments into its typed `Args`.
