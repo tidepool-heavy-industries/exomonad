@@ -62,6 +62,26 @@ pub fn build_agent_command(
                 }
             }
 
+            // Private config files (node-mode): point CC at our hooks + MCP server without writing
+            // the shared cwd's `.claude/settings.local.json` / `.mcp.json`. Both flags MERGE over the
+            // cwd config (no `--strict-mcp-config` / `--setting-sources`), so the user's own config
+            // survives. EMITTED BEFORE `--append-system-prompt`/`--model`: `--mcp-config` is VARIADIC
+            // (consumes every following non-flag arg), so it must be capped by a later `--flag` and
+            // must NEVER sit adjacent to the trailing positional prompt — else CC swallows the prompt
+            // as an MCP config path. The singular `--append-system-prompt`/`--model` below are that cap.
+            if let Some(settings) = claude_flags.and_then(|f| f.settings_path.as_deref()) {
+                if !settings.trim().is_empty() {
+                    flags.push_str(" --settings ");
+                    flags.push_str(&shell_escape::escape(settings.into()));
+                }
+            }
+            if let Some(mcp) = claude_flags.and_then(|f| f.mcp_config_path.as_deref()) {
+                if !mcp.trim().is_empty() {
+                    flags.push_str(" --mcp-config ");
+                    flags.push_str(&shell_escape::escape(mcp.into()));
+                }
+            }
+
             if let Some(p) = append_system_prompt {
                 if !p.trim().is_empty() {
                     flags.push_str(" --append-system-prompt ");
@@ -73,23 +93,6 @@ pub fn build_agent_command(
                 if !model.trim().is_empty() {
                     flags.push_str(" --model ");
                     flags.push_str(&shell_escape::escape(model.into()));
-                }
-            }
-
-            // Private config files (node-mode): point CC at our hooks + MCP server without writing
-            // the shared cwd's `.claude/settings.local.json` / `.mcp.json`. Both flags MERGE over the
-            // cwd config (no `--strict-mcp-config` / `--setting-sources`), so the user's own config
-            // survives.
-            if let Some(settings) = claude_flags.and_then(|f| f.settings_path.as_deref()) {
-                if !settings.trim().is_empty() {
-                    flags.push_str(" --settings ");
-                    flags.push_str(&shell_escape::escape(settings.into()));
-                }
-            }
-            if let Some(mcp) = claude_flags.and_then(|f| f.mcp_config_path.as_deref()) {
-                if !mcp.trim().is_empty() {
-                    flags.push_str(" --mcp-config ");
-                    flags.push_str(&shell_escape::escape(mcp.into()));
                 }
             }
 
@@ -348,6 +351,43 @@ mod tests {
         assert!(
             !cmd.contains("--strict-mcp-config") && !cmd.contains("--setting-sources"),
             "must MERGE (no strict/setting-sources) to preserve user config: {cmd}"
+        );
+    }
+
+    #[test]
+    fn variadic_mcp_config_never_abuts_the_positional_prompt() {
+        // REGRESSION: `--mcp-config` is variadic (eats following non-flag args). If it sits right
+        // before the trailing `"$(cat ...)"` positional, CC swallows the prompt as a config path.
+        // It MUST be capped by a later singular flag (--append-system-prompt / --model).
+        let cwd = Path::new("/home/u/dev/proj/.exo/worktrees/leaf");
+        let pf = cwd.join(".exo/tmp/prompt.txt");
+        let env = HashMap::new();
+        let flags = ClaudeSpawnFlags {
+            model: Some("kimi-for-coding".into()),
+            settings_path: Some("/p/pane-3.settings.json".into()),
+            mcp_config_path: Some("/p/pane-3.mcp.json".into()),
+            ..Default::default()
+        };
+        let cmd = build_agent_command(
+            AgentType::Claude,
+            Some(&pf),
+            None,
+            &env,
+            cwd,
+            Some(&flags),
+            false,
+            false,
+            Some("ROLE PROTOCOL PROSE"), // append_system_prompt — always present for node spawns
+        );
+        let mcp_at = cmd.find("--mcp-config").expect("has --mcp-config");
+        let prompt_at = cmd.find("\"$(cat").expect("has the positional prompt");
+        let cap_at = cmd
+            .find("--append-system-prompt")
+            .or_else(|| cmd.find("--model"))
+            .expect("a singular flag must follow --mcp-config");
+        assert!(
+            mcp_at < cap_at && cap_at < prompt_at,
+            "--mcp-config must be capped by a later --flag, not abut the prompt: {cmd}"
         );
     }
 }
