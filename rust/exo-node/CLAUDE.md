@@ -34,7 +34,7 @@ The sidecar initializes a persistent file subscriber at startup (in the binary c
 
 ## The inbound → dispatch path
 
-`inbound::watch` resumes from a `pane-N.cursor` byte-offset (missing cursor → start at EOF, no history replay), reads only up to the last `\n` (torn lines re-read once complete), advances the cursor **after** successful delivery (at-least-once; a duplicate line is benign), and routes by `kind`:
+`inbound::watch` resumes from a `pane-N.cursor` byte-offset (missing cursor → start at EOF, no history replay), reads only up to the last `\n` (torn lines re-read once complete), advances the cursor **after** successful delivery (at-least-once; a duplicate line is benign), **resolves any claim-check `spill` pointer** to the full entry (`resolve_spilled` loads the bus's `.spill/` side-file — how an oversized payload like a rich verdict arrives), and routes by `kind`:
 
 - **`Chat` / `Event`** → `dispatch::dispatch` (last-hop deliver, rendered with a `[from: X, kind: Y]` header).
 - **`Control(Shutdown{grace_ms, force})`** → the cooperative/forced matrix (`decide`):

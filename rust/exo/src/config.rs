@@ -15,10 +15,11 @@ use std::path::{Path, PathBuf};
 
 /// A per-role launch profile from config — the convenient, file-based way to set a role's
 /// proxy-backed brain (e.g. the reviewer → Kimi via `claude-code-proxy`) instead of exporting
-/// `EXO_<ROLE>_*` env vars by hand. Each table key is a role name (e.g. `reviewer`); `discover`
-/// translates `[launch_profile.<role>]` → `EXO_<ROLE_UPPER>_{BASE_URL,MODEL,AUTH_TOKEN,LABEL}`,
-/// which `exo init` embeds in the root launch and the tree propagates + resolves as usual. A real
-/// API key can still be kept out of the file by setting that one env var in the shell (env wins).
+/// `EXO_<ROLE>_*` env vars by hand. `discover` translates each profile →
+/// `EXO_<ROLE_UPPER>_{BASE_URL,MODEL,AUTH_TOKEN,LABEL}`, which `exo init` embeds in the root launch
+/// and the tree propagates + resolves as usual. A real API key can still be kept out of the file by
+/// setting that one env var in the shell (env wins); `auth_token` is optional (a local proxy holds
+/// the OAuth — the runtime supplies a placeholder when none is given).
 #[derive(Deserialize, Default)]
 struct LaunchProfileRaw {
     base_url: Option<String>,
@@ -26,6 +27,36 @@ struct LaunchProfileRaw {
     auth_token: Option<String>,
     label: Option<String>,
 }
+
+/// A profile entry is either a **named-brain shorthand** (`reviewer = "kimi"`) resolved from the
+/// built-in registry, or the **full table** (`[launch_profile.reviewer]` with explicit fields) for a
+/// custom/unknown backend. Untagged: a bare string parses as `Named`, a table as `Full`.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum LaunchProfileEntry {
+    Named(String),
+    Full(LaunchProfileRaw),
+}
+
+/// Expand a named-brain shorthand to its profile fields. This is the **one place a vendor is named**
+/// — domain config sugar; the runtime / `exo-caps` seam stays backend-agnostic. The default
+/// `base_url` is [`claude-code-proxy`](https://github.com/raine/claude-code-proxy)'s default port;
+/// use the full-table form to override it. `auth_token` is `None` — the proxy holds the real OAuth.
+fn named_brain(name: &str) -> Option<LaunchProfileRaw> {
+    match name {
+        "kimi" => Some(LaunchProfileRaw {
+            base_url: Some("http://localhost:18765".into()),
+            model: Some("kimi-for-coding".into()),
+            auth_token: None,
+            label: Some("kimi".into()),
+        }),
+        _ => None,
+    }
+}
+
+/// The known named brains, for diagnostics (an unknown name is a loud error, never a silent
+/// fall-through to the default model).
+const KNOWN_BRAINS: &[&str] = &["kimi"];
 
 /// The config fields the node-mode root bootstrap reads. (`serde(default)` on the raw form
 /// ignores every other field, so this stays in sync with classic config files without naming them.)
@@ -37,8 +68,9 @@ struct RawInit {
     /// (`own_launch_policy`). Absent ⇒ the behavior-preserving [`NodePapers`] defaults.
     yolo: Option<bool>,
     wrap_nix: Option<bool>,
-    /// `[launch_profile.<role>]` tables, keyed by role name.
-    launch_profile: Option<BTreeMap<String, LaunchProfileRaw>>,
+    /// `[launch_profile.<role>]` profiles, keyed by role name. Each value is a named-brain
+    /// shorthand string or a full table (see [`LaunchProfileEntry`]).
+    launch_profile: Option<BTreeMap<String, LaunchProfileEntry>>,
 }
 
 /// Resolved node-mode init config.
@@ -100,24 +132,40 @@ pub fn discover() -> InitConfig {
     }
 }
 
-/// Flatten `[launch_profile.<role>]` tables to `EXO_<ROLE_UPPER>_<FIELD>` env-var pairs (only
+/// Flatten each `[launch_profile.<role>]` profile to `EXO_<ROLE_UPPER>_<FIELD>` env-var pairs (only
 /// present fields). The `<ROLE_UPPER>` prefix matches each role's
-/// `RoleKind::launch_profile_env_prefix` (e.g. `reviewer` → `EXO_REVIEWER`).
-fn flatten_profiles(profiles: BTreeMap<String, LaunchProfileRaw>) -> Vec<(String, String)> {
-    profiles
-        .into_iter()
-        .flat_map(|(role, p)| {
-            let prefix = format!("EXO_{}", role.to_uppercase());
-            [
-                ("BASE_URL", p.base_url),
-                ("MODEL", p.model),
-                ("AUTH_TOKEN", p.auth_token),
-                ("LABEL", p.label),
-            ]
-            .into_iter()
-            .filter_map(move |(field, val)| val.map(|v| (format!("{prefix}_{field}"), v)))
-        })
-        .collect()
+/// `RoleKind::launch_profile_env_prefix` (e.g. `reviewer` → `EXO_REVIEWER`). A `Named` shorthand is
+/// expanded via [`named_brain`]; an **unknown** brain name is a loud `eprintln!` at init and that
+/// role's profile is skipped (it stays the default model) — never a silent fall-through.
+fn flatten_profiles(profiles: BTreeMap<String, LaunchProfileEntry>) -> Vec<(String, String)> {
+    let mut env = Vec::new();
+    for (role, entry) in profiles {
+        let resolved = match entry {
+            LaunchProfileEntry::Named(name) => match named_brain(&name) {
+                Some(p) => p,
+                None => {
+                    eprintln!(
+                        "exo: unknown launch-profile brain {name:?} for role {role:?}; known brains: \
+                         {KNOWN_BRAINS:?}. This role will NOT be redirected (stays the default model)."
+                    );
+                    continue;
+                }
+            },
+            LaunchProfileEntry::Full(raw) => raw,
+        };
+        let prefix = format!("EXO_{}", role.to_uppercase());
+        for (field, val) in [
+            ("BASE_URL", resolved.base_url),
+            ("MODEL", resolved.model),
+            ("AUTH_TOKEN", resolved.auth_token),
+            ("LABEL", resolved.label),
+        ] {
+            if let Some(v) = val {
+                env.push((format!("{prefix}_{field}"), v));
+            }
+        }
+    }
+    env
 }
 
 fn load_raw(path: &Path) -> RawInit {
@@ -204,5 +252,62 @@ mod tests {
     fn no_profile_table_is_empty() {
         let raw: RawInit = toml::from_str("tmux_session = \"x\"").unwrap();
         assert!(flatten_profiles(raw.launch_profile.unwrap_or_default()).is_empty());
+    }
+
+    #[test]
+    fn named_brain_shorthand_expands_without_auth_token() {
+        // The clean form: `reviewer = "kimi"` under `[launch_profile]`.
+        let toml = r#"
+            [launch_profile]
+            reviewer = "kimi"
+        "#;
+        let raw: RawInit = toml::from_str(toml).unwrap();
+        let mut env = flatten_profiles(raw.launch_profile.unwrap());
+        env.sort();
+        // No EXO_REVIEWER_AUTH_TOKEN — the proxy holds the OAuth, the runtime supplies a placeholder.
+        assert_eq!(
+            env,
+            vec![
+                (
+                    "EXO_REVIEWER_BASE_URL".to_string(),
+                    "http://localhost:18765".to_string()
+                ),
+                ("EXO_REVIEWER_LABEL".to_string(), "kimi".to_string()),
+                (
+                    "EXO_REVIEWER_MODEL".to_string(),
+                    "kimi-for-coding".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn shorthand_and_full_table_mix_in_one_file() {
+        let toml = r#"
+            [launch_profile]
+            reviewer = "kimi"
+
+            [launch_profile.worker]
+            base_url = "http://localhost:9999"
+            model = "custom"
+        "#;
+        let raw: RawInit = toml::from_str(toml).unwrap();
+        let env = flatten_profiles(raw.launch_profile.unwrap());
+        assert!(env.contains(&(
+            "EXO_REVIEWER_MODEL".to_string(),
+            "kimi-for-coding".to_string()
+        )));
+        assert!(env.contains(&("EXO_WORKER_MODEL".to_string(), "custom".to_string())));
+    }
+
+    #[test]
+    fn unknown_brain_is_skipped_not_fatal() {
+        let toml = r#"
+            [launch_profile]
+            reviewer = "gpt9000"
+        "#;
+        let raw: RawInit = toml::from_str(toml).unwrap();
+        // Unknown brain → no env emitted for that role (and a loud eprintln, not a panic).
+        assert!(flatten_profiles(raw.launch_profile.unwrap()).is_empty());
     }
 }

@@ -22,6 +22,7 @@ fn domain_message_in_ingestion_entry_round_trips() {
         v: 1,
         ts: Utc::now(),
         from: Persona::Agent(AgentName::new("dev".into()).unwrap()),
+        spill: None,
         msg: Message {
             text: MessageBody::new("domain msg".into()).unwrap(),
             summary: Summary::new("summary".into()).unwrap(),
@@ -44,6 +45,7 @@ fn chat_message_in_ingestion_entry_round_trips() {
         v: 1,
         ts: Utc::now(),
         from: Persona::Agent(AgentName::new("dev".into()).unwrap()),
+        spill: None,
         msg: Message {
             text: MessageBody::new("chat msg".into()).unwrap(),
             summary: Summary::new("summary".into()).unwrap(),

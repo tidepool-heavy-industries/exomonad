@@ -126,31 +126,39 @@ where
     Err(err)
 }
 
+/// Placeholder `ANTHROPIC_AUTH_TOKEN` for a profiled child whose endpoint needs no real key (a local
+/// proxy holds the OAuth). Claude requires a **non-empty** token whenever `ANTHROPIC_BASE_URL` is set,
+/// so the runtime supplies this when the launch profile carries none — the operator never writes a
+/// dummy value into config.
+const DEFAULT_PROXY_TOKEN: &str = "exo-local-proxy";
+
 /// A per-role launch redirect resolved from `{prefix}_*` env at `Spawner::spawn`. Points a child's
 /// Claude at a non-default Anthropic-compatible endpoint + model (e.g. a local
 /// [`claude-code-proxy`](https://github.com/raine/claude-code-proxy) serving Kimi). Runtime-internal
-/// and **backend-agnostic** — the secret `auth_token` lives in memory only and is never written to
+/// and **backend-agnostic** — the optional `auth_token` lives in memory only and is never written to
 /// papers; only the non-secret `label` is recorded (window + `tree`).
 #[derive(Debug, Clone)]
 pub(crate) struct LaunchProfile {
     pub base_url: Option<String>,
     pub model: Option<String>,
-    pub auth_token: String,
+    pub auth_token: Option<String>,
     pub label: Option<String>,
 }
 
 impl LaunchProfile {
     /// Resolve a role's launch profile from a `{prefix}_*` env lookup. Returns `None` when the role
-    /// declares no prefix OR no `{prefix}_AUTH_TOKEN` is set — a half-set env (only `BASE_URL`/
-    /// `MODEL`) must NOT half-activate the redirect. `getenv` is injected so the gating logic is
-    /// testable without mutating the process environment.
+    /// declares no prefix OR no `{prefix}_BASE_URL` is set — `BASE_URL` is the defining field of a
+    /// redirect, so a half-set env (only `MODEL`/`LABEL`, no endpoint) must NOT half-activate it. The
+    /// `auth_token` is optional (a local proxy holds the OAuth; the placeholder is supplied at
+    /// translation). `getenv` is injected so the gating logic is testable without mutating the
+    /// process environment.
     fn resolve(prefix: Option<&str>, getenv: impl Fn(&str) -> Option<String>) -> Option<Self> {
         let prefix = prefix?;
-        let auth_token = getenv(&format!("{prefix}_AUTH_TOKEN"))?;
+        let base_url = getenv(&format!("{prefix}_BASE_URL"))?;
         Some(LaunchProfile {
-            base_url: getenv(&format!("{prefix}_BASE_URL")),
+            base_url: Some(base_url),
             model: getenv(&format!("{prefix}_MODEL")),
-            auth_token,
+            auth_token: getenv(&format!("{prefix}_AUTH_TOKEN")),
             label: getenv(&format!("{prefix}_LABEL")),
         })
     }
@@ -573,7 +581,14 @@ impl Runtime {
                     if let Some(url) = &p.base_url {
                         env_vars.insert("ANTHROPIC_BASE_URL".into(), url.clone());
                     }
-                    env_vars.insert("ANTHROPIC_AUTH_TOKEN".into(), p.auth_token.clone());
+                    // Claude needs a non-empty token whenever a base_url is set; supply a placeholder
+                    // when the profile carries none (a local proxy holds the real OAuth).
+                    env_vars.insert(
+                        "ANTHROPIC_AUTH_TOKEN".into(),
+                        p.auth_token
+                            .clone()
+                            .unwrap_or_else(|| DEFAULT_PROXY_TOKEN.to_string()),
+                    );
                     if let Some(m) = &p.model {
                         env_vars.insert("ANTHROPIC_SMALL_FAST_MODEL".into(), m.clone());
                     }
@@ -857,9 +872,9 @@ mod tests {
     }
 
     #[test]
-    fn launch_profile_resolves_only_with_auth_token() {
+    fn launch_profile_gates_on_base_url_token_optional() {
         let full = std::collections::HashMap::from([
-            ("EXO_REVIEWER_AUTH_TOKEN".to_string(), "unused".to_string()),
+            ("EXO_REVIEWER_AUTH_TOKEN".to_string(), "sk-xxx".to_string()),
             (
                 "EXO_REVIEWER_BASE_URL".to_string(),
                 "http://localhost:18765".to_string(),
@@ -873,30 +888,43 @@ mod tests {
         // No prefix (a non-profiled role) → None regardless of env.
         assert!(LaunchProfile::resolve(None, |k: &str| full.get(k).cloned()).is_none());
 
-        // Full env → resolved with every field.
+        // Full env → resolved with every field (an explicit token is preserved).
         let p = LaunchProfile::resolve(Some("EXO_REVIEWER"), |k: &str| full.get(k).cloned())
             .expect("resolves");
-        assert_eq!(p.auth_token, "unused");
+        assert_eq!(p.auth_token.as_deref(), Some("sk-xxx"));
         assert_eq!(p.base_url.as_deref(), Some("http://localhost:18765"));
         assert_eq!(p.model.as_deref(), Some("kimi-for-coding"));
         assert_eq!(p.label.as_deref(), Some("kimi"));
 
-        // Half-set env (BASE_URL/MODEL but NO auth token) must NOT activate the redirect.
-        let half = std::collections::HashMap::from([(
-            "EXO_REVIEWER_BASE_URL".to_string(),
-            "http://localhost:18765".to_string(),
-        )]);
-        assert!(LaunchProfile::resolve(Some("EXO_REVIEWER"), |k: &str| half.get(k).cloned()).is_none());
+        // BASE_URL present but NO token → STILL activates (token is optional; the runtime supplies a
+        // placeholder at translation). This is the `reviewer = "kimi"` shorthand case.
+        let no_token = std::collections::HashMap::from([
+            (
+                "EXO_REVIEWER_BASE_URL".to_string(),
+                "http://localhost:18765".to_string(),
+            ),
+            (
+                "EXO_REVIEWER_MODEL".to_string(),
+                "kimi-for-coding".to_string(),
+            ),
+            ("EXO_REVIEWER_LABEL".to_string(), "kimi".to_string()),
+        ]);
+        let p = LaunchProfile::resolve(Some("EXO_REVIEWER"), |k: &str| no_token.get(k).cloned())
+            .expect("resolves without a token");
+        assert!(p.auth_token.is_none());
+        assert_eq!(p.base_url.as_deref(), Some("http://localhost:18765"));
 
-        // Token only → resolves with the rest None (e.g. a real Anthropic key, default model).
-        let token_only = std::collections::HashMap::from([(
-            "EXO_REVIEWER_AUTH_TOKEN".to_string(),
-            "sk-xxx".to_string(),
-        )]);
-        let p = LaunchProfile::resolve(Some("EXO_REVIEWER"), |k: &str| token_only.get(k).cloned())
-            .expect("resolves");
-        assert_eq!(p.auth_token, "sk-xxx");
-        assert!(p.base_url.is_none() && p.model.is_none() && p.label.is_none());
+        // Half-set env (MODEL/LABEL but NO base_url) must NOT activate the redirect.
+        let no_url = std::collections::HashMap::from([
+            (
+                "EXO_REVIEWER_MODEL".to_string(),
+                "kimi-for-coding".to_string(),
+            ),
+            ("EXO_REVIEWER_AUTH_TOKEN".to_string(), "sk-xxx".to_string()),
+        ]);
+        assert!(
+            LaunchProfile::resolve(Some("EXO_REVIEWER"), |k: &str| no_url.get(k).cloned()).is_none()
+        );
     }
 
     #[tokio::test]

@@ -10,17 +10,9 @@ type = "stdio"
 command = "vendor/notebooklm-mcp/result/bin/notebooklm-mcp"
 args = []
 
-# Run the reviewer on Kimi-K2 via the local claude-code-proxy (still a Claude process,
-# so Teams/hooks/MCP are unchanged). Unset this table ⇒ a normal Sonnet reviewer.
-[launch_profile.reviewer]
-base_url = "http://localhost:18765"
-model = "kimi-for-coding"
-auth_token = "unused"   # proxy holds the real OAuth; this value is ignored
-label = "kimi"
-
-# Ephemeral in-pane workers (spawn_worker) on Kimi too — the old Gemini-worker slot.
-[launch_profile.worker]
-base_url = "http://localhost:18765"
-model = "kimi-for-coding"
-auth_token = "unused"
-label = "kimi"
+# Run the reviewer + ephemeral workers on Kimi-K2 via the local claude-code-proxy (still
+# Claude processes, so Teams/hooks/MCP are unchanged). "kimi" is a built-in named brain;
+# omit a role ⇒ it stays the default model. Full-table form available for a custom backend.
+[launch_profile]
+reviewer = "kimi"
+worker = "kimi"

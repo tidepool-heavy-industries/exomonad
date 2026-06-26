@@ -366,6 +366,7 @@ impl<D: Exomonad> RealHandler<D> {
         let entry = IngestionEntry {
             v: 1,
             ts: Utc::now(),
+            spill: None,
             from: from.clone(),
             msg: Message {
                 text: MessageBody::new(format!("[child idle] {summary}"))
@@ -395,6 +396,7 @@ impl<D: Exomonad> RealHandler<D> {
         let entry = IngestionEntry {
             v: 1,
             ts: Utc::now(),
+            spill: None,
             from: from.clone(),
             msg: Message {
                 text: MessageBody::new(format_shutdown_response(
@@ -725,11 +727,25 @@ async fn process_inbox<H: InboundHandler>(
         }
 
         let line_len = line_bytes.len() as u64;
-        let entry: IngestionEntry = match serde_json::from_slice(line_bytes) {
+        let parsed: IngestionEntry = match serde_json::from_slice(line_bytes) {
             Ok(e) => e,
             Err(e) => {
                 warn!(node = %node, "failed to parse ingestion entry: {}", e);
                 // Advance past malformed line
+                *offset += line_len + 1;
+                if let Err(e) = save_cursor(cursor_path, *offset) {
+                    warn!(node = %node, "failed to persist cursor (will retry next wake): {e}");
+                }
+                continue;
+            }
+        };
+
+        // Claim-check: if this line is a spill pointer, load the full (oversized) entry from its
+        // side-file. A normal entry passes through untouched.
+        let entry = match resolve_spilled(parsed) {
+            Ok(e) => e,
+            Err(e) => {
+                warn!(node = %node, "failed to resolve spilled entry, skipping: {e}");
                 *offset += line_len + 1;
                 if let Err(e) = save_cursor(cursor_path, *offset) {
                     warn!(node = %node, "failed to persist cursor (will retry next wake): {e}");
@@ -765,6 +781,20 @@ async fn process_inbox<H: InboundHandler>(
     Ok(false)
 }
 
+/// Resolve a claim-check pointer (see [`IngestionEntry::spill`]): if `spill` is set, load + parse the
+/// full entry from its side-file; otherwise pass the entry through. The loaded entry carries `spill:
+/// None`, so this never recurses. The side-file is left in place — a transient run artifact (GC'd with
+/// the inbox dir) — which keeps an at-least-once re-read idempotent.
+fn resolve_spilled(entry: IngestionEntry) -> std::io::Result<IngestionEntry> {
+    match &entry.spill {
+        None => Ok(entry),
+        Some(path) => {
+            let bytes = std::fs::read(path)?;
+            serde_json::from_slice(&bytes).map_err(std::io::Error::other)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -772,6 +802,44 @@ mod tests {
     use exo_caps::{AgentName, Message, MessageBody, Persona, Summary};
     use std::fs::OpenOptions;
     use std::sync::Mutex;
+
+    fn sample_entry(text: &str) -> IngestionEntry {
+        IngestionEntry {
+            v: 1,
+            ts: Utc::now(),
+            spill: None,
+            from: Persona::Agent(AgentName::new("rev".into()).unwrap()),
+            msg: Message {
+                text: MessageBody::new(text.to_string()).unwrap(),
+                summary: Summary::new("s".into()).unwrap(),
+                kind: MessageKind::Chat,
+            },
+        }
+    }
+
+    #[test]
+    fn resolve_spilled_loads_full_entry_from_side_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // A "spilled" full entry written to a side-file (as the bus would).
+        let full = sample_entry("a very large verdict payload");
+        let path = dir.path().join("spill-1.json");
+        std::fs::write(&path, serde_json::to_vec(&full).unwrap()).unwrap();
+
+        // A pointer line that references it (stub body; real content is in the file).
+        let mut pointer = sample_entry("[spilled]");
+        pointer.spill = Some(path.to_string_lossy().into_owned());
+
+        let resolved = resolve_spilled(pointer).unwrap();
+        assert!(resolved.spill.is_none());
+        assert_eq!(resolved.msg, full.msg);
+    }
+
+    #[test]
+    fn resolve_spilled_passes_through_a_normal_entry() {
+        let entry = sample_entry("inline");
+        let resolved = resolve_spilled(entry.clone()).unwrap();
+        assert_eq!(resolved, entry);
+    }
 
     #[test]
     fn shutdown_response_render_text() {
@@ -823,6 +891,7 @@ mod tests {
             v: 1,
             ts: Utc::now(),
             from: Persona::Agent(AgentName::new("test".to_string()).unwrap()),
+            spill: None,
             msg: Message {
                 text: MessageBody::new(text.to_string()).unwrap(),
                 summary: Summary::new("test".to_string()).unwrap(),
@@ -886,6 +955,7 @@ mod tests {
             v: 1,
             ts: Utc::now(),
             from: Persona::Agent(AgentName::new("test".to_string()).unwrap()),
+            spill: None,
             msg: Message {
                 text: MessageBody::new("partial".to_string()).unwrap(),
                 summary: Summary::new("test".to_string()).unwrap(),

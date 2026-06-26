@@ -113,6 +113,7 @@ pub(crate) async fn deliver_synthetic<D: Exomonad>(
     let entry = IngestionEntry {
         v: 1,
         ts: Utc::now(),
+        spill: None,
         from: Persona::Synthetic(
             SyntheticName::new(from.to_string())
                 .map_err(|e| std::io::Error::other(e.to_string()))?,
@@ -267,6 +268,7 @@ mod tests {
             v: 1,
             ts: Utc::now(),
             from: Persona::Agent(AgentName::new("alice".to_string()).unwrap()),
+            spill: None,
             msg: Message {
                 text: MessageBody::new("Hello world".to_string()).unwrap(),
                 summary: Summary::new("Greeting".to_string()).unwrap(),
@@ -342,6 +344,7 @@ mod tests {
             v: 1,
             ts: Utc::now(),
             from: Persona::Synthetic(exo_caps::SyntheticName::new("github".to_string()).unwrap()),
+            spill: None,
             msg: Message {
                 text: MessageBody::new("PR #1 Approved".to_string()).unwrap(),
                 summary: Summary::new("[PR READY]".to_string()).unwrap(),

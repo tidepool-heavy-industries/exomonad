@@ -11,9 +11,13 @@
 //!      (`exo_caps::fold_children`) and look up the child's stored `inbox`.
 //! 2. Wrap the policy [`Message`] in an [`IngestionEntry`]: stamp `from = Agent(self.name())`,
 //!    `ts = Utc::now()`, `v = 1` (the runtime stamps the envelope — policy cannot spoof it).
-//! 3. Serialize to one line + `\n`. **Assert the serialized line ≤ `PIPE_BUF` (4096)**;
-//!    error (`BusError::Append`) if it would overflow — the bus NEVER spills. Bulk content
-//!    is a sender-written side-file referenced by path, never inlined.
+//! 3. Serialize to one line + `\n`. If it would exceed `PIPE_BUF` (4096), **spill** (claim-check):
+//!    write the full entry to a `.spill/` side-file (tmp+rename) and append a small pointer line
+//!    instead (`IngestionEntry::spill = Some(path)`, a stub `msg`). So every inbox line stays
+//!    ≤ PIPE_BUF (one atomic append) while the *payload* can be arbitrarily large — a rich review
+//!    verdict, a long report. The reader (`inbound::resolve_spilled`) loads the side-file
+//!    transparently. The side-file is written **before** the pointer (the append is the commit), so
+//!    a crash between them orphans a harmless unreferenced file, never a torn line.
 //! 4. Append with `OpenOptions::new().create(true).append(true)` + a single `write_all` of
 //!    the whole line (one atomic `write(2)` since it's ≤ PIPE_BUF). **No fsync.** Assumes a
 //!    local fs. Never read-modify-write the file.
@@ -27,9 +31,21 @@
 use crate::runtime::Runtime;
 use async_trait::async_trait;
 use chrono::Utc;
-use exo_caps::{Addressee, Bus, BusError, InboxPath, IngestionEntry, Message, Persona, SpawnError};
+use exo_caps::{
+    Addressee, Bus, BusError, InboxPath, IngestionEntry, Message, MessageBody, MessageKind, Persona,
+    SpawnError,
+};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::AsyncWriteExt;
 use tracing::{error, info};
+
+/// Max bytes for one atomic inbox append. A `write(2)` of ≤ `PIPE_BUF` is atomic on a local fs, so
+/// concurrent writers never interleave/tear. An entry that would exceed this is **spilled** to a
+/// side-file and replaced by a small pointer line (see `Bus::deliver`).
+const PIPE_BUF: usize = 4096;
+
+/// Monotonic counter disambiguating spill filenames written by this process.
+static SPILL_SEQ: AtomicU64 = AtomicU64::new(0);
 
 impl Runtime {
     /// Resolve a policy-facing [`Addressee`] to the concrete inbox file to append to.
@@ -55,6 +71,40 @@ impl Runtime {
             }
         }
     }
+
+    /// Claim-check overflow: write the full (oversized) `entry` to a side-file in a `.spill/` dir
+    /// next to `inbox`, returning its path. The caller appends a small pointer line referencing it.
+    /// Ordering is the safety guarantee — the side-file is fully written (tmp + rename, so a reader
+    /// never sees a torn file) **before** the pointer is appended, and the pointer append is the
+    /// commit point. A crash between the two orphans a harmless unreferenced side-file, never a torn
+    /// inbox line.
+    async fn write_spill(
+        &self,
+        inbox: &InboxPath,
+        entry: &IngestionEntry,
+    ) -> Result<String, BusError> {
+        let body = serde_json::to_vec(entry).map_err(|e| BusError::Append {
+            detail: e.to_string(),
+        })?;
+        let dir = inbox
+            .as_path()
+            .parent()
+            .map(|p| p.join(".spill"))
+            .ok_or_else(|| BusError::Append {
+                detail: format!(
+                    "inbox path {} has no parent for the .spill dir",
+                    inbox.as_path().display()
+                ),
+            })?;
+        tokio::fs::create_dir_all(&dir).await?;
+        let seq = SPILL_SEQ.fetch_add(1, Ordering::Relaxed);
+        let nanos = entry.ts.timestamp_nanos_opt().unwrap_or(0);
+        let path = dir.join(format!("spill-{nanos}-{seq}.json"));
+        let tmp = dir.join(format!("spill-{nanos}-{seq}.json.tmp"));
+        tokio::fs::write(&tmp, &body).await?;
+        tokio::fs::rename(&tmp, &path).await?;
+        Ok(path.to_string_lossy().into_owned())
+    }
 }
 
 #[async_trait]
@@ -73,6 +123,7 @@ impl Bus for Runtime {
             v: 1,
             ts: Utc::now(),
             from: Persona::Agent(self.name()),
+            spill: None,
             msg,
         };
 
@@ -81,11 +132,40 @@ impl Bus for Runtime {
         })?;
         line.push('\n');
 
-        const PIPE_BUF: usize = 4096;
         if line.len() > PIPE_BUF {
-            return Err(BusError::Append {
-                detail: format!("line {} bytes exceeds PIPE_BUF {}", line.len(), PIPE_BUF),
-            });
+            // Too big for one atomic append. Spill the full entry to a side-file and append a small
+            // claim-check pointer instead (the reader resolves it transparently). The bus thus
+            // delivers arbitrarily-large payloads — a rich review verdict, a long report — without
+            // ever writing a non-atomic (>PIPE_BUF) inbox line.
+            let spill_path = self.write_spill(&inbox, &entry).await?;
+            let pointer = IngestionEntry {
+                v: 1,
+                ts: entry.ts,
+                from: entry.from.clone(),
+                spill: Some(spill_path.clone()),
+                msg: Message {
+                    text: MessageBody::new("[spilled: full content in side-file]".into())
+                        .expect("static spill-stub body is valid"),
+                    summary: entry.msg.summary.clone(),
+                    kind: MessageKind::Chat,
+                },
+            };
+            line = serde_json::to_string(&pointer).map_err(|e| BusError::Append {
+                detail: e.to_string(),
+            })?;
+            line.push('\n');
+            // The pointer is small by construction; assert defensively (a pathologically long inbox
+            // path is the only way it could overflow).
+            if line.len() > PIPE_BUF {
+                return Err(BusError::Append {
+                    detail: format!(
+                        "spill pointer line {} bytes exceeds PIPE_BUF {} (inbox path too long?)",
+                        line.len(),
+                        PIPE_BUF
+                    ),
+                });
+            }
+            info!(to = %to, summary = %summary, spill = %spill_path, "Bus::deliver: oversized entry spilled to side-file");
         }
 
         let path = inbox.as_path();
@@ -158,10 +238,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_deliver_overflow() {
+    async fn test_deliver_spills_oversized_entry() {
         let dir = tempdir().unwrap();
         let inbox_path = dir.path().join("parent_inbox.jsonl");
-        let inbox = InboxPath::new(inbox_path);
+        let inbox = InboxPath::new(inbox_path.clone());
 
         let node_path = NodePath::new(vec![AgentName::new("child".into()).unwrap()]).unwrap();
         let runtime = Runtime::new(
@@ -175,19 +255,36 @@ mod tests {
             exo_caps::ChildKind::Worktree,
         );
 
-        // Build a body that is large enough that when combined with the envelope it exceeds 4096.
+        // A body large enough that the serialized envelope exceeds PIPE_BUF (≈ a rich verdict).
         let large_body = "A".repeat(4000);
         let msg = Message {
-            text: MessageBody::new(large_body).unwrap(),
-            summary: Summary::new("large".into()).unwrap(),
+            text: MessageBody::new(large_body.clone()).unwrap(),
+            summary: Summary::new("big verdict".into()).unwrap(),
             kind: MessageKind::Chat,
         };
 
-        let res = runtime.deliver(Addressee::Parent, msg).await;
-        match res {
-            Err(BusError::Append { detail }) => assert!(detail.contains("exceeds PIPE_BUF")),
-            _ => panic!("Expected Append error, got {:?}", res),
-        }
+        // Delivery SUCCEEDS via the claim-check spill (was an error before).
+        runtime
+            .deliver(Addressee::Parent, msg.clone())
+            .await
+            .unwrap();
+
+        // The inbox holds exactly one line, and it fits a single atomic append.
+        let content = std::fs::read_to_string(&inbox_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].len() + 1 <= PIPE_BUF,
+            "the pointer line must fit one atomic append"
+        );
+
+        // That line is a pointer; the side-file holds the full entry with the original body.
+        let pointer: IngestionEntry = serde_json::from_str(lines[0]).unwrap();
+        let spill = pointer.spill.expect("oversized entry carries a spill pointer");
+        let full: IngestionEntry = serde_json::from_slice(&std::fs::read(&spill).unwrap()).unwrap();
+        assert!(full.spill.is_none(), "the full entry carries no further pointer");
+        assert_eq!(full.msg, msg);
+        assert_eq!(full.msg.text.as_str(), large_body);
     }
 
     #[tokio::test]
@@ -231,7 +328,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_deliver_overflow_no_spill() {
+    async fn test_max_body_spills_and_inbox_line_stays_atomic() {
         let dir = tempdir().unwrap();
         let inbox_path = dir.path().join("inbox.jsonl");
         let inbox = InboxPath::new(inbox_path.clone());
@@ -248,24 +345,53 @@ mod tests {
             exo_caps::ChildKind::Worktree,
         );
 
-        // Max MessageBody is 4096, which GUARANTEES the total line exceeds 4096.
+        // A max-size body GUARANTEES the envelope exceeds PIPE_BUF → must spill, never error.
         let msg = Message {
             text: MessageBody::new("A".repeat(MessageBody::MAX_LEN)).unwrap(),
             summary: Summary::new("overflow".into()).unwrap(),
             kind: MessageKind::Chat,
         };
+        runtime.deliver(Addressee::Parent, msg).await.unwrap();
 
-        let res = runtime.deliver(Addressee::Parent, msg).await;
-        match res {
-            Err(BusError::Append { detail }) => assert!(detail.contains("exceeds PIPE_BUF")),
-            _ => panic!("Expected Append error, got {:?}", res),
-        }
+        // Every byte of the inbox is ≤ PIPE_BUF (the atomic-append invariant holds).
+        let content = std::fs::read_to_string(&inbox_path).unwrap();
+        assert!(content.len() <= PIPE_BUF);
+    }
 
-        // NO-SPILL: The file must not exist or be empty.
-        if inbox_path.exists() {
-            let content = std::fs::read(&inbox_path).unwrap();
-            assert!(content.is_empty(), "File should be empty on overflow");
-        }
+    #[tokio::test]
+    async fn test_small_message_does_not_spill() {
+        let dir = tempdir().unwrap();
+        let inbox_path = dir.path().join("inbox.jsonl");
+        let inbox = InboxPath::new(inbox_path.clone());
+
+        let node_path = NodePath::new(vec![AgentName::new("node".into()).unwrap()]).unwrap();
+        let runtime = Runtime::new(
+            node_path,
+            Branch::new("main".into()).unwrap(),
+            dir.path().to_path_buf(),
+            Some(inbox),
+            "run-1".into(),
+            "session-1".into(),
+            PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
+        );
+
+        let msg = Message {
+            text: MessageBody::new("hello".into()).unwrap(),
+            summary: Summary::new("hi".into()).unwrap(),
+            kind: MessageKind::Chat,
+        };
+        runtime.deliver(Addressee::Parent, msg).await.unwrap();
+
+        // The common path is byte-identical to before: no `spill` field on the wire, no .spill dir.
+        let content = std::fs::read_to_string(&inbox_path).unwrap();
+        let entry: IngestionEntry = serde_json::from_str(content.lines().next().unwrap()).unwrap();
+        assert!(entry.spill.is_none());
+        assert!(
+            !content.contains("\"spill\""),
+            "spill is omitted from the wire when None"
+        );
+        assert!(!dir.path().join(".spill").exists());
     }
 
     #[tokio::test]

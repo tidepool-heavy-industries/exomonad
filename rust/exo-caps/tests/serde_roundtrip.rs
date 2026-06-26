@@ -140,6 +140,7 @@ fn test_ingestion_entry_roundtrip() {
         v: 1,
         ts: Utc::now(),
         from: Persona::Agent(AgentName::new("root".into()).unwrap()),
+        spill: None,
         msg: Message {
             text: MessageBody::new("hello".into()).unwrap(),
             summary: Summary::new("hi".into()).unwrap(),

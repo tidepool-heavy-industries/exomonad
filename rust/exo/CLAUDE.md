@@ -87,15 +87,21 @@ Every role is a Claude instance; the **model** varies per role via `ExoRole::mod
 | **Worker** | Claude (Sonnet) | notify_parent | `stop_notify` (inline child, no branch to fold, but still signals on yield) |
 | **Reviewer** | Claude (Sonnet, or a launch-profile brain) | verdict, notify_parent | `stop_reviewer` (ephemeral; its `verdict` is its done-signal; emits `ReviewAborted` if it exits without one) |
 
-The **reviewer** and ephemeral in-pane **worker** roles carry a **launch profile** (`ExoRole::launch_profile_env_prefix` → `Some("EXO_REVIEWER")` / `Some("EXO_WORKER")`): their Claude can be redirected to a non-default Anthropic-compatible endpoint/model (e.g. Kimi via a local `claude-code-proxy`) — still a Claude process, so Teams/hooks/MCP are unchanged (the old Gemini-worker slot, now Kimi). Configure per-role in `.exo/config.toml` (the convenient path):
+The **reviewer** and ephemeral in-pane **worker** roles carry a **launch profile** (`ExoRole::launch_profile_env_prefix` → `Some("EXO_REVIEWER")` / `Some("EXO_WORKER")`): their Claude can be redirected to a non-default Anthropic-compatible endpoint/model (e.g. Kimi via a local `claude-code-proxy`) — still a Claude process, so Teams/hooks/MCP are unchanged (the old Gemini-worker slot, now Kimi). Configure per-role in `.exo/config.toml` (the convenient path) — the **named-brain shorthand** is the common case:
 ```toml
-[launch_profile.reviewer]   # and/or [launch_profile.worker]
+[launch_profile]
+reviewer = "kimi"          # built-in named brain → proxy endpoint + model + label
+worker   = "kimi"          # no auth_token needed: the proxy holds the OAuth
+```
+`"kimi"` is the one built-in brain today (`config.rs::named_brain` — the **only place a vendor is named**; the runtime/seam stays backend-agnostic). For a custom/unknown backend, the **full-table form** still works and overrides the shorthand:
+```toml
+[launch_profile.reviewer]
 base_url = "http://localhost:18765"
 model = "kimi-for-coding"
-auth_token = "unused"      # the proxy ignores it; a real key can instead live in the env (env wins)
+auth_token = "sk-…"        # OPTIONAL — omit for a local proxy; a real key can also live in the shell env (env wins)
 label = "kimi"             # tags the window + tree
 ```
-`config.rs` flattens `[launch_profile.<role>]` → `EXO_<ROLE_UPPER>_*`, `init.rs` embeds them in the root launch (a matching shell `EXO_*` overrides, so a secret key needn't be in the file), and the tree propagates + `exo-runtime` resolves them (see its CLAUDE.md). Unset ⇒ a normal Sonnet reviewer. Adding another role/backend = one arm in `launch_profile_env_prefix` + a `[launch_profile.<role>]` block.
+`config.rs` resolves each profile (`Named` shorthand via `named_brain`, an unknown name is a loud skip) and flattens to `EXO_<ROLE_UPPER>_*`; `init.rs` embeds them in the root launch (a matching shell `EXO_*` overrides), the tree propagates, and `exo-runtime` resolves them (see its CLAUDE.md — the profile **activates on `BASE_URL`**, the token is optional). Omit a role ⇒ it stays the default Sonnet. Adding another role/backend = one arm in `launch_profile_env_prefix` (+ optionally a `named_brain` entry).
 
 ## The review gate (how `submit_branch` → `merge` is gated)
 

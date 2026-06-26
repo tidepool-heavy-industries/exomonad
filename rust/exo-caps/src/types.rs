@@ -356,6 +356,14 @@ pub struct IngestionEntry {
     pub v: u32,
     pub ts: DateTime<Utc>,
     pub from: Persona,
+    /// **Claim-check pointer.** When `Some(path)`, THIS line is a small stand-in: the real
+    /// (oversized) entry is the JSON in that side-file, and the reader loads + processes *that*
+    /// instead of the inline `msg` (a stub here). The bus writes it when a serialized entry would
+    /// exceed `PIPE_BUF`, so every inbox line stays ≤ `PIPE_BUF` (one atomic append) while a payload
+    /// — e.g. a rich review verdict — can be arbitrarily large. `None` (the common case) is omitted
+    /// from the wire, so an ordinary line is byte-identical to before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spill: Option<String>,
     #[serde(flatten)]
     pub msg: Message,
 }
@@ -579,6 +587,7 @@ mod tests {
                 .unwrap()
                 .with_timezone(&Utc),
             from: Persona::Synthetic(SyntheticName::new("github".into()).unwrap()),
+            spill: None,
             msg: Message {
                 text: MessageBody::new("PR #5 approved".into()).unwrap(),
                 summary: Summary::new("approved".into()).unwrap(),
