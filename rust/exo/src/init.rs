@@ -128,7 +128,15 @@ pub async fn run(
     }
     std::fs::write(&papers_path, serde_json::to_vec_pretty(&papers)?)?;
 
-    exo_runtime::write_node_agent_config(&cwd, &papers_path).await?;
+    // Root config goes to private files (siblings of root.json under `.exo/node/{run}/`), pointed at
+    // via `--settings`/`--mcp-config` below — never the cwd's `.mcp.json`/`.claude/settings.local.json`.
+    let (settings_path, mcp_config_path) = exo_caps::paths::node_config_paths(&papers_path);
+    exo_runtime::write_node_agent_config(&settings_path, &mcp_config_path, &papers_path).await?;
+
+    // Migration: remove stale exomonad-written cwd config from the pre-private-config era. CC still
+    // MERGES the cwd's `.claude/settings.local.json` over our `--settings`, so a leftover (e.g. a
+    // worker-clobbered) one would fire dead hooks. Only OUR generated content is touched.
+    migrate_strip_legacy_cwd_config(&cwd);
 
     let model_flag = model.map(|m| format!(" --model {m}")).unwrap_or_default();
     // Embed the boot env directly in the launch command. The holding-shell pane was created
@@ -144,6 +152,10 @@ pub async fn run(
     // would otherwise break the launch. (run_id is a UUID, but escape it too for uniformity.)
     let run_id_esc = shell_escape::escape(run_id.clone().into());
     let session_esc = shell_escape::escape(session.clone().into());
+    // Point the root's `claude` at its private config (merged over the cwd, so a user's own
+    // `.mcp.json`/settings survive — no `--strict-mcp-config`/`--setting-sources`).
+    let settings_esc = shell_escape::escape(settings_path.to_string_lossy().into_owned().into());
+    let mcp_esc = shell_escape::escape(mcp_config_path.to_string_lossy().into_owned().into());
     // On `--recreate` (e.g. restarting after a binary update), continue the prior root
     // conversation so the restart doesn't discard the human's context — `claude --continue`
     // resumes the most recent conversation in this cwd. A fresh `init` has nothing to continue.
@@ -167,7 +179,7 @@ pub async fn run(
         .map(|(k, v)| format!("{k}={} ", shell_escape::escape(v.into())))
         .collect();
     let launch = format!(
-        "{profile_env}EXOMONAD_SWARM_RUN_ID={run_id_esc} EXOMONAD_TMUX_SESSION={session_esc} CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude{continue_flag} --dangerously-skip-permissions{model_flag}"
+        "{profile_env}EXOMONAD_SWARM_RUN_ID={run_id_esc} EXOMONAD_TMUX_SESSION={session_esc} CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude{continue_flag} --dangerously-skip-permissions{model_flag} --settings {settings_esc} --mcp-config {mcp_esc}"
     );
 
     exomonad_shared::services::tmux_ipc::TmuxIpc::new(&session)
@@ -178,4 +190,46 @@ pub async fn run(
 
     // Attach the user into the root session, matching production `init`.
     exomonad_shared::services::tmux_ipc::TmuxIpc::attach_session(&session, None).await
+}
+
+/// Best-effort removal of stale exomonad-written cwd config from the pre-private-config era, so it
+/// doesn't merge into a node's launch. Touches ONLY our generated content: a user-authored
+/// `settings.local.json` (no `_exomonad_generated` marker) or a `.mcp.json` carrying the user's own
+/// servers is preserved. Failures are logged, never fatal.
+fn migrate_strip_legacy_cwd_config(cwd: &Path) {
+    // `.claude/settings.local.json`: delete iff it carries our generated marker (CC MERGES it over
+    // our `--settings`, so a stale one would fire dead hooks).
+    let settings = cwd.join(".claude/settings.local.json");
+    let is_ours = std::fs::read(&settings)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .and_then(|v| v.get("_exomonad_generated").and_then(|m| m.as_bool()))
+        == Some(true);
+    if is_ours {
+        if let Err(e) = std::fs::remove_file(&settings) {
+            eprintln!(
+                "exo init: could not remove legacy {}: {e}",
+                settings.display()
+            );
+        }
+    }
+
+    // `.mcp.json` that is ONLY our exomonad server (what the old code truncated it to) is obsolete —
+    // delete it. A file the user added other servers to is left alone (our `--mcp-config` exomonad
+    // server takes command-line precedence over a stale project one).
+    let mcp = cwd.join(".mcp.json");
+    let only_exomonad = std::fs::read(&mcp)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .and_then(|v| {
+            v.get("mcpServers")
+                .and_then(|s| s.as_object())
+                .map(|o| o.len() == 1 && o.contains_key("exomonad"))
+        })
+        == Some(true);
+    if only_exomonad {
+        if let Err(e) = std::fs::remove_file(&mcp) {
+            eprintln!("exo init: could not remove legacy {}: {e}", mcp.display());
+        }
+    }
 }

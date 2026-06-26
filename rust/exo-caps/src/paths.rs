@@ -19,6 +19,20 @@ pub fn papers_path(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
         .join(format!("pane-{n}.json"))
 }
 
+/// A node's private CC config files, derived as **siblings** of its papers file:
+/// `(settings, mcp)` = `<papers>.settings.json`, `<papers>.mcp.json`. These are passed to
+/// `claude` via `--settings`/`--mcp-config` so the node NEVER writes the shared cwd's
+/// `.claude/settings.local.json` / `.mcp.json` (which an inline worker would clobber, and which
+/// made the root `.mcp.json` a git-tracked footgun). Living beside the papers keeps them per-node:
+/// the root's under `.exo/node/{run}/`, a worktree child's under its `.exo/`, an inline worker's
+/// under `~/.claude/exo/papers/{run}/` — the last is OUTSIDE the shared cwd, so no clobber.
+pub fn node_config_paths(papers: &Path) -> (PathBuf, PathBuf) {
+    (
+        papers.with_extension("settings.json"),
+        papers.with_extension("mcp.json"),
+    )
+}
+
 /// Child's NodeStatus path: `{home}/.claude/exo/status/{run_id}/pane-{n}.json`.
 pub fn status_path(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
     let n = pane.as_str().trim_start_matches('%');
@@ -70,6 +84,24 @@ mod tests {
         assert_eq!(
             papers,
             Path::new("/home/user/.claude/exo/papers/run-42/pane-317.json")
+        );
+    }
+
+    #[test]
+    fn node_config_paths_are_siblings_of_papers() {
+        let (s, m) = node_config_paths(Path::new("/x/.exo/node/run-1/root.json"));
+        assert_eq!(s, Path::new("/x/.exo/node/run-1/root.settings.json"));
+        assert_eq!(m, Path::new("/x/.exo/node/run-1/root.mcp.json"));
+
+        // Inline worker papers live under $HOME — config siblings land there too (outside the cwd).
+        let (s, m) = node_config_paths(Path::new("/home/u/.claude/exo/papers/run-1/pane-3.json"));
+        assert_eq!(
+            s,
+            Path::new("/home/u/.claude/exo/papers/run-1/pane-3.settings.json")
+        );
+        assert_eq!(
+            m,
+            Path::new("/home/u/.claude/exo/papers/run-1/pane-3.mcp.json")
         );
     }
 

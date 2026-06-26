@@ -83,7 +83,7 @@ Each leaf agent (`spawn_dev` with worktree isolation):
 Each worker agent (`spawn_worker`, inline isolation):
 - Runs in a tmux pane in the parent's directory (no branch, no worktree, ephemeral)
 - Sonnet Claude — lightweight, focused execution
-- `.mcp.json` + `.claude/settings.local.json` in the parent's worktree (CWD-discovered)
+- MCP + hooks come from **private files** (siblings of the worker's papers under `~/.claude/exo/papers/`) passed via `claude --settings/--mcp-config` — NOT the shared cwd, so it can't clobber the parent's config
 
 ## Documentation Tree
 

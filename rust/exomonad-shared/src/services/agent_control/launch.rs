@@ -76,6 +76,23 @@ pub fn build_agent_command(
                 }
             }
 
+            // Private config files (node-mode): point CC at our hooks + MCP server without writing
+            // the shared cwd's `.claude/settings.local.json` / `.mcp.json`. Both flags MERGE over the
+            // cwd config (no `--strict-mcp-config` / `--setting-sources`), so the user's own config
+            // survives.
+            if let Some(settings) = claude_flags.and_then(|f| f.settings_path.as_deref()) {
+                if !settings.trim().is_empty() {
+                    flags.push_str(" --settings ");
+                    flags.push_str(&shell_escape::escape(settings.into()));
+                }
+            }
+            if let Some(mcp) = claude_flags.and_then(|f| f.mcp_config_path.as_deref()) {
+                if !mcp.trim().is_empty() {
+                    flags.push_str(" --mcp-config ");
+                    flags.push_str(&shell_escape::escape(mcp.into()));
+                }
+            }
+
             flags
         }
         AgentType::Gemini => {
@@ -233,7 +250,10 @@ mod tests {
             false,
             None,
         );
-        assert!(cmd.contains("$(cat"), "Claude path should still cat the prompt file: {cmd}");
+        assert!(
+            cmd.contains("$(cat"),
+            "Claude path should still cat the prompt file: {cmd}"
+        );
         assert!(
             !cmd.contains("@.exo/tmp"),
             "Claude path should not use the Gemini @-reference form: {cmd}"
@@ -261,7 +281,10 @@ mod tests {
             false,
             None,
         );
-        assert!(cmd.contains("--model sonnet"), "expected --model sonnet: {cmd}");
+        assert!(
+            cmd.contains("--model sonnet"),
+            "expected --model sonnet: {cmd}"
+        );
         assert!(
             cmd.contains("--dangerously-skip-permissions"),
             "model flag must not disturb the default permission mode: {cmd}"
@@ -285,6 +308,46 @@ mod tests {
             false,
             None,
         );
-        assert!(!cmd.contains("--model"), "no model flag expected when unset: {cmd}");
+        assert!(
+            !cmd.contains("--model"),
+            "no model flag expected when unset: {cmd}"
+        );
+    }
+
+    #[test]
+    fn claude_private_config_flags_emitted() {
+        // Node-mode points CC at private config files via flags (merge over the cwd — plain
+        // --settings / --mcp-config, never --strict-mcp-config / --setting-sources).
+        let cwd = Path::new("/home/u/dev/proj/.exo/worktrees/leaf");
+        let pf = cwd.join(".exo/tmp/prompt.txt");
+        let env = HashMap::new();
+        let flags = ClaudeSpawnFlags {
+            settings_path: Some("/home/u/.claude/exo/papers/run/pane-3.settings.json".into()),
+            mcp_config_path: Some("/home/u/.claude/exo/papers/run/pane-3.mcp.json".into()),
+            ..Default::default()
+        };
+        let cmd = build_agent_command(
+            AgentType::Claude,
+            Some(&pf),
+            None,
+            &env,
+            cwd,
+            Some(&flags),
+            false,
+            false,
+            None,
+        );
+        assert!(
+            cmd.contains("--settings /home/u/.claude/exo/papers/run/pane-3.settings.json"),
+            "expected --settings flag: {cmd}"
+        );
+        assert!(
+            cmd.contains("--mcp-config /home/u/.claude/exo/papers/run/pane-3.mcp.json"),
+            "expected --mcp-config flag: {cmd}"
+        );
+        assert!(
+            !cmd.contains("--strict-mcp-config") && !cmd.contains("--setting-sources"),
+            "must MERGE (no strict/setting-sources) to preserve user config: {cmd}"
+        );
     }
 }

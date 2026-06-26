@@ -132,6 +132,12 @@ pub struct ClaudeSpawnFlags {
     pub disallowed_tools: Vec<String>,
     /// `--model` to launch with (e.g. "sonnet"). `None` inherits the launcher's default model.
     pub model: Option<String>,
+    /// `--settings <path>` — a private settings file (hooks) merged over the cwd's settings, so the
+    /// node never writes the shared cwd's `.claude/settings.local.json`. `None` ⇒ no flag.
+    pub settings_path: Option<String>,
+    /// `--mcp-config <path>` — a private MCP config merged over the cwd's `.mcp.json` (plain, NOT
+    /// `--strict-mcp-config`, so the user's own MCP servers survive). `None` ⇒ no flag.
+    pub mcp_config_path: Option<String>,
 }
 
 #[cfg(test)]

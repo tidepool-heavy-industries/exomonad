@@ -404,7 +404,11 @@ impl Runtime {
         };
         // A launch-profiled child (e.g. a Kimi reviewer) is still a 🤖 Claude process; tag the
         // window with its model label so the heterogeneity is legible at a glance.
-        let window_name = match core.launch_profile.as_ref().and_then(|p| p.label.as_deref()) {
+        let window_name = match core
+            .launch_profile
+            .as_ref()
+            .and_then(|p| p.label.as_deref())
+        {
             Some(label) => format!("{} {} ({})", emoji, core.name.as_str(), label),
             None => format!("{} {}", emoji, core.name.as_str()),
         };
@@ -514,6 +518,12 @@ impl Runtime {
             }
         };
 
+        // The node's private CC config files (siblings of its papers). `claude` is pointed at them
+        // via `--settings`/`--mcp-config` so we NEVER write the shared cwd's config — the inline-worker
+        // clobber + the `.mcp.json`-in-repo footgun both vanish (an inline worker's papers live under
+        // `~/.claude/exo/papers/`, outside the shared cwd).
+        let (settings_path, mcp_config_path) = exo_caps::paths::node_config_paths(&papers_path);
+
         let papers_json = serde_json::to_vec_pretty(&papers).map_err(|e| SpawnError::Failed {
             op: "serialize_papers",
             child: Some(core.name.clone()),
@@ -558,13 +568,17 @@ impl Runtime {
 
         let agent_type = match core.agent_type {
             AgentType::Claude => {
-                crate::node_config::write_node_agent_config(child_dir, &papers_path)
-                    .await
-                    .map_err(|e| SpawnError::Failed {
-                        op: "write_node_agent_config",
-                        child: Some(core.name.clone()),
-                        detail: e.to_string(),
-                    })?;
+                crate::node_config::write_node_agent_config(
+                    &settings_path,
+                    &mcp_config_path,
+                    &papers_path,
+                )
+                .await
+                .map_err(|e| SpawnError::Failed {
+                    op: "write_node_agent_config",
+                    child: Some(core.name.clone()),
+                    detail: e.to_string(),
+                })?;
                 // Enable Claude Code Teams so the Bus→Teams last hop (dispatch.rs) can
                 // deliver as a native `<teammate-message>` instead of falling back to paste.
                 // Worktree children only — inline workers share the parent's worktree and cwd,
@@ -691,12 +705,14 @@ impl Runtime {
             .as_ref()
             .and_then(|p| p.model.clone())
             .or_else(|| core.model.clone());
-        let claude_flags = launch_model.map(|m| {
-            exomonad_shared::services::agent_control::ClaudeSpawnFlags {
-                model: Some(m),
-                ..Default::default()
-            }
-        });
+        // Always pass Claude flags: besides the optional `--model`, they carry the node's private
+        // config-file paths so the launch emits `--settings`/`--mcp-config` (never the cwd config).
+        let claude_flags = exomonad_shared::services::agent_control::ClaudeSpawnFlags {
+            model: launch_model,
+            settings_path: Some(settings_path.to_string_lossy().into_owned()),
+            mcp_config_path: Some(mcp_config_path.to_string_lossy().into_owned()),
+            ..Default::default()
+        };
 
         // The protocol string is passed via --append-system-prompt for Claude.
         let launch_cmd = format!(
@@ -707,7 +723,7 @@ impl Runtime {
                 fork_session_id.as_deref(),
                 &env_vars,
                 child_dir,           // cwd (flake detection for wrap_nix)
-                claude_flags.as_ref(), // claude_flags (carries --model)
+                Some(&claude_flags), // claude_flags (--model + private config paths)
                 yolo,                // yolo (inherited launch policy)
                 wrap_nix,            // wrap_nix: nix develop wrap (inherited launch policy)
                 Some(&core.protocol),
@@ -945,7 +961,8 @@ mod tests {
             ("EXO_REVIEWER_AUTH_TOKEN".to_string(), "sk-xxx".to_string()),
         ]);
         assert!(
-            LaunchProfile::resolve(Some("EXO_REVIEWER"), |k: &str| no_url.get(k).cloned()).is_none()
+            LaunchProfile::resolve(Some("EXO_REVIEWER"), |k: &str| no_url.get(k).cloned())
+                .is_none()
         );
     }
 
