@@ -824,6 +824,28 @@ impl Spawner for Runtime {
 
                     if let Err(e) = res {
                         if path == base_path {
+                            tracing::error!(
+                                child = child.as_str(),
+                                path = %path.display(),
+                                reason = %e,
+                                "reclaim_worktree: worktree remove FAILED after {MAX_TEARDOWN_ATTEMPTS} attempts — worktree may be locked, dirty, or nested",
+                            );
+                            match tokio::process::Command::new("git")
+                                .args(["worktree", "prune"])
+                                .current_dir(&self.working_dir)
+                                .output()
+                                .await
+                            {
+                                Ok(out) => tracing::info!(
+                                    exit = ?out.status.code(),
+                                    stdout = %String::from_utf8_lossy(&out.stdout).trim(),
+                                    stderr = %String::from_utf8_lossy(&out.stderr).trim(),
+                                    "git worktree prune (post-reclaim fallback)",
+                                ),
+                                Err(prune_err) => tracing::warn!(
+                                    "git worktree prune failed to launch: {prune_err}"
+                                ),
+                            }
                             return Err(SpawnError::Failed {
                                 op: "reclaim_worktree",
                                 child: Some(child.clone()),
