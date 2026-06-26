@@ -14,6 +14,8 @@ exo-runtime = { path = "../exo-runtime" }
 exo-framework = { path = "../exo-framework" }
 exo-scry = { path = "../exo-scry" }
 
+libc = "0.2"
+
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

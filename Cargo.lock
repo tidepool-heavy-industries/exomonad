@@ -1072,6 +1072,7 @@ dependencies = [
  "exo-framework",
  "exo-runtime",
  "exo-scry",
+ "libc",
  "notify",
  "rmcp",
  "serde",

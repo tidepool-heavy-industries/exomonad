@@ -62,6 +62,31 @@ impl<D: Exomonad> NodeContext<D> {
     }
 }
 
+/// Arm a Linux parent-death signal so this sidecar dies if its parent `claude` exits — the
+/// stdin-EOF lifetime anchor is not always reliable (a killed pane can orphan the sidecar).
+/// Best-effort: a prctl failure logs a warning and is non-fatal.
+#[cfg(target_os = "linux")]
+fn install_parent_death_signal() {
+    // SAFETY: prctl/getppid are simple syscalls with no memory effects.
+    unsafe {
+        let original_ppid = libc::getppid();
+        if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as libc::c_ulong, 0, 0, 0) != 0 {
+            tracing::warn!("prctl(PR_SET_PDEATHSIG) failed; orphaned-sidecar guard not armed");
+            return;
+        }
+        // Race guard: if the parent died between getppid() and prctl(), the signal will never
+        // arrive — detect the reparent and exit now.
+        if libc::getppid() != original_ppid {
+            tracing::warn!("parent died before PDEATHSIG was armed; self-terminating");
+            std::process::exit(0);
+        }
+    }
+    tracing::info!("PDEATHSIG armed (sidecar exits if parent claude dies)");
+}
+
+#[cfg(not(target_os = "linux"))]
+fn install_parent_death_signal() {}
+
 /// Read+parse the node's papers from the `--papers` path.
 fn load_papers(papers_path: &Path) -> NodeResult<NodePapers> {
     let bytes = std::fs::read(papers_path).map_err(|e| NodeError::Papers {
@@ -92,6 +117,7 @@ pub fn bootstrap<D: Exomonad<Caps = Runtime>>(
     papers_path: &Path,
     working_dir: PathBuf,
 ) -> NodeResult<NodeContext<D>> {
+    install_parent_death_signal();
     let papers = load_papers(papers_path)?;
 
     let run_id = std::env::var("EXOMONAD_SWARM_RUN_ID")
