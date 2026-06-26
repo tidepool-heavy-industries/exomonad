@@ -11,7 +11,7 @@
 use crate::roles::ExoRole;
 use crate::spawn::ExoSpawn;
 use exo_caps::{
-    Addressee, Bus, CapError, CapResult, ChildKind, Fs, Git, Message, MessageBody, MessageKind,
+    Addressee, Bus, CapError, CapResult, ChildKind, Fs, Git, Kv, Message, MessageBody, MessageKind,
     Process, Spawner, Summary,
 };
 use schemars::JsonSchema;
@@ -142,7 +142,7 @@ fn checks<C: Git + Process + Sync>() -> Vec<Check<C>> {
 pub struct SubmitBranch;
 
 #[async_trait::async_trait]
-impl<R: Git + Process + Spawner + Fs + Bus + Send + Sync> Tool<R> for SubmitBranch {
+impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for SubmitBranch {
     const NAME: &'static str = "submit_branch";
     const DESCRIPTION: &'static str =
         "Request review of your branch. Commit everything first (it refuses on uncommitted changes \
@@ -189,6 +189,10 @@ impl<R: Git + Process + Spawner + Fs + Bus + Send + Sync> Tool<R> for SubmitBran
                 kind: MessageKind::Chat,
             };
             ctx.deliver(Addressee::Parent, msg).await?;
+            // Flag that submit_branch ran this session so the stop guard doesn't block clean exit.
+            // Best-effort — a kv failure here is not a reason to abort a successful submit.
+            // sidecar-session-scoped (in-memory Kv); a v1 backstop for the never-submitted case.
+            let _ = ctx.set("submit_branch_called", "true").await;
             return Ok(ToolOutput::with_data(
                 format!(
                     "Forwarded [READY] to your parent for branch {} WITHOUT review (reviewer \
@@ -297,6 +301,11 @@ impl<R: Git + Process + Spawner + Fs + Bus + Send + Sync> Tool<R> for SubmitBran
             fork_session: false,
         };
         let reviewer = ctx.spawn(spec).await?;
+
+        // Flag that submit_branch ran this session so the stop guard doesn't block clean exit.
+        // Best-effort — a kv failure here is not a reason to abort a successful submit.
+        // sidecar-session-scoped (in-memory Kv); a v1 backstop for the never-submitted case.
+        let _ = ctx.set("submit_branch_called", "true").await;
 
         Ok(ToolOutput::with_data(
             format!(

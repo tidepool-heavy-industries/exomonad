@@ -31,6 +31,9 @@ pub trait Git {
     /// other branch shares history with HEAD. Name-agnostic: needs no parent-branch name.
     async fn fork_point(&self) -> Result<Option<String>, GitError>;
     async fn is_clean(&self) -> Result<bool, GitError>;
+    /// True if HEAD has commits that `base` does not. `Ok(false)` when the base ref does not
+    /// resolve or any git error occurs (fail-open — never block a stop on a bad base).
+    async fn is_ahead_of(&self, base: &str) -> Result<bool, GitError>;
     async fn fetch(&self) -> Result<(), GitError>;
     /// Merge `branch` into the current branch (the local fold; no remote). Non-interactive.
     async fn merge(&self, branch: &Branch) -> Result<(), GitError>;

@@ -7,7 +7,9 @@
 //! NO `dyn Caps` — the table is parameterized by the concrete runtime `R`. The [`RoleDef<R>`] shape
 //! and the fn-pointer aliases are the framework contract ([`exo_framework::roles`]).
 
-use crate::gates::{pre_tool_use, session_start, stop, stop_allow, stop_notify, stop_reviewer};
+use crate::gates::{
+    pre_tool_use, session_start, stop, stop_allow, stop_dev, stop_notify, stop_reviewer,
+};
 use crate::tools::dismiss::DismissWorker;
 use crate::tools::merge::Merge;
 use crate::tools::messaging::{NotifyParent, SendMessage};
@@ -128,13 +130,13 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
             stop,
             session_start,
         },
-        // A dev leaf works on its own branch and submits it for the parent to merge. It notifies on
-        // turn-end but never blocks at stop; the committed-before-fold guarantee is enforced by
-        // submit_branch's committed-check.
+        // A dev leaf works on its own branch and submits it for the parent to merge. stop_dev runs
+        // the committed-unsubmitted guard (blocks if clean+ahead+never submitted) then falls through
+        // to the idle-notify path. Workers share the parent's branch and must not use stop_dev.
         ExoRole::Dev => RoleDef {
             tools: vec![tool(NotifyParent), tool(SubmitBranch)],
             pre_tool_use,
-            stop: stop_notify,
+            stop: stop_dev,
             session_start,
         },
         // A worker is an inline child sharing the parent's worktree — no own branch to submit, so it
@@ -181,13 +183,14 @@ mod tests {
                 rd.pre_tool_use as usize,
                 pre_tool_use::<MockRuntime> as *const () as usize
             );
-            // Root never yields work to fold → stop_allow. Reviewer signals ReviewAborted
-            // if no verdict → stop_reviewer. Dev/Worker notify the parent then allow
-            // (never block). Tl keeps the dirty-gate (stop).
+            // Root → stop_allow (no parent). Reviewer → stop_reviewer (ReviewAborted on miss).
+            // Dev → stop_dev (commit-guard + idle-notify). Worker → stop_notify (idle-notify only).
+            // Tl → stop (dirty-gate + commit-guard + idle-notify).
             let expected_stop = match kind {
                 ExoRole::Root => stop_allow::<MockRuntime> as *const () as usize,
                 ExoRole::Reviewer => stop_reviewer::<MockRuntime> as *const () as usize,
-                ExoRole::Dev | ExoRole::Worker => stop_notify::<MockRuntime> as *const () as usize,
+                ExoRole::Dev => stop_dev::<MockRuntime> as *const () as usize,
+                ExoRole::Worker => stop_notify::<MockRuntime> as *const () as usize,
                 ExoRole::Tl => stop::<MockRuntime> as *const () as usize,
             };
             assert_eq!(rd.stop as usize, expected_stop, "Role {:?} stop fn", kind);

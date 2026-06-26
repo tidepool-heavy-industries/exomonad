@@ -72,6 +72,9 @@ impl Git for TestCaps {
     async fn worktree_remove(&self, _at: &Path) -> Result<(), GitError> {
         unimplemented!()
     }
+    async fn is_ahead_of(&self, _base: &str) -> Result<bool, GitError> {
+        unimplemented!()
+    }
 }
 
 #[async_trait]
