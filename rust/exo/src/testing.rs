@@ -79,6 +79,8 @@ pub struct MockRuntime {
     /// What `fork_point` returns (default None so submit tests exercise the merge_base fallback).
     pub fork_point: Option<String>,
     pub is_clean: bool,
+    /// What [`Git::is_ahead_of`] returns. Default `false` (no unsubmitted commits).
+    pub is_ahead: bool,
     /// What [`ChildLiveness::any_child_busy`] returns. Default `true` (a working child → the
     /// subtree-idle gate treats the node as busy); set `false` to model a quiescent subtree.
     pub child_busy: bool,
@@ -98,6 +100,7 @@ impl Default for MockRuntime {
             merge_base: Some("basebasebasebasebasebasebasebasebasebase".into()),
             fork_point: None,
             is_clean: true,
+            is_ahead: false,
             child_busy: true,
             fail: Mutex::new(None),
         }
@@ -153,6 +156,15 @@ impl Git for MockRuntime {
     }
     async fn is_clean(&self) -> Result<bool, GitError> {
         Ok(self.is_clean)
+    }
+    async fn is_ahead_of(&self, _base: &str) -> Result<bool, GitError> {
+        if self.should_fail("is_ahead_of") {
+            return Err(GitError::Failed {
+                op: "is_ahead_of",
+                detail: "mock forced failure".into(),
+            });
+        }
+        Ok(self.is_ahead)
     }
     async fn fetch(&self) -> Result<(), GitError> {
         if self.should_fail("fetch") {

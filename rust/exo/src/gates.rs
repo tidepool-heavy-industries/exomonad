@@ -87,18 +87,83 @@ async fn subtree_busy<R: ChildLiveness>(ctx: &R) -> bool {
     ctx.any_child_busy().await
 }
 
+/// Returns `Some(Block)` when the worktree is clean, the branch is ahead of its derived parent
+/// branch, and `submit_branch` was never called this session — the "committed but never submitted"
+/// failure mode. Returns `None` on any git/kv error (fail-open: never wedge on an error) and
+/// whenever the conditions are not met (dirty, not ahead, or already submitted).
+///
+/// Base is derived by stripping the last `.`-segment from the current branch name, mirroring the
+/// parent-branch convention: `root.my-dev` → base `root`, `root.tl.my-dev` → base `root.tl`.
+/// If the base ref does not exist as a live git ref, `is_ahead_of` fails open (`Ok(false)`).
+async fn committed_unsubmitted_block<R: Git + Kv + Send + Sync>(
+    ctx: &R,
+) -> Option<StopDecision> {
+    let clean = match ctx.is_clean().await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("commit-guard: is_clean failed, allowing exit: {e}");
+            return None;
+        }
+    };
+    if !clean {
+        return None;
+    }
+    let branch = match ctx.current_branch().await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!("commit-guard: current_branch failed, allowing exit: {e}");
+            return None;
+        }
+    };
+    let base = branch
+        .as_str()
+        .rsplit_once('.')
+        .map(|(p, _)| p)
+        .unwrap_or("main");
+    let ahead = match ctx.is_ahead_of(base).await {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::warn!("commit-guard: is_ahead_of failed, allowing exit: {e}");
+            return None;
+        }
+    };
+    if !ahead {
+        return None;
+    }
+    let submitted = match ctx.get("submit_branch_called").await {
+        Ok(v) => v.is_some(),
+        Err(e) => {
+            tracing::warn!("commit-guard: kv.get failed, allowing exit: {e}");
+            return None;
+        }
+    };
+    if submitted {
+        return None;
+    }
+    Some(StopDecision::Block {
+        reason: format!(
+            "You have committed work on `{branch}` that hasn't been submitted for review — \
+             call submit_branch to hand it up, or notify_parent if you're handing off differently.",
+            branch = branch.as_str()
+        ),
+    })
+}
+
 /// The local convergence gate for a spawned TL (v2 — no GitHub). A parent folds a child by
 /// merging its **branch** off disk, so uncommitted work is invisible to that merge: block exit
-/// while the worktree is dirty (commit or discard first). On a clean exit, notify the parent it
-/// went idle — but ONLY when the whole subtree is quiescent (no busy children); a TL mid-flow with
-/// active children is not idle. Fails OPEN on any git error — a hook must never wedge an agent in
-/// its turn-loop (that bricks the session).
-pub fn stop<'a, R: Git + Bus + ChildLiveness + Send + Sync>(
+/// while the worktree is dirty (commit or discard first). On a clean exit, also run the
+/// committed-unsubmitted guard (clean + ahead-of-base + never called submit_branch → Block with
+/// guidance). On a clean unblocked exit, notify the parent it went idle — but ONLY when the whole
+/// subtree is quiescent. Fails OPEN on any git error — a hook must never wedge an agent.
+pub fn stop<'a, R: Git + Bus + ChildLiveness + Kv + Send + Sync>(
     ctx: &'a R,
 ) -> BoxFuture<'a, StopDecision> {
     Box::pin(async move {
         match ctx.is_clean().await {
             Ok(true) => {
+                if let Some(block) = committed_unsubmitted_block(ctx).await {
+                    return block;
+                }
                 if !subtree_busy(ctx).await {
                     notify_parent_idle(ctx).await;
                 }
@@ -134,6 +199,25 @@ pub fn stop_notify<'a, R: Bus + ChildLiveness + Send + Sync>(
     ctx: &'a R,
 ) -> BoxFuture<'a, StopDecision> {
     Box::pin(async move {
+        if !subtree_busy(ctx).await {
+            notify_parent_idle(ctx).await;
+        }
+        StopDecision::Allow
+    })
+}
+
+/// Stop hook for dev leaves. Runs the committed-unsubmitted guard first: if the worktree is
+/// clean, the branch is ahead of its base, and `submit_branch` was never called this session,
+/// block with guidance to call `submit_branch`. Otherwise: notify the parent this node yielded
+/// control (when the subtree is quiescent) and always allow exit. Workers share the parent's
+/// branch and must NOT use this hook — use `stop_notify` instead.
+pub fn stop_dev<'a, R: Git + Bus + ChildLiveness + Kv + Send + Sync>(
+    ctx: &'a R,
+) -> BoxFuture<'a, StopDecision> {
+    Box::pin(async move {
+        if let Some(block) = committed_unsubmitted_block(ctx).await {
+            return block;
+        }
         if !subtree_busy(ctx).await {
             notify_parent_idle(ctx).await;
         }
@@ -396,5 +480,104 @@ mod tests {
                 additional_context: None
             }
         );
+    }
+
+    // --- committed_unsubmitted_block / stop_dev / tl stop (commit-guard) tests ---
+
+    #[tokio::test]
+    async fn test_stop_dev_blocks_clean_ahead_unsubmitted() {
+        // Guard fires: clean + ahead-of-base + submit_branch never called.
+        let ctx = MockRuntime {
+            is_clean: true,
+            is_ahead: true,
+            child_busy: false,
+            ..Default::default()
+        };
+        match stop_dev(&ctx).await {
+            StopDecision::Block { reason } => {
+                assert!(reason.contains("submit_branch"), "guidance should mention submit_branch");
+            }
+            _ => panic!("should block when clean+ahead+unsubmitted"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stop_dev_allows_when_submitted() {
+        // Guard does not fire when submit_branch was called.
+        let ctx = MockRuntime {
+            is_clean: true,
+            is_ahead: true,
+            child_busy: false,
+            ..Default::default()
+        };
+        ctx.set("submit_branch_called", "true").await.unwrap();
+        assert_eq!(stop_dev(&ctx).await, StopDecision::Allow);
+        // And the idle notification fires on a quiescent subtree.
+        assert!(delivered_child_idle_to_parent(&ctx.calls_made()));
+    }
+
+    #[tokio::test]
+    async fn test_stop_dev_allows_when_not_ahead() {
+        // Guard does not fire when not ahead of base (nothing committed beyond parent).
+        let ctx = MockRuntime {
+            is_clean: true,
+            is_ahead: false,
+            child_busy: false,
+            ..Default::default()
+        };
+        assert_eq!(stop_dev(&ctx).await, StopDecision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_stop_dev_allows_when_dirty() {
+        // Dirty worktree → guard's is_clean check returns false → None → stop_notify path → Allow.
+        let ctx = MockRuntime {
+            is_clean: false,
+            is_ahead: true,
+            ..Default::default()
+        };
+        assert_eq!(stop_dev(&ctx).await, StopDecision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_stop_dev_fail_open_on_git_error() {
+        // Any git error in the guard → fail-open (Allow), never block.
+        let ctx = MockRuntime {
+            is_clean: true,
+            is_ahead: true, // would trigger guard, but is_ahead_of fails
+            ..MockRuntime::failing("is_ahead_of")
+        };
+        assert_eq!(stop_dev(&ctx).await, StopDecision::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_stop_tl_blocks_clean_ahead_unsubmitted() {
+        // TL stop: clean + ahead + not submitted → Block (commit-guard fires after dirty-gate).
+        let ctx = MockRuntime {
+            is_clean: true,
+            is_ahead: true,
+            child_busy: false,
+            ..Default::default()
+        };
+        match stop(&ctx).await {
+            StopDecision::Block { reason } => {
+                assert!(reason.contains("submit_branch"), "guidance should mention submit_branch");
+            }
+            _ => panic!("TL stop should block when clean+ahead+unsubmitted"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stop_tl_allows_when_submitted() {
+        // TL stop: clean + ahead + submitted → Allow (guard clears, proceeds to idle-notify).
+        let ctx = MockRuntime {
+            is_clean: true,
+            is_ahead: true,
+            child_busy: false,
+            ..Default::default()
+        };
+        ctx.set("submit_branch_called", "true").await.unwrap();
+        assert_eq!(stop(&ctx).await, StopDecision::Allow);
+        assert!(delivered_child_idle_to_parent(&ctx.calls_made()));
     }
 }

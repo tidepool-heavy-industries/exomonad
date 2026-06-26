@@ -99,6 +99,23 @@ impl Git for Runtime {
         Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())
     }
 
+    async fn is_ahead_of(&self, base: &str) -> Result<bool, GitError> {
+        let output = Command::new("git")
+            .current_dir(self.working_dir())
+            .args(["rev-list", "--count", &format!("{base}..HEAD")])
+            .output()
+            .await?;
+        if !output.status.success() {
+            tracing::warn!(base = %base, "is_ahead_of: git rev-list failed, treating as not ahead");
+            return Ok(false);
+        }
+        let count: usize = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse()
+            .unwrap_or(0);
+        Ok(count > 0)
+    }
+
     async fn fetch(&self) -> Result<(), GitError> {
         self.git(&["fetch"]).await?;
         Ok(())
@@ -217,6 +234,38 @@ mod tests {
         std::fs::write(dir.join("f.txt"), "base\n").unwrap();
         run_git(dir, &["add", "f.txt"]);
         run_git(dir, &["commit", "-q", "-m", "base"]);
+    }
+
+    #[tokio::test]
+    async fn is_ahead_of_detects_commits_ahead_of_base() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        run_git(p, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(p.join("extra.txt"), "extra\n").unwrap();
+        run_git(p, &["add", "extra.txt"]);
+        run_git(p, &["commit", "-q", "-m", "extra"]);
+
+        let rt = runtime_at(p);
+        assert!(rt.is_ahead_of("main").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn is_ahead_of_false_when_not_ahead() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        let rt = runtime_at(p);
+        assert!(!rt.is_ahead_of("main").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn is_ahead_of_false_on_unresolved_base() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        let rt = runtime_at(p);
+        assert!(!rt.is_ahead_of("nonexistent").await.unwrap());
     }
 
     #[tokio::test]
