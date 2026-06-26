@@ -9,6 +9,7 @@
 //! merge signal), `tree` (the caller's subtree + parent + liveness), `verdict` (the reviewer's
 //! approve/deny/changes signal). They are wired into [`role_def`](crate::roles::role_def).
 
+pub mod dismiss;
 pub mod merge;
 pub mod messaging;
 pub mod spawn;
