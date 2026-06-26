@@ -6,8 +6,8 @@ use exo_caps::{
     TopologyView,
 };
 use exo_framework::{
-    ok_json, parse, schema_json, BoxFuture, Exomonad, HookDecision, HookInput, RoleDef,
-    SessionStartOutput, StopDecision, SystemCtx, SystemOutcome, Tool, ToolOutput,
+    ok_json, parse, schema_json, BoxFuture, ErasedTool, Exomonad, HookDecision, HookInput, RoleDef,
+    SessionStartOutput, StopDecision, SystemCtx, SystemOutcome, ToolOutput,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -227,7 +227,7 @@ struct EchoArgs {
 }
 
 #[async_trait]
-impl<R: Send + Sync> Tool<R> for EchoTool {
+impl<R: Send + Sync> ErasedTool<R> for EchoTool {
     fn name(&self) -> &str {
         "echo"
     }

@@ -9,7 +9,7 @@
 use crate::roles::ExoRole;
 use crate::spawn::{render_spec_prompt, write_acceptance, ExoSpawn};
 use exo_caps::{AgentName, CapResult, ChildKind, Fs, Spawner};
-use exo_framework::{ok_json, parse, schema_json, Tool, ToolOutput};
+use exo_framework::{Tool, ToolOutput};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -33,8 +33,20 @@ pub struct SpawnWorkerArgs {
 
 pub struct SpawnWorker;
 
-impl SpawnWorker {
-    async fn run<C: Spawner>(ctx: &C, args: SpawnWorkerArgs) -> CapResult<ToolOutput> {
+#[async_trait::async_trait]
+impl<R: Spawner + Send + Sync> Tool<R> for SpawnWorker {
+    const NAME: &'static str = "spawn_worker";
+    const DESCRIPTION: &'static str =
+        "Spawn an ephemeral Sonnet worker in a pane inside YOUR worktree (no own branch, no \
+         review). PREFER DELEGATING OVER DOING WORK YOURSELF — a Sonnet leaf costs far less than \
+         your own tokens, so every line you implement yourself is wasted budget. Give it \
+         acceptance criteria, key file paths, and anti-patterns — not line-by-line code. For \
+         research or non-conflicting in-place edits; it reports back with `notify_parent`. There \
+         is nothing to merge — for work that should land on its own branch, use `spawn_dev`. \
+         After spawning, return immediately — idle and wait, do not poll.";
+    type Args = SpawnWorkerArgs;
+
+    async fn run(ctx: &R, args: SpawnWorkerArgs) -> CapResult<ToolOutput> {
         let name = match args.name {
             Some(n) => Some(AgentName::new(n)?),
             None => None,
@@ -64,30 +76,6 @@ impl SpawnWorker {
     }
 }
 
-#[async_trait::async_trait]
-impl<R: Spawner + Send + Sync> Tool<R> for SpawnWorker {
-    fn name(&self) -> &str {
-        "spawn_worker"
-    }
-    fn description(&self) -> &str {
-        "Spawn an ephemeral Sonnet worker in a pane inside YOUR worktree (no own branch, no \
-         review). PREFER DELEGATING OVER DOING WORK YOURSELF — a Sonnet leaf costs far less than \
-         your own tokens, so every line you implement yourself is wasted budget. Give it \
-         acceptance criteria, key file paths, and anti-patterns — not line-by-line code. For \
-         research or non-conflicting in-place edits; it reports back with `notify_parent`. There \
-         is nothing to merge — for work that should land on its own branch, use `spawn_dev`. \
-         After spawning, return immediately — idle and wait, do not poll."
-    }
-    fn schema(&self) -> serde_json::Value {
-        schema_json::<SpawnWorkerArgs>()
-    }
-    async fn call(&self, ctx: &R, args: serde_json::Value) -> CapResult<serde_json::Value> {
-        let parsed = parse(args)?;
-        let out = Self::run(ctx, parsed).await?;
-        ok_json(out)
-    }
-}
-
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SpawnDevArgs {
     pub name: Option<String>,
@@ -108,8 +96,21 @@ pub struct SpawnDevArgs {
 
 pub struct SpawnDev;
 
-impl SpawnDev {
-    async fn run<C: Spawner + Fs>(ctx: &C, args: SpawnDevArgs) -> CapResult<ToolOutput> {
+#[async_trait::async_trait]
+impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnDev {
+    const NAME: &'static str = "spawn_dev";
+    const DESCRIPTION: &'static str =
+        "Spawn a Sonnet dev leaf in its OWN worktree + branch with a self-contained spec. PREFER \
+         DELEGATING OVER DOING WORK YOURSELF — a Sonnet leaf costs far less than your own tokens; \
+         every line you implement yourself is wasted budget. Use the structured fields \
+         (steps, verify, boundary, read_first) for precise specs — give it acceptance criteria \
+         and file paths, not line-by-line code. It commits to that branch and calls \
+         `submit_branch` when ready; a one-shot reviewer checks it, then you `merge` the branch \
+         locally. No PRs, no remote — convergence is on-disk. After spawning, return immediately \
+         — idle and wait for [READY], do not poll.";
+    type Args = SpawnDevArgs;
+
+    async fn run(ctx: &R, args: SpawnDevArgs) -> CapResult<ToolOutput> {
         let name = match args.name {
             Some(n) => Some(AgentName::new(n)?),
             None => None,
@@ -139,31 +140,6 @@ impl SpawnDev {
             format!("Spawned dev {}", spawned.as_str()),
             serde_json::json!({ "spawned": spawned.as_str() }),
         ))
-    }
-}
-
-#[async_trait::async_trait]
-impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnDev {
-    fn name(&self) -> &str {
-        "spawn_dev"
-    }
-    fn description(&self) -> &str {
-        "Spawn a Sonnet dev leaf in its OWN worktree + branch with a self-contained spec. PREFER \
-         DELEGATING OVER DOING WORK YOURSELF — a Sonnet leaf costs far less than your own tokens; \
-         every line you implement yourself is wasted budget. Use the structured fields \
-         (steps, verify, boundary, read_first) for precise specs — give it acceptance criteria \
-         and file paths, not line-by-line code. It commits to that branch and calls \
-         `submit_branch` when ready; a one-shot reviewer checks it, then you `merge` the branch \
-         locally. No PRs, no remote — convergence is on-disk. After spawning, return immediately \
-         — idle and wait for [READY], do not poll."
-    }
-    fn schema(&self) -> serde_json::Value {
-        schema_json::<SpawnDevArgs>()
-    }
-    async fn call(&self, ctx: &R, args: serde_json::Value) -> CapResult<serde_json::Value> {
-        let parsed = parse(args)?;
-        let out = Self::run(ctx, parsed).await?;
-        ok_json(out)
     }
 }
 
@@ -198,8 +174,20 @@ pub struct ForkWaveArgs {
 
 pub struct ForkWave;
 
-impl ForkWave {
-    async fn run<C: Spawner + Fs + Sync>(ctx: &C, args: ForkWaveArgs) -> CapResult<ToolOutput> {
+#[async_trait::async_trait]
+impl<R: Spawner + Fs + Send + Sync> Tool<R> for ForkWave {
+    const NAME: &'static str = "fork_wave";
+    const DESCRIPTION: &'static str =
+        "Fork a wave of parallel Claude TL children, each in its own worktree + branch. Each runs \
+         scaffold-fork-converge on its subtree and calls `submit_branch` when its branch is \
+         ready; you then `merge` it locally — no PRs, no remote, convergence is on-disk. \
+         Decompose and delegate aggressively: every token you spend on work a child could do is \
+         wasted. Create a team (TeamCreate) BEFORE calling so children's messages reach you. \
+         Requires a clean worktree. After spawning, return immediately — idle and wait, do not \
+         poll.";
+    type Args = ForkWaveArgs;
+
+    async fn run(ctx: &R, args: ForkWaveArgs) -> CapResult<ToolOutput> {
         let mut specs = Vec::with_capacity(args.children.len());
         // Keep the rendered tasks parallel to `specs` so we can persist each spawned child's
         // acceptance bar after the wave returns (the results are positional).
@@ -260,34 +248,11 @@ impl ForkWave {
     }
 }
 
-#[async_trait::async_trait]
-impl<R: Spawner + Fs + Send + Sync> Tool<R> for ForkWave {
-    fn name(&self) -> &str {
-        "fork_wave"
-    }
-    fn description(&self) -> &str {
-        "Fork a wave of parallel Claude TL children, each in its own worktree + branch. Each runs \
-         scaffold-fork-converge on its subtree and calls `submit_branch` when its branch is \
-         ready; you then `merge` it locally — no PRs, no remote, convergence is on-disk. \
-         Decompose and delegate aggressively: every token you spend on work a child could do is \
-         wasted. Create a team (TeamCreate) BEFORE calling so children's messages reach you. \
-         Requires a clean worktree. After spawning, return immediately — idle and wait, do not \
-         poll."
-    }
-    fn schema(&self) -> serde_json::Value {
-        schema_json::<ForkWaveArgs>()
-    }
-    async fn call(&self, ctx: &R, args: serde_json::Value) -> CapResult<serde_json::Value> {
-        let parsed = parse(args)?;
-        let out = Self::run(ctx, parsed).await?;
-        ok_json(out)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testing::{Call, MockRuntime};
+    use exo_framework::Tool;
 
     #[tokio::test]
     async fn test_spawn_worker() {

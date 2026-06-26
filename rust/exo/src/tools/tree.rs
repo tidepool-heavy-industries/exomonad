@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use exo_framework::{ok_json, parse, schema_json, Tool, ToolOutput};
+use exo_framework::{Tool, ToolOutput};
 
 /// Arguments for the `tree` tool — none; it reports the caller's own position.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -23,42 +23,6 @@ pub struct TreeArgs {}
 pub struct Tree;
 
 impl Tree {
-    pub async fn run<C: Topology + Fs>(ctx: &C, _args: TreeArgs) -> CapResult<ToolOutput> {
-        let view = ctx.topology().await?;
-        let (total, alive) = count(&view.node);
-
-        let home = std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."));
-        let run_id = std::env::var("EXOMONAD_SWARM_RUN_ID").unwrap_or_default();
-
-        let mut status_map = HashMap::new();
-        Self::collect_status(ctx, &view.node, &home, &run_id, &mut status_map).await;
-
-        let mut text = String::new();
-        use std::fmt::Write;
-        if let Some(parent) = &view.parent {
-            writeln!(&mut text, "parent: {parent}").unwrap();
-        } else {
-            writeln!(&mut text, "parent: none (root)").unwrap();
-        }
-        Self::format_node(&view.node, 0, &status_map, None, &mut text);
-
-        let mut data = serde_json::to_value(&view).map_err(|e| CapError::Json {
-            context: "tree topology view".into(),
-            source: e,
-        })?;
-
-        // Enrich data with status
-        if let Some(node_val) = data.get_mut("node") {
-            Self::enrich_json(node_val, &status_map, None);
-        }
-
-        // Add summary line at the bottom
-        writeln!(&mut text, "\n{} node(s) in subtree, {} alive", total, alive).unwrap();
-
-        Ok(ToolOutput::with_data(text, data))
-    }
 
     async fn collect_status<C: Fs>(
         ctx: &C,
@@ -182,24 +146,48 @@ fn count(node: &TreeNode) -> (usize, usize) {
 
 #[async_trait::async_trait]
 impl<R: Topology + Fs + Send + Sync> Tool<R> for Tree {
-    fn name(&self) -> &str {
-        "tree"
-    }
-
-    fn description(&self) -> &str {
+    const NAME: &'static str = "tree";
+    const DESCRIPTION: &'static str =
         "Show your place in the swarm tree: your subtree (every descendant, folded from the \
          on-disk ledgers) plus your parent, with a per-node liveness flag (`pane_alive` = the \
-         node's tmux pane still exists). Read-only; takes no arguments."
-    }
+         node's tmux pane still exists). Read-only; takes no arguments.";
+    type Args = TreeArgs;
 
-    fn schema(&self) -> serde_json::Value {
-        schema_json::<TreeArgs>()
-    }
+    async fn run(ctx: &R, _args: TreeArgs) -> CapResult<ToolOutput> {
+        let view = ctx.topology().await?;
+        let (total, alive) = count(&view.node);
 
-    async fn call(&self, ctx: &R, args: serde_json::Value) -> CapResult<serde_json::Value> {
-        let args: TreeArgs = parse(args)?;
-        let out = Self::run(ctx, args).await?;
-        ok_json(out)
+        let home = std::env::var("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("."));
+        let run_id = std::env::var("EXOMONAD_SWARM_RUN_ID").unwrap_or_default();
+
+        let mut status_map = HashMap::new();
+        Tree::collect_status(ctx, &view.node, &home, &run_id, &mut status_map).await;
+
+        let mut text = String::new();
+        use std::fmt::Write;
+        if let Some(parent) = &view.parent {
+            writeln!(&mut text, "parent: {parent}").unwrap();
+        } else {
+            writeln!(&mut text, "parent: none (root)").unwrap();
+        }
+        Tree::format_node(&view.node, 0, &status_map, None, &mut text);
+
+        let mut data = serde_json::to_value(&view).map_err(|e| CapError::Json {
+            context: "tree topology view".into(),
+            source: e,
+        })?;
+
+        // Enrich data with status
+        if let Some(node_val) = data.get_mut("node") {
+            Tree::enrich_json(node_val, &status_map, None);
+        }
+
+        // Add summary line at the bottom
+        writeln!(&mut text, "\n{} node(s) in subtree, {} alive", total, alive).unwrap();
+
+        Ok(ToolOutput::with_data(text, data))
     }
 }
 
@@ -207,6 +195,7 @@ impl<R: Topology + Fs + Send + Sync> Tool<R> for Tree {
 mod tests {
     use super::*;
     use crate::testing::MockRuntime;
+    use exo_framework::Tool;
 
     #[tokio::test]
     async fn test_tree_returns_view() {

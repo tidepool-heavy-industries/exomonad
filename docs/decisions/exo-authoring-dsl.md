@@ -1,7 +1,8 @@
 # exo authoring DSL: typed tools + hook pipelines (T3.7)
 
 **Status:** accepted 2026-06-09 (design; reviewed adversarially, mechanics compile-proven in a
-scratch crate — see [Review provenance](#review-provenance)). Implementation pending.
+scratch crate — see [Review provenance](#review-provenance)). Phase A (Tool flip) LANDED 2026-06-25.
+Phase B (hook pipelines) pending.
 Builds on [exo-framework-domain-split](exo-framework-domain-split.md) and
 [exo-trait-refactor](exo-trait-refactor.md); resolves the deferred "builder/trait reshape of
 `RoleDef<R>`" follow-on those docs banked, and closes `exo/CLAUDE.md`'s "authoring-DSL polish"
