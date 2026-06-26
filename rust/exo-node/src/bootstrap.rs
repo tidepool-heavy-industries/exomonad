@@ -65,23 +65,26 @@ impl<D: Exomonad> NodeContext<D> {
 /// Arm a Linux parent-death signal so this sidecar dies if its parent `claude` exits — the
 /// stdin-EOF lifetime anchor is not always reliable (a killed pane can orphan the sidecar).
 /// Best-effort: a prctl failure logs a warning and is non-fatal.
+///
+/// Uses `eprintln!` rather than `tracing` macros because this runs before `init_logging` is
+/// called in the binary — tracing events here go to the no-op dispatcher.
 #[cfg(target_os = "linux")]
 fn install_parent_death_signal() {
     // SAFETY: prctl/getppid are simple syscalls with no memory effects.
     unsafe {
         let original_ppid = libc::getppid();
         if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as libc::c_ulong, 0, 0, 0) != 0 {
-            tracing::warn!("prctl(PR_SET_PDEATHSIG) failed; orphaned-sidecar guard not armed");
+            eprintln!("exo-node: prctl(PR_SET_PDEATHSIG) failed; orphaned-sidecar guard not armed");
             return;
         }
         // Race guard: if the parent died between getppid() and prctl(), the signal will never
         // arrive — detect the reparent and exit now.
         if libc::getppid() != original_ppid {
-            tracing::warn!("parent died before PDEATHSIG was armed; self-terminating");
+            eprintln!("exo-node: parent died before PDEATHSIG was armed; self-terminating");
             std::process::exit(0);
         }
     }
-    tracing::info!("PDEATHSIG armed (sidecar exits if parent claude dies)");
+    eprintln!("exo-node: PDEATHSIG armed (sidecar exits if parent claude dies)");
 }
 
 #[cfg(not(target_os = "linux"))]
