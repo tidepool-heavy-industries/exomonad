@@ -268,15 +268,18 @@ impl<D: Exomonad> RealHandler<D> {
     #[tracing::instrument(skip(self, lc), fields(from = %persona_label(from), kind = "lifecycle"))]
     async fn handle_lifecycle(&self, from: &Persona, lc: &Lifecycle) -> NodeResult<()> {
         match lc {
-            // A child yielded control. Flip its busy-bit to idle (the idle gate reads this), then
-            // render a concise line for this node's LLM; never tear the child down. (v1: no
-            // dedupe — volume is accepted; the refine-later seam is here.)
+            // A child yielded control. Flip its busy-bit to idle (the idle gate `any_child_busy`
+            // reads this) and that's ALL — do NOT render it to this node's LLM. CC's Stop fires on
+            // every turn-end (e.g. a child pausing on a long bash command mid-task), so `[child idle]`
+            // is high-frequency noise, not a "done" signal. The meaningful signals still flow: the
+            // child's own `notify_parent`, `[READY]`, a reviewer verdict, `ChildExited`. Never tear
+            // the child down.
             Lifecycle::ChildIdle { summary } => {
-                info!(outcome = "child_idle", summary = %summary, "handling child idle signal");
+                info!(outcome = "child_idle", summary = %summary, "child idle — busy-bit flipped, not rendered to the LLM");
                 if let Persona::Agent(name) = from {
                     self.ctx.runtime.mark_child_idle(name);
                 }
-                self.render_child_idle(from, summary).await
+                Ok(())
             }
             // A child reaped itself (its shutdown completed). Record it in the authoritative
             // exited-set, then re-evaluate our own pending shutdown — if it was the last child, we
@@ -357,26 +360,6 @@ impl<D: Exomonad> RealHandler<D> {
             }
         }
         Ok(())
-    }
-
-    /// Render a concise \"child yielded control\" line into THIS node's LLM. The sender is a LIVE
-    /// child (not a one-shot reviewer), so it is NOT torn down. Preserves the child's identity as
-    /// `from` so the dispatch header attributes the line correctly.
-    async fn render_child_idle(&self, from: &Persona, summary: &str) -> NodeResult<()> {
-        let entry = IngestionEntry {
-            v: 1,
-            ts: Utc::now(),
-            spill: None,
-            from: from.clone(),
-            msg: Message {
-                text: MessageBody::new(format!("[child idle] {summary}"))
-                    .map_err(|e| std::io::Error::other(e.to_string()))?,
-                summary: Summary::new("[child idle]".into())
-                    .map_err(|e| std::io::Error::other(e.to_string()))?,
-                kind: MessageKind::Chat,
-            },
-        };
-        crate::dispatch::dispatch(&self.ctx, &entry).await
     }
 
     /// Render a child's [`ShutdownResponse`](exo_caps::Lifecycle::ShutdownResponse) into THIS
