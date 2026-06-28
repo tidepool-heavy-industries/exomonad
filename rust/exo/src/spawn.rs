@@ -17,8 +17,9 @@ pub struct ExoSpawn {
     pub kind: ChildKind,
     /// Explicit child name, or `None` to auto-generate from `name_prefix`.
     pub name: Option<AgentName>,
-    /// Auto-increment prefix used when `name` is `None`.
-    pub name_prefix: &'static str,
+    /// Auto-increment prefix used when `name` is `None` (owned, so it can be derived at runtime —
+    /// e.g. a reviewer named after the branch under review).
+    pub name_prefix: String,
     /// The fully-rendered prompt/task body delivered to the child.
     pub task: String,
     /// Opt-in Claude context inheritance (`--resume --fork-session`).
@@ -38,7 +39,7 @@ impl SpawnSpec for ExoSpawn {
         self.name.clone()
     }
     fn name_prefix(&self) -> &str {
-        self.name_prefix
+        &self.name_prefix
     }
     fn fork_session(&self) -> bool {
         self.fork_session
@@ -162,7 +163,7 @@ mod tests {
             role: ExoRole::Dev,
             kind: ChildKind::Worktree,
             name: Some(name.clone()),
-            name_prefix: "dev",
+            name_prefix: "dev".into(),
             task: "t".into(),
             fork_session: true,
         };

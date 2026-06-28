@@ -292,11 +292,22 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
         );
         // Spawn a reviewer in its own worktree off the under-review branch (role fixed here, the
         // domain tool boundary). It reads the diff + acceptance criteria, emits a `verdict`, exits.
+        // Name it after the branch under review — its last `.`-segment is the submitter's name — so a
+        // tree of reviewers is legible (`oauth-dev-rev-0`, not a wall of `reviewer-0`). Auto-increment
+        // tags the re-review rounds (`-0`, `-1`).
+        let review_prefix = format!(
+            "{}-rev",
+            branch
+                .as_str()
+                .rsplit('.')
+                .next()
+                .unwrap_or_else(|| branch.as_str())
+        );
         let spec = ExoSpawn {
             role: ExoRole::Reviewer,
             kind: ChildKind::Worktree,
             name: None,
-            name_prefix: "reviewer",
+            name_prefix: review_prefix,
             task: review_task,
             fork_session: false,
         };

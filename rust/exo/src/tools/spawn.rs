@@ -56,7 +56,7 @@ impl<R: Spawner + Send + Sync> Tool<R> for SpawnWorker {
             role: ExoRole::Worker,
             kind: ChildKind::Inline,
             name,
-            name_prefix: "worker",
+            name_prefix: "worker".into(),
             task: render_spec_prompt(
                 &args.task,
                 &args.read_first,
@@ -129,7 +129,7 @@ impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnDev {
             role: ExoRole::Dev,
             kind: ChildKind::Worktree,
             name,
-            name_prefix: "dev",
+            name_prefix: "dev".into(),
             task: task.clone(),
             fork_session: false,
         };
@@ -212,7 +212,7 @@ impl<R: Spawner + Fs + Send + Sync> Tool<R> for ForkWave {
                 role: ExoRole::Tl,
                 kind: ChildKind::Worktree,
                 name,
-                name_prefix: "tl",
+                name_prefix: "tl".into(),
                 task,
                 fork_session: child.fork_session,
             });
