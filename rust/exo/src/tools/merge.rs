@@ -5,6 +5,7 @@
 //! when added, runs *before* this (gating the merge); this tool is just the fold. A merge
 //! conflict surfaces as a tool error for the TL to resolve.
 
+use crate::branching::child_name;
 use exo_caps::{AgentName, Branch, CapResult, Git, Spawner};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -42,7 +43,7 @@ impl<R: Git + Spawner + Send + Sync> Tool<R> for Merge {
         let mut teardown = String::new();
         let child_candidate = args
             .child
-            .or_else(|| branch.as_str().rsplit('.').next().map(|s| s.to_string()));
+            .or_else(|| Some(child_name(&branch).to_string()));
 
         if let Some(name_str) = child_candidate {
             if let Ok(child) = AgentName::new(name_str) {

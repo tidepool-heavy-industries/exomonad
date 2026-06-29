@@ -13,6 +13,50 @@ use exo_framework::{Tool, ToolOutput};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+/// Internal fields shared by all three spawn tools. Callers convert their specific Args into this
+/// and pass it to [`build_spawn`].
+struct SpawnArgs {
+    name: Option<String>,
+    task: String,
+    steps: Vec<String>,
+    verify: Vec<String>,
+    done_criteria: Vec<String>,
+    context: Option<String>,
+    boundary: Vec<String>,
+    read_first: Vec<String>,
+    fork_session: bool,
+}
+
+/// Resolve the name, render the spec prompt, and assemble an [`ExoSpawn`]. The `(role, kind,
+/// name_prefix)` triple is fixed by the calling tool — callers provide only the task content.
+fn build_spawn(
+    role: ExoRole,
+    kind: ChildKind,
+    name_prefix: &str,
+    args: SpawnArgs,
+) -> CapResult<ExoSpawn> {
+    let name = match args.name {
+        Some(n) => Some(AgentName::new(n)?),
+        None => None,
+    };
+    Ok(ExoSpawn {
+        role,
+        kind,
+        name,
+        name_prefix: name_prefix.into(),
+        task: render_spec_prompt(
+            &args.task,
+            &args.read_first,
+            &args.steps,
+            &args.verify,
+            &args.boundary,
+            args.context.as_ref(),
+            &args.done_criteria,
+        ),
+        fork_session: args.fork_session,
+    })
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SpawnWorkerArgs {
     pub name: Option<String>,
@@ -47,27 +91,23 @@ impl<R: Spawner + Send + Sync> Tool<R> for SpawnWorker {
     type Args = SpawnWorkerArgs;
 
     async fn run(ctx: &R, args: SpawnWorkerArgs) -> CapResult<ToolOutput> {
-        let name = match args.name {
-            Some(n) => Some(AgentName::new(n)?),
-            None => None,
-        };
         // The tool fixes the (role, kind): an ephemeral inline worker (Sonnet Claude).
-        let spec = ExoSpawn {
-            role: ExoRole::Worker,
-            kind: ChildKind::Inline,
-            name,
-            name_prefix: "worker".into(),
-            task: render_spec_prompt(
-                &args.task,
-                &args.read_first,
-                &args.steps,
-                &args.verify,
-                &args.boundary,
-                args.context.as_ref(),
-                &args.done_criteria,
-            ),
-            fork_session: false,
-        };
+        let spec = build_spawn(
+            ExoRole::Worker,
+            ChildKind::Inline,
+            "worker",
+            SpawnArgs {
+                name: args.name,
+                task: args.task,
+                steps: args.steps,
+                verify: args.verify,
+                done_criteria: args.done_criteria,
+                context: args.context,
+                boundary: args.boundary,
+                read_first: args.read_first,
+                fork_session: false,
+            },
+        )?;
         let spawned = ctx.spawn(spec).await?;
         Ok(ToolOutput::with_data(
             format!("Spawned worker {}", spawned.as_str()),
@@ -111,28 +151,24 @@ impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnDev {
     type Args = SpawnDevArgs;
 
     async fn run(ctx: &R, args: SpawnDevArgs) -> CapResult<ToolOutput> {
-        let name = match args.name {
-            Some(n) => Some(AgentName::new(n)?),
-            None => None,
-        };
-        let task = render_spec_prompt(
-            &args.task,
-            &args.read_first,
-            &args.steps,
-            &args.verify,
-            &args.boundary,
-            args.context.as_ref(),
-            &args.done_criteria,
-        );
         // The tool fixes the (role, kind): a Sonnet dev leaf in its own worktree.
-        let spec = ExoSpawn {
-            role: ExoRole::Dev,
-            kind: ChildKind::Worktree,
-            name,
-            name_prefix: "dev".into(),
-            task: task.clone(),
-            fork_session: false,
-        };
+        let spec = build_spawn(
+            ExoRole::Dev,
+            ChildKind::Worktree,
+            "dev",
+            SpawnArgs {
+                name: args.name,
+                task: args.task,
+                steps: args.steps,
+                verify: args.verify,
+                done_criteria: args.done_criteria,
+                context: args.context,
+                boundary: args.boundary,
+                read_first: args.read_first,
+                fork_session: false,
+            },
+        )?;
+        let task = spec.task.clone();
         let spawned = ctx.spawn(spec).await?;
         // Persist the child's spec as its acceptance bar (relocated out of the runtime birth).
         write_acceptance(ctx, &spawned, &task).await;
@@ -193,29 +229,25 @@ impl<R: Spawner + Fs + Send + Sync> Tool<R> for ForkWave {
         // acceptance bar after the wave returns (the results are positional).
         let mut tasks = Vec::with_capacity(args.children.len());
         for child in args.children {
-            let name = match child.name {
-                Some(n) => Some(AgentName::new(n)?),
-                None => None,
-            };
-            let task = render_spec_prompt(
-                &child.task,
-                &child.read_first,
-                &child.steps,
-                &child.verify,
-                &child.boundary,
-                child.context.as_ref(),
-                &child.done_criteria,
-            );
-            tasks.push(task.clone());
             // The tool fixes the (role, kind): a Claude TL child in its own worktree.
-            specs.push(ExoSpawn {
-                role: ExoRole::Tl,
-                kind: ChildKind::Worktree,
-                name,
-                name_prefix: "tl".into(),
-                task,
-                fork_session: child.fork_session,
-            });
+            let spec = build_spawn(
+                ExoRole::Tl,
+                ChildKind::Worktree,
+                "tl",
+                SpawnArgs {
+                    name: child.name,
+                    task: child.task,
+                    steps: child.steps,
+                    verify: child.verify,
+                    done_criteria: child.done_criteria,
+                    context: child.context,
+                    boundary: child.boundary,
+                    read_first: child.read_first,
+                    fork_session: child.fork_session,
+                },
+            )?;
+            tasks.push(spec.task.clone());
+            specs.push(spec);
         }
         let results = ctx.fork_wave(specs).await;
 

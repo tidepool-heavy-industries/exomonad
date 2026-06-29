@@ -8,8 +8,12 @@
 //! rewrite. v1 has a single check: the worktree must be clean (work committed), because a parent
 //! merges the BRANCH off disk and uncommitted changes would be invisible to that merge.
 
+use crate::branching::{child_name, parent_branch};
 use crate::roles::ExoRole;
 use crate::spawn::ExoSpawn;
+
+/// KV flag set when `submit_branch` runs this session; read by the stop gate.
+pub(crate) const SUBMIT_BRANCH_CALLED: &str = "submit_branch_called";
 use exo_caps::{
     Addressee, Bus, CapError, CapResult, ChildKind, Fs, Git, Kv, Message, MessageBody, MessageKind,
     Process, Spawner, Summary,
@@ -192,7 +196,7 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
             // Flag that submit_branch ran this session so the stop guard doesn't block clean exit.
             // Best-effort — a kv failure here is not a reason to abort a successful submit.
             // sidecar-session-scoped (in-memory Kv); a v1 backstop for the never-submitted case.
-            let _ = ctx.set("submit_branch_called", "true").await;
+            let _ = ctx.set(SUBMIT_BRANCH_CALLED, "true").await;
             return Ok(ToolOutput::with_data(
                 format!(
                     "Forwarded [READY] to your parent for branch {} WITHOUT review (reviewer \
@@ -210,11 +214,7 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
         let base_sha = match ctx.fork_point().await? {
             Some(fp) => Some(fp),
             None => {
-                let derived_parent = branch
-                    .as_str()
-                    .rsplit_once('.')
-                    .map(|(p, _)| p)
-                    .unwrap_or("main");
+                let derived_parent = parent_branch(&branch);
                 let mut b = None;
                 for candidate in [derived_parent, "main", "master"] {
                     if let Some(found) = ctx.merge_base(candidate).await? {
@@ -295,14 +295,7 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
         // Name it after the branch under review — its last `.`-segment is the submitter's name — so a
         // tree of reviewers is legible (`oauth-dev-rev-0`, not a wall of `reviewer-0`). Auto-increment
         // tags the re-review rounds (`-0`, `-1`).
-        let review_prefix = format!(
-            "{}-rev",
-            branch
-                .as_str()
-                .rsplit('.')
-                .next()
-                .unwrap_or_else(|| branch.as_str())
-        );
+        let review_prefix = format!("{}-rev", child_name(&branch));
         let spec = ExoSpawn {
             role: ExoRole::Reviewer,
             kind: ChildKind::Worktree,
@@ -316,7 +309,7 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
         // Flag that submit_branch ran this session so the stop guard doesn't block clean exit.
         // Best-effort — a kv failure here is not a reason to abort a successful submit.
         // sidecar-session-scoped (in-memory Kv); a v1 backstop for the never-submitted case.
-        let _ = ctx.set("submit_branch_called", "true").await;
+        let _ = ctx.set(SUBMIT_BRANCH_CALLED, "true").await;
 
         Ok(ToolOutput::with_data(
             format!(
