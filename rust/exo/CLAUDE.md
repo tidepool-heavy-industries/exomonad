@@ -55,7 +55,7 @@ contract ([`exo-framework`](../exo-framework/CLAUDE.md)); this crate provides th
 | `submit_branch` | `Git`+`Process`+`Spawner`+`Fs`+`Bus` | tl, dev | **Request review.** Runs the precondition checks (committed + `.exo/checks/pre-merge/*` scripts), then spawns a **reviewer** off this branch (fork-point `git diff` base via `Git::merge_base`) and returns "stop & wait". It does NOT deliver `[READY]` — only the sidecar does, on an approve-verdict (the structural gate). **Continuity:** reads the latest `ReviewLog` and appends unresolved Error findings from the prior round to the reviewer task. Escape hatch: `dangerously_skip_reviewer: true`. |
 | `verdict` | `Bus`+`Kv` | reviewer | A reviewer's one output → a `System(Reviewed)` message to its parent: `summary` + structured `findings` {`file`, `line`, `severity`, `body`, `suggestion`?}. Triggers reviewer teardown (handled in `exo-node`). |
 | `notify_parent` | `Bus` | tl, dev, worker, reviewer | Status/failure update to `Addressee::Parent` (NOT the done-signal). |
-| `send_message` | `Bus` | root, tl | Deliver to a child (`Inline`/`Worktree`) — **tree-edges only**. |
+| `send_message` | `Bus` | root, tl | Deliver to a child by name (`to: <child>`) — **tree-edges only**; inline vs worktree is transparent. |
 | `tree` | `Topology`+`Fs` | root, tl | Read-only: the caller's subtree (recursive ledger fold) + parent + per-node `pane_alive` liveness, plus a `(label)` for any launch-profiled node (e.g. a Kimi reviewer). |
 
 ## exo doctor

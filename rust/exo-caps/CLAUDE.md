@@ -54,7 +54,7 @@ Tool bounds in `exo` stay **explicit per-cap** (`C: Git + Spawner`, not just `C:
 
 - **Observe, don't store.** Only genuinely-recorded facts get types: `ChildRecord` is `Spawned`/`Started` only. Running-vs-exited is computed **live** (pane-alive), never written back. `fold_children` folds the append-only log into the current child set (newest `Spawned` wins; `Started` upgrades lifecycle). The one piece of *live* per-child state is the `ChildLiveness` busy-bit — in-memory only, derived from observed messages, never persisted; a restart rebuilds it conservatively.
 - **Identity is assigned at birth, not derived.** `role`/`parent`/tree-position exist in no runtime's live state, so `NodePapers` records them once. Live derivation (`exo-scry`) recovers only runtime-native facts (pane, CC team).
-- **Messaging is tree-edges only.** `Addressee` = `Parent | InlineChild(name) | WorktreeChild(name)`. There is no sibling/cross-tree addressee — the messaging structure *is* the process tree. (`Pane` is an internal resolution target, not policy-facing.)
+- **Messaging is tree-edges only.** `Addressee` = `Parent | Child(name)`. There is no sibling/cross-tree addressee — the messaging structure *is* the process tree. (Inline vs worktree children deliver identically, so the edge carries only the name; the `ChildKind` distinction lives at spawn/teardown. `Pane` is an internal resolution target, not policy-facing.)
 
 ## Gaps / not-yet
 
