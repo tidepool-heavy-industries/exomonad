@@ -165,7 +165,7 @@ fn test_message_kind_roundtrip() {
             force: true,
         }),
         MessageKind::Lifecycle(Lifecycle::ChildIdle {
-            summary: "done".into(),
+            summary: Summary::new("done".into()).unwrap(),
         }),
     ];
     for v in variants {
@@ -210,14 +210,14 @@ fn test_shutdown_status_roundtrip() {
 fn test_lifecycle_roundtrip() {
     let variants = [
         Lifecycle::ChildIdle {
-            summary: "idle".into(),
+            summary: Summary::new("idle".into()).unwrap(),
         },
         Lifecycle::ChildExited {
             reason: "done".into(),
         },
         Lifecycle::ShutdownResponse {
             status: ShutdownStatus::Accepted,
-            live_children: vec!["a".into()],
+            live_children: vec![AgentName::new("a".into()).unwrap()],
             busy: false,
             reason: "ok".into(),
         },
@@ -326,15 +326,15 @@ fn test_child_lifecycle_roundtrip() {
 #[test]
 fn test_topology_roundtrip() {
     let node = TreeNode {
-        name: "root".into(),
+        name: AgentName::new("root".into()).unwrap(),
         kind: None,
-        pane: "%1".into(),
+        pane: PaneId::new("%1".into()).unwrap(),
         pane_alive: true,
         model_label: None,
         children: vec![TreeNode {
-            name: "child".into(),
+            name: AgentName::new("child".into()).unwrap(),
             kind: Some(ChildKind::Worktree),
-            pane: "%2".into(),
+            pane: PaneId::new("%2".into()).unwrap(),
             pane_alive: false,
             model_label: Some("kimi".into()),
             children: vec![],
@@ -343,7 +343,10 @@ fn test_topology_roundtrip() {
     let view = TopologyView {
         node,
         parent: Some("boss".into()),
-        path: vec!["boss".into(), "root".into()],
+        path: vec![
+            AgentName::new("boss".into()).unwrap(),
+            AgentName::new("root".into()).unwrap(),
+        ],
     };
     assert_roundtrip(&view);
 }

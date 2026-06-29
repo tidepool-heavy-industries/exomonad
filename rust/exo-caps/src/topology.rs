@@ -11,7 +11,7 @@
 
 use crate::fs::Fs;
 use crate::tmux::Tmux;
-use crate::types::ChildKind;
+use crate::types::{AgentName, ChildKind, PaneId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -30,12 +30,12 @@ pub enum TopologyError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TreeNode {
     /// The node's name (last segment of its tree address).
-    pub name: String,
+    pub name: AgentName,
     /// How the node relates to its parent's worktree; `None` for the caller/self.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<ChildKind>,
     /// The node's tmux pane id.
-    pub pane: String,
+    pub pane: PaneId,
     /// Liveness proxy: the node's tmux pane still exists.
     pub pane_alive: bool,
     /// Cosmetic model tag (e.g. `"kimi"`) for a node launched on a non-default model via a
@@ -57,7 +57,7 @@ pub struct TopologyView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
     /// The caller's full tree address (`NodePath` segments, root-first).
-    pub path: Vec<String>,
+    pub path: Vec<AgentName>,
 }
 
 /// **Composite cap** — the tree walk reads the per-node ledgers (`Fs`) and probes pane

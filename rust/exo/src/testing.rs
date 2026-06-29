@@ -342,15 +342,15 @@ impl Topology for MockRuntime {
         // A small canned tree: self `mock` (under `mock-parent`) with one worktree child.
         Ok(TopologyView {
             node: TreeNode {
-                name: "mock".into(),
+                name: AgentName::new("mock".into()).unwrap(),
                 kind: None,
-                pane: "%0".into(),
+                pane: PaneId::new("%0".into()).unwrap(),
                 pane_alive: true,
                 model_label: None,
                 children: vec![TreeNode {
-                    name: "child-a".into(),
+                    name: AgentName::new("child-a".into()).unwrap(),
                     kind: Some(ChildKind::Worktree),
-                    pane: "%1".into(),
+                    pane: PaneId::new("%1".into()).unwrap(),
                     // Topology reports pane *existence* only (for the `tree` tool); idle is a
                     // separate axis, modelled by `child_busy` via the `ChildLiveness` impl below.
                     pane_alive: true,
@@ -359,7 +359,10 @@ impl Topology for MockRuntime {
                 }],
             },
             parent: Some("mock-parent".into()),
-            path: vec!["mock-parent".into(), "mock".into()],
+            path: vec![
+                AgentName::new("mock-parent".into()).unwrap(),
+                AgentName::new("mock".into()).unwrap(),
+            ],
         })
     }
 }

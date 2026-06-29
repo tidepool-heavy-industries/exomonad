@@ -6,7 +6,7 @@
 //! that have children).
 
 use exo_caps::{
-    paths::status_path, CapError, CapResult, Fs, NodeStatus, PaneId, Topology, TreeNode,
+    paths::status_path, CapError, CapResult, Fs, NodeStatus, Topology, TreeNode,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -31,12 +31,10 @@ impl Tree {
         run_id: &str,
         map: &mut HashMap<String, NodeStatus>,
     ) {
-        if let Ok(pane) = PaneId::new(node.pane.clone()) {
-            let path = status_path(home, run_id, &pane);
-            if let Ok(bytes) = ctx.read(&path).await {
-                if let Ok(status) = serde_json::from_slice::<NodeStatus>(&bytes) {
-                    map.insert(node.name.clone(), status);
-                }
+        let path = status_path(home, run_id, &node.pane);
+        if let Ok(bytes) = ctx.read(&path).await {
+            if let Ok(status) = serde_json::from_slice::<NodeStatus>(&bytes) {
+                map.insert(node.name.as_str().to_string(), status);
             }
         }
         for child in &node.children {
@@ -64,14 +62,14 @@ impl Tree {
 
         // 1. Busy bit (from parent's view)
         if let Some(ps) = parent_status {
-            if let Some(cs) = ps.children.iter().find(|c| c.name == node.name) {
+            if let Some(cs) = ps.children.iter().find(|c| c.name == node.name.as_str()) {
                 status_bits.push(if cs.busy { "busy" } else { "idle" });
             }
         }
 
         // 2. Branch & Shutdown (from node's own view)
         let mut shutdown_flag = "";
-        if let Some(s) = status_map.get(&node.name) {
+        if let Some(s) = status_map.get(node.name.as_str()) {
             status_bits.push(&s.branch);
             if s.shutdown_pending {
                 shutdown_flag = " [SHUTDOWN PENDING]";
@@ -88,11 +86,12 @@ impl Tree {
         writeln!(
             out,
             "{indent}• {} ({}) [{liveness}]{extra}{shutdown_flag}",
-            node.name, node.pane
+            node.name.as_str(),
+            node.pane.as_str()
         )
         .unwrap();
 
-        let my_status = status_map.get(&node.name);
+        let my_status = status_map.get(node.name.as_str());
         for child in &node.children {
             Self::format_node(child, depth + 1, status_map, my_status, out);
         }
@@ -209,9 +208,9 @@ mod tests {
         // structured data round-trips back to the view (self + one child)
         let data = out.data.expect("tree returns structured data");
         let view: exo_caps::TopologyView = serde_json::from_value(data).unwrap();
-        assert_eq!(view.node.name, "mock");
+        assert_eq!(view.node.name.as_str(), "mock");
         assert_eq!(view.parent.as_deref(), Some("mock-parent"));
         assert_eq!(view.node.children.len(), 1);
-        assert_eq!(view.node.children[0].name, "child-a");
+        assert_eq!(view.node.children[0].name.as_str(), "child-a");
     }
 }

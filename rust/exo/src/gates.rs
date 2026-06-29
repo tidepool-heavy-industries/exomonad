@@ -54,13 +54,12 @@ pub fn pre_tool_use<'a, R: Send + Sync>(
 /// renders. `ChildIdle` is an engine-owned [`Lifecycle`] signal (the sidecar acts on it), so it
 /// rides the typed lifecycle wire, not the domain payload.
 fn child_idle_message() -> CapResult<Message> {
-    let summary = "finished a turn and is yielding control";
+    let text = "finished a turn and is yielding control";
+    let summary = Summary::new(text.into())?;
     Ok(Message {
-        text: MessageBody::new(format!("[idle] {summary}"))?,
-        summary: Summary::new(summary.into())?,
-        kind: MessageKind::Lifecycle(Lifecycle::ChildIdle {
-            summary: summary.into(),
-        }),
+        text: MessageBody::new(format!("[idle] {text}"))?,
+        summary: summary.clone(),
+        kind: MessageKind::Lifecycle(Lifecycle::ChildIdle { summary }),
     })
 }
 

@@ -43,9 +43,9 @@ impl Topology for Runtime {
             })?;
 
         let node = TreeNode {
-            name: self.name().as_str().to_string(),
+            name: self.name().clone(),
             kind: None,
-            pane: self.own_pane().as_str().to_string(),
+            pane: self.own_pane().clone(),
             // Self is, definitionally, alive — it's the node answering the call. Deliberately NOT
             // derived from the `alive` probe set: a best-effort `tmux list-panes` failure would
             // then mis-report this node as dead, which is strictly wrong (it's clearly running).
@@ -59,12 +59,7 @@ impl Topology for Runtime {
             .node_path()
             .parent()
             .map(|p| p.name().as_str().to_string());
-        let path = self
-            .node_path()
-            .segments()
-            .iter()
-            .map(|s| s.as_str().to_string())
-            .collect();
+        let path = self.node_path().segments().to_vec();
 
         Ok(TopologyView { node, parent, path })
     }
@@ -81,7 +76,7 @@ fn subtree(working_dir: &Path, alive: &HashSet<String>, depth: usize) -> Vec<Tre
     fold_children(&records)
         .into_values()
         .map(|c| {
-            let pane = c.pane.as_str().to_string();
+            let pane = c.pane.clone();
             let children = match c.kind {
                 ChildKind::Worktree => {
                     let child_wd = working_dir.join(".exo/worktrees").join(c.name.as_str());
@@ -90,9 +85,9 @@ fn subtree(working_dir: &Path, alive: &HashSet<String>, depth: usize) -> Vec<Tre
                 ChildKind::Inline => Vec::new(),
             };
             TreeNode {
-                name: c.name.as_str().to_string(),
+                name: c.name.clone(),
                 kind: Some(c.kind),
-                pane_alive: alive.contains(&pane),
+                pane_alive: alive.contains(pane.as_str()),
                 pane,
                 model_label: c.model_label.clone(),
                 children,
@@ -174,13 +169,13 @@ mod tests {
         let tree = subtree(root, &alive, MAX_DEPTH);
 
         assert_eq!(tree.len(), 2);
-        let a = tree.iter().find(|n| n.name == "a").unwrap();
-        let b = tree.iter().find(|n| n.name == "b").unwrap();
+        let a = tree.iter().find(|n| n.name.as_str() == "a").unwrap();
+        let b = tree.iter().find(|n| n.name.as_str() == "b").unwrap();
         assert!(a.pane_alive, "a's pane %1 is in the alive set");
         assert!(!b.pane_alive, "b's pane %2 is not in the alive set");
         // recursion: a (worktree) descends into "c"; b (inline) is a leaf
         assert_eq!(a.children.len(), 1);
-        assert_eq!(a.children[0].name, "c");
+        assert_eq!(a.children[0].name.as_str(), "c");
         assert!(b.children.is_empty());
     }
 
@@ -212,12 +207,15 @@ mod tests {
         );
 
         let view = rt.topology().await.unwrap();
-        assert_eq!(view.node.name, "me");
-        assert_eq!(view.node.pane, "%9"); // self's pane id (deterministic; no tmux dependency)
+        assert_eq!(view.node.name.as_str(), "me");
+        assert_eq!(view.node.pane.as_str(), "%9"); // self's pane id (deterministic; no tmux dependency)
         assert!(view.node.pane_alive); // self is always alive (hardcoded, not probe-derived)
         assert_eq!(view.parent.as_deref(), Some("root"));
-        assert_eq!(view.path, vec!["root".to_string(), "me".to_string()]);
+        assert_eq!(
+            view.path.iter().map(|a| a.as_str()).collect::<Vec<_>>(),
+            vec!["root", "me"]
+        );
         assert_eq!(view.node.children.len(), 1);
-        assert_eq!(view.node.children[0].name, "a");
+        assert_eq!(view.node.children[0].name.as_str(), "a");
     }
 }

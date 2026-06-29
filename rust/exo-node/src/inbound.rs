@@ -275,7 +275,7 @@ impl<D: Exomonad> RealHandler<D> {
             // child's own `notify_parent`, `[READY]`, a reviewer verdict, `ChildExited`. Never tear
             // the child down.
             Lifecycle::ChildIdle { summary } => {
-                info!(outcome = "child_idle", summary = %summary, "child idle — busy-bit flipped, not rendered to the LLM");
+                info!(outcome = "child_idle", summary = %summary.as_str(), "child idle — busy-bit flipped, not rendered to the LLM");
                 if let Persona::Agent(name) = from {
                     self.ctx.runtime.mark_child_idle(name);
                 }
@@ -368,7 +368,7 @@ impl<D: Exomonad> RealHandler<D> {
         &self,
         from: &Persona,
         status: &ShutdownStatus,
-        live_children: &[String],
+        live_children: &[AgentName],
         busy: bool,
         reason: &str,
     ) -> NodeResult<()> {
@@ -402,7 +402,7 @@ impl<D: Exomonad> RealHandler<D> {
     async fn respond_shutdown(
         &self,
         status: ShutdownStatus,
-        live_children: Vec<String>,
+        live_children: Vec<AgentName>,
         busy: bool,
         reason: &str,
     ) -> NodeResult<()> {
@@ -486,12 +486,12 @@ impl<D: Exomonad> RealHandler<D> {
                     "[shutdown] Forced teardown of your subtree in progress.",
                 )
                 .await;
-                for name in &live {
-                    let Ok(an) = AgentName::new(name.clone()) else {
-                        continue;
-                    };
-                    let Some(addr) = self.ctx.runtime.resolve_edge(&an).await else {
-                        warn!("cascade shutdown: cannot resolve child '{name}'; skipping");
+                for an in &live {
+                    let Some(addr) = self.ctx.runtime.resolve_edge(an).await else {
+                        warn!(
+                            "cascade shutdown: cannot resolve child '{}'; skipping",
+                            an.as_str()
+                        );
                         continue;
                     };
                     match shutdown_message(grace_ms) {
@@ -499,7 +499,7 @@ impl<D: Exomonad> RealHandler<D> {
                             if let Err(e) =
                                 exo_caps::Bus::deliver(&*self.ctx.runtime, addr, msg).await
                             {
-                                warn!("cascade shutdown: deliver to '{name}' failed: {e}");
+                                warn!("cascade shutdown: deliver to '{}' failed: {e}", an.as_str());
                             }
                         }
                         Err(e) => warn!("cascade shutdown: build message failed: {e}"),
@@ -545,7 +545,7 @@ fn decide(force: bool, childless: bool) -> ShutdownAction {
 /// the child, so the wording is first-person (the child speaking).
 fn format_shutdown_response(
     status: &ShutdownStatus,
-    live_children: &[String],
+    live_children: &[AgentName],
     busy: bool,
     reason: &str,
 ) -> String {
@@ -560,7 +560,11 @@ fn format_shutdown_response(
                      Re-send shutdown with force:true to tear down the whole subtree, or shut them \
                      down individually first.",
                     live_children.len(),
-                    live_children.join(", "),
+                    live_children
+                        .iter()
+                        .map(|n| n.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
                 )
             }
         }
@@ -580,7 +584,7 @@ fn any_live(n: &TreeNode) -> bool {
 
 /// Names of this node's direct children that still have a live pane (recursively). `None` if the
 /// topology read failed (caller must not treat that as "childless").
-async fn live_children<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> Option<Vec<String>> {
+async fn live_children<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> Option<Vec<AgentName>> {
     match ctx.runtime.topology().await {
         Ok(view) => Some(
             view.node
@@ -599,7 +603,7 @@ async fn live_children<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> Option<Vec<Str
 
 /// Live direct children NOT yet known-exited (the authoritative gone-set). On a topology error,
 /// returns a non-empty sentinel so `try_reap` errs toward NOT reaping.
-async fn remaining_live_children<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> Vec<String> {
+async fn remaining_live_children<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> Vec<AgentName> {
     let exited = ctx.exited_children.lock().unwrap().clone();
     match ctx.runtime.topology().await {
         Ok(view) => view
@@ -608,9 +612,10 @@ async fn remaining_live_children<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> Vec<
             .iter()
             .filter(|c| any_live(c))
             .map(|c| c.name.clone())
-            .filter(|n| !exited.contains(n))
+            .filter(|n| !exited.contains(n.as_str()))
             .collect(),
-        Err(_) => vec!["<topology-error>".to_string()],
+        Err(_) => vec![AgentName::new("<topology-error>".to_string())
+            .expect("static sentinel is a valid AgentName")],
     }
 }
 
@@ -828,7 +833,10 @@ mod tests {
     fn shutdown_response_render_text() {
         let deferred = format_shutdown_response(
             &ShutdownStatus::Deferred,
-            &["a".to_string(), "b".to_string()],
+            &[
+                AgentName::new("a".to_string()).unwrap(),
+                AgentName::new("b".to_string()).unwrap(),
+            ],
             true,
             "",
         );

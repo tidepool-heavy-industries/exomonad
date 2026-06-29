@@ -442,7 +442,7 @@ pub enum ShutdownStatus {
 pub enum Lifecycle {
     /// A node finished a turn and is yielding control (its stop hook fired). The envelope's
     /// stamped `from` says which node; `summary` is a short human note the parent may render.
-    ChildIdle { summary: String },
+    ChildIdle { summary: Summary },
     /// A node is about to reap itself (its shutdown completed and its subtree is clear). Sent to
     /// its parent just before it kills its own pane — the authoritative "this child is gone".
     ChildExited { reason: String },
@@ -451,7 +451,7 @@ pub enum Lifecycle {
     ShutdownResponse {
         status: ShutdownStatus,
         #[serde(default)]
-        live_children: Vec<String>,
+        live_children: Vec<AgentName>,
         #[serde(default)]
         busy: bool,
         #[serde(default)]
@@ -490,7 +490,10 @@ mod tests {
     fn shutdown_response_serde_roundtrip() {
         let m = Lifecycle::ShutdownResponse {
             status: ShutdownStatus::Deferred,
-            live_children: vec!["a".into(), "b".into()],
+            live_children: vec![
+                AgentName::new("a".into()).unwrap(),
+                AgentName::new("b".into()).unwrap(),
+            ],
             busy: true,
             reason: String::new(),
         };
