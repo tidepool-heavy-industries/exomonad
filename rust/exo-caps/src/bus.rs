@@ -8,29 +8,23 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 /// How policy names a delivery target — **tree-edges only** (no sibling / cross-tree:
-/// the messaging structure *is* the tree). `InlineChild` and `WorktreeChild` share the
-/// delivery path (name → pane → run-id-keyed inbox) but differ in spawn / papers /
-/// teardown (their [`ChildKind`](crate::ChildKind)). `Pane` is not policy-facing — it's
-/// an internal resolution target.
+/// the messaging structure *is* the tree). `Pane` is not policy-facing — it's an internal
+/// resolution target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Addressee {
     /// Up: my parent's inbox (a path held in my papers).
     Parent,
-    /// Down: a worker spawned in MY worktree (ephemeral pane, no PR).
-    InlineChild(AgentName),
-    /// Down: a child spawned in its OWN worktree (branch + PR).
-    WorktreeChild(AgentName),
+    /// Down: any direct child (inline worker or worktree child — delivery is identical).
+    Child(AgentName),
 }
 
-/// Log-friendly rendering: `parent` or the bare child name — not the `WorktreeChild(AgentName(..))`
+/// Log-friendly rendering: `parent` or the bare child name — not the `Child(AgentName(..))`
 /// Debug wrapping. Use `%addr` at log sites; `?addr` (Debug) is for diagnostics that need the variant.
 impl std::fmt::Display for Addressee {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Addressee::Parent => f.write_str("parent"),
-            Addressee::InlineChild(name) | Addressee::WorktreeChild(name) => {
-                f.write_str(name.as_str())
-            }
+            Addressee::Child(name) => f.write_str(name.as_str()),
         }
     }
 }

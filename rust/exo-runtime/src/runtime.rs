@@ -144,10 +144,7 @@ impl Runtime {
         let records = self.read_child_records().await.ok()?;
         exo_caps::fold_children(&records)
             .get(name)
-            .map(|c| match c.kind {
-                ChildKind::Inline => Addressee::InlineChild(name.clone()),
-                ChildKind::Worktree => Addressee::WorktreeChild(name.clone()),
-            })
+            .map(|_| Addressee::Child(name.clone()))
     }
 
     /// Build a periodic status snapshot. `role_str` is the node's domain role as its stable string

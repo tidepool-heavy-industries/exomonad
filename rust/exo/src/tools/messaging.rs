@@ -50,8 +50,8 @@ pub struct SendMessage;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct SendMessageArgs {
-    /// The recipient child and its kind (inline or worktree).
-    pub to: ChildTarget,
+    /// The name of the child agent to send the message to.
+    pub to: String,
     /// The message body.
     pub text: String,
     /// A short one-line preview/summary.
@@ -59,16 +59,6 @@ pub struct SendMessageArgs {
     /// The kind of message (defaults to chat).
     #[serde(default)]
     pub kind: ToolMessageKind,
-}
-
-/// Selects an [`Addressee`] child variant.
-#[derive(Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ChildTarget {
-    /// A worker spawned in the parent's worktree.
-    Inline(String),
-    /// A child spawned in its own worktree.
-    Worktree(String),
 }
 
 /// The kind of message to send, porting the [`MessageKind`] vocabulary to a
@@ -106,15 +96,12 @@ impl From<ToolMessageKind> for MessageKind {
 impl<R: Bus + Send + Sync> Tool<R> for SendMessage {
     const NAME: &'static str = "send_message";
     const DESCRIPTION: &'static str =
-        "Send a message to one of your children (a tree-edge: inline worker or worktree child). \
+        "Send a message to one of your children (a tree-edge: any direct child). \
          For messaging your parent use `notify_parent`.";
     type Args = SendMessageArgs;
 
     async fn run(ctx: &R, args: SendMessageArgs) -> CapResult<ToolOutput> {
-        let to = match args.to {
-            ChildTarget::Inline(name) => Addressee::InlineChild(AgentName::new(name)?),
-            ChildTarget::Worktree(name) => Addressee::WorktreeChild(AgentName::new(name)?),
-        };
+        let to = Addressee::Child(AgentName::new(args.to)?);
         let msg = Message {
             text: MessageBody::new(args.text)?,
             summary: Summary::new(args.summary)?,
@@ -156,10 +143,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_send_message_inline() {
+    async fn test_send_message_child() {
         let mock = MockRuntime::default();
         let args = json!({
-            "to": { "inline": "worker-1" },
+            "to": "worker-1",
             "text": "Hello worker",
             "summary": "Greeting"
         });
@@ -171,7 +158,7 @@ mod tests {
         if let Call::BusDeliver { to, msg } = &calls[0] {
             assert_eq!(
                 to,
-                &Addressee::InlineChild(AgentName::new("worker-1".into()).unwrap())
+                &Addressee::Child(AgentName::new("worker-1".into()).unwrap())
             );
             assert_eq!(msg.text.as_str(), "Hello worker");
             assert_eq!(msg.summary.as_str(), "Greeting");
@@ -185,7 +172,7 @@ mod tests {
     async fn test_send_message_shutdown() {
         let mock = MockRuntime::default();
         let args = json!({
-            "to": { "worktree": "child-1" },
+            "to": "child-1",
             "text": "finish and exit",
             "summary": "shutdown",
             "kind": { "shutdown": { "grace_ms": 5000 } }
@@ -198,7 +185,7 @@ mod tests {
         if let Call::BusDeliver { to, msg } = &calls[0] {
             assert_eq!(
                 to,
-                &Addressee::WorktreeChild(AgentName::new("child-1".into()).unwrap())
+                &Addressee::Child(AgentName::new("child-1".into()).unwrap())
             );
             assert_eq!(
                 msg.kind,

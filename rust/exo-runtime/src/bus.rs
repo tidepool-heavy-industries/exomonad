@@ -7,7 +7,7 @@
 //! `deliver` only does the **append** half:
 //! 1. Resolve `Addressee` → `InboxPath`:
 //!    - `Parent` → `self.parent_inbox` (held in papers; `BusError::Unresolved` if `None`).
-//!    - `InlineChild(name)` / `WorktreeChild(name)` → fold the parent's `children.jsonl`
+//!    - `Child(name)` → fold the parent's `children.jsonl`
 //!      (`exo_caps::fold_children`) and look up the child's stored `inbox`.
 //! 2. Wrap the policy [`Message`] in an [`IngestionEntry`]: stamp `from = Agent(self.name())`,
 //!    `ts = Utc::now()`, `v = 1` (the runtime stamps the envelope — policy cannot spoof it).
@@ -56,7 +56,7 @@ impl Runtime {
                 .parent_inbox
                 .clone()
                 .ok_or_else(|| BusError::Unresolved(to.clone())),
-            Addressee::InlineChild(name) | Addressee::WorktreeChild(name) => {
+            Addressee::Child(name) => {
                 let children = self.read_children().await.map_err(|e| match e {
                     SpawnError::Io(io) => BusError::Io(io),
                     SpawnError::Failed { detail, .. } => {
@@ -114,7 +114,7 @@ impl Bus for Runtime {
 
         // A delivery down to a child is a poke that will wake it — mark it busy so the idle gate
         // doesn't treat a just-poked child as idle (paired with `mark_child_idle` on `ChildIdle`).
-        if let Addressee::InlineChild(name) | Addressee::WorktreeChild(name) = &to {
+        if let Addressee::Child(name) = &to {
             self.mark_child_busy(name);
         }
 
@@ -321,7 +321,7 @@ mod tests {
         );
 
         let resolved = runtime
-            .resolve_inbox(&Addressee::InlineChild(child_name))
+            .resolve_inbox(&Addressee::Child(child_name))
             .await
             .unwrap();
         assert_eq!(resolved, child_inbox);
@@ -469,16 +469,16 @@ mod tests {
             .unwrap();
         assert!(parent_inbox_path.exists());
 
-        // Deliver to InlineChild
+        // Deliver to Child (inline)
         runtime
-            .deliver(Addressee::InlineChild(inline_name), msg.clone())
+            .deliver(Addressee::Child(inline_name), msg.clone())
             .await
             .unwrap();
         assert!(inline_inbox_path.exists());
 
-        // Deliver to WorktreeChild
+        // Deliver to Child (worktree)
         runtime
-            .deliver(Addressee::WorktreeChild(worktree_name), msg.clone())
+            .deliver(Addressee::Child(worktree_name), msg.clone())
             .await
             .unwrap();
         assert!(worktree_inbox_path.exists());
@@ -570,7 +570,7 @@ mod tests {
         );
 
         let resolved = runtime
-            .resolve_inbox(&Addressee::InlineChild(good_name))
+            .resolve_inbox(&Addressee::Child(good_name))
             .await
             .unwrap();
         assert_eq!(resolved, good_inbox);
