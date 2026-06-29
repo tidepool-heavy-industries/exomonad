@@ -7,9 +7,6 @@
 use crate::runtime::Runtime;
 use async_trait::async_trait;
 use exo_caps::{Kv, KvError};
-use std::sync::atomic::{AtomicU64, Ordering};
-
-static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[async_trait]
 impl Kv for Runtime {
@@ -29,32 +26,12 @@ impl Kv for Runtime {
     }
 
     async fn set(&self, key: &str, value: &str) -> Result<(), KvError> {
-        let kv_dir = self.working_dir().join("kv");
-        tokio::fs::create_dir_all(&kv_dir)
-            .await
-            .map_err(|e| KvError::Failed {
-                op: "set (create_dir_all)",
-                key: key.to_string(),
-                detail: e.to_string(),
-            })?;
-
         let encoded = encode_key(key);
-        let path = kv_dir.join(&encoded);
-        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let tmp_path = kv_dir.join(format!("{}.{}.{}.tmp", encoded, std::process::id(), id));
-
-        tokio::fs::write(&tmp_path, value)
+        let path = self.working_dir().join("kv").join(&encoded);
+        crate::util::atomic_write(&path, value.as_bytes())
             .await
             .map_err(|e| KvError::Failed {
-                op: "set (write tmp)",
-                key: key.to_string(),
-                detail: e.to_string(),
-            })?;
-
-        tokio::fs::rename(&tmp_path, path)
-            .await
-            .map_err(|e| KvError::Failed {
-                op: "set (rename)",
+                op: "set",
                 key: key.to_string(),
                 detail: e.to_string(),
             })

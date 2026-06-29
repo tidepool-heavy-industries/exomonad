@@ -25,17 +25,11 @@ impl Git for Runtime {
     }
 
     async fn merge_base(&self, refish: &str) -> Result<Option<String>, GitError> {
-        // Run the command directly (not via `self.git`) so a non-zero exit — `refish` doesn't
-        // resolve, or HEAD and `refish` share no history — is `Ok(None)` (caller falls back to
-        // another base), not an error.
-        let output = Command::new("git")
-            .current_dir(self.working_dir())
-            .args(["merge-base", "HEAD", refish])
-            .output()
-            .await?;
-        if !output.status.success() {
+        // A non-zero exit — `refish` doesn't resolve, or HEAD and `refish` share no history —
+        // is `Ok(None)` (caller falls back to another base), not an error.
+        let Some(output) = self.git_optional(&["merge-base", "HEAD", refish]).await? else {
             return Ok(None);
-        }
+        };
         let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
         Ok((!sha.is_empty()).then_some(sha))
     }
@@ -43,21 +37,20 @@ impl Git for Runtime {
     async fn fork_point(&self) -> Result<Option<String>, GitError> {
         let head = self.head_sha().await?;
         // current branch name (may be detached — then current is empty, fine)
-        let cur_out = Command::new("git")
-            .current_dir(self.working_dir())
-            .args(["rev-parse", "--abbrev-ref", "HEAD"])
-            .output()
+        let cur_out = self
+            .git_optional(&["rev-parse", "--abbrev-ref", "HEAD"])
             .await?;
-        let current = String::from_utf8_lossy(&cur_out.stdout).trim().to_string();
+        let current = cur_out
+            .as_ref()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
         // all local branch short names
-        let refs_out = Command::new("git")
-            .current_dir(self.working_dir())
-            .args(["for-each-ref", "--format=%(refname:short)", "refs/heads"])
-            .output()
-            .await?;
-        if !refs_out.status.success() {
+        let Some(refs_out) = self
+            .git_optional(&["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+            .await?
+        else {
             return Ok(None);
-        }
+        };
         let branches = String::from_utf8_lossy(&refs_out.stdout);
         let mut best: Option<(usize, String)> = None; // (ancestor-count, sha)
         for b in branches.lines().map(str::trim).filter(|b| !b.is_empty()) {
@@ -65,14 +58,9 @@ impl Git for Runtime {
                 continue;
             }
             // merge-base HEAD <b>
-            let mb_out = Command::new("git")
-                .current_dir(self.working_dir())
-                .args(["merge-base", "HEAD", b])
-                .output()
-                .await?;
-            if !mb_out.status.success() {
+            let Some(mb_out) = self.git_optional(&["merge-base", "HEAD", b]).await? else {
                 continue;
-            }
+            };
             let mb = String::from_utf8_lossy(&mb_out.stdout).trim().to_string();
             if mb.is_empty() || mb == head {
                 continue; // exclude HEAD itself (descendant branches) and no-shared-history
@@ -100,15 +88,13 @@ impl Git for Runtime {
     }
 
     async fn is_ahead_of(&self, base: &str) -> Result<bool, GitError> {
-        let output = Command::new("git")
-            .current_dir(self.working_dir())
-            .args(["rev-list", "--count", &format!("{base}..HEAD")])
-            .output()
-            .await?;
-        if !output.status.success() {
+        let Some(output) = self
+            .git_optional(&["rev-list", "--count", &format!("{base}..HEAD")])
+            .await?
+        else {
             tracing::warn!(base = %base, "is_ahead_of: git rev-list failed, treating as not ahead");
             return Ok(false);
-        }
+        };
         let count: usize = String::from_utf8_lossy(&output.stdout)
             .trim()
             .parse()
@@ -194,6 +180,24 @@ impl Runtime {
         }
 
         Ok(output)
+    }
+
+    /// Run git and treat a non-zero exit as `Ok(None)` rather than an error. Use for
+    /// operations where "not found" or "no shared history" is expected control flow.
+    async fn git_optional(
+        &self,
+        args: &[&str],
+    ) -> Result<Option<std::process::Output>, GitError> {
+        debug!(cwd = %self.working_dir().display(), args = ?args, "git_optional: exec");
+        let output = Command::new("git")
+            .current_dir(self.working_dir())
+            .args(args)
+            .output()
+            .await?;
+        if !output.status.success() {
+            return Ok(None);
+        }
+        Ok(Some(output))
     }
 }
 

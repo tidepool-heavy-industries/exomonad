@@ -18,6 +18,7 @@
 //! (`exo-node`).
 
 mod runtime;
+mod util;
 
 mod bus;
 mod fs;
