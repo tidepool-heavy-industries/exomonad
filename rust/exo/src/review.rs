@@ -190,7 +190,7 @@ pub async fn handle_review_system<C: SystemCtx + ?Sized>(
             let safe = safe_branch(my_branch.as_str());
             let path = std::path::PathBuf::from(format!(".exo/reviews/{safe}.json"));
 
-            let mut log = match ctx.read_reviews(&path).await {
+            let mut log = match ctx.read_file(&path).await {
                 Ok(Some(bytes)) => {
                     serde_json::from_slice::<ReviewLog>(&bytes).unwrap_or_else(|e| {
                         tracing::warn!("failed to parse review log at {:?}: {e}", path);
@@ -222,7 +222,7 @@ pub async fn handle_review_system<C: SystemCtx + ?Sized>(
             });
 
             if let Ok(bytes) = serde_json::to_vec(&log) {
-                if let Err(e) = ctx.persist_reviews(&path, &bytes).await {
+                if let Err(e) = ctx.write_file(&path, &bytes).await {
                     tracing::warn!("failed to persist review log at {:?}: {e}", path);
                 }
             }
@@ -339,7 +339,7 @@ mod tests {
             self.to_self.lock().unwrap().push(summary.to_string());
             Ok(())
         }
-        async fn read_reviews(&self, path: &std::path::Path) -> CapResult<Option<Vec<u8>>> {
+        async fn read_file(&self, path: &std::path::Path) -> CapResult<Option<Vec<u8>>> {
             Ok(self
                 .persisted
                 .lock()
@@ -348,7 +348,7 @@ mod tests {
                 .find(|(p, _)| p == path)
                 .map(|(_, b)| b.clone()))
         }
-        async fn persist_reviews(&self, path: &std::path::Path, bytes: &[u8]) -> CapResult<()> {
+        async fn write_file(&self, path: &std::path::Path, bytes: &[u8]) -> CapResult<()> {
             self.persisted
                 .lock()
                 .unwrap()

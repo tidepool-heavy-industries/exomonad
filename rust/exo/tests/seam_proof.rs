@@ -270,10 +270,10 @@ async fn handle_system_runs_through_the_seam() {
             self.delivered.lock().unwrap().push(text.to_string());
             Ok(())
         }
-        async fn read_reviews(&self, _path: &std::path::Path) -> CapResult<Option<Vec<u8>>> {
+        async fn read_file(&self, _path: &std::path::Path) -> CapResult<Option<Vec<u8>>> {
             Ok(None)
         }
-        async fn persist_reviews(&self, _path: &std::path::Path, _bytes: &[u8]) -> CapResult<()> {
+        async fn write_file(&self, _path: &std::path::Path, _bytes: &[u8]) -> CapResult<()> {
             Ok(())
         }
     }

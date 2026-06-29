@@ -381,10 +381,10 @@ impl SystemCtx for MockCtx {
     async fn deliver_to_self(&self, _from: &str, _summary: &str, _text: &str) -> CapResult<()> {
         Ok(())
     }
-    async fn read_reviews(&self, _path: &std::path::Path) -> CapResult<Option<Vec<u8>>> {
+    async fn read_file(&self, _path: &std::path::Path) -> CapResult<Option<Vec<u8>>> {
         Ok(None)
     }
-    async fn persist_reviews(&self, _path: &std::path::Path, _bytes: &[u8]) -> CapResult<()> {
+    async fn write_file(&self, _path: &std::path::Path, _bytes: &[u8]) -> CapResult<()> {
         Ok(())
     }
 }
