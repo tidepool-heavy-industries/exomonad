@@ -20,6 +20,193 @@ pub fn escape_for_shell_command(s: &str) -> String {
     format!("'{}'", escaped)
 }
 
+/// Typed representation of an agent launch command.
+///
+/// The `render()` method enforces the structural invariant: every variadic flag
+/// (notably `--mcp-config`) is followed by a capping `--flag` (`--append-system-prompt`
+/// or `--model`) **before** the positional prompt, so a variadic can never accidentally
+/// consume the prompt as one of its arguments.
+///
+/// Construct this struct, then call `render()` to obtain the shell command string.
+/// `build_agent_command` is a convenience wrapper that constructs and renders in one step.
+pub struct ClaudeInvocation {
+    pub agent_type: AgentType,
+    pub cwd: PathBuf,
+    /// `None` → `--dangerously-skip-permissions`.
+    pub permission_mode: Option<crate::domain::PermissionMode>,
+    pub allowed_tools: Vec<String>,
+    pub disallowed_tools: Vec<String>,
+    /// `--settings <path>` — merged over the cwd config; `None` ⇒ no flag.
+    pub settings_path: Option<String>,
+    /// `--mcp-config <path>` — variadic; MUST be followed by a cap flag before the prompt.
+    pub mcp_config_path: Option<String>,
+    /// `--append-system-prompt <text>` — cap flag 1; rendered after `--mcp-config`.
+    pub append_system_prompt: Option<String>,
+    /// `--model <name>` — cap flag 2; rendered after `--mcp-config`.
+    pub model: Option<String>,
+    pub prompt_file: Option<PathBuf>,
+    pub fork_session_id: Option<String>,
+    pub env_vars: HashMap<String, String>,
+    /// Gemini-only `--yolo` flag; inert for Claude.
+    pub yolo: bool,
+    /// Wrap the launch in `nix develop` when `cwd` contains a `flake.nix`.
+    pub wrap_nix: bool,
+    /// `--continue`: resume the most recent conversation in this cwd (root re-init only).
+    pub resume: bool,
+}
+
+impl ClaudeInvocation {
+    /// Render the invocation to a shell command string.
+    ///
+    /// **Ordering invariant** (Claude only): flags are emitted in this fixed order:
+    /// `[--continue] [--dangerously-skip-permissions|--permission-mode] [--allowedTools…]
+    /// [--disallowedTools…] [--settings] [--mcp-config] [--append-system-prompt] [--model]
+    /// [positional-prompt]`
+    ///
+    /// `--mcp-config` (variadic) is always followed by at least one of `--append-system-prompt`
+    /// or `--model` when they are set, or sits at the end when both are absent (no prompt to
+    /// swallow in that case — the root interactive launch).
+    pub fn render(&self) -> String {
+        let cmd = self.agent_type.command();
+
+        let perms_flags = match self.agent_type {
+            AgentType::Claude => {
+                let mut flags = String::new();
+
+                if self.resume {
+                    flags.push_str(" --continue");
+                }
+
+                match &self.permission_mode {
+                    Some(m) => {
+                        flags.push_str(" --permission-mode ");
+                        flags.push_str(m.as_str());
+                    }
+                    None => flags.push_str(" --dangerously-skip-permissions"),
+                }
+
+                for tool in &self.allowed_tools {
+                    flags.push_str(" --allowedTools ");
+                    flags.push_str(&shell_escape::escape(tool.into()));
+                }
+                for tool in &self.disallowed_tools {
+                    flags.push_str(" --disallowedTools ");
+                    flags.push_str(&shell_escape::escape(tool.into()));
+                }
+
+                if let Some(settings) = &self.settings_path {
+                    if !settings.trim().is_empty() {
+                        flags.push_str(" --settings ");
+                        flags.push_str(&shell_escape::escape(settings.into()));
+                    }
+                }
+
+                // --mcp-config is VARIADIC (consumes every following non-flag arg). It MUST be
+                // capped by --append-system-prompt or --model before any positional prompt.
+                if let Some(mcp) = &self.mcp_config_path {
+                    if !mcp.trim().is_empty() {
+                        flags.push_str(" --mcp-config ");
+                        flags.push_str(&shell_escape::escape(mcp.into()));
+                    }
+                }
+
+                // Cap flags — always rendered AFTER --mcp-config, ALWAYS before the prompt.
+                if let Some(p) = &self.append_system_prompt {
+                    if !p.trim().is_empty() {
+                        flags.push_str(" --append-system-prompt ");
+                        flags.push_str(&escape_for_shell_command(p));
+                    }
+                }
+                if let Some(m) = &self.model {
+                    if !m.trim().is_empty() {
+                        flags.push_str(" --model ");
+                        flags.push_str(&shell_escape::escape(m.into()));
+                    }
+                }
+
+                flags
+            }
+            AgentType::Gemini => {
+                if self.yolo {
+                    " --yolo".to_string()
+                } else {
+                    String::new()
+                }
+            }
+            AgentType::Shoal | AgentType::Process => String::new(),
+        };
+
+        let agent_command = match (&self.prompt_file, &self.fork_session_id) {
+            (Some(pf), Some(session_id)) => {
+                let escaped_session = escape_for_shell_command(session_id);
+                let escaped_path = escape_for_shell_command(&pf.display().to_string());
+                format!(
+                    "{}{} --resume {} --fork-session \"$(cat {})\"",
+                    cmd, perms_flags, escaped_session, escaped_path
+                )
+            }
+            (Some(pf), None) if self.agent_type == AgentType::Gemini => {
+                // Gemini `@`-expands its `-i` prompt, so passing the spec inline (`"$(cat file)"`)
+                // makes any `@/`, `@scoped`, `@types`, etc. in the spec be read as FILE references —
+                // e.g. `@/` → "read `/`" → the folder-trust modal that hangs the leaf. Instead,
+                // deliver the prompt as a single `@`-reference to the file: the spec's `@`-tokens
+                // then arrive as literal file CONTENT, and the only reference in the arg is our own.
+                let rel = pf
+                    .strip_prefix(&self.cwd)
+                    .unwrap_or(pf)
+                    .display()
+                    .to_string();
+                let init = format!(
+                    "Your complete task spec is in the file @{rel} — read it in full and carry it out. \
+                     Treat that file's contents as literal text.",
+                );
+                format!(
+                    "{}{} {} {}",
+                    cmd,
+                    perms_flags,
+                    self.agent_type.prompt_flag(),
+                    escape_for_shell_command(&init)
+                )
+            }
+            (Some(pf), None) => {
+                let escaped_path = escape_for_shell_command(&pf.display().to_string());
+                let flag = self.agent_type.prompt_flag();
+                if flag.is_empty() {
+                    format!("{}{} \"$(cat {})\"", cmd, perms_flags, escaped_path)
+                } else {
+                    format!(
+                        "{}{} {} \"$(cat {})\"",
+                        cmd, perms_flags, flag, escaped_path
+                    )
+                }
+            }
+            _ => format!("{}{}", cmd, perms_flags),
+        };
+
+        // Prepend env vars
+        let env_prefix = self
+            .env_vars
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, shell_escape::escape(v.into())))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let full_command = if env_prefix.is_empty() {
+            agent_command
+        } else {
+            format!("{} {}", env_prefix, agent_command)
+        };
+
+        // Wrap in nix develop shell if requested and flake.nix exists in cwd
+        if self.wrap_nix && self.cwd.join("flake.nix").exists() {
+            info!("Wrapping agent command in nix develop shell");
+            let escaped = full_command.replace('\'', "'\\''");
+            format!("nix develop -c sh -c '{}'", escaped)
+        } else {
+            full_command
+        }
+    }
+}
+
 /// Build the full shell command that launches `agent_type`, sourcing its prompt from
 /// `prompt_file` (never inline). Prepends `env_vars`; wraps in `nix develop` if `cwd`
 /// contains a `flake.nix`.
@@ -37,142 +224,28 @@ pub fn build_agent_command(
     wrap_nix: bool,
     append_system_prompt: Option<&str>,
 ) -> String {
-    let cmd = agent_type.command();
-
-    // Build permission flags for Claude agents
-    let perms_flags = match agent_type {
-        AgentType::Claude => {
-            let mut flags = String::new();
-            let mode = claude_flags.and_then(|f| f.permission_mode.as_ref());
-            match mode {
-                Some(m) => {
-                    flags.push_str(" --permission-mode ");
-                    flags.push_str(m.as_str());
-                }
-                None => flags.push_str(" --dangerously-skip-permissions"),
-            }
-            if let Some(f) = claude_flags {
-                for tool in &f.allowed_tools {
-                    flags.push_str(" --allowedTools ");
-                    flags.push_str(&shell_escape::escape(tool.into()));
-                }
-                for tool in &f.disallowed_tools {
-                    flags.push_str(" --disallowedTools ");
-                    flags.push_str(&shell_escape::escape(tool.into()));
-                }
-            }
-
-            // Private config files (node-mode): point CC at our hooks + MCP server without writing
-            // the shared cwd's `.claude/settings.local.json` / `.mcp.json`. Both flags MERGE over the
-            // cwd config (no `--strict-mcp-config` / `--setting-sources`), so the user's own config
-            // survives. EMITTED BEFORE `--append-system-prompt`/`--model`: `--mcp-config` is VARIADIC
-            // (consumes every following non-flag arg), so it must be capped by a later `--flag` and
-            // must NEVER sit adjacent to the trailing positional prompt — else CC swallows the prompt
-            // as an MCP config path. The singular `--append-system-prompt`/`--model` below are that cap.
-            if let Some(settings) = claude_flags.and_then(|f| f.settings_path.as_deref()) {
-                if !settings.trim().is_empty() {
-                    flags.push_str(" --settings ");
-                    flags.push_str(&shell_escape::escape(settings.into()));
-                }
-            }
-            if let Some(mcp) = claude_flags.and_then(|f| f.mcp_config_path.as_deref()) {
-                if !mcp.trim().is_empty() {
-                    flags.push_str(" --mcp-config ");
-                    flags.push_str(&shell_escape::escape(mcp.into()));
-                }
-            }
-
-            if let Some(p) = append_system_prompt {
-                if !p.trim().is_empty() {
-                    flags.push_str(" --append-system-prompt ");
-                    flags.push_str(&escape_for_shell_command(p));
-                }
-            }
-
-            if let Some(model) = claude_flags.and_then(|f| f.model.as_deref()) {
-                if !model.trim().is_empty() {
-                    flags.push_str(" --model ");
-                    flags.push_str(&shell_escape::escape(model.into()));
-                }
-            }
-
-            flags
-        }
-        AgentType::Gemini => {
-            if yolo {
-                " --yolo".to_string()
-            } else {
-                String::new()
-            }
-        }
-        AgentType::Shoal | AgentType::Process => String::new(),
-    };
-
-    let agent_command = match (prompt_file, fork_session_id) {
-        (Some(pf), Some(session_id)) => {
-            let escaped_session = escape_for_shell_command(session_id);
-            let escaped_path = escape_for_shell_command(&pf.display().to_string());
-            format!(
-                "{}{} --resume {} --fork-session \"$(cat {})\"",
-                cmd, perms_flags, escaped_session, escaped_path
-            )
-        }
-        (Some(pf), None) if agent_type == AgentType::Gemini => {
-            // Gemini `@`-expands its `-i` prompt, so passing the spec inline (`"$(cat file)"`)
-            // makes any `@/`, `@scoped`, `@types`, etc. in the spec be read as FILE references —
-            // e.g. `@/` → "read `/`" → the folder-trust modal that hangs the leaf. Instead, deliver
-            // the prompt as a single `@`-reference to the file: the spec's `@`-tokens then arrive as
-            // literal file CONTENT (an included file's text is not itself re-scanned for `@`-refs),
-            // and the only reference in the arg is our own. The file is under the agent's cwd
-            // (`<worktree>/.exo/tmp/…`), so a relative path resolves; fall back to the absolute path.
-            let rel = pf.strip_prefix(cwd).unwrap_or(pf).display().to_string();
-            let init = format!(
-                "Your complete task spec is in the file @{rel} — read it in full and carry it out. \
-                 Treat that file's contents as literal text.",
-            );
-            format!(
-                "{}{} {} {}",
-                cmd,
-                perms_flags,
-                agent_type.prompt_flag(),
-                escape_for_shell_command(&init)
-            )
-        }
-        (Some(pf), None) => {
-            let escaped_path = escape_for_shell_command(&pf.display().to_string());
-            let flag = agent_type.prompt_flag();
-            if flag.is_empty() {
-                format!("{}{} \"$(cat {})\"", cmd, perms_flags, escaped_path)
-            } else {
-                format!(
-                    "{}{} {} \"$(cat {})\"",
-                    cmd, perms_flags, flag, escaped_path
-                )
-            }
-        }
-        _ => format!("{}{}", cmd, perms_flags),
-    };
-
-    // Prepend env vars
-    let env_prefix = env_vars
-        .iter()
-        .map(|(k, v)| format!("{}={}", k, shell_escape::escape(v.into())))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let full_command = if env_prefix.is_empty() {
-        agent_command
-    } else {
-        format!("{} {}", env_prefix, agent_command)
-    };
-
-    // Wrap in nix develop shell if requested and flake.nix exists in cwd
-    if wrap_nix && cwd.join("flake.nix").exists() {
-        info!("Wrapping agent command in nix develop shell");
-        let escaped = full_command.replace('\'', "'\\''");
-        format!("nix develop -c sh -c '{}'", escaped)
-    } else {
-        full_command
+    ClaudeInvocation {
+        agent_type,
+        cwd: cwd.to_path_buf(),
+        permission_mode: claude_flags.and_then(|f| f.permission_mode),
+        allowed_tools: claude_flags
+            .map(|f| f.allowed_tools.clone())
+            .unwrap_or_default(),
+        disallowed_tools: claude_flags
+            .map(|f| f.disallowed_tools.clone())
+            .unwrap_or_default(),
+        settings_path: claude_flags.and_then(|f| f.settings_path.clone()),
+        mcp_config_path: claude_flags.and_then(|f| f.mcp_config_path.clone()),
+        append_system_prompt: append_system_prompt.map(|s| s.to_string()),
+        model: claude_flags.and_then(|f| f.model.clone()),
+        prompt_file: prompt_file.map(|p| p.to_path_buf()),
+        fork_session_id: fork_session_id.map(|s| s.to_string()),
+        env_vars: env_vars.clone(),
+        yolo,
+        wrap_nix,
+        resume: false,
     }
+    .render()
 }
 
 /// Write a prompt to a temp file and return the absolute path.
@@ -388,6 +461,78 @@ mod tests {
         assert!(
             mcp_at < cap_at && cap_at < prompt_at,
             "--mcp-config must be capped by a later --flag, not abut the prompt: {cmd}"
+        );
+    }
+
+    #[test]
+    fn claude_invocation_ordering_invariant() {
+        // The ClaudeInvocation struct enforces by construction that --mcp-config (variadic)
+        // is always followed by a capping --flag before the positional prompt.
+        // This test asserts: index(--mcp-config) < index(cap-flag) < index(positional prompt).
+        let cwd = Path::new("/home/u/dev/proj/.exo/worktrees/leaf");
+        let pf = cwd.join(".exo/tmp/prompt.txt");
+
+        let cmd = ClaudeInvocation {
+            agent_type: AgentType::Claude,
+            cwd: cwd.to_path_buf(),
+            permission_mode: None,
+            allowed_tools: vec![],
+            disallowed_tools: vec![],
+            settings_path: Some("/p/settings.json".into()),
+            mcp_config_path: Some("/p/mcp.json".into()),
+            append_system_prompt: Some("ROLE PROTOCOL".into()),
+            model: Some("sonnet".into()),
+            prompt_file: Some(pf.clone()),
+            fork_session_id: None,
+            env_vars: HashMap::new(),
+            yolo: false,
+            wrap_nix: false,
+            resume: false,
+        }
+        .render();
+
+        let mcp_at = cmd.find("--mcp-config").expect("--mcp-config present");
+        let prompt_at = cmd.find("\"$(cat").expect("positional prompt present");
+        let cap_at = cmd
+            .find("--append-system-prompt")
+            .or_else(|| cmd.find("--model"))
+            .expect("at least one cap flag present");
+
+        assert!(
+            mcp_at < cap_at,
+            "--mcp-config must precede the cap flag: {cmd}"
+        );
+        assert!(
+            cap_at < prompt_at,
+            "cap flag must precede the positional prompt: {cmd}"
+        );
+
+        // Also verify with only --model as the cap (no append-system-prompt).
+        let cmd2 = ClaudeInvocation {
+            agent_type: AgentType::Claude,
+            cwd: cwd.to_path_buf(),
+            permission_mode: None,
+            allowed_tools: vec![],
+            disallowed_tools: vec![],
+            settings_path: Some("/p/settings.json".into()),
+            mcp_config_path: Some("/p/mcp.json".into()),
+            append_system_prompt: None,
+            model: Some("sonnet".into()),
+            prompt_file: Some(pf),
+            fork_session_id: None,
+            env_vars: HashMap::new(),
+            yolo: false,
+            wrap_nix: false,
+            resume: false,
+        }
+        .render();
+
+        let mcp2 = cmd2.find("--mcp-config").expect("--mcp-config present");
+        let model2 = cmd2.find("--model").expect("--model present (the cap)");
+        let prompt2 = cmd2.find("\"$(cat").expect("positional prompt present");
+        assert!(
+            mcp2 < model2 && model2 < prompt2,
+            "--mcp-config < --model < prompt when only --model is the cap: {cmd2}"
         );
     }
 }

@@ -138,7 +138,6 @@ pub async fn run(
     // worker-clobbered) one would fire dead hooks. Only OUR generated content is touched.
     migrate_strip_legacy_cwd_config(&cwd);
 
-    let model_flag = model.map(|m| format!(" --model {m}")).unwrap_or_default();
     // Embed the boot env directly in the launch command. The holding-shell pane was created
     // by `boot_root_session` BEFORE the `tmux set-environment` calls above, so it never picked
     // up the session vars — `claude` (and the `exo node` sidecar it spawns) would
@@ -147,19 +146,6 @@ pub async fn run(
     // `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` enables Teams (TeamCreate + the Teams inbox),
     // which is the Bus's last hop into a running CC session — without it, the root can't lead
     // a team and child messages fall back to raw tmux paste.
-    // The launch string is pasted into a shell, so shell-escape the interpolated values.
-    // `sanitize_session_name` only maps `.`→`_`, so a session name with shell metacharacters
-    // would otherwise break the launch. (run_id is a UUID, but escape it too for uniformity.)
-    let run_id_esc = shell_escape::escape(run_id.clone().into());
-    let session_esc = shell_escape::escape(session.clone().into());
-    // Point the root's `claude` at its private config (merged over the cwd, so a user's own
-    // `.mcp.json`/settings survive — no `--strict-mcp-config`/`--setting-sources`).
-    let settings_esc = shell_escape::escape(settings_path.to_string_lossy().into_owned().into());
-    let mcp_esc = shell_escape::escape(mcp_config_path.to_string_lossy().into_owned().into());
-    // On `--recreate` (e.g. restarting after a binary update), continue the prior root
-    // conversation so the restart doesn't discard the human's context — `claude --continue`
-    // resumes the most recent conversation in this cwd. A fresh `init` has nothing to continue.
-    let continue_flag = if recreate { " --continue" } else { "" };
     // Carry any per-role launch-profile vars into the ROOT launch (the root pane predates the
     // session-env, so they're embedded inline like the boot vars above). `birth_finish` re-copies
     // them onto every descendant; only a profiled role's own launch translates them to `ANTHROPIC_*`.
@@ -167,20 +153,39 @@ pub async fn run(
     // any matching `EXO_*` already in the shell (so a secret key can stay out of the file). Absent ⇒
     // empty ⇒ launch byte-identical.
     const PROFILE_SUFFIXES: [&str; 4] = ["_BASE_URL", "_MODEL", "_AUTH_TOKEN", "_LABEL"];
-    let mut profile_vars: std::collections::BTreeMap<String, String> =
+    let mut env_vars: std::collections::HashMap<String, String> =
         profile_env.iter().cloned().collect();
-    profile_vars.extend(
+    env_vars.extend(
         std::env::vars().filter(|(k, _)| {
             k.starts_with("EXO_") && PROFILE_SUFFIXES.iter().any(|s| k.ends_with(s))
         }),
     );
-    let profile_env: String = profile_vars
-        .into_iter()
-        .map(|(k, v)| format!("{k}={} ", shell_escape::escape(v.into())))
-        .collect();
-    let launch = format!(
-        "{profile_env}EXOMONAD_SWARM_RUN_ID={run_id_esc} EXOMONAD_TMUX_SESSION={session_esc} CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude{continue_flag} --dangerously-skip-permissions{model_flag} --settings {settings_esc} --mcp-config {mcp_esc}"
-    );
+    env_vars.insert("EXOMONAD_SWARM_RUN_ID".into(), run_id.clone());
+    env_vars.insert("EXOMONAD_TMUX_SESSION".into(), session.clone());
+    env_vars.insert("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".into(), "1".into());
+    // On `--recreate` (e.g. restarting after a binary update), continue the prior root
+    // conversation so the restart doesn't discard the human's context — `claude --continue`
+    // resumes the most recent conversation in this cwd. A fresh `init` has nothing to continue.
+    // The root has no positional prompt (interactive launch), so --mcp-config never abuts a
+    // prompt argument — but we use ClaudeInvocation for uniformity and structural safety.
+    let launch = exomonad_shared::services::agent_control::launch::ClaudeInvocation {
+        agent_type: exomonad_shared::services::agent_control::AgentType::Claude,
+        cwd: cwd.clone(),
+        permission_mode: None, // root always uses --dangerously-skip-permissions
+        allowed_tools: vec![],
+        disallowed_tools: vec![],
+        settings_path: Some(settings_path.to_string_lossy().into_owned()),
+        mcp_config_path: Some(mcp_config_path.to_string_lossy().into_owned()),
+        append_system_prompt: None, // root has no role-steering prompt
+        model: model.map(|m| m.to_string()),
+        prompt_file: None,          // interactive launch — no positional prompt
+        fork_session_id: None,
+        env_vars,
+        yolo: false,
+        wrap_nix,
+        resume: recreate,
+    }
+    .render();
 
     exomonad_shared::services::tmux_ipc::TmuxIpc::new(&session)
         .inject_input(root_pane.as_str(), &launch)
