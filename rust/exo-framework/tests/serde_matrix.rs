@@ -1,3 +1,4 @@
+use exo_caps::Reason;
 use exo_framework::{HookDecision, HookInput, SessionStartOutput, StopDecision, ToolOutput};
 use serde_json::{json, Value};
 
@@ -7,7 +8,7 @@ fn hook_decision_round_trip() {
         (HookDecision::Allow, json!({ "decision": "allow" })),
         (
             HookDecision::Deny {
-                reason: "blocked".into(),
+                reason: Reason::new("blocked".into()).unwrap(),
             },
             json!({ "decision": "deny", "reason": "blocked" }),
         ),
@@ -33,7 +34,7 @@ fn stop_decision_round_trip() {
         (StopDecision::Allow, json!({ "decision": "allow" })),
         (
             StopDecision::Block {
-                reason: "wait".into(),
+                reason: Reason::new("wait".into()).unwrap(),
             },
             json!({ "decision": "block", "reason": "wait" }),
         ),
@@ -71,7 +72,7 @@ fn session_start_output_serde() {
 fn hook_input_deserialization_defaults() {
     let j = json!({ "tool_name": "test" });
     let input: HookInput = serde_json::from_value(j).unwrap();
-    assert_eq!(input.tool_name, "test");
+    assert_eq!(input.tool_name.as_str(), "test");
     assert_eq!(input.tool_input, Value::Null);
 
     let j2 = json!({ "tool_name": "test", "tool_input": { "arg": 1 } });

@@ -51,5 +51,5 @@ pub use topology::{Topology, TopologyError, TopologyView, TreeNode};
 pub use types::{
     AgentName, AgentType, Branch, ChildKind, ChildStatus, ControlKind, DomainPayload, InboxPath,
     IngestionEntry, Lifecycle, Message, MessageBody, MessageKind, NodePath, NodeStatus, PaneId,
-    Persona, ShutdownStatus, Summary, SyntheticName,
+    Persona, Reason, ShutdownStatus, Summary, SyntheticName, ToolName,
 };

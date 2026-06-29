@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn stop_block_emits_block() {
         let out = stop_verdict(StopDecision::Block {
-            reason: "commit first".into(),
+            reason: exo_caps::Reason::new("commit first".into()).unwrap(),
         });
         assert!(out.contains(r#""decision":"block""#));
         assert!(out.contains("commit first"));

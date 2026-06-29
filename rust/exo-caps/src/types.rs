@@ -294,6 +294,57 @@ impl TryFrom<String> for Summary {
     }
 }
 
+/// A hook decision reason; non-empty, multi-line allowed (block reasons span multiple lines).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String")]
+pub struct Reason(String);
+
+impl Reason {
+    pub fn new(s: String) -> CapResult<Self> {
+        if s.is_empty() {
+            return Err(CapError::invalid("Reason", "must be non-empty"));
+        }
+        Ok(Reason(s))
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for Reason {
+    type Error = CapError;
+    fn try_from(s: String) -> CapResult<Self> {
+        Reason::new(s)
+    }
+}
+
+/// A CC tool name; non-empty, no path separators.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String")]
+pub struct ToolName(String);
+
+impl ToolName {
+    pub fn new(s: String) -> CapResult<Self> {
+        if s.is_empty() || s.contains('/') || s.contains('\\') {
+            return Err(CapError::invalid(
+                "ToolName",
+                format!("empty or contains a path separator: {s:?}"),
+            ));
+        }
+        Ok(ToolName(s))
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for ToolName {
+    type Error = CapError;
+    fn try_from(s: String) -> CapResult<Self> {
+        ToolName::new(s)
+    }
+}
+
 // ── archetype & runtime ──────────────────────────────────────────────────────
 
 // The concrete role enum is **domain-owned** (`exo::ExoRole`), reached through the
@@ -609,5 +660,21 @@ mod tests {
     fn summary_rejects_newline() {
         assert!(Summary::new("ok".into()).is_ok());
         assert!(Summary::new("two\nlines".into()).is_err());
+    }
+
+    #[test]
+    fn reason_validates() {
+        assert!(Reason::new("non-empty reason".into()).is_ok());
+        assert!(Reason::new("multi\nline\nreason".into()).is_ok());
+        assert!(Reason::new("".into()).is_err());
+    }
+
+    #[test]
+    fn tool_name_validates() {
+        assert!(ToolName::new("Bash".into()).is_ok());
+        assert!(ToolName::new("pre_tool_use".into()).is_ok());
+        assert!(ToolName::new("".into()).is_err());
+        assert!(ToolName::new("a/b".into()).is_err());
+        assert!(ToolName::new("a\\b".into()).is_err());
     }
 }

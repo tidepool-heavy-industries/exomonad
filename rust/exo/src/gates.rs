@@ -12,7 +12,7 @@ use crate::tools::submit::SUBMIT_BRANCH_CALLED;
 use crate::tools::verdict::VERDICT_PRODUCED;
 use exo_caps::{
     deliver_domain, Addressee, Bus, CapResult, ChildLiveness, Git, Kv, Lifecycle, Message,
-    MessageBody, MessageKind, Summary,
+    MessageBody, MessageKind, Reason, Summary,
 };
 use exo_framework::{BoxFuture, HookDecision, HookInput, SessionStartOutput, StopDecision};
 
@@ -30,7 +30,7 @@ pub fn pre_tool_use<'a, R: Send + Sync>(
 
     Box::pin(async move {
         // Antipattern: Avoid `git add .` or `git add -A` (Claude's `Bash` tool).
-        if tool_name == "Bash" {
+        if tool_name.as_str() == "Bash" {
             if let Some(cmd) = tool_input.get("command").and_then(|v| v.as_str()) {
                 let parts: Vec<&str> = cmd.split_whitespace().collect();
                 for i in 0..parts.len() {
@@ -41,7 +41,7 @@ pub fn pre_tool_use<'a, R: Send + Sync>(
                         && (parts[i + 2] == "." || parts[i + 2] == "-A")
                     {
                         return HookDecision::Deny {
-                            reason: "Avoid `git add -A`/`git add .` — stage specific files by path to avoid committing stray artifacts.".into(),
+                            reason: Reason::new("Avoid `git add -A`/`git add .` — stage specific files by path to avoid committing stray artifacts.".to_string()).unwrap(),
                         };
                     }
                 }
@@ -139,11 +139,12 @@ async fn committed_unsubmitted_block<R: Git + Kv + Send + Sync>(
         return None;
     }
     Some(StopDecision::Block {
-        reason: format!(
+        reason: Reason::new(format!(
             "You have committed work on `{branch}` that hasn't been submitted for review — \
              call submit_branch to hand it up, or notify_parent if you're handing off differently.",
             branch = branch.as_str()
-        ),
+        ))
+        .unwrap(),
     })
 }
 
@@ -168,10 +169,13 @@ pub fn stop<'a, R: Git + Bus + ChildLiveness + Kv + Send + Sync>(
                 StopDecision::Allow
             }
             Ok(false) => StopDecision::Block {
-                reason: "Uncommitted changes in your worktree. Commit your work (a parent merges \
-                         your branch off disk — uncommitted changes are invisible to that merge), \
-                         then stop."
-                    .into(),
+                reason: Reason::new(
+                    "Uncommitted changes in your worktree. Commit your work (a parent merges \
+                     your branch off disk — uncommitted changes are invisible to that merge), \
+                     then stop."
+                        .to_string(),
+                )
+                .unwrap(),
             },
             Err(e) => {
                 tracing::error!("stop gate: could not read git status, allowing exit: {e}");
@@ -266,6 +270,7 @@ pub fn session_start<'a, R: Send + Sync>(_ctx: &'a R) -> BoxFuture<'a, SessionSt
 mod tests {
     use super::*;
     use crate::testing::{Call, MockRuntime};
+    use exo_caps::ToolName;
     use serde_json::json;
 
     fn delivered_child_idle_to_parent(calls: &[Call]) -> bool {
@@ -380,7 +385,7 @@ mod tests {
     async fn test_pre_tool_use_allow_by_default() {
         let ctx = MockRuntime::default();
         let input = HookInput {
-            tool_name: "some_unknown_tool".into(),
+            tool_name: ToolName::new("some_unknown_tool".into()).unwrap(),
             tool_input: json!({ "arg": 1 }),
         };
         assert_eq!(pre_tool_use(&ctx, &input).await, HookDecision::Allow);
@@ -393,30 +398,30 @@ mod tests {
 
         for tool in tools {
             let input = HookInput {
-                tool_name: tool.into(),
+                tool_name: ToolName::new(tool.into()).unwrap(),
                 tool_input: json!({ "command": "git add ." }),
             };
             match pre_tool_use(&ctx, &input).await {
                 HookDecision::Deny { reason } => {
-                    assert!(reason.contains("Avoid `git add -A`/`git add .`"));
+                    assert!(reason.as_str().contains("Avoid `git add -A`/`git add .`"));
                 }
                 _ => panic!("Should be Deny for {} with 'git add .'", tool),
             }
 
             let input_a = HookInput {
-                tool_name: tool.into(),
+                tool_name: ToolName::new(tool.into()).unwrap(),
                 tool_input: json!({ "command": "git add -A" }),
             };
             match pre_tool_use(&ctx, &input_a).await {
                 HookDecision::Deny { reason } => {
-                    assert!(reason.contains("Avoid `git add -A`/`git add .`"));
+                    assert!(reason.as_str().contains("Avoid `git add -A`/`git add .`"));
                 }
                 _ => panic!("Should be Deny for {} with 'git add -A'", tool),
             }
 
             // Test with extra whitespace
             let input_ws = HookInput {
-                tool_name: tool.into(),
+                tool_name: ToolName::new(tool.into()).unwrap(),
                 tool_input: json!({ "command": "  git   add    .  " }),
             };
             assert!(matches!(
@@ -437,7 +442,7 @@ mod tests {
 
         for cmd in cases {
             let input = HookInput {
-                tool_name: "Bash".into(),
+                tool_name: ToolName::new("Bash".into()).unwrap(),
                 tool_input: json!({ "command": cmd }),
             };
             assert_eq!(
@@ -463,7 +468,7 @@ mod tests {
         };
         match stop(&ctx).await {
             StopDecision::Block { reason } => {
-                assert!(reason.contains("Uncommitted changes"));
+                assert!(reason.as_str().contains("Uncommitted changes"));
             }
             _ => panic!("Should be Block when worktree is dirty"),
         }
@@ -493,7 +498,10 @@ mod tests {
         };
         match stop_dev(&ctx).await {
             StopDecision::Block { reason } => {
-                assert!(reason.contains("submit_branch"), "guidance should mention submit_branch");
+                assert!(
+                    reason.as_str().contains("submit_branch"),
+                    "guidance should mention submit_branch"
+                );
             }
             _ => panic!("should block when clean+ahead+unsubmitted"),
         }
@@ -559,7 +567,10 @@ mod tests {
         };
         match stop(&ctx).await {
             StopDecision::Block { reason } => {
-                assert!(reason.contains("submit_branch"), "guidance should mention submit_branch");
+                assert!(
+                    reason.as_str().contains("submit_branch"),
+                    "guidance should mention submit_branch"
+                );
             }
             _ => panic!("TL stop should block when clean+ahead+unsubmitted"),
         }
