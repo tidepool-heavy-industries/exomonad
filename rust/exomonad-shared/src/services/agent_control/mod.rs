@@ -9,4 +9,5 @@ pub mod fork_session;
 pub mod launch;
 mod types;
 
+pub use launch::ClaudeInvocation;
 pub use types::{AgentType, ClaudeSpawnFlags};

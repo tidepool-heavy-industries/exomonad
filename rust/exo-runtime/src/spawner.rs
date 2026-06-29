@@ -296,14 +296,30 @@ impl Runtime {
         for path in candidates {
             match exo_caps::Fs::read(self, &path).await {
                 Ok(bytes) => match serde_json::from_slice::<NodePapers>(&bytes) {
-                    Ok(p) => return (p.yolo, p.wrap_nix),
+                    Ok(p) => {
+                        tracing::info!(
+                            path = %path.display(),
+                            yolo = p.yolo,
+                            wrap_nix = p.wrap_nix,
+                            "own_launch_policy: loaded from papers"
+                        );
+                        return (p.yolo, p.wrap_nix);
+                    }
                     Err(e) => {
-                        tracing::warn!("own papers parse failed ({}): {e}", path.display());
+                        tracing::warn!(
+                            path = %path.display(),
+                            "own_launch_policy: papers parse failed ({e}); trying next candidate"
+                        );
                     }
                 },
                 Err(_) => continue,
             }
         }
+        tracing::info!(
+            yolo = NodePapers::DEFAULT_YOLO,
+            wrap_nix = NodePapers::DEFAULT_WRAP_NIX,
+            "own_launch_policy: no readable papers found; using behavior-preserving defaults"
+        );
         (NodePapers::DEFAULT_YOLO, NodePapers::DEFAULT_WRAP_NIX)
     }
 
@@ -698,36 +714,37 @@ impl Runtime {
         };
 
         // The launch model: a launch profile's model (e.g. kimi-for-coding) wins over the role's
-        // default (`exo` pins leaves to sonnet); `None` inherits the launcher's default. Threaded
-        // via the Claude-spawn flags bag → `build_agent_command`'s `--model`.
+        // default (`exo` pins leaves to sonnet); `None` inherits the launcher's default.
         let launch_model = core
             .launch_profile
             .as_ref()
             .and_then(|p| p.model.clone())
             .or_else(|| core.model.clone());
-        // Always pass Claude flags: besides the optional `--model`, they carry the node's private
-        // config-file paths so the launch emits `--settings`/`--mcp-config` (never the cwd config).
-        let claude_flags = exomonad_shared::services::agent_control::ClaudeSpawnFlags {
-            model: launch_model,
-            settings_path: Some(settings_path.to_string_lossy().into_owned()),
-            mcp_config_path: Some(mcp_config_path.to_string_lossy().into_owned()),
-            ..Default::default()
-        };
 
-        // The protocol string is passed via --append-system-prompt for Claude.
+        // Build the typed launch invocation. The ordered render enforces the structural invariant:
+        // --mcp-config (variadic) is always capped by --append-system-prompt/--model before the
+        // positional prompt, so it can never swallow the prompt as a config path.
         let launch_cmd = format!(
             "{}\n",
-            exomonad_shared::services::agent_control::launch::build_agent_command(
+            exomonad_shared::services::agent_control::launch::ClaudeInvocation {
                 agent_type,
-                Some(&prompt_file),
-                fork_session_id.as_deref(),
-                &env_vars,
-                child_dir,           // cwd (flake detection for wrap_nix)
-                Some(&claude_flags), // claude_flags (--model + private config paths)
-                yolo,                // yolo (inherited launch policy)
-                wrap_nix,            // wrap_nix: nix develop wrap (inherited launch policy)
-                Some(&core.protocol),
-            )
+                cwd: child_dir.to_path_buf(),
+                permission_mode: None, // node spawns always use --dangerously-skip-permissions
+                allowed_tools: vec![],
+                disallowed_tools: vec![],
+                settings_path: Some(settings_path.to_string_lossy().into_owned()),
+                mcp_config_path: Some(mcp_config_path.to_string_lossy().into_owned()),
+                // Cap flags — rendered after --mcp-config, before the positional prompt.
+                append_system_prompt: Some(core.protocol.clone()),
+                model: launch_model,
+                prompt_file: Some(prompt_file),
+                fork_session_id,
+                env_vars,
+                yolo,
+                wrap_nix,
+                resume: false,
+            }
+            .render()
         );
 
         exo_caps::Tmux::paste(self, pane, &launch_cmd)
