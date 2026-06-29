@@ -1,3 +1,4 @@
+use exo_caps::{Reason, ToolName};
 use exo_framework::*;
 use serde_json::json;
 
@@ -15,7 +16,7 @@ fn test_hook_decision_roundtrip() {
     let variants = [
         HookDecision::Allow,
         HookDecision::Deny {
-            reason: "blocked".into(),
+            reason: Reason::new("blocked".into()).unwrap(),
         },
         HookDecision::Modify {
             input: json!({"arg": 1}),
@@ -31,7 +32,10 @@ fn test_hook_decision_roundtrip() {
         json!({"decision": "allow"})
     );
     assert_eq!(
-        serde_json::to_value(&HookDecision::Deny { reason: "r".into() }).unwrap(),
+        serde_json::to_value(&HookDecision::Deny {
+            reason: Reason::new("r".into()).unwrap()
+        })
+        .unwrap(),
         json!({"decision": "deny", "reason": "r"})
     );
 }
@@ -41,7 +45,7 @@ fn test_stop_decision_roundtrip() {
     let variants = [
         StopDecision::Allow,
         StopDecision::Block {
-            reason: "dirty".into(),
+            reason: Reason::new("dirty".into()).unwrap(),
         },
     ];
     for v in variants {
@@ -70,7 +74,7 @@ fn test_session_start_output_roundtrip() {
 #[test]
 fn test_hook_input_roundtrip() {
     let h = HookInput {
-        tool_name: "test".into(),
+        tool_name: ToolName::new("test".into()).unwrap(),
         tool_input: json!({"a": 1}),
     };
     assert_roundtrip(&h);

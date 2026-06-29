@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use exo_caps::{
     Addressee, AgentName, AgentType, Branch, Bus, BusError, CapResult, ChildKind, ChildLiveness,
     Fs, FsError, Git, GitError, Kv, KvError, Message, PaneId, Persona, Process, ProcessError,
-    RoleKind, SpawnError, SpawnSpec, Spawner, Tmux, TmuxError, Topology, TopologyError,
-    TopologyView,
+    Reason, RoleKind, SpawnError, SpawnSpec, Spawner, Tmux, TmuxError, Topology, TopologyError,
+    ToolName, TopologyView,
 };
 use exo_framework::{
     ok_json, parse, schema_json, BoxFuture, ErasedTool, Exomonad, HookDecision, HookInput, RoleDef,
@@ -258,7 +258,7 @@ fn stop_gate<'a>(_: &'a TestCaps) -> BoxFuture<'a, StopDecision> {
 fn stop_gate_block<'a>(_: &'a TestCaps) -> BoxFuture<'a, StopDecision> {
     Box::pin(async {
         StopDecision::Block {
-            reason: "blocked".into(),
+            reason: Reason::new("blocked".into()).unwrap(),
         }
     })
 }
@@ -323,7 +323,7 @@ fn role_def_pre_tool_use_and_stop_hooks_fire() {
     let rd_rev = TestDomain::role_def(TestRole::Reviewer);
     let caps = TestCaps;
     let input = HookInput {
-        tool_name: "echo".into(),
+        tool_name: ToolName::new("echo".into()).unwrap(),
         tool_input: json!({}),
     };
 
@@ -337,7 +337,7 @@ fn role_def_pre_tool_use_and_stop_hooks_fire() {
     assert_eq!(
         stop_rev,
         StopDecision::Block {
-            reason: "blocked".into(),
+            reason: Reason::new("blocked".into()).unwrap(),
         }
     );
 

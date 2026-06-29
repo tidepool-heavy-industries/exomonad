@@ -4,7 +4,7 @@
 //! layer's `Deny → nudge` shaping is exercised without coupling the engine test to the domain's
 //! concrete antipattern rules (those are unit-tested in `exo`).
 
-use exo_caps::{AgentName, AgentType, CapResult, ChildKind, Persona, RoleKind, SpawnSpec};
+use exo_caps::{AgentName, AgentType, CapResult, ChildKind, Persona, Reason, RoleKind, SpawnSpec};
 use exo_framework::{
     BoxFuture, Exomonad, HookDecision, HookInput, RoleDef, SessionStartOutput, StopDecision,
     SystemCtx, SystemOutcome,
@@ -49,11 +49,12 @@ impl RoleKind for TestRole {
 }
 
 fn pre<'a>(_: &'a Runtime, input: &'a HookInput) -> BoxFuture<'a, HookDecision> {
-    let deny = input.tool_name == "Bash" || input.tool_name == "run_shell_command";
+    let deny =
+        input.tool_name.as_str() == "Bash" || input.tool_name.as_str() == "run_shell_command";
     Box::pin(async move {
         if deny {
             HookDecision::Deny {
-                reason: "test gate: shell denied".into(),
+                reason: Reason::new("test gate: shell denied".into()).unwrap(),
             }
         } else {
             HookDecision::Allow

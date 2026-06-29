@@ -295,7 +295,7 @@ mod tests {
 
         match (rd.stop)(&ctx).await {
             StopDecision::Block { reason } => {
-                assert!(reason.contains("Uncommitted changes"));
+                assert!(reason.as_str().contains("Uncommitted changes"));
             }
             _ => panic!("Should be blocked by uncommitted changes"),
         }

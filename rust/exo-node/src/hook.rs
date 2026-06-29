@@ -89,7 +89,7 @@ async fn run_hook<D: Exomonad>(
                 HookDecision::Allow => json!({"continue": true}),
                 HookDecision::Deny { reason } => json!({
                     "continue": true,
-                    "systemMessage": reason
+                    "systemMessage": reason.as_str()
                 }),
                 HookDecision::Modify { input } => json!({
                     "continue": true,
@@ -107,7 +107,7 @@ async fn run_hook<D: Exomonad>(
                 StopDecision::Allow => json!({"continue": true}),
                 StopDecision::Block { reason } => json!({
                     "decision": "block",
-                    "reason": reason
+                    "reason": reason.as_str()
                 }),
             };
             Ok(serde_json::to_string(&output).unwrap())
@@ -138,7 +138,7 @@ mod tests {
     use crate::test_support::{
         test_pre_tool_use, test_session_start, test_stop, TestDomain, TestRole,
     };
-    use exo_caps::{AgentName, Branch, NodePath, PaneId};
+    use exo_caps::{AgentName, Branch, NodePath, PaneId, Reason};
     use exo_framework::{BoxFuture, HookDecision, HookInput, RoleDef, StopDecision};
     use exo_runtime::Runtime;
     use serde_json::{json, Value};
@@ -276,7 +276,7 @@ mod tests {
     fn mock_stop_block<'a>(_: &'a exo_runtime::Runtime) -> BoxFuture<'a, StopDecision> {
         Box::pin(async {
             StopDecision::Block {
-                reason: "test reason".into(),
+                reason: Reason::new("test reason".into()).unwrap(),
             }
         })
     }
@@ -303,7 +303,7 @@ mod tests {
     ) -> BoxFuture<'a, HookDecision> {
         Box::pin(async {
             HookDecision::Deny {
-                reason: "test deny".into(),
+                reason: Reason::new("test deny".into()).unwrap(),
             }
         })
     }
