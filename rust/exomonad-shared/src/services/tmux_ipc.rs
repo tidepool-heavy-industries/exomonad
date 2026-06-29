@@ -3,7 +3,7 @@
 //! All methods are asynchronous (using `tokio::process::Command`).
 
 use anyhow::{Context, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::Path;
 use tokio::process::Command;
@@ -530,6 +530,99 @@ impl TmuxIpc {
         }
         info!(pane = %pane_id, "Killed tmux pane");
         Ok(())
+    }
+
+    // -- V2 node-mode spawn primitives --
+    // Back `impl Tmux for exo_runtime::Runtime`. Target the session rather than
+    // a specific window_id, return PaneId, and run the command directly (no shell wrapper).
+
+    /// Spawn a detached pane in this session. Returns the new pane's ID (%N).
+    pub async fn spawn_pane(&self, cwd: &Path, cmd: &str) -> Result<PaneId> {
+        let cwd_str = cwd.to_string_lossy();
+        let output = self
+            .tmux_cmd()
+            .args([
+                "split-window",
+                "-d",
+                "-t",
+                &self.session_name,
+                "-c",
+                &cwd_str,
+                "-P",
+                "-F",
+                "#{pane_id}",
+                cmd,
+            ])
+            .output()
+            .await
+            .context("Failed to run tmux split-window")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux split-window failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let pane_id =
+            PaneId::parse(&raw).context("Failed to parse pane_id from tmux split-window")?;
+        info!(session = %self.session_name, pane = %pane_id, "Created tmux pane");
+        Ok(pane_id)
+    }
+
+    /// Spawn a detached named window in this session. Returns the new pane's ID (%N).
+    pub async fn spawn_window(&self, name: &str, cwd: &Path, cmd: &str) -> Result<PaneId> {
+        let cwd_str = cwd.to_string_lossy();
+        let output = self
+            .tmux_cmd()
+            .args([
+                "new-window",
+                "-d",
+                "-t",
+                &self.session_name,
+                "-n",
+                name,
+                "-c",
+                &cwd_str,
+                "-P",
+                "-F",
+                "#{pane_id}",
+                cmd,
+            ])
+            .output()
+            .await
+            .context("Failed to run tmux new-window")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux new-window failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let pane_id =
+            PaneId::parse(&raw).context("Failed to parse pane_id from tmux new-window")?;
+        info!(session = %self.session_name, pane = %pane_id, name, "Created tmux window");
+        Ok(pane_id)
+    }
+
+    /// List all pane IDs across all sessions (`tmux list-panes -a`). Used as a liveness probe.
+    pub async fn list_panes_all(&self) -> Result<HashSet<String>> {
+        let output = self
+            .tmux_cmd()
+            .args(["list-panes", "-a", "-F", "#{pane_id}"])
+            .output()
+            .await
+            .context("Failed to run tmux list-panes")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux list-panes failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect())
     }
 
     // -- Input injection (buffer pattern for multiline safety) --
