@@ -10,9 +10,9 @@ type = "stdio"
 command = "vendor/notebooklm-mcp/result/bin/notebooklm-mcp"
 args = []
 
-# Run the reviewer + ephemeral workers on Kimi-K2 via the local claude-code-proxy (still
-# Claude processes, so Teams/hooks/MCP are unchanged). "kimi" is a built-in named brain;
-# omit a role ⇒ it stays the default model. Full-table form available for a custom backend.
+# Run ephemeral workers on Kimi-K2 via the local claude-code-proxy (still Claude processes,
+# so Teams/hooks/MCP are unchanged). "kimi" is a built-in named brain; omit a role ⇒ it
+# stays the default model. The reviewer stays default Sonnet Claude (Kimi was unreliable for
+# the review gate). Full-table form available for a custom backend.
 [launch_profile]
-reviewer = "kimi"
 worker = "kimi"
