@@ -6,7 +6,10 @@
 //! least-privilege spec. The decision enums they return are the framework contract
 //! ([`exo_framework::hooks`]).
 
+use crate::branching::parent_branch;
 use crate::review::ReviewSystem;
+use crate::tools::submit::SUBMIT_BRANCH_CALLED;
+use crate::tools::verdict::VERDICT_PRODUCED;
 use exo_caps::{
     deliver_domain, Addressee, Bus, CapResult, ChildLiveness, Git, Kv, Lifecycle, Message,
     MessageBody, MessageKind, Summary,
@@ -114,11 +117,7 @@ async fn committed_unsubmitted_block<R: Git + Kv + Send + Sync>(
             return None;
         }
     };
-    let base = branch
-        .as_str()
-        .rsplit_once('.')
-        .map(|(p, _)| p)
-        .unwrap_or("main");
+    let base = parent_branch(&branch);
     let ahead = match ctx.is_ahead_of(base).await {
         Ok(a) => a,
         Err(e) => {
@@ -129,7 +128,7 @@ async fn committed_unsubmitted_block<R: Git + Kv + Send + Sync>(
     if !ahead {
         return None;
     }
-    let submitted = match ctx.get("submit_branch_called").await {
+    let submitted = match ctx.get(SUBMIT_BRANCH_CALLED).await {
         Ok(v) => v.is_some(),
         Err(e) => {
             tracing::warn!("commit-guard: kv.get failed, allowing exit: {e}");
@@ -232,7 +231,7 @@ pub fn stop_dev<'a, R: Git + Bus + ChildLiveness + Kv + Send + Sync>(
 /// LOUD: a kv-read error is treated as no-verdict (a spurious re-submit beats a silent stall).
 pub fn stop_reviewer<'a, R: Bus + Kv + Send + Sync>(ctx: &'a R) -> BoxFuture<'a, StopDecision> {
     Box::pin(async move {
-        let produced = matches!(ctx.get("verdict_produced").await, Ok(Some(_)));
+        let produced = matches!(ctx.get(VERDICT_PRODUCED).await, Ok(Some(_)));
         if !produced {
             // ReviewAborted is a domain verdict — it rides the erased domain wire via
             // `deliver_domain`, so this gate needs only `Bus` (not `Bus<D::System>`).

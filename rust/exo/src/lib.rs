@@ -30,6 +30,8 @@ pub mod roles;
 pub mod spawn;
 pub mod tools;
 
+pub(crate) mod branching;
+
 #[cfg(test)]
 pub mod testing;
 

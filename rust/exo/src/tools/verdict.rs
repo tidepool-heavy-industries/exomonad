@@ -7,6 +7,9 @@
 
 use crate::review::{Finding, ReviewSystem, Severity};
 use exo_caps::{deliver_domain, Addressee, Branch, Bus, CapError, CapResult, Kv};
+
+/// KV flag set when `verdict` runs this session; read by the reviewer's stop gate.
+pub(crate) const VERDICT_PRODUCED: &str = "verdict_produced";
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -80,7 +83,7 @@ impl<R: Bus + Kv + Send + Sync> Tool<R> for Verdict {
         // Record that a verdict was produced this turn so the reviewer's stop hook stays silent
         // (the verdict is the done-signal). Best-effort — a kv failure at worst causes a spurious
         // re-submit, never a silent stall.
-        let _ = ctx.set("verdict_produced", "true").await;
+        let _ = ctx.set(VERDICT_PRODUCED, "true").await;
 
         Ok(ToolOutput::with_data(
             format!("verdict delivered to parent: {}", outcome_label),
