@@ -24,7 +24,6 @@
 
 pub mod error;
 pub mod identity;
-pub mod inbox;
 pub mod signal;
 pub mod target;
 pub mod teams;

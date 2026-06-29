@@ -15,13 +15,12 @@ Assembles `exo-runtime` (all caps) + a domain `D: Exomonad` (the domain's tools/
 | `outbound` (N1) | serve | Serve `role_def(kind).tools` as MCP over stdio (`tools/list` emits each tool's `name`/`description`/`inputSchema`, so the toolset is self-documenting). **Owns stdin/stdout → the node's lifetime anchor** (when it closes, the node ends). |
 | `inbound` (N2b) | watch | Watch the node's own ingestion inbox (byte-offset cursor + `notify` watch), route each new entry. |
 | `hooksock` (N5) | serve | Per-agent UDS hook-RPC channel — runs the role hook fn on the live runtime and shapes the verdict as the Claude hook-output JSON (`{"continue":true}` / `{"decision":"block",...}`). |
-| `teamout` (N6) | watch | **Outbound Teams bridge (Claude-only, Linux-only).** Watches this node's own CC team inboxes for messages the agent *sent* to a teammate (native `SendMessage` / `shutdown_request`), maps the recipient name → tree-edge `Addressee`, and forwards onto the bus. The reverse of `dispatch`. No roster authored (a child self-registers as a teammate when it first messages up); sidecar-owned processed-count cursor, never writes CC's inboxes. |
-| `dispatch` (N2a) | — | The **last hop**: deliver one entry into the agent's native interface (Teams inbox or tmux paste). |
-| `hook` (N4) | one-shot | `exo hook <event>` → bootstrap from papers → run the role's `pre_tool_use`/`stop`/`session_start` → print the verdict. No server. On SessionStart it appends the node identity + team lines to the `additionalContext`; the role protocol is delivered via the launch-time `--append-system-prompt` instead. |
+| `dispatch` (N2a) | — | The **last hop**: deliver one entry into the agent's pane via tmux-paste (buffer pattern), rendered with a `[from: X, kind: Y]` header. |
+| `hook` (N4) | one-shot | `exo hook <event>` → bootstrap from papers → run the role's `pre_tool_use`/`stop`/`session_start` → print the verdict. No server. On SessionStart it appends the node identity to the `additionalContext`; the role protocol is delivered via the launch-time `--append-system-prompt` instead. |
 | `bootstrap` | — | Self-ID: read `--papers` → `NodePapers`, enrich with ambient env (`$TMUX_PANE`, `EXOMONAD_SWARM_RUN_ID`, `EXOMONAD_TMUX_SESSION`, `$HOME`), build `NodeContext<D> { runtime, kind, own_inbox, parent_inbox, ... }`. Arms `PR_SET_PDEATHSIG` (Linux) as its first act so the sidecar self-terminates if its parent `claude` process dies — stdin-EOF alone is not a reliable lifetime anchor. |
 | `error` | — | `NodeError`. |
 
-`run_node` spawns `inbound`, `hooksock`, and `teamout` as background tasks and awaits `outbound::serve`; when serve returns (agent gone) it aborts all three. A background loop erroring is logged, not fatal.
+`run_node` spawns `inbound` and `hooksock` as background tasks and awaits `outbound::serve`; when serve returns (agent gone) it aborts both. A background loop erroring is logged, not fatal.
 
 ## Persistent Logging
 
@@ -44,26 +43,43 @@ The sidecar initializes a persistent file subscriber at startup (in the binary c
 - **`Lifecycle(Lifecycle)`** → `handle_lifecycle` (engine-owned, sidecar-consumed). A **`ChildIdle`** from a child finishing a turn ONLY flips that child's busy-bit to idle (`runtime.mark_child_idle` — what the `stop` idle gate reads); it is **NOT rendered to the LLM**. CC's Stop fires on every turn-end (e.g. a child pausing on a long bash command mid-task), so `[child idle]` is high-frequency noise, not a done-signal — the meaningful signals (`notify_parent`, `[READY]`, a reviewer verdict, `ChildExited`) carry the real state. The child is **never** torn down. `ChildExited` / `ShutdownResponse` drive the reap / shutdown-render paths.
 - **`Domain(DomainPayload)`** → `handle_domain` (domain-opaque, sidecar-consumed, never shown to the LLM unless the domain decides to act). The **one place** the erased wire payload is deserialized to the concrete `D::System` and handed to `D::handle_system` — for the `exo` domain that's `ReviewSystem` (decision derived from structured findings; the round is **best-effort RMW-appended to `.exo/reviews/{safe-branch}.json`** via the `read_reviews`/`persist_reviews` `SystemCtx` methods). The engine then acts on the returned `SystemOutcome`: `ReclaimSender` tears the sender down (`kill_pane` + `reclaim_worktree` — how a one-shot reviewer dies; teardown is **verdict-only**). An undeserializable payload is logged + skipped (tolerant, like a malformed bus line).
 
-## Native Teams delivery (the hard-won part)
+## Delivery: tmux-paste (exo owns its channel)
 
-`dispatch` decides the last hop by the node's `agent_type`:
+`dispatch` has a single last hop for every node kind (Claude, Shoal companion, inline worker):
+`Tmux::paste` the rendered `[from: X, kind: Y]` entry into the agent's own pane (buffer pattern —
+`load-buffer`/`paste-buffer`, no bracketed `-p`). The durable bus carries the message
+sidecar→sidecar; this module injects it into the live `claude`.
 
-- **Claude in a team** → write the team's **lead inbox**; the agent's own CC `InboxPoller` renders it as a native `<teammate-message>`. The team is resolved via **`exo_scry::resolve_self_or_portable()`** (solo-team-per-session): primary path is `resolve_self()`, which walks the sidecar → parent `claude` process and reads that process's inotify-bound team dir — without a `tmux_pane_id` (which CC omits from team config — that's why `resolve_by_pane` never fired and native delivery used to fail; see `node-native-teams-delivery` memory). On `resolve_self`'s failure (no team, or a transient `/proc`/config race) it falls back to the portable `resolve_via_transcript` path (cwd→transcript→`resolve_by_session`). **This portable fallback is WIRED but UNTESTED on non-Linux:** its cwd reader is currently Linux-only, so off-Linux `resolve_self_or_portable()` returns `None` and the node degrades to tmux paste. On Linux, `resolve_self` succeeds in the common case, so the fallback rung is rarely hit and is itself effectively untested.
-- **Claude with no team (or a Shoal companion)** → `Tmux::paste` into the pane.
-- **Inline worker (any agent type)** → always `Tmux::paste`. `dispatch` short-circuits team resolution when `ctx.runtime.is_inline()` is true, because the inline node's cwd is the parent's worktree — `resolve_self_or_portable()`'s cwd→transcript fallback would resolve into the **parent's** team, leaking the message into the parent's conversation. The `SessionStart` hook also skips the `TeamCreate` instruction for inline nodes.
+**Why not CC Agent Teams?** exo used to write the agent's CC team lead inbox so its `InboxPoller`
+rendered a native `<teammate-message>`. As of **Claude Code 2.1.178** that channel is dead for a
+multi-process orchestrator: teammates are now **in-process** (`Agent({name})`), one-team-per-session,
+no cross-session sharing — and a **solo team-lead with no live in-process teammate never drains its
+inbox**. Every exo node is a separate `claude` process = a solo lead, so every Teams write silently
+stranded (reproduced; CC GH#26426). There is no supported external/file-based registration or
+push-injection path. So Teams delivery, the `teamout` outbound bridge, and the `TeamCreate`
+SessionStart instruction were all **removed**; tmux-paste (the former floor) is now the only channel.
+`exo-scry` survives only for `fork_session` context inheritance (`spawner.rs`), not delivery.
 
-Delivery always works, only degrades — Teams is a *nicety*, tmux-paste is the floor. The `SessionStart` hook tells a Claude **worktree** node to `TeamCreate` if it doesn't already lead a team.
+The paste path (`exomonad_shared::services::tmux_ipc::inject_input`) is hardened: per-target async
+lock, **Rewind/modal dismissal** (capture pane → if it looks like the Rewind menu, send Escape — else
+the modal swallows the paste), copy/scroll-mode exit, temp-file `load-buffer`, 150ms debounce, 3×
+Enter retry, SIGWINCH wake, session-qualified target, and spill-to-file for payloads >480B.
 
-The bridge is **bidirectional** for every worktree node (all Claude): `dispatch` is the inbound last hop (bus → the agent's lead inbox → native `<teammate-message>`), and `teamout` (N6) is the outbound one (the agent's native `SendMessage`/`shutdown_request` → bus → the addressed tree edge). `run_node` does **not** spawn the `teamout` task for inline nodes. So a worktree node can just use its native team tools to talk to its parent/children — no exomonad-specific tool required. The MCP `send_message`/`notify_parent` tools remain as a fallback (and for inline workers, Shoal companions, or any teamless node).
+Outbound is symmetric and exo-owned: a child reaches its parent via the **`notify_parent` MCP tool**
+(→ Bus → the parent's inbound→paste); `send_message` addresses a child. No native CC team tools are
+used.
 
-## Inline-child shutdown (FIX C)
+## Inline-child shutdown
 
-When a **parent's** `teamout` bridge receives a `shutdown_request` addressed to an inline child (resolved as `Addressee::InlineChild` via `resolve_edge`), it calls `Spawner::kill_pane(&*ctx.runtime, child_name)` directly — **parent-side pane kill** — instead of forwarding a `Control(Shutdown)` onto the bus. The inline worker has no teamout bridge (not spawned) and can't receive cooperative-shutdown messages, so the parent just kills its pane. Worktree-child shutdown continues the cooperative path (`Control(Shutdown)` → bus → the child's inbound loop → `try_reap`).
+Tearing down an inline worker is a **parent-side `Spawner::kill_pane(child_name)`** — done by the
+`dismiss_worker` MCP tool (the same `kill_pane` path, no cooperative handshake; the inline worker has
+no sidecar inbound loop to receive a `Control(Shutdown)`). Worktree-child shutdown is the cooperative
+bus path (`Control(Shutdown)` → bus → the child's inbound loop → `try_reap`), and a folded/reviewed
+worktree child is reclaimed by `merge` / verdict-side teardown.
 
 ## Gaps / not-yet
 
-- **Shutdown has structured response.** A structured `shutdown_response` is written back to the requester (status accepted/deferred + live_children + busy), and the requester's `handle_system` renders it to chat. The native CC `shutdown_request` has no force field, so a bridged request is always cooperative.
+- **Shutdown has structured response.** A structured `shutdown_response` is written back to the requester (status accepted/deferred + live_children + busy), and the requester's `handle_system` renders it to chat.
 - **Forced teardown is a hard kill.** `force:true` cascades pane-kills through the subtree with no per-node commit/wrap-up — a busy descendant loses uncommitted work. Deliberate (force = "tear it down"); revisit if it bites in dogfooding.
 - **`outbound` hand-rolls JSON-RPC** over stdio (despite the "rmcp/stdio" framing) — minimal `initialize`/`tools/list`/`tools/call`; no capability negotiation beyond that.
-- **Portable team resolution is wired but untested off-Linux.** `dispatch` resolves via `exo_scry::resolve_self_or_portable()`, which falls back from the inotify `resolve_self` to the portable cwd→transcript path. That fallback is portable *by design* but its cwd reader is Linux-only, so on non-Linux it yields `None` and the node degrades to tmux paste — native delivery there has never run. Verify off-Linux (or with a portable cwd reader) before relying on it.
 - **Convergence teardown is wired, best-effort, now retried.** `merge` (the `exo` domain tool) reclaims the folded child (`kill_pane` + `reclaim_worktree`), and a one-shot reviewer is torn down verdict-side in `handle_system`. The reclaim path is now **bounded-retried** (3 attempts, linear backoff) inside the `Spawner` impls (`exo_runtime::retry_teardown`), so the reviewer teardown and the `merge` tool both inherit it for free; `try_reap`'s own-pane self-kill uses the same helper. A final failure logs a **loud structured error** (`op` + `child` + `attempts`) and the error is surfaced — but teardown stays **best-effort**: it never aborts the merge/teardown flow, and a child whose worktree is dirty or holds a nested worktree (e.g. a still-live reviewer) can still fail to reclaim after retries and linger (self-heals via the liveness reap).

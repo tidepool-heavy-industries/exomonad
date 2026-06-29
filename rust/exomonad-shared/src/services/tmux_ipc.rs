@@ -106,6 +106,25 @@ pub struct WindowInfo {
     pub pane_id: PaneId,
 }
 
+/// True if captured pane content looks like Claude Code's Rewind menu (or a similar transient modal
+/// that captures keyboard input until dismissed with Escape). Used to clear the modal before a paste
+/// so the input isn't silently swallowed. Mirrors Gastown's `containsRewindIndicators`.
+fn looks_like_rewind_modal(content: &str) -> bool {
+    let lower = content.to_lowercase();
+    if lower.contains("rewind") && lower.contains("enter") && lower.contains("esc") {
+        return true;
+    }
+    const PAIRS: [(&str, &str); 4] = [
+        ("enter to continue", "esc to exit"),
+        ("enter to accept", "esc to cancel"),
+        ("enter to select", "esc to go back"),
+        ("enter to select", "esc to cancel"),
+    ];
+    PAIRS
+        .iter()
+        .any(|(a, b)| lower.contains(a) && lower.contains(b))
+}
+
 /// tmux CLI wrapper for a specific session.
 #[derive(Debug, Clone)]
 pub struct TmuxIpc {
@@ -551,6 +570,29 @@ impl TmuxIpc {
         };
         let _guard = target_lock.lock().await;
 
+        // Dismiss Claude Code's Rewind menu (double-Esc history browser) or a similar transient
+        // modal before pasting: it takes over the terminal and silently swallows pasted input until
+        // cleared with Escape. Gated on Rewind indicators (a Claude-specific UI), so we never send a
+        // spurious Escape into a Gemini/Copilot pane mid-generation. Mirrors Gastown's
+        // `isInRewindMode`/`dismissRewindMode`.
+        if let Ok(output) = self
+            .tmux_cmd()
+            .args(["capture-pane", "-p", "-t", &qualified_target])
+            .output()
+            .await
+        {
+            if output.status.success()
+                && looks_like_rewind_modal(&String::from_utf8_lossy(&output.stdout))
+            {
+                let _ = self
+                    .tmux_cmd()
+                    .args(["send-keys", "-t", &qualified_target, "Escape"])
+                    .output()
+                    .await;
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            }
+        }
+
         // Exit copy/scroll mode if active — copy mode intercepts input,
         // preventing paste-buffer from reaching the underlying process.
         let mode_output = self
@@ -884,6 +926,21 @@ mod tests {
     fn test_session_name() {
         let ipc = TmuxIpc::new("test-session");
         assert_eq!(ipc.session_name(), "test-session");
+    }
+
+    #[test]
+    fn rewind_modal_detection() {
+        // Primary: "rewind" + enter + esc action prompts.
+        assert!(looks_like_rewind_modal(
+            "Rewind to a previous point\n  Enter to select · Esc to exit"
+        ));
+        // Action-prompt pair without the literal word "rewind".
+        assert!(looks_like_rewind_modal("  Enter to accept · Esc to cancel"));
+        // A normal prompt / busy indicator must NOT match (no spurious Escape).
+        assert!(!looks_like_rewind_modal(
+            "❯ implement the feature\n✻ Cooked for 1s"
+        ));
+        assert!(!looks_like_rewind_modal(""));
     }
 
     #[test]

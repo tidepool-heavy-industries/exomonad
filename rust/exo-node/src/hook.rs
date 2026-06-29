@@ -56,40 +56,16 @@ fn identity_context<D: Exomonad>(ctx: &NodeContext<D>) -> String {
         None => "none (root)".to_string(),
     };
 
-    // Claude nodes lead a solo team so the Bus's last hop can deliver native <teammate-message>s.
-    // Team names are a GLOBAL namespace, so the agent picking its own collides across re-runs /
-    // siblings → TeamCreate fails → the node leads no team → delivery degrades to tmux paste.
-    // Mint a run-scoped unique name here instead. Every tree node is a Claude instance; a non-Claude
-    // companion (Shoal) gets no team instruction (it receives via paste).
-    let team_line = if ctx.kind.agent_type() == exo_caps::AgentType::Claude && !ctx.runtime.is_inline() {
-        let run8: String = ctx.run_id.chars().take(8).collect();
-        let safe_name: String = name
-            .as_str()
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '-'
-                }
-            })
-            .collect();
-        format!(
-            "\nIf you do not already lead a team, create one named exactly `exo-{safe_name}-{run8}` \
-             with the TeamCreate tool — that is how messages from other agents reach you as native \
-             teammate-messages. Do this before other work."
-        )
-    } else {
-        String::new()
-    };
-
+    // Messages from other agents arrive as a tmux-pasted `[from: X]` note delivered by this node's
+    // own sidecar off the bus — exo owns its delivery channel (CC Agent Teams native delivery was
+    // retired; a solo session-lead never drains its teammate inbox as of CC 2.1.178, GH#26426). A
+    // child reaches its parent via the `notify_parent` MCP tool; no team setup is needed.
     format!(
-        "You are exomonad node '{}' (role: {}) on branch '{}'. Parent: {}.{}",
+        "You are exomonad node '{}' (role: {}) on branch '{}'. Parent: {}.",
         name.as_str(),
         role,
         branch.as_str(),
         parent_str,
-        team_line
     )
 }
 
@@ -223,35 +199,16 @@ mod tests {
         assert!(id.contains("(role: dev)"));
         assert!(id.contains("on branch 'main.root.dev-node'"));
         assert!(id.contains("Parent: root"));
-        // Dev is a Claude instance now — it leads a solo team so its parent can reach it natively.
+        // CC Agent Teams native delivery is retired — no node is told to create a team.
         assert!(
-            id.contains("TeamCreate"),
-            "Claude dev must get a team instruction: {id}"
-        );
-        assert!(
-            id.contains("exo-dev-node-run-123"),
-            "expected run-scoped team name: {id}"
-        );
-
-        // Tl also leads a solo team with a run-scoped, globally-unique name (`run-123`[..8]).
-        let ctx_tl = mock_ctx(
-            TestRole::Tl,
-            vec!["root", "tl-node"],
-            "main.root.tl-node",
-            true,
-        );
-        let id_tl = identity_context(&ctx_tl);
-        assert!(id_tl.contains("TeamCreate"));
-        assert!(
-            id_tl.contains("exo-tl-node-run-123"),
-            "expected run-scoped team name: {id_tl}"
+            !id.contains("TeamCreate"),
+            "no TeamCreate instruction expected: {id}"
         );
 
         let ctx_root = mock_ctx(TestRole::Root, vec!["root"], "main", false);
         let id_root = identity_context(&ctx_root);
         assert!(id_root.contains("Parent: none (root)"));
-        // Root is Claude too — it leads a team so children's ChildIdle can be delivered natively.
-        assert!(id_root.contains("exo-root-run-123"));
+        assert!(!id_root.contains("TeamCreate"));
     }
 
     #[tokio::test]

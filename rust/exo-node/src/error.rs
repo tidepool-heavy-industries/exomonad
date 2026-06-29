@@ -14,9 +14,9 @@ pub enum NodeError {
     #[error("missing required boot context: {0}")]
     MissingContext(&'static str),
 
-    /// `exo-scry` self-ID failed.
-    #[error("identity resolution failed: {0}")]
-    Scry(String),
+    /// Last-hop delivery into the agent (tmux paste) failed.
+    #[error("delivery failed: {0}")]
+    Delivery(String),
 
     /// The converge wiring isn't in place yet (Wave-2 scaffold placeholder).
     #[error("node loops not yet assembled")]

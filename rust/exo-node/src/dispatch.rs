@@ -1,12 +1,11 @@
-//! **N2a — Last-hop dispatch.** Routes ingestion entries into the agent based on its
-//! `agent_type` and CC team membership. This module handles the final delivery of messages
-//! to the agent's native interface.
+//! **N2a — Last-hop dispatch.** Delivers an ingestion entry into this node's own agent by
+//! tmux-pasting it into the agent's pane (buffer pattern), rendered with a `[from: X, kind: Y]`
+//! header. This is the single last hop for every node kind (Claude, Shoal companion, inline worker).
 //!
-//! Delivery mechanisms:
-//! - **Claude Code in a team**: Writes to the CC Teams inbox, which is then picked up
-//!   by the InboxPoller and delivered as a `<teammate-message>`.
-//! - **Claude Code with no team**: Uses tmux injection (buffer pattern) to paste
-//!   the message directly into the agent's pane, rendered with a `[from: X, kind: Y]` header.
+//! CC Agent Teams native delivery was removed: as of Claude Code 2.1.178 a solo session-lead never
+//! drains its teammate inbox, so writing `~/.claude/teams/<team>/inboxes/team-lead.json` silently
+//! stranded every message (GH#26426). exo owns its delivery channel — the durable bus carries the
+//! message sidecar→sidecar, and this module injects it into the live `claude` via tmux.
 //!
 //! This is pure last-hop dispatch; it focuses on the agent-facing write for entries
 //! that have already been routed to this node.
@@ -16,8 +15,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use exo_caps::{
-    AgentType, Fs, IngestionEntry, Message, MessageBody, MessageKind, Persona, RoleKind, Summary,
-    SyntheticName, Tmux,
+    Fs, IngestionEntry, Message, MessageBody, MessageKind, Persona, Summary, SyntheticName, Tmux,
 };
 use exo_framework::Exomonad;
 use tracing::{error, info, warn};
@@ -34,69 +32,14 @@ pub async fn dispatch<D: Exomonad>(
     ctx: &Arc<NodeContext<D>>,
     entry: &IngestionEntry,
 ) -> NodeResult<()> {
-    let agent_type = ctx.kind.agent_type();
-
-    // Resolve THIS agent's own team — but ONLY for a Claude node, since `decide_lasthop` consults
-    // the team only for Claude. A non-Claude companion (Shoal) always tmux-pastes; resolving its
-    // team would walk `/proc` for a `claude` ancestor it never has and log a spurious WARN on every
-    // delivery. So skip it entirely for non-Claude.
-    //
-    // `resolve_self_or_portable` tries `resolve_self` first — it walks from the sidecar up to its
-    // parent `claude` process and reads that process's inotify-bound `tasks/{team}` dir, finding
-    // the agent's own (solo) team without needing a `tmux_pane_id` (which CC never writes into its
-    // team config; that's why `resolve_by_pane` always missed and native delivery never fired). On
-    // its failure (no team, or a transient `/proc`/config race) it falls back to the portable
-    // cwd→transcript path before giving up. On non-Linux the portable cwd reader is unavailable, so
-    // this yields `None` (wired but untested off-Linux). For a Claude node, resolution failure is
-    // non-fatal but noteworthy: fall back to paste, and WARN so a Claude node silently degrading to
-    // paste is visible, not a mystery.
-    // Inline workers share the parent's cwd, so `resolve_self_or_portable()`'s cwd→transcript
-    // fallback would resolve into the parent's team — leaking messages into the parent's
-    // conversation. Skip team resolution entirely for inline nodes; they always tmux-paste.
-    let active_team = if agent_type == AgentType::Claude && !ctx.runtime.is_inline() {
-        match exo_scry::resolve_self_or_portable() {
-            Ok(team) => team,
-            Err(e) => {
-                warn!(node = %ctx.runtime.name().as_str(), "team resolution failed; falling back to tmux paste for this delivery: {e}");
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    let lasthop = decide_lasthop(agent_type, active_team);
-    match lasthop {
-        LastHop::TeamsInbox { team, to } => {
-            info!(outcome = "teams_inbox", team = %team, to = %to, "dispatching via Teams inbox");
-            let persona_str = render_persona(&entry.from);
-            match exo_scry::inbox::send_message(
-                &team,
-                &to,
-                &persona_str,
-                entry.msg.text.as_str(),
-                entry.msg.summary.as_str(),
-            ) {
-                // The `outcome = "teams_inbox"` line above already records the attempt; on success
-                // there's nothing to add, so don't double-log. Only the failure path is noteworthy.
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    error!("FAILED to dispatch via Teams inbox: {e}");
-                    Err(NodeError::Scry(e.to_string()))
-                }
-            }
-        }
-        LastHop::TmuxPaste => {
-            info!(outcome = "tmux_paste", "dispatching via tmux paste");
-            let rendered = prepare_tmux_payload(ctx, entry).await;
-            match Tmux::paste(&*ctx.runtime, &ctx.own_pane, &rendered).await {
-                // `outcome = "tmux_paste"` above already records the attempt; don't double-log OK.
-                Ok(()) => Ok(()),
-                Err(e) => {
-                    error!("FAILED to dispatch via tmux paste: {e}");
-                    Err(NodeError::Scry(format!("Tmux paste failed: {}", e)))
-                }
-            }
+    info!(outcome = "tmux_paste", "dispatching via tmux paste");
+    let rendered = prepare_tmux_payload(ctx, entry).await;
+    match Tmux::paste(&*ctx.runtime, &ctx.own_pane, &rendered).await {
+        // `outcome = "tmux_paste"` above already records the attempt; don't double-log OK.
+        Ok(()) => Ok(()),
+        Err(e) => {
+            error!("FAILED to dispatch via tmux paste: {e}");
+            Err(NodeError::Delivery(format!("Tmux paste failed: {}", e)))
         }
     }
 }
@@ -127,32 +70,6 @@ pub(crate) async fn deliver_synthetic<D: Exomonad>(
         },
     };
     dispatch(ctx, &entry).await
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum LastHop {
-    TeamsInbox { team: String, to: String },
-    TmuxPaste,
-}
-
-fn decide_lasthop(agent_type: AgentType, active_team: Option<exo_scry::ActiveTeam>) -> LastHop {
-    // A node delivers into its OWN agent's conversation. For a Claude node that leads a team
-    // (solo-team-per-session — `resolve_self` resolves the team the agent is bound to, where it
-    // IS the lead), write that team's lead inbox: the agent's own CC InboxPoller renders it as
-    // a native `<teammate-message>`. With no team (before `TeamCreate`, or a Shoal companion), the
-    // sidecar tmux-pastes instead. Messaging is tree-edges only (the Bus); nothing reads
-    // another node's inbox — the lead inbox here is the agent's *own*.
-    if agent_type == AgentType::Claude {
-        if let Some(team) = active_team {
-            if let Some(to) = team.lead_inbox {
-                return LastHop::TeamsInbox {
-                    team: team.team.0,
-                    to,
-                };
-            }
-        }
-    }
-    LastHop::TmuxPaste
 }
 
 /// Short, log-friendly label for a persona: the bare agent/synthetic name, no `Agent(AgentName(..))`
@@ -279,63 +196,6 @@ mod tests {
         let rendered = render_entry(&entry);
         assert!(rendered.contains("[from: alice, kind: chat]"));
         assert!(rendered.contains("\n\nGreeting\nHello world"));
-    }
-
-    #[test]
-    fn test_decide_lasthop_shoal() {
-        let hop = decide_lasthop(AgentType::Shoal, None);
-        assert_eq!(hop, LastHop::TmuxPaste);
-    }
-
-    #[test]
-    fn test_decide_lasthop_claude_no_team() {
-        let hop = decide_lasthop(AgentType::Claude, None);
-        assert_eq!(hop, LastHop::TmuxPaste);
-    }
-
-    /// `resolve_self` resolves the agent's own team with `me: None` and `lead_inbox` set →
-    /// native delivery to the agent's own (lead) inbox.
-    #[test]
-    fn test_decide_lasthop_claude_team_native() {
-        use exo_scry::identity::TeamName;
-        use std::path::PathBuf;
-
-        let active_team = exo_scry::ActiveTeam {
-            claude_pid: None,
-            team: TeamName("myteam".to_string()),
-            tasks_dir: PathBuf::from("/tmp"),
-            lead_inbox: Some("myteam-lead".to_string()),
-            lead_session_id: None,
-            me: None,
-        };
-
-        let hop = decide_lasthop(AgentType::Claude, Some(active_team));
-        assert_eq!(
-            hop,
-            LastHop::TeamsInbox {
-                team: "myteam".to_string(),
-                to: "myteam-lead".to_string()
-            }
-        );
-    }
-
-    /// A team with no lead inbox (nothing to write) → paste.
-    #[test]
-    fn test_decide_lasthop_claude_no_lead_inbox_pastes() {
-        use exo_scry::identity::TeamName;
-        use std::path::PathBuf;
-
-        let active_team = exo_scry::ActiveTeam {
-            claude_pid: None,
-            team: TeamName("myteam".to_string()),
-            tasks_dir: PathBuf::from("/tmp"),
-            lead_inbox: None,
-            lead_session_id: None,
-            me: None,
-        };
-
-        let hop = decide_lasthop(AgentType::Claude, Some(active_team));
-        assert_eq!(hop, LastHop::TmuxPaste);
     }
 
     #[test]

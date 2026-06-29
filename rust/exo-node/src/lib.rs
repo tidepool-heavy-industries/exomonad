@@ -25,7 +25,6 @@ pub mod hook;
 pub mod hooksock;
 pub mod inbound;
 pub mod outbound;
-pub mod teamout;
 
 #[cfg(test)]
 mod test_support;
@@ -39,16 +38,13 @@ use exo_framework::Exomonad;
 use exo_runtime::Runtime;
 use std::sync::Arc;
 
-/// Run the node's concurrent stimuli in one process (outbound serve + inbound watch + hooksock +
-/// teamout):
+/// Run the node's concurrent stimuli in one process (outbound serve + inbound watch + hooksock):
 /// - **outbound** ([`outbound::serve`]) — serve the role's MCP tools over stdio. This owns
 ///   stdin/stdout and returns when the stream closes (agent gone), so it is the node's
 ///   **lifetime anchor**: when it ends, the node ends.
 /// - **inbound** ([`inbound::watch`]) — watch the ingestion inbox (cursor + notify) and route
 ///   each entry; ends on a `Control(Shutdown)`.
 /// - **hooksock** ([`hooksock::serve`]) — background hook-RPC socket (N5); also aborted when serve returns.
-/// - **teamout** ([`teamout::watch`]) — N6, Claude-only: watch this node's CC team inboxes and
-///   forward the agent's outbound teammate messages / shutdown_requests onto the bus.
 ///
 /// The background loops are aborted when `serve` returns. `Arc<NodeContext>` satisfies the
 /// `R: Send + Sync + 'static` dispatch boundary. A background loop erroring is logged but does
@@ -72,23 +68,6 @@ pub async fn run_node<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> 
             }
         }
     });
-
-    // N6 — outbound Teams bridge (Claude worktree nodes only). An inline worker shares the
-    // parent's cwd → its team resolution would land in the parent's team (the leak). Skip
-    // the bridge for inline nodes; their outbound path is always the MCP tools (notify_parent
-    // etc.) or tmux-paste, never native Teams.
-    let teamout = if !ctx.runtime.is_inline() {
-        Some(tokio::spawn({
-            let ctx = ctx.clone();
-            async move {
-                if let Err(e) = teamout::watch(ctx).await {
-                    tracing::error!("teamout loop exited with error: {e}");
-                }
-            }
-        }))
-    } else {
-        None
-    };
 
     // Periodic status publisher — writes the node's status snapshot to disk for visibility.
     let status = tokio::spawn({
@@ -124,9 +103,6 @@ pub async fn run_node<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> 
     // Agent stream closed (or serve errored) → reap the background loops.
     inbound.abort();
     hooksock.abort();
-    if let Some(t) = teamout {
-        t.abort();
-    }
     status.abort();
 
     result

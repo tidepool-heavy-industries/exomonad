@@ -115,5 +115,5 @@ Agent lifecycle is tracked via `StateMachine` typeclass instances. Phase types l
 
 - `notify_parent` for completion/failure/status updates to parent
 - `send_message` for peer-to-peer messaging between any agents
-- Messages arrive as native `<teammate-message>` via Teams inbox
+- Messages arrive as a tmux-pasted `[from: X]` note from the recipient's sidecar (off the bus); CC Agent Teams native delivery was retired (broken for multi-process orchestrators as of CC 2.1.178)
 - TL idles between spawning and receiving notifications — no polling

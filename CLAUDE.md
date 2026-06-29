@@ -131,7 +131,7 @@ Spawn a recursive tree of heterogeneous agents:
 
 **Agent types:** v2 node-mode is all Claude 🤖 — Opus TLs (root/tl, session default) + Sonnet leaves (dev/worker/reviewer) — plus Shoal 🌊 (custom binary agents over rmcp + HTTP-over-UDS) as an external companion backend. (Gemini 💎 was the v2 leaf runtime before the cut and is now Classic-only.) **Identity** = birth-branch (immutable, deterministic); root = `root`. The filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/`.
 
-**Coordination is push-based** via the Claude Code Teams inbox: a child calls `notify_parent` (or `send_message` for peer-to-peer), the message lands in the parent's inbox and arrives as a native `<teammate-message>` between turns. The TL idles — no polling, no blocking. Fallback is tmux STDIN injection.
+**Coordination is push-based** via the sidecar: a child calls `notify_parent` (or `send_message` for peer-to-peer), the message lands on the bus, and the recipient's sidecar tmux-pastes it into the agent's pane as a `[from: X]` note between turns. The TL idles — no polling, no blocking. (CC Agent Teams native delivery was retired — as of CC 2.1.178 a solo session-lead never drains its teammate inbox; exo owns its delivery channel.)
 
 Tool/role matrix → [`.claude/rules/exomonad.md`](.claude/rules/exomonad.md). Root protocol → `.exo/roles/devswarm/context/root.md`.
 
