@@ -74,6 +74,29 @@ fn home_or_warn(site: &str) -> String {
     })
 }
 
+/// Parse a child ledger's raw bytes into records. **Tolerant of malformed lines** — a torn
+/// last record from a crash mid-append must not block the whole ledger, only the affected
+/// record. Shared by [`Runtime::read_child_records`] (this node's own ledger) and
+/// [`Runtime::read_child_records_at`] (an arbitrary enclosing directory's ledger).
+fn parse_child_ledger(data: &[u8], ledger_path: &Path) -> Vec<ChildRecord> {
+    let mut records = Vec::new();
+    for line in data.split(|&b| b == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        match serde_json::from_slice::<ChildRecord>(line) {
+            Ok(record) => records.push(record),
+            Err(e) => {
+                tracing::warn!(
+                    path = %ledger_path.display(),
+                    "skipping malformed children.jsonl line: {e}"
+                );
+            }
+        }
+    }
+    records
+}
+
 /// Run a best-effort teardown op with **bounded** retry + linear backoff. Each transient failure
 /// is logged at `warn`; a final failure after [`MAX_TEARDOWN_ATTEMPTS`] is logged LOUD and
 /// structured (`op` + `child` + `attempts`) and the last error is returned.
@@ -240,7 +263,18 @@ impl Runtime {
         if self.is_inline() {
             return Ok(Vec::new());
         }
-        let path = self.children_log_path();
+        self.read_child_records_at(&self.working_dir).await
+    }
+
+    /// Read + parse the child ledger rooted at an arbitrary directory (`{dir}/.exo/children.jsonl`),
+    /// not necessarily this node's own `working_dir`. Used by nested-worktree reclaim: a nested
+    /// child's `Spawned` record lives in its immediate ENCLOSING worktree's ledger, which may not
+    /// be `self`'s. Shares the same tolerant-parse discipline as [`read_child_records`].
+    pub(crate) async fn read_child_records_at(
+        &self,
+        dir: &Path,
+    ) -> Result<Vec<ChildRecord>, SpawnError> {
+        let path = dir.join(".exo/children.jsonl");
         let data = match exo_caps::Fs::read(self, &path).await {
             Ok(d) => d,
             Err(FsError::At { source, .. } | FsError::Io(source))
@@ -250,20 +284,64 @@ impl Runtime {
             }
             Err(FsError::At { source, .. } | FsError::Io(source)) => return Err(source.into()),
         };
+        Ok(parse_child_ledger(&data, &path))
+    }
 
-        let mut records = Vec::new();
-        for line in data.split(|&b| b == b'\n') {
-            if line.is_empty() {
-                continue;
+    /// Best-effort teardown of a nested worktree's recorded pane, read from its ENCLOSING
+    /// directory's ledger (not `self`'s — a nested child was spawned by the enclosing node, not by
+    /// this one). Missing ledger / missing record / kill failure are all logged at `warn!` and
+    /// swallowed — the caller proceeds with `git worktree remove` regardless, so a torn-down pane
+    /// is best-effort, never a precondition for reclaiming the directory.
+    pub(crate) async fn kill_nested_pane_before_removal(
+        &self,
+        enclosing_dir: &Path,
+        nested_child_name: &str,
+    ) {
+        let name = match AgentName::new(nested_child_name.to_string()) {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::warn!(
+                    enclosing = %enclosing_dir.display(),
+                    child = nested_child_name,
+                    error = %e,
+                    "reclaim_worktree: nested dir name is not a valid AgentName; skipping pane-kill"
+                );
+                return;
             }
-            match serde_json::from_slice::<ChildRecord>(line) {
-                Ok(record) => records.push(record),
-                Err(e) => {
-                    tracing::warn!("skipping malformed children.jsonl line: {e}");
-                }
+        };
+        let records = match self.read_child_records_at(enclosing_dir).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    enclosing = %enclosing_dir.display(),
+                    child = name.as_str(),
+                    error = %e,
+                    "reclaim_worktree: could not read enclosing ledger; proceeding without a pane-kill"
+                );
+                return;
             }
+        };
+        let Some(record) = fold_children(&records).get(&name).cloned() else {
+            tracing::warn!(
+                enclosing = %enclosing_dir.display(),
+                child = name.as_str(),
+                "reclaim_worktree: nested child has no record in the enclosing ledger; proceeding without a pane-kill"
+            );
+            return;
+        };
+        if let Err(e) = retry_teardown("reclaim_nested_kill_pane", name.as_str(), || {
+            exo_caps::Tmux::kill_pane(self, &record.pane)
+        })
+        .await
+        {
+            tracing::warn!(
+                enclosing = %enclosing_dir.display(),
+                child = name.as_str(),
+                pane = record.pane.as_str(),
+                error = %e,
+                "reclaim_worktree: nested pane-kill failed after retries; proceeding with removal anyway"
+            );
         }
-        Ok(records)
     }
 
     /// Read + parse the child ledger, yielding the folded child set.
@@ -825,32 +903,72 @@ impl Spawner for Runtime {
             ChildKind::Worktree => {
                 let base_path = self.working_dir.join(".exo/worktrees").join(child.as_str());
 
-                // Find all nested worktrees.
+                // Find all nested worktrees. `enclosing` maps a discovered nested path to the
+                // directory it was found under — the enclosing worktree whose OWN ledger records
+                // the nested child's pane (a nested child was spawned by that enclosing node, not
+                // by `self`). `base_path` has no entry (its pane-kill is the caller's job — both
+                // `merge` and the reviewer-verdict teardown call `Spawner::kill_pane` before
+                // `reclaim_worktree`).
                 let mut stack = vec![base_path.clone()];
                 let mut to_remove = vec![];
+                let mut enclosing: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
                 while let Some(dir) = stack.pop() {
                     to_remove.push(dir.clone());
                     let w_dir = dir.join(".exo/worktrees");
-                    if let Ok(mut entries) = tokio::fs::read_dir(&w_dir).await {
-                        while let Ok(Some(entry)) = entries.next_entry().await {
-                            if let Ok(ft) = entry.file_type().await {
-                                if ft.is_dir() {
-                                    stack.push(entry.path());
+                    match tokio::fs::read_dir(&w_dir).await {
+                        Ok(mut entries) => loop {
+                            match entries.next_entry().await {
+                                Ok(Some(entry)) => match entry.file_type().await {
+                                    Ok(ft) if ft.is_dir() => {
+                                        let path = entry.path();
+                                        enclosing.insert(path.clone(), dir.clone());
+                                        stack.push(path);
+                                    }
+                                    Ok(_) => {}
+                                    Err(e) => tracing::warn!(
+                                        path = %entry.path().display(),
+                                        error = %e,
+                                        "reclaim_worktree: file_type() failed during nested-worktree discovery; entry skipped"
+                                    ),
+                                },
+                                Ok(None) => break,
+                                Err(e) => {
+                                    tracing::warn!(
+                                        dir = %w_dir.display(),
+                                        error = %e,
+                                        "reclaim_worktree: next_entry() failed during nested-worktree discovery; remaining entries in this dir skipped"
+                                    );
+                                    break;
                                 }
                             }
-                        }
+                        },
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(e) => tracing::warn!(
+                            dir = %w_dir.display(),
+                            error = %e,
+                            "reclaim_worktree: read_dir() failed during nested-worktree discovery; this subtree's nested worktrees may be missed"
+                        ),
                     }
                 }
 
                 // Innermost first. Removal is the `Git` supertrait's `worktree_remove`
                 // (force/reclaim semantics: the directory's state is discarded, the branch
                 // ref — a reviewer's committed fixup — survives).
+                let mut failed_nested: Vec<PathBuf> = vec![];
                 for path in to_remove.into_iter().rev() {
                     let child_name = path
                         .file_name()
                         .unwrap_or_default()
                         .to_string_lossy()
                         .to_string();
+
+                    // A live nested agent's pane must die BEFORE its cwd is force-removed out from
+                    // under it — kill the recorded pane first (best-effort; see
+                    // `kill_nested_pane_before_removal`).
+                    if let Some(enclosing_dir) = enclosing.get(&path) {
+                        self.kill_nested_pane_before_removal(enclosing_dir, &child_name)
+                            .await;
+                    }
 
                     let res = retry_teardown("reclaim_worktree", &child_name, || {
                         exo_caps::Git::worktree_remove(self, &path)
@@ -888,8 +1006,27 @@ impl Spawner for Runtime {
                             });
                         } else {
                             tracing::warn!("nested reclaim failed: {}", e);
+                            failed_nested.push(path);
                         }
                     }
+                }
+
+                if !failed_nested.is_empty() {
+                    let paths = failed_nested
+                        .iter()
+                        .map(|p| p.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    tracing::error!(
+                        child = child.as_str(),
+                        paths = %paths,
+                        "reclaim_worktree: nested worktrees left behind after retries — caller must not report a clean reclaim"
+                    );
+                    return Err(SpawnError::Failed {
+                        op: "reclaim_nested",
+                        child: Some(child.clone()),
+                        detail: format!("nested worktrees left behind: {paths}"),
+                    });
                 }
 
                 Ok(())
@@ -1212,5 +1349,159 @@ mod tests {
         // The parent still reads its own ledger correctly.
         let parent_records = rt_parent.read_child_records().await.unwrap();
         assert_eq!(parent_records.len(), 1);
+    }
+
+    fn run_git(dir: &std::path::Path, args: &[&str]) {
+        let ok = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {:?} failed in {}", args, dir.display());
+    }
+
+    fn init_git_repo(dir: &std::path::Path) {
+        run_git(dir, &["init", "-q", "-b", "main"]);
+        run_git(dir, &["config", "user.email", "t@t"]);
+        run_git(dir, &["config", "user.name", "t"]);
+        std::fs::write(dir.join("f.txt"), "base\n").unwrap();
+        run_git(dir, &["add", "f.txt"]);
+        run_git(dir, &["commit", "-q", "-m", "base"]);
+    }
+
+    fn root_runtime(repo: &std::path::Path) -> Runtime {
+        Runtime::new(
+            NodePath::new(vec![an("root")]).unwrap(),
+            Branch::new("main".into()).unwrap(),
+            repo.to_path_buf(),
+            None,
+            "run".into(),
+            "session".into(),
+            PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
+        )
+    }
+
+    /// A nested worktree with a ledger-recorded (but nonexistent) pane still gets a best-effort
+    /// kill attempt before removal, and that best-effort failure does NOT block reclaim: the
+    /// nested and outer worktrees are both removed, and `reclaim_worktree` returns `Ok`.
+    #[tokio::test]
+    async fn reclaim_worktree_attempts_nested_pane_kill_and_survives_a_dead_pane() {
+        let tmp = tempdir().unwrap();
+        let repo = tmp.path();
+        init_git_repo(repo);
+        let rt = root_runtime(repo);
+
+        let outer_name = an("outer");
+        let outer_path = repo.join(".exo/worktrees/outer");
+        run_git(
+            repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "outer-branch",
+                outer_path.to_str().unwrap(),
+            ],
+        );
+        let outer_pane = PaneId::new("%10".into()).unwrap();
+        rt.append_child_record(&ChildRecord::Spawned {
+            child: outer_name.clone(),
+            kind: ChildKind::Worktree,
+            pane: outer_pane.clone(),
+            inbox: rt.child_inbox_path(&outer_pane),
+            model_label: None,
+        })
+        .await
+        .unwrap();
+
+        // A nested worktree (e.g. a reviewer spawned inside the leaf), registered with git so
+        // removal succeeds, but with a pane id that doesn't correspond to any real tmux pane.
+        let nested_path = outer_path.join(".exo/worktrees/nested");
+        run_git(
+            repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "nested-branch",
+                nested_path.to_str().unwrap(),
+            ],
+        );
+        let nested_pane = PaneId::new("%99999".into()).unwrap();
+        let nested_record = ChildRecord::Spawned {
+            child: an("nested"),
+            kind: ChildKind::Worktree,
+            pane: nested_pane.clone(),
+            inbox: rt.child_inbox_path(&nested_pane),
+            model_label: None,
+        };
+        let nested_ledger = outer_path.join(".exo/children.jsonl");
+        tokio::fs::create_dir_all(nested_ledger.parent().unwrap())
+            .await
+            .unwrap();
+        let mut line = serde_json::to_string(&nested_record).unwrap();
+        line.push('\n');
+        tokio::fs::write(&nested_ledger, line).await.unwrap();
+
+        let res = exo_caps::Spawner::reclaim_worktree(&rt, &outer_name).await;
+        assert!(
+            res.is_ok(),
+            "a best-effort nested pane-kill failure must not fail reclaim: {:?}",
+            res
+        );
+        assert!(!nested_path.exists(), "nested worktree should be removed");
+        assert!(!outer_path.exists(), "outer worktree should be removed");
+    }
+
+    /// A nested directory that git never registered as a worktree (e.g. left over from a prior
+    /// crash) cannot be removed by `git worktree remove`. `reclaim_worktree` must still attempt
+    /// (and succeed at) removing the OUTERMOST worktree, but surface the leftover nested dir as an
+    /// `Err` so the caller (the `merge` tool) doesn't report a clean reclaim.
+    #[tokio::test]
+    async fn reclaim_worktree_errs_on_leftover_nested_dir_but_still_removes_outer() {
+        let tmp = tempdir().unwrap();
+        let repo = tmp.path();
+        init_git_repo(repo);
+        let rt = root_runtime(repo);
+
+        let outer_name = an("outer2");
+        let outer_path = repo.join(".exo/worktrees/outer2");
+        run_git(
+            repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "outer2-branch",
+                outer_path.to_str().unwrap(),
+            ],
+        );
+        let outer_pane = PaneId::new("%11".into()).unwrap();
+        rt.append_child_record(&ChildRecord::Spawned {
+            child: outer_name.clone(),
+            kind: ChildKind::Worktree,
+            pane: outer_pane.clone(),
+            inbox: rt.child_inbox_path(&outer_pane),
+            model_label: None,
+        })
+        .await
+        .unwrap();
+
+        // A plain directory under the discovery path, never registered via `git worktree add` —
+        // `git worktree remove` on it always fails.
+        let ghost = outer_path.join(".exo/worktrees/ghost");
+        tokio::fs::create_dir_all(&ghost).await.unwrap();
+
+        let res = exo_caps::Spawner::reclaim_worktree(&rt, &outer_name).await;
+        assert!(
+            res.is_err(),
+            "a leftover nested worktree must surface as an Err"
+        );
+        assert!(
+            !outer_path.exists(),
+            "outer removal must still be attempted and succeed despite the nested failure"
+        );
     }
 }
