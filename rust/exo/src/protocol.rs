@@ -2,15 +2,17 @@
 //! Claude at launch via `--append-system-prompt`. [`ExoRole::protocol`](crate::ExoRole) returns one
 //! of these per variant.
 //!
-//! Ported from the battle-tested prose in `.exo/roles/devswarm/context/{root,tl,dev,worker}.md`,
-//! **translated to v2 node-mode mechanics**: convergence is local `git merge` + `submit_branch`
-//! (no PRs, no remote, no Copilot). A leaf commits to its own branch and calls `submit_branch`,
-//! which spawns a one-shot reviewer; on an approve `verdict` the sidecar escalates `[READY]` to the
-//! parent, who folds the branch with the `merge` tool.
+//! Ported from the battle-tested prose that originally lived on disk at
+//! `.exo/roles/devswarm/context/{root,tl,dev,worker}.md`, **translated to v2 node-mode
+//! mechanics**: convergence is local `git merge` + `submit_branch` (no PRs, no remote, no
+//! Copilot). A leaf commits to its own branch and calls `submit_branch`, which spawns a
+//! one-shot reviewer; on an approve `verdict` the sidecar escalates `[READY]` to the parent,
+//! who folds the branch with the `merge` tool.
 //!
 //! These consts are the source of truth; an optional on-disk
-//! `.exo/roles/devswarm/context/{role}.md` may override one during prompt-tuning (the engine reads
-//! it if present, else falls back to the const).
+//! `.exo/roles/devswarm/context/{role}.md` may override one during prompt-tuning (the engine
+//! reads it if present, else falls back to the const). Today only `root.md` exists on disk as
+//! a live override target — `tl`/`dev`/`worker` fall through to these consts.
 
 /// Root TL — the human-facing top of the cognition tree.
 pub const ROOT: &str = r#"# Root TL Protocol

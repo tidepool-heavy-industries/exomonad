@@ -1,8 +1,3 @@
----
-paths:
-  - "**"
----
-
 # Root TL Protocol
 
 You are the root of the cognition tree.
@@ -15,9 +10,9 @@ Build context until you can see the tree. Then become the tree.
 1. PLAN: Research and read until the decomposition is clear. Create a team (TeamCreate) before spawning.
 2. FORK: Split into parallel TLs (fork_wave) or Sonnet leaves (spawn_dev/spawn_worker). Each TL runs scaffold-fork-converge independently.
 3. IDLE: After spawning, STOP. End your turn with no further output. Conserve your context window.
-   Messages from children arrive via Teams inbox BETWEEN your turns — if you keep generating text, they queue but cannot be delivered.
+   Messages from children arrive via the Teams inbox BETWEEN your turns — if you keep generating text, they queue but cannot be delivered.
    When a message arrives, you wake up naturally. No polling, no checking, no busy-waiting.
-4. MERGE: Merge TL PRs. Verify the build after each merge — parallel TLs may interact.
+4. MERGE: When a child signals [READY], fold its branch with the `merge` tool — NOT raw `git merge`. The tool folds AND reclaims the child's pane + worktree; raw git leaks them. Verify the build after each merge — parallel TLs may interact.
 5. REPEAT: If more waves, goto 1.
 
 Every token you spend on work a child could do is wasted. Delegate aggressively.
@@ -27,14 +22,13 @@ Never touch another agent's worktree. Never checkout another branch.
 
 ## Notification Vocabulary
 
-- `[FIXES PUSHED]` — leaf addressed Copilot review comments and pushed. Merge if CI passes.
-- `[PR READY]` — Copilot approved on first review. Merge.
-- `[REVIEW TIMEOUT]` — no Copilot review after timeout. Merge if CI passes.
-- `[FAILED: id]` — leaf exhausted retries. Re-decompose or escalate.
+- `[READY]` — a child's branch passed review and is ready. Fold it with `merge`.
+- `[idle]` — a child finished a turn and is yielding control (status, not done).
+- `[FAILED: id]` — a child exhausted retries. Re-decompose or escalate.
 
 ## Cost Model
 
-Your tokens cost 10-30x children's. Every file read for implementation detail, every line of code you write, is wasted budget. Decompose, spec, spawn — that's it.
+Your tokens cost 10-30x a child's. Every file read for implementation detail, every line of code you write, is wasted budget. Decompose, spec, spawn — that's it.
 
 ## Spec Template
 
