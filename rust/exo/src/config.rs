@@ -8,6 +8,7 @@
 //! from CWD for `.exo/config.toml` / `.exo/config.local.toml`; everything else falls back to a
 //! default so a config-less project still boots.
 
+use anyhow::Context;
 use exo_caps::NodePapers;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -96,11 +97,15 @@ pub struct InitConfig {
 
 /// Discover the node-mode init config by merging `.exo/config.local.toml` over `.exo/config.toml`,
 /// searching upward from CWD. `tmux_session`: local > global > project-dir name, sanitized.
-pub fn discover() -> InitConfig {
+///
+/// A missing config file defaults silently (a config-less project still boots); a config file that
+/// exists but fails to read or parse is a loud error — a typo'd `.exo/config.toml` must not silently
+/// drop `review_enabled`/`yolo`/`wrap_nix` by masquerading as "absent".
+pub fn discover() -> anyhow::Result<InitConfig> {
     let project_root = find_project_root();
 
-    let local = load_raw(&project_root.join(".exo/config.local.toml"));
-    let global = load_raw(&project_root.join(".exo/config.toml"));
+    let local = load_raw(&project_root.join(".exo/config.local.toml"))?;
+    let global = load_raw(&project_root.join(".exo/config.toml"))?;
 
     let tmux_session = local
         .tmux_session
@@ -134,14 +139,14 @@ pub fn discover() -> InitConfig {
     profiles.extend(local.launch_profile.unwrap_or_default());
     let profile_env = flatten_profiles(profiles);
 
-    InitConfig {
+    Ok(InitConfig {
         tmux_session,
         model,
         yolo,
         wrap_nix,
         review_enabled,
         profile_env,
-    }
+    })
 }
 
 /// Flatten each `[launch_profile.<role>]` profile to `EXO_<ROLE_UPPER>_<FIELD>` env-var pairs (only
@@ -180,11 +185,16 @@ fn flatten_profiles(profiles: BTreeMap<String, LaunchProfileEntry>) -> Vec<(Stri
     env
 }
 
-fn load_raw(path: &Path) -> RawInit {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|c| toml::from_str(&c).ok())
-        .unwrap_or_default()
+/// Read + parse one config file. Missing ⇒ defaults (a config-less project still boots, silently).
+/// Present but unreadable (permissions, IO) or unparseable (a TOML syntax error) ⇒ loud error — this
+/// must never be conflated with "no config", or a typo'd file would silently drop every field it sets.
+fn load_raw(path: &Path) -> anyhow::Result<RawInit> {
+    let contents = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(RawInit::default()),
+        Err(e) => return Err(e).with_context(|| format!("reading config file {}", path.display())),
+    };
+    toml::from_str(&contents).with_context(|| format!("parsing config file {}", path.display()))
 }
 
 /// Walk up from CWD to the project root containing `.exo/config.toml` (or any `.exo/`); fall back
