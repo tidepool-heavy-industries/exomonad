@@ -1,6 +1,9 @@
 # Teams Integration Roadmap
 
-**Status:** Active
+**Status:** Superseded/retired. CC Teams delivery was retired (Claude Code 2.1.178 broke native
+Teams delivery for multi-process orchestrators — see `rust/exo-node/CLAUDE.md` § "Why not CC Agent
+Teams?"). The `teams_mailbox` module this roadmap proposes locking no longer exists; v2 delivers via
+tmux-paste instead. Kept as historical record of the retired design.
 
 Open work items for the Claude Teams integration. Consolidated from individual ADRs (`claude-teams-integration.md`, `event-delivery-zellij-stdin.md`, `teams-synthetic-members.md`).
 

@@ -4,41 +4,42 @@ description: "ExoMonad agent orchestration rules — loaded into every agent's c
 
 # ExoMonad Agent Rules
 
-> **⚠️ v2 NODE-MODE SESSIONS:** parts of this file predate v2 and describe the Classic
-> loop. In a v2 session your session-start protocol and your spawn spec/charter override
-> this file wherever they conflict. Known-stale here: there is no `file_pr`/`merge_pr` and
-> no Copilot — v2 converges via `submit_branch` → reviewer `verdict` → parent `merge`
-> (local git); `fork_wave`'s `fork_session` defaults to **false** (context inheritance is
-> opt-in); the notification vocabulary is `[READY]`/`[idle]`/`[FAILED: id]`; and v2 leaves
-> (dev/worker/reviewer) are now **Sonnet Claude**, not Gemini (`spawn_gemini` → `spawn_dev`).
-> Full trueing is scheduled (T4.5).
+> This file describes the v2 Node-Mode loop (the `exo` binary). Classic (`exomonad serve`)
+> specifics — `file_pr`/`merge_pr`, Copilot review, PR-based convergence — live in
+> [`rust/exomonad/CLAUDE.md`](../../rust/exomonad/CLAUDE.md).
 
 ## Model
 
-ExoMonad is a hylomorphism over context windows. Unfold = plan + scaffold + spawn. Fold = merge + integrate + PR upward. Each agent is a triad: worktree (filesystem) + context window (attention) + actor (messages). See `CLAUDE.md` § Model for the full conceptual framework.
+ExoMonad is a hylomorphism over context windows. Unfold = plan + scaffold + spawn. Fold = merge + integrate + surface upward. Each agent is a triad: worktree (filesystem) + context window (attention) + actor (messages). See `CLAUDE.md` § Model for the full conceptual framework.
 
 ## MCP Tools
 
-Use exomonad MCP tools for orchestration. Git and GitHub operations use `git` and `gh` CLI commands, NOT MCP tools.
+Use exomonad MCP tools for orchestration. Git operations use the `git` CLI directly, NOT MCP tools — v2 has no GitHub cap (convergence is local `git merge`, no PR/Copilot).
 
 | Tool | Role | What it does |
 |------|------|-------------|
-| `fork_wave` | root, tl | Fork N parallel Claude agents (own worktrees, context inherited by default via `fork_session`) |
-| `spawn_dev` | root, tl | Spawn a Sonnet Claude dev in own worktree+branch. Structured spec fields: steps, verify, boundary, context, read_first |
-| `spawn_worker` | root, tl | Spawn ephemeral Sonnet Claude worker in tmux pane (no branch). Just name + task |
-| `file_pr` | tl, dev | Create/update PR (base branch auto-detected from branch naming) |
-| `merge_pr` | root, tl | Merge a child's PR |
-| `notify_parent` | tl, dev, worker | Send message to parent agent |
-| `send_message` | all | Send message to any exomonad-spawned agent |
-| `task_list` | dev, worker | List tasks from the shared task list |
-| `task_get` | dev, worker | Get a task by ID |
-| `task_update` | dev, worker | Update task status, owner, or activeForm |
+| `fork_wave` | root, tl | Fork N parallel Claude TL children, each in its own worktree. Per-child `fork_session` (default **false**) opts into inheriting the parent's context |
+| `spawn_dev` | root, tl | Spawn a Sonnet Claude dev in its own worktree+branch |
+| `spawn_worker` | root, tl | Spawn an ephemeral Sonnet Claude worker in a tmux pane (no branch) |
+| `dismiss_worker` | root, tl | Tear down an inline worker by name (parent-side `kill_pane`) |
+| `merge` | root, tl | The local fold: `git merge <child-branch>` + best-effort child teardown |
+| `submit_branch` | tl, dev | Request review/convergence — see "Convergence Protocol" below |
+| `verdict` | reviewer | A reviewer's one output: `summary` + structured `findings` → a message to its parent |
+| `notify_parent` | tl, dev, worker, reviewer | Status/failure update to the parent (NOT the done-signal) |
+| `send_message` | root, tl | Deliver to a named child (tree-edges only) |
+| `tree` | root, tl | Read-only: the caller's subtree + parent + per-node pane-liveness |
+
+`file_pr` and `merge_pr` do not exist in v2 — they are Classic-only.
 
 ## Agent Hierarchy
 
-- **TL (Tech Lead)**: Claude (Opus / session default). Decomposes, specs, scaffolds, spawns, merges. Never implements directly.
-- **Dev (Leaf)**: Sonnet Claude. Implements a focused spec, commits, `submit_branch`. No spawning.
-- **Worker**: Sonnet Claude. Ephemeral pane, no branch. Research or in-place edits.
+Every role runs as a Claude instance; the **model** varies per role (`RoleKind::model`):
+
+- **Root**: inherits the launcher's default (the human's own top-level `exo init` session — never spawned via `birth`, so this is the human's own model choice).
+- **Tl (spawned Tech Lead)**: Opus. Decomposes, specs, scaffolds, spawns, merges. Never implements directly.
+- **Dev (leaf)**: Sonnet. Implements a focused spec, commits, `submit_branch`. No spawning.
+- **Worker**: Sonnet. Ephemeral pane, no branch. Research or in-place edits. May run on an alternate launch-profile brain (e.g. Kimi) if configured.
+- **Reviewer**: Sonnet (or a launch-profile brain). Short-lived, spawned by `submit_branch` when reviewers are enabled; reads the diff read-only and calls `verdict`.
 
 ## The TL Protocol: Scaffold-Fork-Converge
 
@@ -53,19 +54,19 @@ Before spawning any children, commit the shared foundation they'll build against
 - **Stub files** showing where children put their code
 - **CLAUDE.md additions** scoping this TL's domain
 
-Commit and push. Children fork from this commit.
+Commit. Children fork from this commit.
 
 ### 2. Fork (spawn wave)
 
 Spawn children for wave N. Zero dependencies between siblings in the same wave.
 
-- **Sub-TLs**: `fork_wave` (Claude). They inherit full conversation context — they already know the plan and the scaffolding.
+- **Sub-TLs**: `fork_wave` (Claude, Opus). `fork_session` defaults to **false** — context inheritance is opt-in per child, not automatic.
 - **Devs**: `spawn_dev` (Sonnet Claude, worktree). They get a self-contained spec. The CLAUDE.md from the scaffolding commit gives them project context.
 - **Workers**: `spawn_worker` (Sonnet Claude, ephemeral pane). Research, boilerplate, or non-conflicting edits.
 
 ### 3. Converge (merge wave)
 
-Wait for children to complete (notifications arrive via Teams inbox). Merge their PRs sequentially. Then write an **integration commit**:
+Wait for children to complete (notifications arrive via tmux-paste into your pane). Merge their branches sequentially with `merge`. Then write an **integration commit**:
 
 - Wire children's outputs together
 - Run integration tests
@@ -75,9 +76,9 @@ Wait for children to complete (notifications arrive via Teams inbox). Merge thei
 
 Wave N+1 depends on merged wave N. Repeat from step 2.
 
-### 5. PR to parent
+### 5. Submit to parent
 
-After all waves are merged and integrated, file a PR to the parent TL's branch.
+After all waves are merged and integrated, call `submit_branch` against the parent's branch.
 
 ## Spec Quality
 
@@ -93,27 +94,31 @@ Include complete code snippets. Name every file by full path. Include exact comm
 
 ## Convergence Protocol
 
-The TL does NOT iterate on children's work. Convergence is **leaf + Copilot**, not TL:
+The TL does NOT iterate on children's work. Convergence is **leaf + reviewer**, not TL:
 
-1. Leaf implements spec, commits, files PR
-2. Copilot reviews automatically on PR creation
-3. If Copilot requests changes → injected into leaf's pane → leaf fixes → pushes
-4. System notifies parent: `[FIXES PUSHED]`, `[PR READY]`, or `[REVIEW TIMEOUT]`
-5. TL merges when notified
+1. Leaf commits, calls `submit_branch`.
+2. `submit_branch` runs its precondition checks in order: working tree clean → **rebase gate** (blocks with a `git rebase <parent>` prompt if the branch is behind its parent's current commit; fails open when the parent isn't a live ref, e.g. root) → project `.exo/checks/pre-merge/*` scripts.
+3. **If `review_enabled` is set** in `.exo/config.toml` (inherited down the tree; **off by default**), `submit_branch` spawns a one-shot Sonnet reviewer in its own worktree off the under-review diff. The reviewer reads read-only (no build/test) and calls `verdict` with structured findings.
+   - No Error-severity findings, sha matches HEAD → the sidecar escalates `[READY]` to the parent directly — no LLM turn.
+   - Error-severity findings → rendered into the submitter's context to address, then re-submit.
+   - Reviewer abandoned (15-min wall-clock timeout via the watchdog tick, not a hook) → submitter is told to re-submit with `dangerously_skip_reviewer: true` instead of spawning another reviewer.
+4. **If reviewers are disabled** (the default) or `dangerously_skip_reviewer: true` is passed, `submit_branch` forwards `[READY]` straight to the parent, flagged as unreviewed.
+5. TL calls `merge` when `[READY]` arrives.
 
-The TL never manually reviews code, never fixes a leaf's implementation.
+The TL never manually reviews code, never fixes a leaf's implementation. There is no Copilot in v2 — Copilot review and `file_pr`/`merge_pr` are Classic-only.
 
 ## Branch Naming
 
-`{parent_branch}.{slug}-{type}` (dot separator, suffixed). The last dot-segment IS the `AgentName` — one namespace, zero translation. PRs target the parent branch, not main. Merged via recursive fold up the tree.
+`{parent_branch}.{slug}` (dot separator). The last dot-segment IS the `AgentName` — one namespace, zero translation. Branches converge to the parent branch, not main — via local `git merge`, folded up the tree.
 
 ## State Machines
 
-Agent lifecycle is tracked via `StateMachine` typeclass instances. Phase types live in role code (`.exo/roles/`). The framework handles persistence (KV), logging, and stop hook integration. Agents cannot exit during critical phases (e.g., `ChangesRequested`).
+Review round-tripping is tracked via a durable `ReviewLog` (`ReviewRound`) persisted to `.exo/reviews/{safe-branch}.json`, appended by the sidecar's `handle_domain` on each `verdict`. There is no `Stop` hook and no stop-hook-based state machine — Claude Code's `Stop` event is not wired at all in v2 (it fired on every turn-end, including legitimate async-wait yields, and couldn't distinguish "done" from "paused"). Time-based logic (e.g. the reviewer's 15-minute abandonment timeout) is handled by each node's **watchdog tick loop** instead, running on wall-clock elapsed time.
 
 ## Communication
 
-- `notify_parent` for completion/failure/status updates to parent
-- `send_message` for peer-to-peer messaging between any agents
-- Messages arrive as a tmux-pasted `[from: X]` note from the recipient's sidecar (off the bus); CC Agent Teams native delivery was retired (broken for multi-process orchestrators as of CC 2.1.178)
-- TL idles between spawning and receiving notifications — no polling
+- `notify_parent` for completion/failure/status updates to parent (not the convergence signal — that's `submit_branch` → `verdict` → `[READY]`)
+- `send_message` for peer-to-peer messaging to a named child (tree-edges only)
+- Messages arrive as a tmux-pasted `[from: X, kind: Y]` note in the recipient's own pane, delivered by its own sidecar off the durable bus. CC Agent Teams native delivery was retired — as of Claude Code 2.1.178, teammates run in-process and a solo session-lead (which every exo node is, since each is a separate `claude` process) never drains its own Teams inbox. `exo` owns its delivery channel end to end; no native CC team tools are used.
+- The notification vocabulary is `[READY]` (converged, parent should merge), `[idle]`, `[FAILED: id]`. There is no Copilot-era vocabulary (`[FIXES PUSHED]`, `[PR READY]`, `[REVIEW TIMEOUT]`) in v2.
+- TL idles between spawning and receiving notifications — no polling.

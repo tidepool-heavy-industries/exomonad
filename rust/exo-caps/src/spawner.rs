@@ -4,10 +4,9 @@
 //! append `Spawned` record → (`git worktree add` for a Worktree child) → `tmux new-pane` →
 //! write child papers (incl. `parent_inbox`) → launch `exo node` (see [`crate::invocation`]).
 //!
-//! Replaces the old per-archetype methods (`spawn_worker`/`spawn_gemini`/`spawn_reviewer`/the
-//! per-op `fork_wave`): a new archetype is now a new domain role + a thin domain tool wrapper that
-//! builds a `D::Spawn`, **not** a new `Spawner` method (an `exo-caps` edit). The role-fixing moved
-//! out of the cap and into the domain.
+//! A new archetype is a new domain role + a thin domain tool wrapper that builds a `D::Spawn`,
+//! **not** a new `Spawner` method (an `exo-caps` edit). The role-fixing lives in the domain, not
+//! the cap.
 
 use crate::fs::Fs;
 use crate::git::Git;

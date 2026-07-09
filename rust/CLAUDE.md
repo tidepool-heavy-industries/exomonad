@@ -44,11 +44,10 @@ Claude Code (hook or MCP call)
 |-----------|---------|
 | [**exo-caps**](exo-caps/CLAUDE.md) | The capability seam: trait contract + validated domain types (no IO) |
 | [**exo-runtime**](exo-runtime/CLAUDE.md) | IO impls of every cap on one `Runtime` (reuses `exomonad-shared` services; **never links classic core**) |
-| [**exo-framework**](exo-framework/CLAUDE.md) | The reusable engine abstractions: `Tool`/`RoleDef`/hook contract + `PolicyCaps` + `RoleRegistry`, generic over caps; no concrete tools/roles/gates |
+| [**exo-framework**](exo-framework/CLAUDE.md) | The reusable engine abstractions: `Tool`/`RoleDef`/hook contract + `PolicyCaps`, generic over caps; no concrete tools/roles/gates |
 | [**exo**](exo/CLAUDE.md) | The domain (bin+lib): concrete tools / roles / gates + the `roster()` the binary injects; thin `main.rs` node entrypoint |
-| [**exo-node**](exo-node/CLAUDE.md) | The per-node sidecar: outbound MCP + inbound inbox-watch + hook mode (resolves roles through an injected `RoleRegistry`, never depends on the domain) |
-| [**exo-scry**](exo-scry/CLAUDE.md) | Derive a session's active team from live OS state (native Teams delivery) |
-| **claude-teams-bridge** | Read/write messages through Claude Code's Teams filesystem |
+| [**exo-node**](exo-node/CLAUDE.md) | The per-node sidecar: outbound MCP + inbound inbox-watch + hook mode (resolves roles through the domain's `Exomonad::role_def`, static dispatch — never depends on the domain crate itself) |
+| [**exo-scry**](exo-scry/CLAUDE.md) | Derive a session's active team from live OS state (survives only for `fork_session` context inheritance) |
 
 ### Deployment
 
@@ -113,13 +112,14 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • FFI boundary types
 │   • Effect request/response messages
 │
+├── claude-teams-bridge/    ← Classic: Teams filesystem bridge
+│
 ├── exo-caps/CLAUDE.md      ← V2: The capability seam (trait contract)
 ├── exo-runtime/CLAUDE.md   ← V2: IO implementations of every cap
-├── exo-framework/CLAUDE.md ← V2: Reusable engine abstractions (Tool/RoleDef/hook contract + RoleRegistry)
+├── exo-framework/CLAUDE.md ← V2: Reusable engine abstractions (Tool/RoleDef/hook contract)
 ├── exo/CLAUDE.md           ← V2: The domain (tools/roles/gates/roster) + thin node entrypoint
 ├── exo-node/CLAUDE.md      ← V2: The per-node sidecar binary/lib
-├── exo-scry/CLAUDE.md      ← V2: Live OS session derivation
-└── claude-teams-bridge/    ← V2: Native Teams filesystem bridge
+└── exo-scry/CLAUDE.md      ← V2: Live OS session derivation
 ```
 
 ## Workspace Members
@@ -132,6 +132,7 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 | exomonad-core | Library | Classic framework, handlers, services, UI protocol; depends on `exomonad-shared` |
 | exomonad-shared | Library | Shared seam: domain, protocol, error/util/ffi/hooks/logging, `services::{tmux_ipc, resilience, agent_control}`. No classic link; consumed by both `exomonad-core` and `exo-runtime` |
 | exomonad-proto | Library | Proto-generated types (prost) for FFI + effects |
+| claude-teams-bridge | Library | Read/write messages through Claude Code's Teams filesystem |
 
 **Node-mode swarm (the `exo` binary — v2, no central server):** a per-agent
 Rust sidecar, the filesystem as the bus, the process tree as the topology. Convergence
@@ -141,11 +142,10 @@ is on-disk (local `git merge`) — no GitHub/Copilot. Built beside classic, non-
 |-------|------|---------|
 | [exo-caps](exo-caps/CLAUDE.md) | Library | The capability seam: trait contract + validated domain types (no IO) |
 | [exo-runtime](exo-runtime/CLAUDE.md) | Library | IO impls of every cap on one `Runtime` (reuses `exomonad-shared` services; never links classic core) |
-| [exo-framework](exo-framework/CLAUDE.md) | Library | Reusable engine abstractions: `Tool`/`RoleDef`/hook contract + `PolicyCaps` + `RoleRegistry`, generic over caps; no concrete tools/roles/gates |
+| [exo-framework](exo-framework/CLAUDE.md) | Library | Reusable engine abstractions: `Tool`/`RoleDef`/hook contract + `PolicyCaps`, generic over caps; no concrete tools/roles/gates |
 | [exo](exo/CLAUDE.md) | Lib + bin | The domain: concrete tools / roles / gates + `roster()` (the injected registry); thin `main.rs` node entrypoint |
-| [exo-node](exo-node/CLAUDE.md) | Library | The per-node sidecar: outbound MCP + inbound inbox-watch + hook mode; resolves roles through an injected `RoleRegistry` (never depends on the domain) |
-| [exo-scry](exo-scry/CLAUDE.md) | Lib + bin | Derive a CC session's active team from live OS state (native Teams delivery) |
-| claude-teams-bridge | Library | Read/write messages through Claude Code's Teams filesystem |
+| [exo-node](exo-node/CLAUDE.md) | Library | The per-node sidecar: outbound MCP + inbound inbox-watch + hook mode; resolves roles through the domain's `Exomonad::role_def` (static dispatch, never depends on the domain crate itself) |
+| [exo-scry](exo-scry/CLAUDE.md) | Lib + bin | Derive a CC session's active team from live OS state (survives only for `fork_session` context inheritance — native Teams delivery itself was retired) |
 
 ### Feature Flags (exomonad-core)
 
@@ -155,34 +155,41 @@ is on-disk (local `git merge`) — no GitHub/Copilot. Built beside classic, non-
 
 ## Quick Reference
 
-### Building
+### Building (both)
 
 All `cargo` commands run from the repo root (workspace `Cargo.toml` lives there):
 
 ```bash
 cargo build --release                    # Build all crates
-cargo build -p exomonad                  # Build exomonad binary
+cargo build -p exomonad                  # Build exomonad binary (Classic)
+cargo build -p exo                       # Build exo binary (v2)
 cargo test --workspace                   # Run all tests
 
-# Build WASM plugin (requires nix develop .#wasm)
+# Build WASM plugin (Classic only; requires nix develop .#wasm)
 nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest
 ```
 
-### Running
+### Running (Classic)
 ```bash
 # MCP server (stdio)
 exomonad mcp-stdio --role root --agent-id root
 
 # Handle Claude Code hook (legacy, forwards to server)
 echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
+```
 
-# Handle Claude Code hook (v2 node mode, no server)
+### Running (v2)
+```bash
+# Decentralized swarm session — root node, own tmux session
+exo init
+
+# Handle Claude Code hook (v2 node mode, no server; routes to the node's sidecar)
 echo '{"hook_event_name":"PreToolUse",...}' | exo hook pre-tool-use --papers node.json
 ```
 
-**Note:** WASM is loaded from `.exo/wasm/` at runtime. To update WASM, run `just wasm-all` or `exomonad recompile --role devswarm`.
+**Note (Classic):** WASM is loaded from `.exo/wasm/` at runtime. To update WASM, run `just wasm-all` or `exomonad recompile --role devswarm`.
 
-### Environment Variables
+### Environment Variables (Classic)
 | Variable | Used By | Purpose |
 |----------|---------|---------|
 | `GITHUB_TOKEN` | services | GitHub API access |
@@ -195,7 +202,7 @@ echo '{"hook_event_name":"PreToolUse",...}' | exo hook pre-tool-use --papers nod
 | `EXOMONAD_SWARM_RUN_ID` | agent spawn, logging | Swarm run ID (OTel resource attribute, propagated to children) |
 | `EXOMONAD_PARENT_AGENT` | agent spawn, logging | Parent agent's birth branch (OTel resource attribute) |
 
-### Agent Identity
+### Agent Identity (Classic)
 
 In `mcp-stdio` mode, the agent's identity is passed via command-line flags: `--role {role} --agent-id {name}`. Role determines which WASM tool set. Identity is structural: each agent gets its own `PluginManager` with `EffectContext` (agent name + birth branch) baked in at construction. All effect handlers receive `&EffectContext` — identity is always present, no Option, no task-locals, no panic paths.
 
