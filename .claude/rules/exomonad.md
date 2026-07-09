@@ -101,7 +101,7 @@ The TL does NOT iterate on children's work. Convergence is **leaf + reviewer**, 
 3. **If `review_enabled` is set** in `.exo/config.toml` (inherited down the tree; **off by default**), `submit_branch` spawns a one-shot Sonnet reviewer in its own worktree off the under-review diff. The reviewer reads read-only (no build/test) and calls `verdict` with structured findings.
    - No Error-severity findings, sha matches HEAD → the sidecar escalates `[READY]` to the parent directly — no LLM turn.
    - Error-severity findings → rendered into the submitter's context to address, then re-submit.
-   - Reviewer abandoned (15-min wall-clock timeout via the watchdog tick, not a hook) → submitter is told to re-submit with `dangerously_skip_reviewer: true` instead of spawning another reviewer.
+   - Reviewer abandoned (30-min wall-clock timeout via the watchdog tick, not a hook) → submitter is told to re-submit with `dangerously_skip_reviewer: true` instead of spawning another reviewer.
 4. **If reviewers are disabled** (the default) or `dangerously_skip_reviewer: true` is passed, `submit_branch` forwards `[READY]` straight to the parent, flagged as unreviewed.
 5. TL calls `merge` when `[READY]` arrives.
 
@@ -113,7 +113,7 @@ The TL never manually reviews code, never fixes a leaf's implementation. There i
 
 ## State Machines
 
-Review round-tripping is tracked via a durable `ReviewLog` (`ReviewRound`) persisted to `.exo/reviews/{safe-branch}.json`, appended by the sidecar's `handle_domain` on each `verdict`. There is no `Stop` hook and no stop-hook-based state machine — Claude Code's `Stop` event is not wired at all in v2 (it fired on every turn-end, including legitimate async-wait yields, and couldn't distinguish "done" from "paused"). Time-based logic (e.g. the reviewer's 15-minute abandonment timeout) is handled by each node's **watchdog tick loop** instead, running on wall-clock elapsed time.
+Review round-tripping is tracked via a durable `ReviewLog` (`ReviewRound`) persisted to `.exo/reviews/{safe-branch}.json`, appended by the sidecar's `handle_domain` on each `verdict`. There is no `Stop` hook and no stop-hook-based state machine — Claude Code's `Stop` event is not wired at all in v2 (it fired on every turn-end, including legitimate async-wait yields, and couldn't distinguish "done" from "paused"). Time-based logic (e.g. the reviewer's 30-minute abandonment timeout) is handled by each node's **watchdog tick loop** instead, running on wall-clock elapsed time.
 
 ## Communication
 
