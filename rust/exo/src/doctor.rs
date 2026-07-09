@@ -44,6 +44,17 @@ pub fn classify(path: &Path, root_path: &Path, is_ancestor: bool) -> WorktreeSta
     }
 }
 
+/// First 8 chars of a sha for display; shorter/empty input (e.g. an unborn HEAD) is returned as-is
+/// rather than panicking on a byte-index slice.
+fn short_sha(sha: &str) -> &str {
+    let end = sha
+        .char_indices()
+        .nth(8)
+        .map(|(i, _)| i)
+        .unwrap_or(sha.len());
+    &sha[..end]
+}
+
 pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
     let root_path = get_project_root()?;
     let (base_branch, base_head) = get_base_info()?;
@@ -51,7 +62,7 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
     println!(
         "Auditing .exo/worktrees/ against base branch '{}' ({})",
         base_branch,
-        &base_head[..8]
+        short_sha(&base_head)
     );
     println!("{:-<100}", "");
     println!(
@@ -83,7 +94,7 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
             relative_path.display(),
             wt.branch,
             wt.status,
-            &wt.head[..8]
+            short_sha(&wt.head)
         );
 
         if wt.status == WorktreeStatus::Merged {
@@ -139,7 +150,13 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
     }
 
     // Final prune
-    let _ = Command::new("git").args(["worktree", "prune"]).status();
+    match Command::new("git").args(["worktree", "prune"]).status() {
+        Ok(status) if !status.success() => {
+            eprintln!("    FAILED to prune worktrees (exit {status})");
+        }
+        Err(e) => eprintln!("    FAILED to run git worktree prune: {e}"),
+        Ok(_) => {}
+    }
 
     println!("\nCleanup complete.");
     Ok(())
@@ -169,6 +186,12 @@ fn get_base_info() -> Result<(String, String)> {
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .output()
         .context("getting current branch name")?;
+    if !branch_out.status.success() {
+        anyhow::bail!(
+            "git rev-parse --abbrev-ref HEAD failed: {}",
+            String::from_utf8_lossy(&branch_out.stderr)
+        );
+    }
     let branch = String::from_utf8_lossy(&branch_out.stdout)
         .trim()
         .to_string();
@@ -178,6 +201,12 @@ fn get_base_info() -> Result<(String, String)> {
         .args(["rev-parse", "HEAD"])
         .output()
         .context("getting current branch HEAD")?;
+    if !head_out.status.success() {
+        anyhow::bail!(
+            "git rev-parse HEAD failed: {}",
+            String::from_utf8_lossy(&head_out.stderr)
+        );
+    }
     let head = String::from_utf8_lossy(&head_out.stdout).trim().to_string();
 
     Ok((branch, head))
@@ -269,7 +298,13 @@ fn remove_worktree(path: &Path, branch: &str) -> Result<()> {
 
     if branch != "detached" && branch != "main" && branch != "master" {
         println!("  Deleting branch: {}", branch);
-        let _ = Command::new("git").args(["branch", "-D", branch]).status();
+        match Command::new("git").args(["branch", "-D", branch]).status() {
+            Ok(status) if !status.success() => {
+                eprintln!("    FAILED to delete branch {branch} (exit {status})");
+            }
+            Err(e) => eprintln!("    FAILED to run git branch -D {branch}: {e}"),
+            Ok(_) => {}
+        }
     }
 
     Ok(())

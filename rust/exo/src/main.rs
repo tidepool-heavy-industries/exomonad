@@ -86,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Init { session, recreate } => {
-            let cfg = config::discover();
+            let cfg = config::discover().context("loading exo config")?;
             init::run(
                 &cfg.tmux_session,
                 cfg.model.as_deref(),

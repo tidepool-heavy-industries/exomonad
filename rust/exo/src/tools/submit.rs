@@ -111,7 +111,15 @@ fn pre_merge_checks<C: Process + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), Stri
         let dir = std::path::Path::new(".exo/checks/pre-merge");
         let mut scripts: Vec<std::path::PathBuf> = match std::fs::read_dir(dir) {
             Ok(rd) => rd
-                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter_map(|e| match e {
+                    Ok(entry) => Some(entry.path()),
+                    Err(e) => {
+                        tracing::warn!(
+                            "pre_merge_checks: dropping unreadable entry in .exo/checks/pre-merge: {e}"
+                        );
+                        None
+                    }
+                })
                 .filter(|p| p.is_file())
                 .collect(),
             // A missing dir = no gate. Any OTHER error (permissions, IO) must NOT silently
@@ -165,15 +173,36 @@ fn pre_merge_checks<C: Process + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), Stri
 
 /// Whether this node's tree has reviewers turned on — `.exo/node.json`'s `review_enabled`,
 /// inherited down the tree from the root's config (see `exo-runtime`'s `own_launch_policy`, which
-/// stamps the same field onto every child's papers at birth). Fails safe: any read/parse error
-/// (missing file, corrupt JSON, pre-field papers) defaults to the same off-by-default posture as
-/// the flag itself — reviewers are opt-in, never assumed.
+/// stamps the same field onto every child's papers at birth). Fails safe (defaults to the
+/// off-by-default posture), but distinguishes WHY: a missing file is the legitimate "papers not
+/// written yet" case and stays silent; corrupt/unparseable papers is unexpected and warns loudly,
+/// so a corrupted `.exo/node.json` is never mistaken for "reviewers just aren't configured".
 async fn own_review_enabled<C: Fs + Sync>(ctx: &C) -> bool {
     match ctx.read(std::path::Path::new(".exo/node.json")).await {
-        Ok(bytes) => serde_json::from_slice::<NodePapers>(&bytes)
-            .map(|p| p.review_enabled)
-            .unwrap_or(NodePapers::DEFAULT_REVIEW_ENABLED),
-        Err(_) => NodePapers::DEFAULT_REVIEW_ENABLED,
+        Ok(bytes) => match serde_json::from_slice::<NodePapers>(&bytes) {
+            Ok(papers) => papers.review_enabled,
+            Err(e) => {
+                tracing::warn!(
+                    "own_review_enabled: .exo/node.json failed to parse ({e}); defaulting to \
+                     review_enabled={}",
+                    NodePapers::DEFAULT_REVIEW_ENABLED
+                );
+                NodePapers::DEFAULT_REVIEW_ENABLED
+            }
+        },
+        Err(exo_caps::FsError::At { source, .. } | exo_caps::FsError::Io(source))
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            NodePapers::DEFAULT_REVIEW_ENABLED
+        }
+        Err(e) => {
+            tracing::warn!(
+                "own_review_enabled: could not read .exo/node.json ({e}); defaulting to \
+                 review_enabled={}",
+                NodePapers::DEFAULT_REVIEW_ENABLED
+            );
+            NodePapers::DEFAULT_REVIEW_ENABLED
+        }
     }
 }
 
@@ -501,7 +530,10 @@ mod tests {
         let msg = delivered.expect("should forward [READY] to parent");
         // Plain wording — no "dangerously skipped" / "be more suspicious" scare language, since
         // this wasn't the agent's choice.
-        assert!(msg.text.as_str().contains("Reviewers are disabled for this project"));
+        assert!(msg
+            .text
+            .as_str()
+            .contains("Reviewers are disabled for this project"));
         assert!(!msg.text.as_str().contains("dangerously_skip_reviewer"));
     }
 
@@ -672,8 +704,14 @@ mod tests {
         let err = res.expect_err("submit must block when the branch is behind its parent");
         let msg = err.to_string();
         // The prompt names the gate, the parent branch (`dev`, from `dev.policy-claude`), and the fix.
-        assert!(msg.contains("needs_rebase"), "err should name the gate: {msg}");
-        assert!(msg.contains("git rebase dev"), "err should prompt the rebase: {msg}");
+        assert!(
+            msg.contains("needs_rebase"),
+            "err should name the gate: {msg}"
+        );
+        assert!(
+            msg.contains("git rebase dev"),
+            "err should prompt the rebase: {msg}"
+        );
         // Neither a reviewer nor a [READY] delivery happens — the gate is before both.
         let calls = mock.calls_made();
         assert!(!calls.iter().any(|c| matches!(c, Call::Spawn { .. })));
@@ -701,6 +739,32 @@ mod tests {
             .calls_made()
             .iter()
             .any(|c| matches!(c, Call::BusDeliver { .. })));
+    }
+
+    #[tokio::test]
+    async fn own_review_enabled_absent_papers_defaults_silently() {
+        // No `.exo/node.json` at all — the legitimate "not written yet" case.
+        let mock = MockRuntime::default();
+        assert_eq!(
+            own_review_enabled(&mock).await,
+            NodePapers::DEFAULT_REVIEW_ENABLED
+        );
+    }
+
+    #[tokio::test]
+    async fn own_review_enabled_corrupt_papers_defaults_but_is_distinguishable() {
+        // Papers present but not valid JSON — corruption, not absence. Must still default safely
+        // (fail-safe), but this is the case the corrupt-vs-absent split exists to make loud (via
+        // tracing::warn!, asserted here only by exercising the parse-error branch without panicking).
+        let mock = MockRuntime::default();
+        mock.files
+            .lock()
+            .unwrap()
+            .insert(".exo/node.json".to_string(), b"not valid json".to_vec());
+        assert_eq!(
+            own_review_enabled(&mock).await,
+            NodePapers::DEFAULT_REVIEW_ENABLED
+        );
     }
 
     #[tokio::test]
