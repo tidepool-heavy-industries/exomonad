@@ -26,7 +26,7 @@ lib (`lib.rs` + `tools/` + `gates.rs` + `roles.rs`) stays generic over the caps 
 | File | Contents |
 |------|----------|
 | `lib.rs` | Re-exports `role_def`, `ExoRole`, `ReviewSystem`/`handle_review_system` (the domain `System` + relocated gate: findings-based), `ExoSpawn` (the domain `Spawn`). Generic over `R`, depends only on `exo-framework` + `exo-caps` (+ `tracing`). |
-| `review.rs` | The domain's inter-node behavior: `ReviewSystem` (`D::System`) + `handle_review_system` (decision derived from structured findings; IO-free via the `SystemCtx` seam — unit-tested against a mock context). **Now persists each round to a durable `ReviewLog` (`ReviewRound`) at `.exo/reviews/{safe-branch}.json`** using the `safe_branch` helper. Also `handle_review_tick` — a reviewer's wall-clock abandonment timeout (`REVIEW_ABANDON_TIMEOUT`, 15 min), called from `ExoDomain::handle_tick` by the sidecar's watchdog loop instead of a Stop hook. |
+| `review.rs` | The domain's inter-node behavior: `ReviewSystem` (`D::System`) + `handle_review_system` (decision derived from structured findings; IO-free via the `SystemCtx` seam — unit-tested against a mock context). **Now persists each round to a durable `ReviewLog` (`ReviewRound`) at `.exo/reviews/{safe-branch}.json`** using the `safe_branch` helper. Also `handle_review_tick` — a reviewer's wall-clock abandonment timeout (`REVIEW_ABANDON_TIMEOUT`, 30 min), called from `ExoDomain::handle_tick` by the sidecar's watchdog loop instead of a Stop hook. |
 | `spawn.rs` | `ExoSpawn` (`D::Spawn`) implementing `SpawnSpec`, the role-fixing the per-op tools do; `render_spec_prompt` (moved from the runtime) + `write_acceptance` (the `.exo/acceptance.md` write via `Fs`, relocated out of birth). |
 | `domain.rs` | **Bin-only.** `ExoDomain` — the `Exomonad` impl that fixes `Caps = Runtime` and points `role_def`/`handle_system` at the lib. The one place that links `exo-runtime`. |
 | `main.rs` | The CLI dispatcher (bin): clap `Cli` → `init` / `node` / `hook`. `node` is the composition root — `exo node --papers <path>` → `exo_node::bootstrap::<ExoDomain>(papers, cwd)` → `run_node::<ExoDomain>`. |
@@ -169,7 +169,7 @@ boundaries, not a hook:
 - Reviewer "done" → the `verdict` tool (unchanged) — it was always the real signal; `Stop` was only
   ever consulted for the *negative* case.
 - Reviewer "abandoned" → `review.rs`'s `handle_review_tick`, a wall-clock timeout
-  (`REVIEW_ABANDON_TIMEOUT`, 15 min) run by `exo-node`'s watchdog loop (`Exomonad::handle_tick`),
+  (`REVIEW_ABANDON_TIMEOUT`, 30 min) run by `exo-node`'s watchdog loop (`Exomonad::handle_tick`),
   checked against real elapsed time, not a turn count. Delivers the same `ReviewAborted` the old
   `stop_reviewer` sent; the parent-side handling (`handle_review_system`) is unchanged.
 - "Uncommitted work before converging" → already independently enforced by `submit_branch`'s own
