@@ -66,15 +66,13 @@ impl Git for Runtime {
                 continue; // exclude HEAD itself (descendant branches) and no-shared-history
             }
             // recency = number of commits reachable from mb (more ancestors = closer to HEAD)
-            let cnt_out = Command::new("git")
-                .current_dir(self.working_dir())
-                .args(["rev-list", "--count", &mb])
-                .output()
-                .await?;
-            let count: usize = String::from_utf8_lossy(&cnt_out.stdout)
-                .trim()
-                .parse()
-                .unwrap_or(0);
+            let count: usize = match self.git_optional(&["rev-list", "--count", &mb]).await? {
+                Some(cnt_out) => String::from_utf8_lossy(&cnt_out.stdout)
+                    .trim()
+                    .parse()
+                    .unwrap_or(0),
+                None => 0,
+            };
             if best.as_ref().is_none_or(|(c, _)| count > *c) {
                 best = Some((count, mb));
             }
@@ -203,10 +201,7 @@ impl Runtime {
 
     /// Run git and treat a non-zero exit as `Ok(None)` rather than an error. Use for
     /// operations where "not found" or "no shared history" is expected control flow.
-    async fn git_optional(
-        &self,
-        args: &[&str],
-    ) -> Result<Option<std::process::Output>, GitError> {
+    async fn git_optional(&self, args: &[&str]) -> Result<Option<std::process::Output>, GitError> {
         debug!(cwd = %self.working_dir().display(), args = ?args, "git_optional: exec");
         let output = Command::new("git")
             .current_dir(self.working_dir())

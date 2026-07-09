@@ -63,6 +63,28 @@ Three tree-wide knobs are config, not literals: `yolo` and `wrap_nix` (wrap the 
 
 `Bus::deliver` stamps `from = Agent(self.name())` from the runtime's own identity. Policy hands over only a `Message` (no `from`), so a tool **cannot** forge its sender. Same discipline as the spawn ledger: the runtime owns identity, policy never asserts it.
 
+## Reclaim ordering: kill nested panes before nested removal
+
+`Spawner::reclaim_worktree` (`spawner.rs`) walks a child's worktree for **nested** worktree
+directories (`.exo/worktrees/**` inside it — e.g. a reviewer spawned inside a leaf being merged)
+and force-removes them innermost-first. A nested worktree's pane is **not** recorded in the
+outermost child's own ledger — it's recorded in its immediate ENCLOSING directory's
+`children.jsonl` (the parent that actually spawned it). Before removing a nested dir, the walk
+reads that enclosing ledger (`Runtime::read_child_records_at`, a path-parametrized sibling of
+`read_child_records` sharing the same tolerant-parse helper) and kills the recorded pane
+(`kill_nested_pane_before_removal`, wrapped in `retry_teardown`) — so a live nested agent's process
+dies before its cwd is force-removed out from under it. A missing ledger, missing record, or a
+kill that fails after retries is logged at `warn!` and swallowed: the pane-kill is best-effort, not
+a precondition for the removal. The **outermost** worktree's own pane-kill stays the caller's job
+(`merge`/reviewer-verdict teardown already call `Spawner::kill_pane` before `reclaim_worktree`).
+
+The discovery walk (`read_dir`/`next_entry`/`file_type` over each `.exo/worktrees` dir) used to
+silently drop errors via `if let Ok`; every failure now logs at `warn!` naming the path — discovery
+stays best-effort but loud. A nested removal that still fails after retries is collected and
+surfaced as an `Err` (`op: "reclaim_nested"`) **after** the outermost removal is still attempted —
+so a caller (the `merge` tool) never reports a clean "(reclaimed X)" when nested dirs were left
+behind; the outermost-failure path (already an `Err`) is unchanged.
+
 ## Gaps / not-yet
 
 - **`birth` itself is not unit-tested** (it needs live tmux+git). Only its helpers (ledger append/read, name resolution, inbox-path derivation) and `Bus` have automated tests; the converge integration test (`exo-node/tests/converge.rs`) covers the bus round-trip end-to-end.

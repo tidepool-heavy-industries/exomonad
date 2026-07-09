@@ -113,7 +113,17 @@ impl Runtime {
                 return Some(Addressee::Parent);
             }
         }
-        let records = self.read_child_records().await.ok()?;
+        let records = match self.read_child_records().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    target = name.as_str(),
+                    error = %e,
+                    "resolve_edge: child ledger read failed; cannot resolve edge (message may be silently dropped by the caller)"
+                );
+                return None;
+            }
+        };
         exo_caps::fold_children(&records)
             .get(name)
             .map(|_| Addressee::Child(name.clone()))
@@ -125,15 +135,43 @@ impl Runtime {
     /// one signal that's true regardless of turn boundaries. There used to be a separate busy-bit
     /// derived from Claude Code's `Stop` hook; it was removed (see `rust/exo/CLAUDE.md`) because
     /// `Stop` fires on every turn-end, including a legitimate async-wait yield, so the bit was
-    /// routinely wrong. Best-effort: a probe failure reports every child as not-busy rather than
-    /// failing the snapshot.
+    /// routinely wrong. Best-effort, but never silently dishonest: `NodeStatus` has no "probe
+    /// failed" slot, so a failure picks the least-false representation instead of defaulting to
+    /// empty. A **ledger** read failure means the child set itself is unknown (not
+    /// verified-empty) — logged loud, then reported as no children, since there is no known name
+    /// to report anything else against. A **pane-probe** failure means the child set IS known but
+    /// liveness isn't — logged loud, then every known child is reported `busy: true`, mirroring
+    /// `ChildLiveness::any_child_busy`'s "probe failure ⇒ assume busy, never manufacture a false
+    /// idle" discipline.
     pub async fn status_snapshot(&self, role_str: &str, shutdown_pending: bool) -> NodeStatus {
-        let records = self.read_child_records().await.unwrap_or_default();
-        let alive = exo_caps::Tmux::list_panes(self).await.unwrap_or_default();
-        let children = exo_caps::fold_children(&records)
+        let records = match self.read_child_records().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "status_snapshot: child ledger read failed; reporting no children (unknown, not a verified empty set)"
+                );
+                Vec::new()
+            }
+        };
+        let folded = exo_caps::fold_children(&records);
+        let alive = match exo_caps::Tmux::list_panes(self).await {
+            Ok(set) => Some(set),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "status_snapshot: pane probe failed; reporting all known children as busy (never manufacture a false idle)"
+                );
+                None
+            }
+        };
+        let children = folded
             .into_values()
             .map(|c| ChildStatus {
-                busy: alive.contains(c.pane.as_str()),
+                busy: match &alive {
+                    Some(set) => set.contains(c.pane.as_str()),
+                    None => true,
+                },
                 name: c.name.as_str().to_string(),
             })
             .collect();
