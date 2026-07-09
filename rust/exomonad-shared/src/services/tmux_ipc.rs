@@ -668,21 +668,29 @@ impl TmuxIpc {
         // cleared with Escape. Gated on Rewind indicators (a Claude-specific UI), so we never send a
         // spurious Escape into a Gemini/Copilot pane mid-generation. Mirrors Gastown's
         // `isInRewindMode`/`dismissRewindMode`.
-        if let Ok(output) = self
+        match self
             .tmux_cmd()
             .args(["capture-pane", "-p", "-t", &qualified_target])
             .output()
             .await
         {
-            if output.status.success()
-                && looks_like_rewind_modal(&String::from_utf8_lossy(&output.stdout))
-            {
-                let _ = self
-                    .tmux_cmd()
-                    .args(["send-keys", "-t", &qualified_target, "Escape"])
-                    .output()
-                    .await;
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            Ok(output) => {
+                if output.status.success()
+                    && looks_like_rewind_modal(&String::from_utf8_lossy(&output.stdout))
+                {
+                    if let Err(e) = self
+                        .tmux_cmd()
+                        .args(["send-keys", "-t", &qualified_target, "Escape"])
+                        .output()
+                        .await
+                    {
+                        warn!(target = %qualified_target, error = %e, "Failed to send Escape to dismiss Rewind modal");
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                }
+            }
+            Err(e) => {
+                warn!(target = %qualified_target, error = %e, "Failed to run tmux capture-pane while probing for Rewind modal");
             }
         }
 
@@ -699,14 +707,23 @@ impl TmuxIpc {
             ])
             .output()
             .await;
-        if let Ok(output) = mode_output {
-            if output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "1" {
-                let _ = self
-                    .tmux_cmd()
-                    .args(["send-keys", "-t", &qualified_target, "-X", "cancel"])
-                    .output()
-                    .await;
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        match mode_output {
+            Ok(output) => {
+                if output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "1"
+                {
+                    if let Err(e) = self
+                        .tmux_cmd()
+                        .args(["send-keys", "-t", &qualified_target, "-X", "cancel"])
+                        .output()
+                        .await
+                    {
+                        warn!(target = %qualified_target, error = %e, "Failed to send cancel to exit tmux copy mode");
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            }
+            Err(e) => {
+                warn!(target = %qualified_target, error = %e, "Failed to run tmux display-message while probing pane_in_mode");
             }
         }
 

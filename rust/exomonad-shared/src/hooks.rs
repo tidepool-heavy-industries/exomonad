@@ -158,9 +158,15 @@ impl HookConfig {
         // is a symlink to .exo/roles/{wasm}/context/{role}.md — we must exclude
         // the canonical target path, not just .claude/rules/**.
         if let Some(parent_dir) = parent_project_dir {
-            let canonical = parent_dir
-                .canonicalize()
-                .unwrap_or(parent_dir.to_path_buf());
+            let canonical = parent_dir.canonicalize().unwrap_or_else(|e| {
+                warn!(
+                    path = %parent_dir.display(),
+                    error = %e,
+                    "Failed to canonicalize parent project dir; claudeMdExcludes will use the \
+                     logical path, which may not match Claude Code's realpath-resolved boundary check"
+                );
+                parent_dir.to_path_buf()
+            });
             let parent = canonical.to_string_lossy();
             settings["claudeMdExcludes"] = json!([
                 format!("{}/CLAUDE.md", parent),
@@ -279,33 +285,49 @@ impl HookConfig {
             );
         } else {
             // Try to remove just our hooks
-            if let Ok(content) = fs::read_to_string(&self.settings_path) {
-                if let Ok(mut settings) = serde_json::from_str::<Value>(&content) {
-                    // Remove our marker
-                    if let Some(obj) = settings.as_object_mut() {
-                        obj.remove(EXOMONAD_MARKER);
+            match fs::read_to_string(&self.settings_path) {
+                Ok(content) => match serde_json::from_str::<Value>(&content) {
+                    Ok(mut settings) => {
+                        // Remove our marker
+                        if let Some(obj) = settings.as_object_mut() {
+                            obj.remove(EXOMONAD_MARKER);
 
-                        // Remove our hook entries
-                        if let Some(hooks) = obj.get_mut("hooks") {
-                            if let Some(hooks_obj) = hooks.as_object_mut() {
-                                for (event_name, _, _) in HOOK_EVENTS {
-                                    // Only remove if it looks like ours
-                                    if let Some(entries) = hooks_obj.get(*event_name) {
-                                        if is_exomonad_hook(entries) {
-                                            hooks_obj.remove(*event_name);
+                            // Remove our hook entries
+                            if let Some(hooks) = obj.get_mut("hooks") {
+                                if let Some(hooks_obj) = hooks.as_object_mut() {
+                                    for (event_name, _, _) in HOOK_EVENTS {
+                                        // Only remove if it looks like ours
+                                        if let Some(entries) = hooks_obj.get(*event_name) {
+                                            if is_exomonad_hook(entries) {
+                                                hooks_obj.remove(*event_name);
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
 
-                        // Write back cleaned settings
-                        if let Ok(cleaned) = serde_json::to_string_pretty(&settings) {
-                            if let Err(e) = fs::write(&self.settings_path, cleaned) {
-                                tracing::warn!(path = %self.settings_path.display(), error = %e, "Failed to write cleaned settings");
+                            // Write back cleaned settings
+                            if let Ok(cleaned) = serde_json::to_string_pretty(&settings) {
+                                if let Err(e) = fs::write(&self.settings_path, cleaned) {
+                                    warn!(path = %self.settings_path.display(), error = %e, "Failed to write cleaned settings");
+                                }
                             }
                         }
                     }
+                    Err(e) => {
+                        warn!(
+                            path = %self.settings_path.display(),
+                            error = %e,
+                            "Failed to parse settings.local.json during cleanup; hook entries left in place"
+                        );
+                    }
+                },
+                Err(e) => {
+                    warn!(
+                        path = %self.settings_path.display(),
+                        error = %e,
+                        "Failed to read settings.local.json during cleanup; hook entries left in place"
+                    );
                 }
             }
         }
