@@ -30,7 +30,7 @@ pub fn node_args(papers: &str) -> [String; 3] {
 /// A full CC hook command string for `settings.local.json`:
 /// `exo hook <event> --papers <papers>`.
 ///
-/// `event` is one of [`PRE_TOOL_USE`]/[`STOP`]/[`SESSION_START`]; `papers_escaped` is the
+/// `event` is one of [`PRE_TOOL_USE`]/[`SESSION_START`]; `papers_escaped` is the
 /// papers path **already shell-escaped** by the caller (it is pasted into a shell).
 pub fn hook_command(event: &str, papers_escaped: &str) -> String {
     format!("{BIN} {HOOK} {event} {PAPERS_FLAG} {papers_escaped}")

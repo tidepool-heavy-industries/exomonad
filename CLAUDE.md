@@ -106,7 +106,7 @@ The Haskell/WASM logging pattern is in [`haskell/wasm-guest/CLAUDE.md`](haskell/
 **v2 Node-Mode (active):**
 ```bash
 exomonad new                  # one-time: .exo/config.toml, .gitignore, rules templates
-exo init                      # decentralized swarm session (per-agent sidecars, native Teams)
+exo init                      # decentralized swarm session (per-agent sidecars, tmux-paste delivery)
 ```
 
 **Classic (deprecated):** `exomonad init` creates a central-server tmux session. Full classic getting-started, MCP registration, config, and companions → [`rust/exomonad/CLAUDE.md`](rust/exomonad/CLAUDE.md).
@@ -141,7 +141,7 @@ Tool/role matrix → [`.claude/rules/exomonad.md`](.claude/rules/exomonad.md). R
 
 Two tracks over shared `exomonad-core` services. Isolation = git worktrees (no Docker); multiplexing = tmux windows (subtrees) and panes (ephemeral workers). Each agent = worktree + window/pane, managed by the Rust runtime.
 
-- **v2 Node-Mode crates:** `exo-caps` (capability seam — traits + types, no IO), `exo-node` (per-agent sidecar; outbound MCP + inbound inbox-watch loops), `exo-runtime` (IO implementations), `exo-policy` (tool/hook/role logic, generic over caps), `exo-scry` (native Teams discovery from live OS state).
+- **v2 Node-Mode crates:** `exo-caps` (capability seam — traits + types, no IO), `exo-node` (per-agent sidecar; outbound MCP + inbound inbox-watch loops), `exo-runtime` (IO implementations), `exo` (tool/hook/role logic, generic over caps), `exo-scry` (native Teams discovery from live OS state).
 - **Classic:** the `exomonad` binary (MCP server + hook handler) hosting Haskell WASM; Rust executes the effects the WASM yields.
 
 Per-architecture detail: classic components + data flows → [`rust/exomonad/CLAUDE.md`](rust/exomonad/CLAUDE.md); WASM guest, MCP tool definitions, DSL → [`haskell/wasm-guest/CLAUDE.md`](haskell/wasm-guest/CLAUDE.md); v2 swarm + observability → [`rust/CLAUDE.md`](rust/CLAUDE.md) and the `exo-*` crate docs. The classic/experimental crate-split plan → [`docs/decisions/classic-shared-crate-split.md`](docs/decisions/classic-shared-crate-split.md).
@@ -177,7 +177,7 @@ CLAUDE.md  ← YOU ARE HERE (router + model)
 │   ├── exo-caps/CLAUDE.md      ← v2 capability seam (traits + types)
 │   ├── exo-node/CLAUDE.md      ← v2 per-node sidecar
 │   ├── exo-runtime/CLAUDE.md   ← v2 IO implementations
-│   ├── exo-policy/CLAUDE.md    ← v2 logic (generic over caps)
+│   ├── exo/CLAUDE.md           ← v2 domain: tools/roles/gates (generic over caps)
 │   └── exo-scry/CLAUDE.md      ← v2 native Teams discovery
 ├── tests/e2e/CLAUDE.md         ← E2E test pattern + harness conventions
 └── docs/decisions/             ← Architecture decision records (living docs)
