@@ -5,10 +5,13 @@
 //! Supported hooks:
 //! - `pre_tool_use`: Evaluates tool use against policy, providing nudges or anti-pattern
 //!   warnings.
-//! - `stop`: Implements the local convergence gate, blocking session termination while the
-//!   worktree has uncommitted changes (a parent merges the branch off disk).
 //! - `session_start`: Performs the identity bootstrap, injecting context about the node's
 //!   role, path, and parent into the agent's session so it understands its place in the swarm.
+//!
+//! There used to be a `stop` hook here (Claude Code's `Stop` event, a local convergence gate). It
+//! was removed — `Stop` fires on every turn-end, including a node legitimately yielding to wait on
+//! a backgrounded async task, so it can't distinguish "genuinely done" from "paused". See
+//! `rust/exo/CLAUDE.md` for the full account and what replaced it.
 //!
 //! Policy logic is resolved from the injected [`RoleRegistry`] based on the node's role.
 
@@ -17,7 +20,7 @@ use std::path::Path;
 use crate::bootstrap::{bootstrap, NodeContext};
 use crate::error::NodeResult;
 use exo_caps::RoleKind;
-use exo_framework::{Exomonad, HookDecision, HookInput, StopDecision};
+use exo_framework::{Exomonad, HookDecision, HookInput};
 use exo_runtime::Runtime;
 use serde_json::json;
 
@@ -25,7 +28,6 @@ use serde_json::json;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookEvent {
     PreToolUse,
-    Stop,
     SessionStart,
 }
 
@@ -101,17 +103,6 @@ async fn run_hook<D: Exomonad>(
             };
             Ok(serde_json::to_string(&output).unwrap())
         }
-        HookEvent::Stop => {
-            let decision = (rd.stop)(&ctx.runtime).await;
-            let output = match decision {
-                StopDecision::Allow => json!({"continue": true}),
-                StopDecision::Block { reason } => json!({
-                    "decision": "block",
-                    "reason": reason.as_str()
-                }),
-            };
-            Ok(serde_json::to_string(&output).unwrap())
-        }
         HookEvent::SessionStart => {
             let policy_output = (rd.session_start)(&ctx.runtime).await;
             let id_ctx = identity_context(&ctx);
@@ -135,11 +126,9 @@ async fn run_hook<D: Exomonad>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{
-        test_pre_tool_use, test_session_start, test_stop, TestDomain, TestRole,
-    };
+    use crate::test_support::{test_session_start, TestDomain, TestRole};
     use exo_caps::{AgentName, Branch, NodePath, PaneId, Reason};
-    use exo_framework::{BoxFuture, HookDecision, HookInput, RoleDef, StopDecision};
+    use exo_framework::{BoxFuture, HookDecision, HookInput, RoleDef};
     use exo_runtime::Runtime;
     use serde_json::{json, Value};
     use std::sync::Arc;
@@ -273,30 +262,6 @@ mod tests {
         );
     }
 
-    fn mock_stop_block<'a>(_: &'a exo_runtime::Runtime) -> BoxFuture<'a, StopDecision> {
-        Box::pin(async {
-            StopDecision::Block {
-                reason: Reason::new("test reason".into()).unwrap(),
-            }
-        })
-    }
-
-    #[tokio::test]
-    async fn test_run_hook_stop_blocked() {
-        let ctx = mock_ctx(TestRole::Dev, vec!["root", "dev"], "main", false);
-        let rd = RoleDef {
-            tools: vec![],
-            pre_tool_use: test_pre_tool_use,
-            stop: mock_stop_block,
-            session_start: test_session_start,
-        };
-
-        let res = run_hook(ctx, rd, HookEvent::Stop, "").await.unwrap();
-        let val: Value = serde_json::from_str(&res).unwrap();
-        assert_eq!(val["decision"], "block");
-        assert_eq!(val["reason"], "test reason");
-    }
-
     fn mock_pre_tool_deny<'a>(
         _: &'a exo_runtime::Runtime,
         _: &'a HookInput,
@@ -314,7 +279,6 @@ mod tests {
         let rd = RoleDef {
             tools: vec![],
             pre_tool_use: mock_pre_tool_deny,
-            stop: test_stop,
             session_start: test_session_start,
         };
         let stdin = json!({
@@ -348,7 +312,6 @@ mod tests {
         let rd = RoleDef {
             tools: vec![],
             pre_tool_use: mock_pre_tool_modify,
-            stop: test_stop,
             session_start: test_session_start,
         };
         let stdin = json!({

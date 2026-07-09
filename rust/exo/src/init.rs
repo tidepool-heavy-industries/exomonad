@@ -71,11 +71,13 @@ fn ensure_git_excludes(cwd: &Path) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     tmux_session: &str,
     model: Option<&str>,
     yolo: bool,
     wrap_nix: bool,
+    review_enabled: bool,
     profile_env: &[(String, String)],
     session: Option<String>,
     recreate: bool,
@@ -122,6 +124,7 @@ pub async fn run(
     let mut papers = exo_caps::NodePapers::root(root_pane.clone(), exo::ExoRole::Root)?;
     papers.yolo = yolo;
     papers.wrap_nix = wrap_nix;
+    papers.review_enabled = review_enabled;
     let papers_path = cwd.join(format!(".exo/node/{run_id}/root.json"));
     if let Some(parent) = papers_path.parent() {
         std::fs::create_dir_all(parent)?;

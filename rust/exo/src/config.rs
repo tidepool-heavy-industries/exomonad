@@ -68,6 +68,10 @@ struct RawInit {
     /// (`own_launch_policy`). Absent ⇒ the behavior-preserving [`NodePapers`] defaults.
     yolo: Option<bool>,
     wrap_nix: Option<bool>,
+    /// Whether `submit_branch` spawns a reviewer at all, inherited down the tree the same way as
+    /// `yolo`/`wrap_nix`. Absent ⇒ [`NodePapers::DEFAULT_REVIEW_ENABLED`] (`false` — reviewers are
+    /// opt-in, not a fully-cooked default).
+    review_enabled: Option<bool>,
     /// `[launch_profile.<role>]` profiles, keyed by role name. Each value is a named-brain
     /// shorthand string or a full table (see [`LaunchProfileEntry`]).
     launch_profile: Option<BTreeMap<String, LaunchProfileEntry>>,
@@ -81,6 +85,9 @@ pub struct InitConfig {
     /// behavior-preserving [`NodePapers`] defaults when unset in config.
     pub yolo: bool,
     pub wrap_nix: bool,
+    /// Whether `submit_branch` spawns reviewers, for the root's papers (inherited down the tree).
+    /// Defaults to `false` (opt-in) when unset in config.
+    pub review_enabled: bool,
     /// Launch-profile env vars (`EXO_<ROLE>_*`) derived from `[launch_profile.<role>]`, ready for
     /// `exo init` to embed in the root launch. Empty ⇒ no profiled roles. A matching shell env var
     /// overrides a config value (so a secret key needn't live in the file).
@@ -116,6 +123,10 @@ pub fn discover() -> InitConfig {
         .wrap_nix
         .or(global.wrap_nix)
         .unwrap_or(NodePapers::DEFAULT_WRAP_NIX);
+    let review_enabled = local
+        .review_enabled
+        .or(global.review_enabled)
+        .unwrap_or(NodePapers::DEFAULT_REVIEW_ENABLED);
 
     // Merge the per-role profile tables (a role defined in local fully overrides the same role in
     // global), then flatten to `EXO_<ROLE_UPPER>_<FIELD>` env vars.
@@ -128,6 +139,7 @@ pub fn discover() -> InitConfig {
         model,
         yolo,
         wrap_nix,
+        review_enabled,
         profile_env,
     }
 }

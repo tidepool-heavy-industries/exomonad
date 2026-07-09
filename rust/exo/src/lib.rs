@@ -35,6 +35,6 @@ pub(crate) mod branching;
 #[cfg(test)]
 pub mod testing;
 
-pub use review::{handle_review_system, ReviewSystem};
+pub use review::{handle_review_system, handle_review_tick, ReviewSystem};
 pub use roles::{role_def, ExoRole};
 pub use spawn::ExoSpawn;

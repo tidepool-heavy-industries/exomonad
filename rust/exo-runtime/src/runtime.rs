@@ -9,9 +9,7 @@
 use exo_caps::{
     Addressee, AgentName, Branch, ChildKind, ChildStatus, InboxPath, NodePath, NodeStatus, PaneId,
 };
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 /// One node's runtime. Holds the node's birth identity + the ambient context the cap
 /// impls need (worktree dir, parent inbox pointer, run-id namespace, tmux session).
@@ -38,12 +36,6 @@ pub struct Runtime {
     pub(crate) tmux_session: String,
     /// This node's own tmux pane id.
     pub(crate) own_pane: PaneId,
-    /// Per-direct-child busy/idle bit (`true` = working). Seeded `true` at birth and on every
-    /// deliver down to a child (a poke that wakes it); set `false` when the child reports
-    /// `ChildIdle`. Shared across the sidecar's loops via `Arc` (the struct is `Clone`, so every
-    /// clone sees the same map). Read by the [`ChildLiveness`](exo_caps::ChildLiveness) cap, which
-    /// combines it with pane-liveness — a dead pane is idle regardless of a stale bit.
-    pub(crate) children_busy: Arc<Mutex<HashMap<AgentName, bool>>>,
     /// Whether this node is `Inline` (shares the parent's worktree) or `Worktree` (own dir).
     /// Drives team isolation, children-ledger access, and teamout spawning — see `is_inline()`.
     pub(crate) own_kind: ChildKind,
@@ -70,7 +62,6 @@ impl Runtime {
             run_id,
             tmux_session,
             own_pane,
-            children_busy: Arc::new(Mutex::new(HashMap::new())),
             own_kind,
         }
     }
@@ -80,25 +71,6 @@ impl Runtime {
     /// cwd-resolution would land in the parent's team).
     pub fn is_inline(&self) -> bool {
         self.own_kind == ChildKind::Inline
-    }
-
-    /// Mark a direct child as working — at birth, and whenever this node delivers a message down to
-    /// it (a poke that will wake it). Paired with [`mark_child_idle`](Self::mark_child_idle).
-    pub(crate) fn mark_child_busy(&self, child: &AgentName) {
-        self.children_busy
-            .lock()
-            .unwrap()
-            .insert(child.clone(), true);
-    }
-
-    /// Mark a direct child idle — it reported `ChildIdle` (its whole subtree is quiescent). Called
-    /// by the sidecar's inbound loop on a `ChildIdle` system message. Until the child is poked
-    /// again it counts as not-working.
-    pub fn mark_child_idle(&self, child: &AgentName) {
-        self.children_busy
-            .lock()
-            .unwrap()
-            .insert(child.clone(), false);
     }
 
     /// This node's own name (the `NodePath` last segment).
@@ -149,15 +121,20 @@ impl Runtime {
 
     /// Build a periodic status snapshot. `role_str` is the node's domain role as its stable string
     /// (the engine no longer knows the domain role enum; the caller passes `D::Role::role_str`).
-    pub fn status_snapshot(&self, role_str: &str, shutdown_pending: bool) -> NodeStatus {
-        let children = self
-            .children_busy
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|(name, &busy)| ChildStatus {
-                name: name.as_str().to_string(),
-                busy,
+    /// `children[].busy` is pane-existence (a live probe, via [`exo_caps::Tmux::list_panes`]) — the
+    /// one signal that's true regardless of turn boundaries. There used to be a separate busy-bit
+    /// derived from Claude Code's `Stop` hook; it was removed (see `rust/exo/CLAUDE.md`) because
+    /// `Stop` fires on every turn-end, including a legitimate async-wait yield, so the bit was
+    /// routinely wrong. Best-effort: a probe failure reports every child as not-busy rather than
+    /// failing the snapshot.
+    pub async fn status_snapshot(&self, role_str: &str, shutdown_pending: bool) -> NodeStatus {
+        let records = self.read_child_records().await.unwrap_or_default();
+        let alive = exo_caps::Tmux::list_panes(self).await.unwrap_or_default();
+        let children = exo_caps::fold_children(&records)
+            .into_values()
+            .map(|c| ChildStatus {
+                busy: alive.contains(c.pane.as_str()),
+                name: c.name.as_str().to_string(),
             })
             .collect();
 

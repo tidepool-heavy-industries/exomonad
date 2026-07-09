@@ -222,6 +222,7 @@ mod tests {
             Some(parent_inbox.clone()),
             NodePapers::DEFAULT_YOLO,
             NodePapers::DEFAULT_WRAP_NIX,
+            NodePapers::DEFAULT_REVIEW_ENABLED,
         )
         .unwrap();
 

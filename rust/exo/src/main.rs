@@ -92,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
                 cfg.model.as_deref(),
                 cfg.yolo,
                 cfg.wrap_nix,
+                cfg.review_enabled,
                 &cfg.profile_env,
                 session,
                 recreate,

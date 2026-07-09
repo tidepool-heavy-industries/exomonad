@@ -1,30 +1,29 @@
 //! `ChildLiveness` capability — does this node have any still-*working* child?
 //!
-//! Distinct from [`Topology`](crate::Topology), which reports pane **existence**. A pane existing
-//! does NOT mean its agent is working: a child agent keeps its pane (and process) alive while it
-//! sits idle waiting for input. So aliveness can never prove "busy".
-//!
-//! Idleness is instead tracked from the messages the sidecar already sees — a child is busy from
-//! birth and from every poke (a message delivered down to it), and idle once it reports
-//! `ChildIdle`. Pane-death is a one-way override on top of that bit: a dead pane is, definitionally,
-//! idle (it's gone — it isn't working), so it forces idle regardless of a stale busy bit. A live
-//! pane decides nothing on its own.
+//! This used to be a genuinely distinct question from [`Topology`](crate::Topology)'s pane
+//! **existence** (a child agent keeps its pane alive while idling, so aliveness alone can't prove
+//! "busy") — a separate busy-bit was tracked from Claude Code's `Stop` hook (busy from birth/poke,
+//! idle on a `ChildIdle` report). That bit was removed: `Stop` fires on every turn-end, including a
+//! child legitimately yielding to wait on a backgrounded async task, so the bit was routinely wrong
+//! (see `rust/exo/CLAUDE.md`). `any_child_busy` now means exactly what `Topology` already tracked:
+//! **any direct child's pane currently exists.** Coarser than the old claim (can't distinguish
+//! "actively working" from "idle but its pane is still open"), but honest — the old claim wasn't.
 
 use crate::fs::Fs;
 use crate::tmux::Tmux;
 use async_trait::async_trait;
 
-/// **Composite cap** — the gate reads the child ledger (`Fs`) and probes pane liveness
-/// ([`Tmux::list_panes`]); the supertraits name those powers. The busy-bit map itself is
-/// impl-internal in-memory state, not a cap.
+/// **Composite cap** — reads the child ledger (`Fs`) and probes pane liveness
+/// ([`Tmux::list_panes`]); the supertraits name those powers.
 #[async_trait]
 pub trait ChildLiveness: Tmux + Fs {
-    /// True if any **direct** child is still working: its busy-bit is set AND its pane is not
-    /// known-dead. Best-effort and infallible — a liveness-probe failure is treated as "alive"
-    /// (trust the busy-bit), so a transient probe hiccup never manufactures a false idle.
+    /// True if any **direct** child's pane currently exists. Best-effort and infallible — a
+    /// liveness-probe failure is treated as "busy" (never manufacture a false idle from a transient
+    /// probe hiccup).
     ///
-    /// Only direct children are consulted: the recursion folds through the message tree, because a
-    /// child reports `ChildIdle` upward only once its *own* subtree is quiescent. So one bit per
-    /// direct child already accounts for everything beneath it.
+    /// Direct children only — a shallow check. Its one caller (the cooperative-shutdown `Defer`
+    /// response) uses it as cosmetic "some actively working" wording, not as the actual
+    /// clear-to-reap gate; that gate is [`Topology`]'s recursive pane walk, which does account for
+    /// the whole subtree.
     async fn any_child_busy(&self) -> bool;
 }

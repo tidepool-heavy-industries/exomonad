@@ -26,7 +26,7 @@ lib (`lib.rs` + `tools/` + `gates.rs` + `roles.rs`) stays generic over the caps 
 | File | Contents |
 |------|----------|
 | `lib.rs` | Re-exports `role_def`, `ExoRole`, `ReviewSystem`/`handle_review_system` (the domain `System` + relocated gate: findings-based), `ExoSpawn` (the domain `Spawn`). Generic over `R`, depends only on `exo-framework` + `exo-caps` (+ `tracing`). |
-| `review.rs` | The domain's inter-node behavior: `ReviewSystem` (`D::System`) + `handle_review_system` (decision derived from structured findings; IO-free via the `SystemCtx` seam — unit-tested against a mock context). **Now persists each round to a durable `ReviewLog` (`ReviewRound`) at `.exo/reviews/{safe-branch}.json`** using the `safe_branch` helper. |
+| `review.rs` | The domain's inter-node behavior: `ReviewSystem` (`D::System`) + `handle_review_system` (decision derived from structured findings; IO-free via the `SystemCtx` seam — unit-tested against a mock context). **Now persists each round to a durable `ReviewLog` (`ReviewRound`) at `.exo/reviews/{safe-branch}.json`** using the `safe_branch` helper. Also `handle_review_tick` — a reviewer's wall-clock abandonment timeout (`REVIEW_ABANDON_TIMEOUT`, 15 min), called from `ExoDomain::handle_tick` by the sidecar's watchdog loop instead of a Stop hook. |
 | `spawn.rs` | `ExoSpawn` (`D::Spawn`) implementing `SpawnSpec`, the role-fixing the per-op tools do; `render_spec_prompt` (moved from the runtime) + `write_acceptance` (the `.exo/acceptance.md` write via `Fs`, relocated out of birth). |
 | `domain.rs` | **Bin-only.** `ExoDomain` — the `Exomonad` impl that fixes `Caps = Runtime` and points `role_def`/`handle_system` at the lib. The one place that links `exo-runtime`. |
 | `main.rs` | The CLI dispatcher (bin): clap `Cli` → `init` / `node` / `hook`. `node` is the composition root — `exo node --papers <path>` → `exo_node::bootstrap::<ExoDomain>(papers, cwd)` → `run_node::<ExoDomain>`. |
@@ -35,7 +35,7 @@ lib (`lib.rs` + `tools/` + `gates.rs` + `roles.rs`) stays generic over the caps 
 | `hook.rs` | `exo hook <event> --papers <path>` — handle a CC hook via the node's `exo` gate (SessionStart in-process; everything else routes to the sidecar hook socket, fail-open). |
 | `config.rs` | Minimal node-mode init config read (`tmux_session`, `model`, the child-launch policy `yolo`/`wrap_nix`, and `[launch_profile.<role>]` tables flattened to `EXO_<ROLE>_*` for the reviewer-brain redirect) — classic `exomonad` owns the full `Config`. |
 | `tools/` | One module per tool — a type + `Args` (derives `Deserialize + JsonSchema`) + `impl Tool<R>` (typed authoring trait; cap bounds in the impl header are the tool's least-privilege spec). The framework's `Adapter` handles JSON erasure; no per-tool adapter, no macro. Each ships mock-cap unit tests. |
-| `gates.rs` | The concrete hook bodies: `pre_tool_use` (antipattern nudges), `stop` (the convergence gate) + per-role variants (`stop_allow`/`stop_notify`/`stop_reviewer`), `session_start`. Functions generic over the caps they need. |
+| `gates.rs` | The concrete hook bodies: `pre_tool_use` (antipattern nudges), `session_start`. Functions generic over the caps they need. (There used to be a `stop` gate + per-role variants here — removed; see "The gates" below.) |
 | `roles.rs` | `ExoRole` (the domain's `D::Role`, impl `RoleKind`) + `role_def(ExoRole)` — the hand-written table (the single place a role's tool list + hooks are named), resolved through `ExoDomain`'s `Exomonad::role_def`. `RoleKind::protocol` is overridden here to map each variant to its `protocol.rs` const. |
 | `protocol.rs` | Per-role **decomposition-steering protocol** consts (`ROOT`/`TL`/`DEV`/`WORKER`/`REVIEWER`) — the prose the engine injects at session_start. The **source of truth** (ported from `.exo/roles/devswarm/context/*.md`, translated to v2 mechanics: local `merge` + `submit_branch`, no PRs/Copilot); an optional on-disk `.md` override wins during prompt-tuning. |
 | `testing.rs` | `MockRuntime` — impls every cap, records calls, returns canned values. Every tool tests against this one shared mock. |
@@ -52,7 +52,7 @@ contract ([`exo-framework`](../exo-framework/CLAUDE.md)); this crate provides th
 | `spawn_worker` | `Spawner` | root, tl | Spawn an ephemeral Sonnet Claude worker (inline pane). |
 | `dismiss_worker` | `Spawner` | root, tl | Dismiss an inline worker by name: unconditional parent-side `kill_pane` resolved via the children ledger. Matched to `spawn_worker`; the reliable teardown primitive for workers that never registered as a teammate. |
 | `merge` | `Git`+`Spawner` | root, tl | **The local fold:** `git merge <child-branch>`, followed by best-effort teardown (`kill_pane` + `reclaim_worktree`) of the child. |
-| `submit_branch` | `Git`+`Process`+`Spawner`+`Fs`+`Bus` | tl, dev | **Request review.** Runs the precondition checks (committed + `.exo/checks/pre-merge/*` scripts), then spawns a **reviewer** off this branch (fork-point `git diff` base via `Git::merge_base`) and returns "stop & wait". It does NOT deliver `[READY]` — only the sidecar does, on an approve-verdict (the structural gate). **Continuity:** reads the latest `ReviewLog` and appends unresolved Error findings from the prior round to the reviewer task. Escape hatch: `dangerously_skip_reviewer: true`. |
+| `submit_branch` | `Git`+`Process`+`Spawner`+`Fs`+`Bus` | tl, dev | **Request review** — if reviewers are enabled (`review_enabled` in `.exo/config.toml`, off by default; read from the node's own papers). Runs the ordered precondition checks (committed → **needs_rebase** → `.exo/checks/pre-merge/*` scripts); the rebase gate blocks + prompts `git rebase <parent>` when the branch is behind its parent's current commit (fails open when the parent name isn't a live ref, e.g. root's `root`). Then spawns a **reviewer** off this branch (fork-point `git diff` base via `Git::merge_base`) and returns "stop & wait". It does NOT deliver `[READY]` itself except via the skip path — only the sidecar does, on an approve-verdict (the structural gate). **Continuity:** reads the latest `ReviewLog` and appends unresolved Error findings from the prior round to the reviewer task. Explicit escape hatch regardless of config: `dangerously_skip_reviewer: true`. |
 | `verdict` | `Bus`+`Kv` | reviewer | A reviewer's one output → a `System(Reviewed)` message to its parent: `summary` + structured `findings` {`file`, `line`, `severity`, `body`, `suggestion`?}. Triggers reviewer teardown (handled in `exo-node`). |
 | `notify_parent` | `Bus` | tl, dev, worker, reviewer | Status/failure update to `Addressee::Parent` (NOT the done-signal). |
 | `send_message` | `Bus` | root, tl | Deliver to a child by name (`to: <child>`) — **tree-edges only**; inline vs worktree is transparent. |
@@ -71,22 +71,31 @@ Worktrees are considered reclaimable if their HEAD is an ancestor of the current
 Every tool implements `Tool::description()`; `exo-node`'s `tools/list` emits it, so the toolset is
 self-documenting — an agent learns the local-merge loop (commit → `submit_branch` → parent `merge`,
 no PR/remote) from the tools it has. `submit_branch`'s preconditions are an **ordered, extensible
-fn-pointer list** (`tools/submit.rs`) mirroring the role hook fn-pointers.
+fn-pointer list** (`tools/submit.rs`) mirroring the role hook fn-pointers — currently `committed`
+(clean tree), `needs_rebase` (branch not behind its parent — prompts `git rebase <parent>`, keeps
+the parent's fold conflict-free by resolving in the child's own context), and `pre_merge_checks`
+(project `.exo/checks/pre-merge/*` scripts). Any check failing surfaces as a tool error the agent
+acts on, before either the review-spawn or the skip-forward path.
 
 ## Roles
 
-`role_def(kind)` returns a `RoleDef<R> { tools, pre_tool_use, stop, session_start }`; `ExoDomain::role_def`
+`role_def(kind)` returns a `RoleDef<R> { tools, pre_tool_use, session_start }`; `ExoDomain::role_def`
 resolves through it (the domain's `Exomonad` impl), replacing the deleted `RoleRegistry`. Hooks compose by pointing several roles at the same fn.
 
-Every role is a Claude instance; the **model** varies per role via `ExoRole::model()` (the `RoleKind::model` seam): `Some("sonnet")` for dev/worker/reviewer leaves, `None` (session default — the human's Opus) for root/tl. The model flows `RoleKind::model()` → `BirthCore.model` → `ClaudeSpawnFlags.model` → `build_agent_command`'s `--model`.
+Every role is a Claude instance; the **model** varies per role via `ExoRole::model()` (the `RoleKind::model` seam): `Some("sonnet")` for dev/worker/reviewer leaves, `Some("opus")` for a spawned tl, `None` (inherit the launcher's default) for root only. Every *spawned* node (everything but root) gets an explicit cap — never `None` — because "inherit the launcher's default" means whatever model tier the human's own top-level session happens to be set to, which is the human's choice for their own interactive use, not a choice made for subagent work (e.g. a human running a cheap/fast model for chat must not have that silently propagate onto a spawned TL's decomposition work). The model flows `RoleKind::model()` → `BirthCore.model` → `ClaudeSpawnFlags.model` → `build_agent_command`'s `--model`.
 
-| Role | agent | tools | stop gate |
-|------|-------|-------|-----------|
-| **Root** | Claude (session default) | fork_wave, spawn_dev, spawn_worker, merge, send_message, tree | `stop_allow` (never gate the human's session; no parent to notify) |
-| **Tl** | Claude (session default) | spawns, merge, notify_parent, send_message, submit_branch, tree | `stop` (clean-gate + notify parent on clean-allow) |
-| **Dev** | Claude (Sonnet) | notify_parent, submit_branch | `stop_notify` (notify parent, always allow) |
-| **Worker** | Claude (Sonnet) | notify_parent | `stop_notify` (inline child, no branch to fold, but still signals on yield) |
-| **Reviewer** | Claude (Sonnet, or a launch-profile brain) | verdict, notify_parent | `stop_reviewer` (ephemeral; its `verdict` is its done-signal; emits `ReviewAborted` if it exits without one) |
+There is no per-role "stop gate" column anymore — Claude Code's `Stop` hook is no longer wired at
+all (see "The gates" below for why). What each role needs from convergence/liveness now comes from
+explicit tool calls (`submit_branch`, `verdict`) and the watchdog loop's wall-clock checks, not a
+turn-boundary hook.
+
+| Role | agent | tools |
+|------|-------|-------|
+| **Root** | Claude (inherits the launcher's default — the human's own session) | fork_wave, spawn_dev, spawn_worker, merge, send_message, tree |
+| **Tl** | Claude (Opus) | spawns, merge, notify_parent, send_message, submit_branch, tree |
+| **Dev** | Claude (Sonnet) | notify_parent, submit_branch |
+| **Worker** | Claude (Sonnet) | notify_parent |
+| **Reviewer** | Claude (Sonnet, or a launch-profile brain) | verdict, notify_parent |
 
 The **reviewer** and ephemeral in-pane **worker** roles carry a **launch profile** (`ExoRole::launch_profile_env_prefix` → `Some("EXO_REVIEWER")` / `Some("EXO_WORKER")`): their Claude can be redirected to a non-default Anthropic-compatible endpoint/model (e.g. Kimi via a local `claude-code-proxy`) — still a Claude process, so Teams/hooks/MCP are unchanged (the old Gemini-worker slot, now Kimi). Configure per-role in `.exo/config.toml` (the convenient path) — the **named-brain shorthand** is the common case:
 ```toml
@@ -106,30 +115,77 @@ label = "kimi"             # tags the window + tree
 
 ## The review gate (how `submit_branch` → `merge` is gated)
 
-A node commits, then calls `submit_branch`. It runs the checks, then spawns a **reviewer** (a full
-Sonnet Claude in its own worktree branched off the under-review code) handed the diff + `.exo/acceptance.md`.
+**Reviewers are opt-in, off by default** — `review_enabled` in `.exo/config.toml` (inherited down
+the tree onto every node's papers exactly like `yolo`/`wrap_nix`; unset ⇒
+`NodePapers::DEFAULT_REVIEW_ENABLED = false`). Reviewers aren't a fully-cooked feature yet (see the
+abandonment-timeout and nested-teardown history in this file), so a project turns them on
+deliberately rather than getting them by surprise. `submit_branch` reads its own `review_enabled`
+(`.exo/node.json`, via `Fs`) at call time; when it's off (or the agent explicitly passes
+`dangerously_skip_reviewer: true`), it forwards `[READY]` straight to the parent, flagged as
+unreviewed, with wording that differs by *why*: plain "reviewers are disabled for this project" when
+it's the config default, vs. the loud "dangerously skipped, be suspicious" framing only when the
+agent itself opted out of a normally-on gate.
+
+When reviewers ARE enabled: a node commits, then calls `submit_branch`. It runs the checks, then
+spawns a **reviewer** (a full Sonnet Claude in its own worktree branched off the under-review code)
+handed the diff + `.exo/acceptance.md`. Its task prompt is explicit that review is **read-only** —
+judge the diff, don't re-run the build/test suite — because a reviewer has a 30-minute wall-clock
+abandonment timeout (`REVIEW_ABANDON_TIMEOUT`) and a cold build routinely blows well past that,
+burning the whole round for nothing (see the tidepool forensics in "The gates" below).
 **Cross-round continuity:** `submit_branch` reads the latest `.exo/reviews/{safe-branch}.json` and
 appends any unresolved Error findings from the prior round to the reviewer's task string.
 The reviewer calls `verdict`, which rides the bus as a `System` message to the submitter's
 **sidecar**:
 - **Reviewed** (no Error-severity findings) & sha==HEAD → the sidecar escalates `[READY]` to the parent — *no LLM turn*.
 - **Reviewed** (with Error-severity findings) → findings are rendered and delivered into the submitter's LLM to address, then re-submit (new sha → fresh reviewer). **The verdict handler persists the round to the log.**
+- **Aborted** (the reviewer never produced a verdict — see `handle_review_tick` below) → the
+  submitter is told explicitly NOT to spawn another reviewer (a second one is likely to hit the same
+  wall) and to re-submit with `dangerously_skip_reviewer: true` instead.
 
-`submit_branch` never delivers `[READY]` itself, so the gate is **structural** — the LLM has no
-tool that skips review. The reviewer is torn down (best-effort) as soon as the `verdict` is processed.
+When reviewers are enabled, `submit_branch` never delivers `[READY]` itself except through the
+skip path, so the gate is **structural** — the LLM has no other tool that fabricates approval. The
+reviewer is torn down (best-effort) as soon as the `verdict` (or the abandonment timeout) is processed.
 
 ## The gates
 
 - **`pre_tool_use`** — default-**ALLOW** antipattern *nudge* (NOT a security gate). Currently one rule: deny `git add .` / `git add -A` (stage by path). Can `Deny` with guidance or `Modify` to rewrite.
-- **`stop`** (tl) — the **local convergence gate** (`R: Git + Log + Bus + ChildLiveness`). Blocks exit while the worktree is dirty (a parent folds a child by merging its *branch* off disk, so uncommitted work is invisible). On a **clean** exit (Allow) it delivers a `System(ChildIdle)` to the parent — but **only when the subtree is idle** (`ChildLiveness::any_child_busy`). **Fails OPEN** on any git error.
-- **`stop_notify`** (dev, worker) — leaf turn-end hook (CC `Stop`; `R: Bus + Log + ChildLiveness`): deliver `System(ChildIdle)` (but only when the subtree is idle; skip if a child is busy), then **always Allow**.
-- **`stop_allow`** (root) — unconditional Allow. Root has no parent.
-- **`stop_reviewer`** (reviewer) — silent on the happy path (verdict produced); emits a loud `ReviewAborted` to the parent if the reviewer exits without a verdict. Always allows exit.
 - **`session_start`** — identity bootstrap (the node-identity context is prepended by `exo-node`). The role's **steering protocol** (`RoleKind::protocol`, mapped to a `protocol.rs` const, override-or-const) is delivered via the launch-time `--append-system-prompt` flag at spawn; the SessionStart hook only appends the node-identity + team lines to `additionalContext`.
+
+There used to be a third gate, `stop` (Claude Code's `Stop` event), with per-role variants
+(`stop_allow`/`stop_notify`/`stop_dev`/`stop_reviewer`) — a TL/dev dirty-worktree exit-block and a
+reviewer verdict-or-abort check. **It was removed entirely** (not neutered to `Allow` — a node's CC
+settings no longer register `Stop` at all, so it's never invoked). Root cause, found live in a
+production swarm: `Stop` fires on **every turn-end**, including a node legitimately yielding to wait
+on a backgrounded async task (e.g. a reviewer polling a `cargo build`). It cannot distinguish
+"genuinely done" from "paused" — confirmed against Claude Code's own docs, which offer no signal that
+can (`SessionEnd` is the only turn-boundary-independent event, but it can't gate/block and has
+undocumented gaps around hard kills). Every decision built on `Stop` was provably wrong some of the
+time: a reviewer got killed ~1 second into a build wait, three submit rounds in a row, on the same
+branch, before ever producing a verdict; a TL/dev got nagged "commit first" mid-async-wait; and the
+`ChildIdle` busy-bit it fed produced false "subtree idle" reports that propagated up the tree.
+
+What replaced it — each protection moved to a signal that's actually true regardless of turn
+boundaries, not a hook:
+- Reviewer "done" → the `verdict` tool (unchanged) — it was always the real signal; `Stop` was only
+  ever consulted for the *negative* case.
+- Reviewer "abandoned" → `review.rs`'s `handle_review_tick`, a wall-clock timeout
+  (`REVIEW_ABANDON_TIMEOUT`, 15 min) run by `exo-node`'s watchdog loop (`Exomonad::handle_tick`),
+  checked against real elapsed time, not a turn count. Delivers the same `ReviewAborted` the old
+  `stop_reviewer` sent; the parent-side handling (`handle_review_system`) is unchanged.
+- "Uncommitted work before converging" → already independently enforced by `submit_branch`'s own
+  precondition check (`tools/submit.rs`) at the moment it actually matters (tool-call time, not
+  turn-boundary time) — no Stop-time backstop needed.
+- "Is my subtree still working" (`ChildLiveness`) → collapsed to pure pane-existence
+  (`Tmux::list_panes`), dropping the busy-bit entirely. Coarser than the old claim, but the old claim
+  was false; this one isn't. Its only remaining consumer is the cooperative-shutdown `Defer`
+  response's cosmetic wording — the actual clear-to-reap gate was always `Topology`'s recursive pane
+  walk, unaffected.
+- Cooperative-shutdown reap-on-idle (`try_reap`) lost its `Stop`-triggered check point; the watchdog
+  loop now calls it unconditionally every tick instead (it's idempotent and independently gated on
+  `shutdown_pending` + subtree-clear, so this is a strict improvement, not a new heuristic).
 
 ## Gaps / not-yet
 
-- **Reviewers:** review is currently always-on (no config to disable); a two-way colleague back-channel (submitter→reviewer reply) needs `send_message` on dev.
+- **Reviewers:** now config-gated (`review_enabled`, off by default) instead of always-on. Still missing: a two-way colleague back-channel (submitter→reviewer reply) needs `send_message` on dev.
 - `pre_tool_use` is intentionally minimal (one nudge); classic exomonad's richer antipattern set + PII rewrite are not ported.
-- `stop`'s dirty-gate can wedge an agent that holds untracked artifacts it won't commit.
-- **Authoring-DSL Phase A LANDED** — typed `Tool` + `ErasedTool` flip: 9 hand-adapters deleted, roster uses `tool(X)`. Phase B (gate/observer stop pipelines, #20426 structural) still pending; see [`docs/decisions/exo-authoring-dsl.md`](../../docs/decisions/exo-authoring-dsl.md).
+- **Authoring-DSL Phase A LANDED** — typed `Tool` + `ErasedTool` flip: 9 hand-adapters deleted, roster uses `tool(X)`. Phase B (gate/observer stop pipelines, #20426 structural) is moot now that Stop-hook gating is gone; see [`docs/decisions/exo-authoring-dsl.md`](../../docs/decisions/exo-authoring-dsl.md).

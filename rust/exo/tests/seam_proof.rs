@@ -23,7 +23,7 @@ use exo_caps::{
 };
 use exo_framework::{
     ok_json, parse, schema_json, BoxFuture, ErasedTool, Exomonad, RoleDef, SystemCtx,
-    SystemOutcome, Tool, ToolOutput,
+    SystemOutcome, ToolOutput,
 };
 use exo_runtime::Runtime;
 use schemars::JsonSchema;
@@ -159,9 +159,6 @@ fn pre<'a>(
 ) -> BoxFuture<'a, exo_framework::HookDecision> {
     Box::pin(async { exo_framework::HookDecision::Allow })
 }
-fn stop(_: &Runtime) -> BoxFuture<'_, exo_framework::StopDecision> {
-    Box::pin(async { exo_framework::StopDecision::Allow })
-}
 fn session(_: &Runtime) -> BoxFuture<'_, exo_framework::SessionStartOutput> {
     Box::pin(async { exo_framework::SessionStartOutput::default() })
 }
@@ -184,7 +181,6 @@ impl Exomonad for ProofDomain {
         RoleDef {
             tools,
             pre_tool_use: pre,
-            stop,
             session_start: session,
         }
     }
@@ -307,7 +303,6 @@ fn auditor_role_def_is_wired() {
 
     // Verify hook pointers are wired
     assert_eq!(rd.pre_tool_use as usize, pre as *const () as usize);
-    assert_eq!(rd.stop as usize, stop as *const () as usize);
     assert_eq!(rd.session_start as usize, session as *const () as usize);
 }
 

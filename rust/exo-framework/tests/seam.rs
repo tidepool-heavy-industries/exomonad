@@ -2,12 +2,12 @@ use async_trait::async_trait;
 use exo_caps::{
     Addressee, AgentName, AgentType, Branch, Bus, BusError, CapResult, ChildKind, ChildLiveness,
     Fs, FsError, Git, GitError, Kv, KvError, Message, PaneId, Persona, Process, ProcessError,
-    Reason, RoleKind, SpawnError, SpawnSpec, Spawner, Tmux, TmuxError, Topology, TopologyError,
-    ToolName, TopologyView,
+    RoleKind, SpawnError, SpawnSpec, Spawner, Tmux, TmuxError, Topology, TopologyError, ToolName,
+    TopologyView,
 };
 use exo_framework::{
     ok_json, parse, schema_json, BoxFuture, ErasedTool, Exomonad, HookDecision, HookInput, RoleDef,
-    SessionStartOutput, StopDecision, SystemCtx, SystemOutcome, ToolOutput,
+    SessionStartOutput, SystemCtx, SystemOutcome, ToolOutput,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -73,6 +73,9 @@ impl Git for TestCaps {
         unimplemented!()
     }
     async fn is_ahead_of(&self, _base: &str) -> Result<bool, GitError> {
+        unimplemented!()
+    }
+    async fn is_behind(&self, _base: &str) -> Result<bool, GitError> {
         unimplemented!()
     }
 }
@@ -251,18 +254,6 @@ fn pre_tool<'a>(_: &'a TestCaps, _: &'a HookInput) -> BoxFuture<'a, HookDecision
     Box::pin(async { HookDecision::Allow })
 }
 
-fn stop_gate<'a>(_: &'a TestCaps) -> BoxFuture<'a, StopDecision> {
-    Box::pin(async { StopDecision::Allow })
-}
-
-fn stop_gate_block<'a>(_: &'a TestCaps) -> BoxFuture<'a, StopDecision> {
-    Box::pin(async {
-        StopDecision::Block {
-            reason: Reason::new("blocked".into()).unwrap(),
-        }
-    })
-}
-
 fn session_start<'a>(_: &'a TestCaps) -> BoxFuture<'a, SessionStartOutput> {
     Box::pin(async { SessionStartOutput::default() })
 }
@@ -279,14 +270,12 @@ impl Exomonad for TestDomain {
             TestRole::Lead => RoleDef {
                 tools: vec![Box::new(EchoTool)],
                 pre_tool_use: pre_tool,
-                stop: stop_gate,
-                session_start: session_start,
+                session_start,
             },
             TestRole::Reviewer => RoleDef {
                 tools: vec![],
                 pre_tool_use: pre_tool,
-                stop: stop_gate_block,
-                session_start: session_start,
+                session_start,
             },
         }
     }
@@ -318,9 +307,8 @@ fn role_def_lists_expected_tools() {
 }
 
 #[test]
-fn role_def_pre_tool_use_and_stop_hooks_fire() {
+fn role_def_pre_tool_use_and_session_start_hooks_fire() {
     let rd_lead = TestDomain::role_def(TestRole::Lead);
-    let rd_rev = TestDomain::role_def(TestRole::Reviewer);
     let caps = TestCaps;
     let input = HookInput {
         tool_name: ToolName::new("echo".into()).unwrap(),
@@ -329,17 +317,6 @@ fn role_def_pre_tool_use_and_stop_hooks_fire() {
 
     let decision = block_on((rd_lead.pre_tool_use)(&caps, &input));
     assert_eq!(decision, HookDecision::Allow);
-
-    let stop_lead = block_on((rd_lead.stop)(&caps));
-    assert_eq!(stop_lead, StopDecision::Allow);
-
-    let stop_rev = block_on((rd_rev.stop)(&caps));
-    assert_eq!(
-        stop_rev,
-        StopDecision::Block {
-            reason: Reason::new("blocked".into()).unwrap(),
-        }
-    );
 
     let session = block_on((rd_lead.session_start)(&caps));
     assert_eq!(session, SessionStartOutput::default());

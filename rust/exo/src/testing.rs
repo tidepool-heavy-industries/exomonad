@@ -81,8 +81,12 @@ pub struct MockRuntime {
     pub is_clean: bool,
     /// What [`Git::is_ahead_of`] returns. Default `false` (no unsubmitted commits).
     pub is_ahead: bool,
-    /// What [`ChildLiveness::any_child_busy`] returns. Default `true` (a working child → the
-    /// subtree-idle gate treats the node as busy); set `false` to model a quiescent subtree.
+    /// What [`Git::is_behind`] returns. Default `false` (branch up-to-date with its parent, so the
+    /// rebase gate passes). Set `true` to model a parent that advanced past the fork point.
+    pub is_behind: bool,
+    /// What [`ChildLiveness::any_child_busy`] returns — a canned stand-in for "does any direct
+    /// child have a live pane" (the cap is a live tmux probe in production; this mock just returns
+    /// the configured value). Default `true`; set `false` to model a quiescent subtree.
     pub child_busy: bool,
     /// If set, the named cap method returns its `*Error` instead of the happy path. Keyed by
     /// a short op label (e.g. "merge") so a test can exercise error branches.
@@ -101,6 +105,7 @@ impl Default for MockRuntime {
             fork_point: None,
             is_clean: true,
             is_ahead: false,
+            is_behind: false,
             child_busy: true,
             fail: Mutex::new(None),
         }
@@ -165,6 +170,15 @@ impl Git for MockRuntime {
             });
         }
         Ok(self.is_ahead)
+    }
+    async fn is_behind(&self, _base: &str) -> Result<bool, GitError> {
+        if self.should_fail("is_behind") {
+            return Err(GitError::Failed {
+                op: "is_behind",
+                detail: "mock forced failure".into(),
+            });
+        }
+        Ok(self.is_behind)
     }
     async fn fetch(&self) -> Result<(), GitError> {
         if self.should_fail("fetch") {

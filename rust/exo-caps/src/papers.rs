@@ -90,6 +90,13 @@ pub struct NodePapers {
     /// still parse correctly — they are always worktree nodes.
     #[serde(default = "default_kind")]
     pub kind: ChildKind,
+    /// Whether `submit_branch` should spawn a reviewer at all. Inherited down the tree exactly
+    /// like `yolo`/`wrap_nix` — a spawning node stamps its own value onto each child's papers.
+    /// Defaults to `false`: reviewers are not yet a fully-cooked feature (see the abandonment-
+    /// timeout / nested-teardown history in `rust/exo/CLAUDE.md`), so a project opts in via
+    /// `.exo/config.toml`'s `review_enabled = true` rather than getting them by default.
+    #[serde(default = "default_review_enabled")]
+    pub review_enabled: bool,
 }
 
 fn default_papers_version() -> u32 {
@@ -108,6 +115,10 @@ fn default_kind() -> ChildKind {
     ChildKind::Worktree
 }
 
+fn default_review_enabled() -> bool {
+    NodePapers::DEFAULT_REVIEW_ENABLED
+}
+
 impl NodePapers {
     pub const VERSION: u32 = 1;
     /// Behavior-preserving launch defaults: node children launch yolo + non-nix-wrapped,
@@ -115,9 +126,13 @@ impl NodePapers {
     /// spawner's fallback when a node has no readable papers.
     pub const DEFAULT_YOLO: bool = true;
     pub const DEFAULT_WRAP_NIX: bool = false;
+    /// Reviewers are opt-in, not a fully-cooked default — see the field doc on `review_enabled`.
+    pub const DEFAULT_REVIEW_ENABLED: bool = false;
 
     /// Construct papers for a node being born (`v` set to the current [`VERSION`]). The role is
-    /// recorded erased; `yolo` / `wrap_nix` are the launch policy stamped onto the child.
+    /// recorded erased; `yolo` / `wrap_nix` / `review_enabled` are the launch policy stamped onto
+    /// the child.
+    #[allow(clippy::too_many_arguments)]
     pub fn new<R: RoleKind>(
         path: NodePath,
         branch: Branch,
@@ -126,6 +141,7 @@ impl NodePapers {
         parent_inbox: Option<InboxPath>,
         yolo: bool,
         wrap_nix: bool,
+        review_enabled: bool,
     ) -> CapResult<Self> {
         Ok(NodePapers {
             v: Self::VERSION,
@@ -137,6 +153,7 @@ impl NodePapers {
             yolo,
             wrap_nix,
             kind: ChildKind::Worktree,
+            review_enabled,
         })
     }
 
@@ -153,6 +170,7 @@ impl NodePapers {
             None,
             Self::DEFAULT_YOLO,
             Self::DEFAULT_WRAP_NIX,
+            Self::DEFAULT_REVIEW_ENABLED,
         )
     }
 }
@@ -202,6 +220,7 @@ mod tests {
             )),
             NodePapers::DEFAULT_YOLO,
             NodePapers::DEFAULT_WRAP_NIX,
+            NodePapers::DEFAULT_REVIEW_ENABLED,
         )
         .unwrap();
         let json = serde_json::to_string(&papers).unwrap();
@@ -226,6 +245,8 @@ mod tests {
         assert_eq!(papers.role.typed::<TestRole>().unwrap(), TestRole::Root);
         // `kind` is absent from older papers — defaults to Worktree (back-compat).
         assert_eq!(papers.kind, ChildKind::Worktree);
+        // `review_enabled` is absent from older papers — defaults to off.
+        assert_eq!(papers.review_enabled, NodePapers::DEFAULT_REVIEW_ENABLED);
     }
 
     #[test]

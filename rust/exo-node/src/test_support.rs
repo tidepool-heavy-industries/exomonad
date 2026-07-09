@@ -5,8 +5,8 @@
 
 use exo_caps::{AgentName, AgentType, CapResult, ChildKind, Persona, RoleKind, SpawnSpec};
 use exo_framework::{
-    BoxFuture, Exomonad, HookDecision, HookInput, RoleDef, SessionStartOutput, StopDecision,
-    SystemCtx, SystemOutcome,
+    BoxFuture, Exomonad, HookDecision, HookInput, RoleDef, SessionStartOutput, SystemCtx,
+    SystemOutcome,
 };
 use exo_runtime::Runtime;
 use serde::{Deserialize, Serialize};
@@ -63,10 +63,6 @@ pub(crate) fn test_pre_tool_use<'a>(
     Box::pin(async { HookDecision::Allow })
 }
 
-pub(crate) fn test_stop(_: &Runtime) -> BoxFuture<'_, StopDecision> {
-    Box::pin(async { StopDecision::Allow })
-}
-
 pub(crate) fn test_session_start(_: &Runtime) -> BoxFuture<'_, SessionStartOutput> {
     Box::pin(async { SessionStartOutput::default() })
 }
@@ -75,7 +71,6 @@ pub(crate) fn test_role_def(_kind: TestRole) -> RoleDef<Runtime> {
     RoleDef {
         tools: vec![],
         pre_tool_use: test_pre_tool_use,
-        stop: test_stop,
         session_start: test_session_start,
     }
 }

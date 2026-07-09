@@ -15,8 +15,10 @@ const PAPERS_FLAG: &str = "--papers";
 
 /// CC hook events the node wires, in the order the spawner emits them.
 /// Each must match a `HookEventType` `value_enum` rendering.
+///
+/// There used to be a `STOP` const here too — a node's settings no longer register a `Stop` hook
+/// (see `rust/exo/CLAUDE.md` for why).
 pub const PRE_TOOL_USE: &str = "pre-tool-use";
-pub const STOP: &str = "stop";
 pub const SESSION_START: &str = "session-start";
 
 /// MCP sidecar args for a child's `.mcp.json` (the `"command"` is [`BIN`]):

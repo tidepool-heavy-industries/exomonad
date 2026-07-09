@@ -17,11 +17,12 @@
 //!   (object-safe runtime) + [`tool`](tool::tool) roster constructor + JSON-edge helpers +
 //!   [`ToolOutput`](tool::ToolOutput). No per-tool adapter, no macro.
 //! - [`caps`] — the [`PolicyCaps`](caps::PolicyCaps) static bound-union for the dispatch boundary.
-//! - [`hooks`] — the decision enums (`pre_tool_use` nudges, `stop` clean-gate, `session_start`).
+//! - [`hooks`] — the decision enums (`pre_tool_use` nudges, `session_start`).
 //! - [`roles`] — [`RoleDef<R>`](roles::RoleDef) + the hook fn-pointer type aliases.
 //! - [`exomonad`] — the [`Exomonad`](exomonad::Exomonad) trait: the engine as generic machinery
-//!   over a domain TYPE (four associated types + `role_def` + `handle_system`). The seam traits its
-//!   associated types are bound by ([`RoleKind`](exo_caps::RoleKind) etc.) live in `exo-caps`.
+//!   over a domain TYPE (four associated types + `role_def` + `handle_system` + `handle_tick`). The
+//!   seam traits its associated types are bound by ([`RoleKind`](exo_caps::RoleKind) etc.) live in
+//!   `exo-caps`.
 
 pub mod caps;
 pub mod exomonad;
@@ -31,6 +32,6 @@ pub mod tool;
 
 pub use caps::PolicyCaps;
 pub use exomonad::{Exomonad, SystemCtx, SystemOutcome};
-pub use hooks::{HookDecision, HookInput, SessionStartOutput, StopDecision};
-pub use roles::{PreToolUseFn, RoleDef, SessionStartFn, StopFn};
+pub use hooks::{HookDecision, HookInput, SessionStartOutput};
+pub use roles::{PreToolUseFn, RoleDef, SessionStartFn};
 pub use tool::{ok_json, parse, schema_json, tool, BoxFuture, ErasedTool, Tool, ToolOutput};

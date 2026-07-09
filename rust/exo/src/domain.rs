@@ -9,10 +9,11 @@
 //! [`role_def`](exo::role_def) and [`handle_review_system`](exo::handle_review_system) — lives in
 //! the lib and is unit-tested there against mocks.
 
-use exo::{handle_review_system, role_def, ExoRole, ExoSpawn, ReviewSystem};
+use exo::{handle_review_system, handle_review_tick, role_def, ExoRole, ExoSpawn, ReviewSystem};
 use exo_caps::{CapResult, Persona};
 use exo_framework::{BoxFuture, Exomonad, RoleDef, SystemCtx, SystemOutcome};
 use exo_runtime::Runtime;
+use std::time::Duration;
 
 /// The `exo` domain — the ZST the binary instantiates the engine at.
 pub struct ExoDomain;
@@ -33,5 +34,18 @@ impl Exomonad for ExoDomain {
         system: &'a ReviewSystem,
     ) -> BoxFuture<'a, CapResult<SystemOutcome>> {
         Box::pin(handle_review_system(ctx, from, system))
+    }
+
+    fn handle_tick<'a>(
+        caps: &'a Runtime,
+        role: ExoRole,
+        elapsed: Duration,
+    ) -> BoxFuture<'a, CapResult<()>> {
+        Box::pin(async move {
+            if role == ExoRole::Reviewer {
+                handle_review_tick(caps, elapsed).await?;
+            }
+            Ok(())
+        })
     }
 }

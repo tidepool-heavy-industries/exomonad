@@ -41,25 +41,6 @@ fn test_hook_decision_roundtrip() {
 }
 
 #[test]
-fn test_stop_decision_roundtrip() {
-    let variants = [
-        StopDecision::Allow,
-        StopDecision::Block {
-            reason: Reason::new("dirty".into()).unwrap(),
-        },
-    ];
-    for v in variants {
-        assert_roundtrip(&v);
-    }
-
-    // Tag pinning
-    assert_eq!(
-        serde_json::to_value(&StopDecision::Allow).unwrap(),
-        json!({"decision": "allow"})
-    );
-}
-
-#[test]
 fn test_session_start_output_roundtrip() {
     let s1 = SessionStartOutput {
         additional_context: None,

@@ -431,8 +431,8 @@ pub enum MessageKind {
     /// lifecycle (exomonad-internal) — see `ControlKind`.
     Control(ControlKind),
     /// An **engine-owned lifecycle signal** ([`Lifecycle`]) — the closed, typed set the sidecar
-    /// acts on itself (`mark_child_idle` / `try_reap` / the shutdown matrix). Never rendered to the
-    /// LLM except as the handler decides. Typed because the engine owns the variant set.
+    /// acts on itself (`try_reap` / the shutdown matrix). Never rendered to the LLM except as the
+    /// handler decides. Typed because the engine owns the variant set.
     Lifecycle(Lifecycle),
     /// A **domain-opaque inter-node payload** — a domain's [`DomainSystem`](crate::DomainSystem)
     /// erased to raw JSON, so a tool that emits one needs only `C: Bus` (least-privilege intact: a
@@ -483,17 +483,19 @@ pub enum ShutdownStatus {
 }
 
 /// Engine-owned **lifecycle** signals — the closed, typed set of node-to-node control signals the
-/// sidecar acts on *itself* (mark a child idle, reap on exit, render a shutdown reply), distinct
-/// from a domain's [`DomainSystem`](crate::DomainSystem) payload. Carried by
-/// [`MessageKind::Lifecycle`]; the engine matches it exhaustively, so a domain cannot add a
-/// lifecycle variant (the documented IoC — lifecycle is the engine's concern). Serde-tagged on
-/// `type`, tolerant of unknown fields.
+/// sidecar acts on *itself* (reap on exit, render a shutdown reply), distinct from a domain's
+/// [`DomainSystem`](crate::DomainSystem) payload. Carried by [`MessageKind::Lifecycle`]; the engine
+/// matches it exhaustively, so a domain cannot add a lifecycle variant (the documented IoC —
+/// lifecycle is the engine's concern). Serde-tagged on `type`, tolerant of unknown fields.
+///
+/// There used to be a `ChildIdle` variant here (sent when a node's Stop hook fired) — it was
+/// removed along with the rest of the Stop-hook machinery (see `rust/exo/CLAUDE.md`): `Stop` fires
+/// on every turn-end, including a node legitimately yielding to wait on a backgrounded async task,
+/// so the busy-bit it fed was routinely wrong. Liveness is now read directly off pane existence
+/// (`ChildLiveness`), not derived from this wire.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Lifecycle {
-    /// A node finished a turn and is yielding control (its stop hook fired). The envelope's
-    /// stamped `from` says which node; `summary` is a short human note the parent may render.
-    ChildIdle { summary: Summary },
     /// A node is about to reap itself (its shutdown completed and its subtree is clear). Sent to
     /// its parent just before it kills its own pane — the authoritative "this child is gone".
     ChildExited { reason: String },

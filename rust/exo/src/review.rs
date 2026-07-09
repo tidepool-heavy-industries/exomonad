@@ -8,10 +8,14 @@
 //! itself — tearing down the one-shot reviewer — is returned as [`SystemOutcome::ReclaimSender`] for
 //! the engine to perform (the engine owns `kill_pane`/`reclaim_worktree`).
 
-use exo_caps::{Branch, CapResult, Message, MessageBody, MessageKind, Persona, Summary};
+use exo_caps::{
+    deliver_domain, Addressee, Branch, Bus, CapResult, Kv, Message, MessageBody, MessageKind,
+    Persona, Summary,
+};
 use exo_framework::{SystemCtx, SystemOutcome};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// The severity of a review finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -234,13 +238,72 @@ pub async fn handle_review_system<C: SystemCtx + ?Sized>(
                 "reviewer",
                 "[REVIEW]",
                 &format!(
-                    "[REVIEW ABORTED] Your reviewer exited without producing a verdict ({reason}). No approval was recorded — re-run `submit_branch` to spawn a fresh reviewer."
+                    "[REVIEW ABORTED] Your reviewer exited without producing a verdict ({reason}). \
+                     No approval was recorded. Do NOT spawn another reviewer — it's likely to hit the \
+                     same wall. Just re-run `submit_branch` with `dangerously_skip_reviewer: true` \
+                     this time and let your parent decide."
                 ),
             )
             .await?;
             Ok(SystemOutcome::ReclaimSender)
         }
     }
+}
+
+/// Wall-clock abandonment timeout for a reviewer that never produces a `verdict` (crashed, its
+/// session died mid-turn, or — rare — emitted the call as prose). Deliberately NOT driven by Claude
+/// Code's `Stop` hook: `Stop` fires on every turn-end, including a reviewer legitimately yielding to
+/// wait on a backgrounded build, so it can't tell "abandoned" from "paused" (see the tidepool
+/// forensics this replaces — a reviewer got killed ~1s into a `cargo build` wait, three times in a
+/// row, on the same branch). Called by the sidecar's watchdog loop on a fixed interval, reviewer
+/// nodes only (the caller — `ExoDomain::handle_tick` — gates on role). 30 minutes, not 15: the
+/// reviewer task prompt (`submit_branch`) now tells reviewers to read the diff only and never run
+/// the build/test suite, but the margin still needs to absorb a reviewer that ignores that and
+/// legitimately runs a slow command once.
+pub const REVIEW_ABANDON_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+/// KV flag set once the abandonment verdict has been delivered, so a reviewer slow to actually reap
+/// doesn't re-deliver `ReviewAborted` on every subsequent tick.
+const REVIEW_ABANDON_SENT: &str = "review_abandon_sent";
+
+/// No-op until `elapsed` clears [`REVIEW_ABANDON_TIMEOUT`], no-op if a verdict was already produced,
+/// no-op if already delivered once. Otherwise delivers the same `ReviewAborted` the old Stop-hook
+/// gate used to send on a bare turn-end — the parent-side handling above (`ReviewAborted` arm) is
+/// unchanged: it wakes the submitter and the engine tears the reviewer's pane+worktree down via
+/// `SystemOutcome::ReclaimSender`. No self-reap logic needed here.
+pub async fn handle_review_tick<C: Bus + Kv + Send + Sync>(
+    ctx: &C,
+    elapsed: Duration,
+) -> CapResult<()> {
+    if elapsed < REVIEW_ABANDON_TIMEOUT {
+        return Ok(());
+    }
+    if matches!(
+        ctx.get(crate::tools::verdict::VERDICT_PRODUCED).await,
+        Ok(Some(_))
+    ) {
+        return Ok(());
+    }
+    if matches!(ctx.get(REVIEW_ABANDON_SENT).await, Ok(Some(_))) {
+        return Ok(());
+    }
+
+    let verdict = ReviewSystem::ReviewAborted {
+        reason: format!(
+            "no verdict after {}s — reviewer likely stuck or abandoned",
+            REVIEW_ABANDON_TIMEOUT.as_secs()
+        ),
+    };
+    deliver_domain(
+        ctx,
+        Addressee::Parent,
+        "[review aborted]",
+        "reviewer produced no verdict within the abandonment timeout",
+        &verdict,
+    )
+    .await?;
+    let _ = ctx.set(REVIEW_ABANDON_SENT, "true").await;
+    Ok(())
 }
 
 /// Renders a structured list of findings into a human-readable string.
@@ -534,5 +597,58 @@ mod tests {
         assert_eq!(safe_branch("root.dev-0"), "root.dev-0");
         assert_eq!(safe_branch("root/dev-0"), "root-dev-0");
         assert_eq!(safe_branch("root.feat/bug"), "root.feat-bug");
+    }
+
+    // --- handle_review_tick (wall-clock abandonment, not Stop-hook-driven) ---
+
+    fn delivered_review_aborted(calls: &[crate::testing::Call]) -> bool {
+        calls.iter().any(|c| {
+            matches!(c, crate::testing::Call::BusDeliver { to: Addressee::Parent, msg }
+                if matches!(&msg.kind, MessageKind::Domain(p)
+                    if matches!(serde_json::from_str::<ReviewSystem>(&p.0),
+                        Ok(ReviewSystem::ReviewAborted { .. }))))
+        })
+    }
+
+    #[tokio::test]
+    async fn tick_before_timeout_is_noop() {
+        let mock = crate::testing::MockRuntime::default();
+        handle_review_tick(&mock, Duration::from_secs(1)).await.unwrap();
+        assert!(!delivered_review_aborted(&mock.calls_made()));
+    }
+
+    #[tokio::test]
+    async fn tick_after_timeout_with_verdict_is_noop() {
+        let mock = crate::testing::MockRuntime::default();
+        mock.set(crate::tools::verdict::VERDICT_PRODUCED, "true")
+            .await
+            .unwrap();
+        handle_review_tick(&mock, REVIEW_ABANDON_TIMEOUT).await.unwrap();
+        assert!(!delivered_review_aborted(&mock.calls_made()));
+    }
+
+    #[tokio::test]
+    async fn tick_after_timeout_without_verdict_delivers_aborted_once() {
+        let mock = crate::testing::MockRuntime::default();
+        handle_review_tick(&mock, REVIEW_ABANDON_TIMEOUT).await.unwrap();
+        assert!(delivered_review_aborted(&mock.calls_made()));
+        assert_eq!(
+            mock.kv.lock().unwrap().get(REVIEW_ABANDON_SENT).map(String::as_str),
+            Some("true")
+        );
+
+        // A second tick must not re-deliver.
+        handle_review_tick(&mock, REVIEW_ABANDON_TIMEOUT * 2)
+            .await
+            .unwrap();
+        let deliveries = mock
+            .calls_made()
+            .iter()
+            .filter(|c| {
+                matches!(c, crate::testing::Call::BusDeliver { to: Addressee::Parent, msg }
+                    if matches!(&msg.kind, MessageKind::Domain(_)))
+            })
+            .count();
+        assert_eq!(deliveries, 1, "must not re-deliver ReviewAborted on a later tick");
     }
 }

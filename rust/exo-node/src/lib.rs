@@ -25,6 +25,7 @@ pub mod hook;
 pub mod hooksock;
 pub mod inbound;
 pub mod outbound;
+pub mod watchdog;
 
 #[cfg(test)]
 mod test_support;
@@ -45,6 +46,9 @@ use std::sync::Arc;
 /// - **inbound** ([`inbound::watch`]) — watch the ingestion inbox (cursor + notify) and route
 ///   each entry; ends on a `Control(Shutdown)`.
 /// - **hooksock** ([`hooksock::serve`]) — background hook-RPC socket (N5); also aborted when serve returns.
+/// - **watchdog** ([`watchdog::watch`]) — periodic wall-clock self-check (domain abandonment
+///   timeouts via `Exomonad::handle_tick`, plus cooperative-shutdown reap retry); also aborted when
+///   serve returns.
 ///
 /// The background loops are aborted when `serve` returns. `Arc<NodeContext>` satisfies the
 /// `R: Send + Sync + 'static` dispatch boundary. A background loop erroring is logged but does
@@ -69,6 +73,17 @@ pub async fn run_node<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> 
         }
     });
 
+    // Watchdog — periodic wall-clock self-check (domain abandonment timeouts + cooperative-shutdown
+    // reap retry). Replaces Stop-hook-triggered decisions, which can't tell "done" from "paused".
+    let watchdog = tokio::spawn({
+        let ctx = ctx.clone();
+        async move {
+            if let Err(e) = watchdog::watch(ctx).await {
+                tracing::error!("watchdog loop exited with error: {e}");
+            }
+        }
+    });
+
     // Periodic status publisher — writes the node's status snapshot to disk for visibility.
     let status = tokio::spawn({
         let ctx = ctx.clone();
@@ -85,7 +100,8 @@ pub async fn run_node<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> 
                 let shutdown_pending = ctx.shutdown_pending.lock().unwrap().is_some();
                 let snapshot = ctx
                     .runtime
-                    .status_snapshot(ctx.kind.role_str(), shutdown_pending);
+                    .status_snapshot(ctx.kind.role_str(), shutdown_pending)
+                    .await;
                 if let Ok(bytes) = serde_json::to_vec(&snapshot) {
                     if let Err(e) =
                         exo_caps::Fs::write_atomic(&*ctx.runtime, &status_path, &bytes).await
@@ -104,6 +120,7 @@ pub async fn run_node<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> 
     inbound.abort();
     hooksock.abort();
     status.abort();
+    watchdog.abort();
 
     result
 }

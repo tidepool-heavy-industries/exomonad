@@ -39,18 +39,18 @@ pub async fn write_node_agent_config(
 
     // 2. CC node-mode hooks (loaded via `claude --settings <settings_path>`, merged over the cwd's).
     let p_str = esc(&papers_path.to_string_lossy());
-    use exo_caps::invocation::{hook_command, PRE_TOOL_USE, SESSION_START, STOP};
-    // The Stop hook is a local convergence gate (reads `git status`); no GitHub token needed.
-    // PreToolUse + Stop route to the sidecar's hook socket via the thin client; SessionStart
-    // stays one-shot in-process.
+    use exo_caps::invocation::{hook_command, PRE_TOOL_USE, SESSION_START};
+    // PreToolUse routes to the sidecar's hook socket via the thin client; SessionStart stays
+    // one-shot in-process. There used to be a `Stop` hook registered here too (Claude Code's
+    // `Stop` event, a local convergence gate reading `git status`). It was removed: `Stop` fires on
+    // every turn-end, including a node legitimately yielding to wait on a backgrounded async task,
+    // so it can't distinguish "genuinely done" from "paused" — see `rust/exo/CLAUDE.md`. A node's
+    // settings no longer mention Stop at all, so CC never invokes it.
     let settings = serde_json::json!({
         "hooks": {
             "PreToolUse": [{
                 "matcher": "*",
                 "hooks": [{"type": "command", "command": hook_command(PRE_TOOL_USE, &p_str)}]
-            }],
-            "Stop": [{
-                "hooks": [{"type": "command", "command": hook_command(STOP, &p_str)}]
             }],
             "SessionStart": [{
                 "hooks": [{"type": "command", "command": hook_command(SESSION_START, &p_str)}]

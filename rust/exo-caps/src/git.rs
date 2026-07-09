@@ -34,6 +34,11 @@ pub trait Git {
     /// True if HEAD has commits that `base` does not. `Ok(false)` when the base ref does not
     /// resolve or any git error occurs (fail-open — never block a stop on a bad base).
     async fn is_ahead_of(&self, base: &str) -> Result<bool, GitError>;
+    /// True if `base` has commits that HEAD does not — i.e. `base` advanced past this branch's
+    /// fork point, so the branch should be rebased onto it before it's submitted for merge.
+    /// `Ok(false)` when the base ref does not resolve or any git error occurs (fail-open — a
+    /// parent branch that isn't a live ref, e.g. the root's `root`, must never block a submit).
+    async fn is_behind(&self, base: &str) -> Result<bool, GitError>;
     async fn fetch(&self) -> Result<(), GitError>;
     /// Merge `branch` into the current branch (the local fold; no remote). Non-interactive.
     async fn merge(&self, branch: &Branch) -> Result<(), GitError>;

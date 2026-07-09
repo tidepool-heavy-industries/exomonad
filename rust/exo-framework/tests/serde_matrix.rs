@@ -1,5 +1,5 @@
 use exo_caps::Reason;
-use exo_framework::{HookDecision, HookInput, SessionStartOutput, StopDecision, ToolOutput};
+use exo_framework::{HookDecision, HookInput, SessionStartOutput, ToolOutput};
 use serde_json::{json, Value};
 
 #[test]
@@ -24,26 +24,6 @@ fn hook_decision_round_trip() {
         let j = serde_json::to_value(&val).unwrap();
         assert_eq!(j, expected);
         let back: HookDecision = serde_json::from_value(j).unwrap();
-        assert_eq!(back, val);
-    }
-}
-
-#[test]
-fn stop_decision_round_trip() {
-    let cases = vec![
-        (StopDecision::Allow, json!({ "decision": "allow" })),
-        (
-            StopDecision::Block {
-                reason: Reason::new("wait".into()).unwrap(),
-            },
-            json!({ "decision": "block", "reason": "wait" }),
-        ),
-    ];
-
-    for (val, expected) in cases {
-        let j = serde_json::to_value(&val).unwrap();
-        assert_eq!(j, expected);
-        let back: StopDecision = serde_json::from_value(j).unwrap();
         assert_eq!(back, val);
     }
 }

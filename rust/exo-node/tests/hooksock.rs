@@ -61,19 +61,6 @@ async fn hook_rpc_round_trips_over_uds() {
     }
     assert!(sock.exists(), "server never bound {}", sock.display());
 
-    // Stop: Root → stop_allow → Allow → Claude allow shape.
-    let v = hooksock::client_request(
-        "root",
-        &sock,
-        &HookRequest {
-            event: HookEvent::Stop,
-            stdin_json: "{}".into(),
-        },
-    )
-    .await
-    .expect("stop round-trip");
-    assert_eq!(v.stdout, r#"{"continue":true}"#);
-
     // PreToolUse on a shell call → the injected gate's `Deny`, shaped for Claude as a nudge
     // (continue + systemMessage). Asserts the transport's `Deny → nudge` shaping; the concrete
     // antipattern rules are unit-tested in `exo`.

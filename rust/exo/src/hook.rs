@@ -35,10 +35,11 @@ pub async fn run(event: HookEventType, papers: std::path::PathBuf) -> Result<()>
         return Ok(());
     }
 
-    // All other hooks route to the sidecar over its per-agent socket.
+    // All other hooks route to the sidecar over its per-agent socket. `Stop` is deliberately
+    // unhandled: a node's settings never register it anymore (see `exo-runtime::node_config`), so
+    // this arm only exists for a stale settings file — fail open, same as any other unhandled event.
     let hook_event = match event {
         HookEventType::PreToolUse => exo_caps::HookEvent::PreToolUse,
-        HookEventType::Stop => exo_caps::HookEvent::Stop,
         other => {
             eprintln!("[exo] node hook: unhandled event {other:?}, passing through");
             print!("{}", fail_open_shape(&papers));

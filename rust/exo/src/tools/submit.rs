@@ -11,12 +11,9 @@
 use crate::branching::{child_name, parent_branch};
 use crate::roles::ExoRole;
 use crate::spawn::ExoSpawn;
-
-/// KV flag set when `submit_branch` runs this session; read by the stop gate.
-pub(crate) const SUBMIT_BRANCH_CALLED: &str = "submit_branch_called";
 use exo_caps::{
     Addressee, Bus, CapError, CapResult, ChildKind, Fs, Git, Kv, Message, MessageBody, MessageKind,
-    Process, Spawner, Summary,
+    NodePapers, Process, Spawner, Summary,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -64,6 +61,44 @@ fn committed<C: Git + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), String>> {
                     .into(),
             ),
             Err(e) => Err(format!("could not read git status: {e}")),
+        }
+    })
+}
+
+/// Rebase gate: refuse to submit a branch that's behind its parent's current commit. In the
+/// fold-up model a parent merges children *sequentially*, so a sibling submitting after an earlier
+/// sibling was already merged is now behind the parent branch — and the parent's `git merge` of it
+/// would conflict, forcing the parent to hand-resolve (violating "the TL never touches child
+/// code"). Push the update to the child, which has the most context: prompt it to rebase onto the
+/// parent's current commit and re-submit, so the parent's eventual merge is trivial. Fails open —
+/// an unresolvable parent name (a direct child of root derives `root`, which is never a live git
+/// branch) reads as "not behind" via `Git::is_behind`, never a block.
+fn needs_rebase<C: Git + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), String>> {
+    Box::pin(async move {
+        let branch = match ctx.current_branch().await {
+            Ok(b) => b,
+            // Can't read our own branch → skip the gate (fail-open, never wedge a submit).
+            Err(e) => {
+                tracing::warn!("rebase gate: current_branch failed, skipping: {e}");
+                return Ok(());
+            }
+        };
+        let parent = parent_branch(&branch);
+        match ctx.is_behind(parent).await {
+            Ok(false) => Ok(()),
+            Ok(true) => Err(format!(
+                "your branch `{branch}` is behind its parent `{parent}` (the parent advanced since \
+                 you forked — most likely a sibling was merged into it). Rebase onto the parent's \
+                 current commit before submitting, so the parent's merge of your work is clean and \
+                 conflict-free: run `git rebase {parent}`, resolve any conflicts, commit, then call \
+                 submit_branch again.",
+                branch = branch.as_str(),
+            )),
+            // A git error resolving the parent → fail-open (same posture as is_behind's own).
+            Err(e) => {
+                tracing::warn!("rebase gate: is_behind({parent}) failed, skipping: {e}");
+                Ok(())
+            }
         }
     })
 }
@@ -128,12 +163,32 @@ fn pre_merge_checks<C: Process + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), Stri
     })
 }
 
-/// The ordered precondition list. Append here to add a gate.
+/// Whether this node's tree has reviewers turned on — `.exo/node.json`'s `review_enabled`,
+/// inherited down the tree from the root's config (see `exo-runtime`'s `own_launch_policy`, which
+/// stamps the same field onto every child's papers at birth). Fails safe: any read/parse error
+/// (missing file, corrupt JSON, pre-field papers) defaults to the same off-by-default posture as
+/// the flag itself — reviewers are opt-in, never assumed.
+async fn own_review_enabled<C: Fs + Sync>(ctx: &C) -> bool {
+    match ctx.read(std::path::Path::new(".exo/node.json")).await {
+        Ok(bytes) => serde_json::from_slice::<NodePapers>(&bytes)
+            .map(|p| p.review_enabled)
+            .unwrap_or(NodePapers::DEFAULT_REVIEW_ENABLED),
+        Err(_) => NodePapers::DEFAULT_REVIEW_ENABLED,
+    }
+}
+
+/// The ordered precondition list. Append here to add a gate. Order matters: `committed` first (a
+/// clean tree is a precondition for a sane rebase check), then `needs_rebase` (don't waste a review
+/// / forward a stale `[READY]` on a branch that must be rebased first), then the project's scripts.
 fn checks<C: Git + Process + Sync>() -> Vec<Check<C>> {
     vec![
         Check {
             name: "committed",
             run: committed::<C>,
+        },
+        Check {
+            name: "needs_rebase",
+            run: needs_rebase::<C>,
         },
         Check {
             name: "pre_merge_checks",
@@ -149,13 +204,16 @@ pub struct SubmitBranch;
 impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for SubmitBranch {
     const NAME: &'static str = "submit_branch";
     const DESCRIPTION: &'static str =
-        "Request review of your branch. Commit everything first (it refuses on uncommitted changes \
-         or failing `.exo/checks/pre-merge` scripts), then it spawns a reviewer of your work and \
-         returns. Do NOT expect to merge yourself: on approval the sidecar escalates `[READY]` to \
-         your parent automatically; on deny / changes you'll be woken with feedback to address and \
-         re-submit. Set `dangerously_skip_reviewer: true` ONLY for a trivial/safe change to skip \
-         review and forward `[READY]` straight to your parent (it's flagged as unreviewed; not \
-         auto-merged). After calling it, STOP and end your turn.";
+        "Request review of your branch (if reviewers are enabled for this project — see \
+         `review_enabled` in `.exo/config.toml`; off by default). Commit everything first: it \
+         refuses on uncommitted changes, on a branch that's behind its parent (it'll tell you to \
+         `git rebase` onto the parent first, so the parent's merge stays clean), or on failing \
+         `.exo/checks/pre-merge` scripts. When reviewers are enabled, it spawns a reviewer of your \
+         work and returns — do NOT expect to merge yourself: on approval the sidecar escalates \
+         `[READY]` to your parent automatically; on deny / changes you'll be woken with feedback to \
+         address and re-submit. Set `dangerously_skip_reviewer: true` to force-skip review even when \
+         reviewers are enabled (only for a trivial/safe change) — forwards `[READY]` straight to \
+         your parent, flagged as unreviewed. After calling it, STOP and end your turn.";
     type Args = SubmitBranchArgs;
 
     async fn run(ctx: &R, args: SubmitBranchArgs) -> CapResult<ToolOutput> {
@@ -174,33 +232,49 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
         let branch = ctx.current_branch().await?;
         let sha = ctx.head_sha().await?;
 
-        // Escape hatch: skip the reviewer and forward `[READY]` straight to the parent — loudly
-        // flagged as unreviewed. It is NOT auto-merged; the parent still decides (and is told to
-        // be suspicious). The structural gate holds by default; only this explicit opt-out bypasses it.
-        if args.dangerously_skip_reviewer {
-            let text = format!(
-                "[READY — REVIEWER SKIPPED] branch `{}` @ {} is committed and ready for you to \
-                 merge. The submitting node chose to skip review (dangerously_skip_reviewer): NO \
-                 reviewer vetted this. Inspect the diff yourself before merging — be more suspicious \
-                 than usual. Note from the submitter: {}",
-                branch.as_str(),
-                sha,
-                args.note
-            );
+        // Two ways to end up here: the agent explicitly opted out (loud, "dangerous"), or this
+        // project simply doesn't have reviewers turned on (quiet, the normal off-by-default case —
+        // reviewers aren't a fully-cooked feature yet; see `rust/exo/CLAUDE.md`). Either way the gate
+        // stays structural: the LLM has no tool that can fabricate a `[READY]` other than through
+        // this one path, and a config-disabled project is told so plainly, not scared into
+        // suspicion for something the project chose.
+        let reviewer_configured = own_review_enabled(ctx).await;
+        if args.dangerously_skip_reviewer || !reviewer_configured {
+            let text = if args.dangerously_skip_reviewer {
+                format!(
+                    "[READY — REVIEWER SKIPPED] branch `{}` @ {} is committed and ready for you to \
+                     merge. The submitting node chose to skip review (dangerously_skip_reviewer): NO \
+                     reviewer vetted this. Inspect the diff yourself before merging — be more suspicious \
+                     than usual. Note from the submitter: {}",
+                    branch.as_str(),
+                    sha,
+                    args.note
+                )
+            } else {
+                format!(
+                    "[READY] branch `{}` @ {} is committed and ready for you to merge. Reviewers are \
+                     disabled for this project (set `review_enabled = true` in `.exo/config.toml` to \
+                     turn them on) — this was not reviewed. Note from the submitter: {}",
+                    branch.as_str(),
+                    sha,
+                    args.note
+                )
+            };
+            let summary = if args.dangerously_skip_reviewer {
+                format!("[READY skipped] {}", branch.as_str())
+            } else {
+                format!("[READY] {}", branch.as_str())
+            };
             let msg = Message {
                 text: MessageBody::new(text)?,
-                summary: Summary::new(format!("[READY skipped] {}", branch.as_str()))?,
+                summary: Summary::new(summary)?,
                 kind: MessageKind::Chat,
             };
             ctx.deliver(Addressee::Parent, msg).await?;
-            // Flag that submit_branch ran this session so the stop guard doesn't block clean exit.
-            // Best-effort — a kv failure here is not a reason to abort a successful submit.
-            // sidecar-session-scoped (in-memory Kv); a v1 backstop for the never-submitted case.
-            let _ = ctx.set(SUBMIT_BRANCH_CALLED, "true").await;
             return Ok(ToolOutput::with_data(
                 format!(
-                    "Forwarded [READY] to your parent for branch {} WITHOUT review (reviewer \
-                     skipped). Your parent will decide whether to merge. STOP now and end your turn.",
+                    "Forwarded [READY] to your parent for branch {} WITHOUT review. Your parent \
+                     will decide whether to merge. STOP now and end your turn.",
                     branch.as_str()
                 ),
                 json!({ "branch": branch.as_str(), "sha": sha, "reviewer_skipped": true }),
@@ -274,11 +348,15 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
         // (see exo-node `handle_system`). That makes the gate structural: the LLM has no tool that
         // can skip review (the explicit opt-out above is the one exception, and it's loud).
         let review_task = format!(
-            "You are a code reviewer. Review branch `{branch}` (commit {sha}). {diff_instruction}; \
-             you may build / test / experiment freely in your own worktree (changes here never touch \
-             the reviewed code). Judge the work against the ACCEPTANCE CRITERIA below and the \
-             project's conventions, then call the `verdict` tool with branch=`{branch}`, sha=`{sha}`, \
-             a high-level `summary`, and a list of structured `findings` (file, line, severity, body, suggestion). \
+            "You are a code reviewer. Review branch `{branch}` (commit {sha}). {diff_instruction}. \
+             READ ONLY: judge the diff by reading it, not by running it — do NOT run the build, the \
+             test suite, or any other long-running command. You have a wall-clock abandonment \
+             timeout (30 minutes); a cold build/test run routinely exceeds that on its own and wastes \
+             the whole review round for nothing but a compile check. If you must sanity-check a small, \
+             fast, specific thing (e.g. one unit test), keep it to seconds, not a full suite. Judge the \
+             work against the ACCEPTANCE CRITERIA below and the project's conventions, then call the \
+             `verdict` tool with branch=`{branch}`, sha=`{sha}`, a high-level `summary`, and a list of \
+             structured `findings` (file, line, severity, body, suggestion). \
              Use the following severity rubric:\n\
              - error: correctness, security, or missed spec. This BLOCKS the merge.\n\
              - warning / info / hint: non-blocking nits or suggestions.\n\
@@ -306,11 +384,6 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
         };
         let reviewer = ctx.spawn(spec).await?;
 
-        // Flag that submit_branch ran this session so the stop guard doesn't block clean exit.
-        // Best-effort — a kv failure here is not a reason to abort a successful submit.
-        // sidecar-session-scoped (in-memory Kv); a v1 backstop for the never-submitted case.
-        let _ = ctx.set(SUBMIT_BRANCH_CALLED, "true").await;
-
         Ok(ToolOutput::with_data(
             format!(
                 "Review requested for branch {branch}: reviewer `{reviewer}` spawned. STOP now — do \
@@ -331,9 +404,29 @@ mod tests {
     use crate::testing::{Call, MockRuntime};
     use exo_framework::Tool;
 
+    /// Minimal valid `NodePapers` JSON for seeding `mock.files` at `.exo/node.json` — the shape
+    /// `own_review_enabled` reads. Only `review_enabled` varies across tests; the rest is filler.
+    fn papers_json(review_enabled: bool) -> Vec<u8> {
+        format!(
+            r#"{{"path":["root","dev-node"],"branch":"dev.policy-claude","role":"dev","pane":"%1","parent_inbox":null,"review_enabled":{review_enabled}}}"#
+        )
+        .into_bytes()
+    }
+
+    /// A mock with reviewers turned on (`review_enabled: true` in its own papers) — the shared
+    /// setup for every test exercising the normal reviewer-spawn path.
+    fn mock_with_reviews_enabled() -> MockRuntime {
+        let mock = MockRuntime::default(); // is_clean = true, branch = dev.policy-claude
+        mock.files
+            .lock()
+            .unwrap()
+            .insert(".exo/node.json".to_string(), papers_json(true));
+        mock
+    }
+
     #[tokio::test]
     async fn submits_spawns_reviewer_when_clean() {
-        let mock = MockRuntime::default(); // is_clean = true, branch = dev.policy-claude
+        let mock = mock_with_reviews_enabled();
         let out = SubmitBranch::run(
             &mock,
             SubmitBranchArgs {
@@ -380,8 +473,65 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn spawns_reviewer_with_diff_instruction() {
+    async fn reviews_disabled_by_default_forwards_ready_without_spawning() {
+        // No `.exo/node.json` seeded — the real-world "config never set" case. Reviewers must be
+        // off by default (not a fully-cooked feature), so this must behave like
+        // `dangerously_skip_reviewer`, minus the "dangerous" framing.
         let mock = MockRuntime::default();
+        let out = SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "did the thing".into(),
+                dangerously_skip_reviewer: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(out.text.contains("WITHOUT review"));
+        let calls = mock.calls_made();
+        assert!(!calls.iter().any(|c| matches!(c, Call::Spawn { .. })));
+        let delivered = calls.iter().find_map(|c| match c {
+            Call::BusDeliver {
+                to: exo_caps::Addressee::Parent,
+                msg,
+            } => Some(msg),
+            _ => None,
+        });
+        let msg = delivered.expect("should forward [READY] to parent");
+        // Plain wording — no "dangerously skipped" / "be more suspicious" scare language, since
+        // this wasn't the agent's choice.
+        assert!(msg.text.as_str().contains("Reviewers are disabled for this project"));
+        assert!(!msg.text.as_str().contains("dangerously_skip_reviewer"));
+    }
+
+    #[tokio::test]
+    async fn reviews_explicitly_disabled_in_papers_forwards_ready_without_spawning() {
+        let mock = MockRuntime::default();
+        mock.files
+            .lock()
+            .unwrap()
+            .insert(".exo/node.json".to_string(), papers_json(false));
+        let out = SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "did the thing".into(),
+                dangerously_skip_reviewer: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(out.text.contains("WITHOUT review"));
+        assert!(!mock
+            .calls_made()
+            .iter()
+            .any(|c| matches!(c, Call::Spawn { .. })));
+    }
+
+    #[tokio::test]
+    async fn spawns_reviewer_with_diff_instruction() {
+        let mock = mock_with_reviews_enabled();
         SubmitBranch::run(
             &mock,
             SubmitBranchArgs {
@@ -417,6 +567,10 @@ mod tests {
             fork_point: Some("forkforkforkforkforkforkforkforkforkfork".into()),
             ..Default::default()
         };
+        mock.files
+            .lock()
+            .unwrap()
+            .insert(".exo/node.json".to_string(), papers_json(true));
         SubmitBranch::run(
             &mock,
             SubmitBranchArgs {
@@ -449,6 +603,10 @@ mod tests {
             merge_base: None,
             ..Default::default()
         };
+        mock.files
+            .lock()
+            .unwrap()
+            .insert(".exo/node.json".to_string(), papers_json(true));
         SubmitBranch::run(
             &mock,
             SubmitBranchArgs {
@@ -498,8 +656,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blocks_and_prompts_rebase_when_behind_parent() {
+        // Reviewers ON so we'd normally spawn — but the rebase gate must fire first, before either
+        // the review-spawn OR the skip-forward path.
+        let mut mock = mock_with_reviews_enabled();
+        mock.is_behind = true;
+        let res = SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "did the thing".into(),
+                dangerously_skip_reviewer: false,
+            },
+        )
+        .await;
+        let err = res.expect_err("submit must block when the branch is behind its parent");
+        let msg = err.to_string();
+        // The prompt names the gate, the parent branch (`dev`, from `dev.policy-claude`), and the fix.
+        assert!(msg.contains("needs_rebase"), "err should name the gate: {msg}");
+        assert!(msg.contains("git rebase dev"), "err should prompt the rebase: {msg}");
+        // Neither a reviewer nor a [READY] delivery happens — the gate is before both.
+        let calls = mock.calls_made();
+        assert!(!calls.iter().any(|c| matches!(c, Call::Spawn { .. })));
+        assert!(!calls.iter().any(|c| matches!(c, Call::BusDeliver { .. })));
+    }
+
+    #[tokio::test]
+    async fn behind_parent_blocks_even_with_reviewer_skipped() {
+        // The rebase gate is a precondition — it runs even when review is being skipped, since a
+        // stale branch's merge conflicts regardless of whether it was reviewed.
+        let mock = MockRuntime {
+            is_behind: true,
+            ..Default::default()
+        };
+        let res = SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "trivial".into(),
+                dangerously_skip_reviewer: true,
+            },
+        )
+        .await;
+        assert!(res.is_err());
+        assert!(!mock
+            .calls_made()
+            .iter()
+            .any(|c| matches!(c, Call::BusDeliver { .. })));
+    }
+
+    #[tokio::test]
     async fn submit_folds_prior_round_findings() {
-        let mock = MockRuntime::default();
+        let mock = mock_with_reviews_enabled();
         let safe = crate::review::safe_branch("dev.policy-claude");
         let path = format!(".exo/reviews/{safe}.json");
 

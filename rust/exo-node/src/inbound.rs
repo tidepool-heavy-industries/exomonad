@@ -268,19 +268,6 @@ impl<D: Exomonad> RealHandler<D> {
     #[tracing::instrument(skip(self, lc), fields(from = %persona_label(from), kind = "lifecycle"))]
     async fn handle_lifecycle(&self, from: &Persona, lc: &Lifecycle) -> NodeResult<()> {
         match lc {
-            // A child yielded control. Flip its busy-bit to idle (the idle gate `any_child_busy`
-            // reads this) and that's ALL — do NOT render it to this node's LLM. CC's Stop fires on
-            // every turn-end (e.g. a child pausing on a long bash command mid-task), so `[child idle]`
-            // is high-frequency noise, not a "done" signal. The meaningful signals still flow: the
-            // child's own `notify_parent`, `[READY]`, a reviewer verdict, `ChildExited`. Never tear
-            // the child down.
-            Lifecycle::ChildIdle { summary } => {
-                info!(outcome = "child_idle", summary = %summary.as_str(), "child idle — busy-bit flipped, not rendered to the LLM");
-                if let Persona::Agent(name) = from {
-                    self.ctx.runtime.mark_child_idle(name);
-                }
-                Ok(())
-            }
             // A child reaped itself (its shutdown completed). Record it in the authoritative
             // exited-set, then re-evaluate our own pending shutdown — if it was the last child, we
             // reap ourselves now (which may kill our pane and end the process).

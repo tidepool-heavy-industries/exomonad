@@ -102,6 +102,25 @@ impl Git for Runtime {
         Ok(count > 0)
     }
 
+    async fn is_behind(&self, base: &str) -> Result<bool, GitError> {
+        // Mirror of `is_ahead_of` with the range reversed: `HEAD..base` counts commits reachable
+        // from `base` but not HEAD — i.e. the parent advanced since we forked. Fail-open to
+        // `Ok(false)` when `base` doesn't resolve (e.g. the root's `root`, which is never a real
+        // git branch), so a submit is never blocked over an unresolvable parent name.
+        let Some(output) = self
+            .git_optional(&["rev-list", "--count", &format!("HEAD..{base}")])
+            .await?
+        else {
+            tracing::warn!(base = %base, "is_behind: git rev-list failed, treating as not behind");
+            return Ok(false);
+        };
+        let count: usize = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse()
+            .unwrap_or(0);
+        Ok(count > 0)
+    }
+
     async fn fetch(&self) -> Result<(), GitError> {
         self.git(&["fetch"]).await?;
         Ok(())
@@ -270,6 +289,51 @@ mod tests {
         init_repo(p);
         let rt = runtime_at(p);
         assert!(!rt.is_ahead_of("nonexistent").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn is_behind_detects_base_advanced_past_fork_point() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        // feature forks from main, then main advances (a sibling merged, say).
+        run_git(p, &["checkout", "-q", "-b", "feature"]);
+        run_git(p, &["checkout", "-q", "main"]);
+        std::fs::write(p.join("sibling.txt"), "merged\n").unwrap();
+        run_git(p, &["add", "sibling.txt"]);
+        run_git(p, &["commit", "-q", "-m", "sibling merged"]);
+        run_git(p, &["checkout", "-q", "feature"]);
+
+        let rt = runtime_at(p);
+        assert!(
+            rt.is_behind("main").await.unwrap(),
+            "feature should be behind main after main advanced"
+        );
+    }
+
+    #[tokio::test]
+    async fn is_behind_false_when_up_to_date() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        // feature is ahead of main but main hasn't moved → not behind.
+        run_git(p, &["checkout", "-q", "-b", "feature"]);
+        std::fs::write(p.join("extra.txt"), "extra\n").unwrap();
+        run_git(p, &["add", "extra.txt"]);
+        run_git(p, &["commit", "-q", "-m", "extra"]);
+
+        let rt = runtime_at(p);
+        assert!(!rt.is_behind("main").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn is_behind_false_on_unresolved_base() {
+        // The root's `root` parent name is never a real branch — must fail open, never block.
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        let rt = runtime_at(p);
+        assert!(!rt.is_behind("root").await.unwrap());
     }
 
     #[tokio::test]

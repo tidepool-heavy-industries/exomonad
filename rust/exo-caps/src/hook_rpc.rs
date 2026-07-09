@@ -10,13 +10,15 @@ use serde::{Deserialize, Serialize};
 
 /// A harness hook event the sidecar can handle. The canonical event identifier shared by the
 /// client and server halves of the channel.
+///
+/// There used to be a `Stop` variant (CC's `Stop` event). It was removed along with the rest of
+/// the Stop-hook machinery — see `rust/exo/CLAUDE.md`. A node's settings no longer register a
+/// `Stop` hook at all (`exo-runtime::node_config`), so this channel never sees one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HookEvent {
     /// Before a tool call (CC `PreToolUse`).
     PreToolUse,
-    /// The agent finished a turn and is yielding control (CC `Stop`).
-    Stop,
     /// Session bootstrap (CC `SessionStart`). Handled one-shot, NOT over the socket — included
     /// here only so the client can recognise and route it.
     SessionStart,

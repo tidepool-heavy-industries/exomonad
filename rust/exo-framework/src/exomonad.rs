@@ -88,4 +88,20 @@ pub trait Exomonad: Send + Sync + 'static {
         from: &'a Persona,
         system: &'a Self::System,
     ) -> BoxFuture<'a, CapResult<SystemOutcome>>;
+
+    /// Periodic wall-clock self-check (the sidecar's `watchdog` loop calls this on a fixed interval,
+    /// `elapsed` since this node's process started). Replaces turn-boundary (`Stop` hook) inference —
+    /// Claude Code's `Stop` fires on every turn-end including a legitimate async-wait yield, so it
+    /// cannot distinguish "genuinely done" from "paused waiting on a background task"; a wall-clock
+    /// timeout can. Takes `&Self::Caps` directly (not `SystemCtx`) since a domain's tick logic may
+    /// need caps `SystemCtx` doesn't expose (e.g. `Kv`), and `Self::Caps: PolicyCaps` already
+    /// guarantees every cap is present. Default no-op so a domain that doesn't need this incurs zero
+    /// cost and no required edit.
+    fn handle_tick<'a>(
+        _caps: &'a Self::Caps,
+        _role: Self::Role,
+        _elapsed: std::time::Duration,
+    ) -> BoxFuture<'a, CapResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
 }

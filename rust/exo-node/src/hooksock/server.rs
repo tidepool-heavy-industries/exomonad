@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use exo_caps::{HookEvent, HookRequest, HookVerdict};
-use exo_framework::{Exomonad, HookDecision, HookInput, RoleDef, StopDecision};
+use exo_framework::{Exomonad, HookDecision, HookInput, RoleDef};
 use exo_runtime::Runtime;
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -93,12 +93,6 @@ async fn handle_conn<D: Exomonad<Caps = Runtime>>(
     stream.write_all(&out).await?;
     stream.shutdown().await?;
 
-    // A Stop hook means the agent just went idle. If a cooperative shutdown is pending and our
-    // subtree is now clear, this is the safe point to reap ourselves. No-op otherwise. Done AFTER
-    // replying so the agent isn't left waiting on a verdict it'll never read.
-    if req.event == HookEvent::Stop {
-        crate::inbound::try_reap(&ctx).await;
-    }
     Ok(())
 }
 
@@ -108,7 +102,6 @@ async fn run<D: Exomonad<Caps = Runtime>>(ctx: &NodeContext<D>, req: &HookReques
     let rd = D::role_def(ctx.kind);
     let stdout = match req.event {
         HookEvent::PreToolUse => shape_pre_tool_use(&rd, &ctx.runtime, &req.stdin_json).await,
-        HookEvent::Stop => shape_stop(&rd, &ctx.runtime).await,
         HookEvent::SessionStart => {
             // SessionStart is handled one-shot by the client, never over the socket. A hook must
             // never wedge an agent, so be defensive and fail-safe allow if one ever arrives.
@@ -148,46 +141,16 @@ async fn shape_pre_tool_use(
     }
 }
 
-async fn shape_stop(rd: &RoleDef<exo_runtime::Runtime>, rt: &exo_runtime::Runtime) -> String {
-    stop_verdict((rd.stop)(rt).await)
-}
-
-/// Pure Claude-shaping of a [`StopDecision`] (split out so the wire shape is unit-testable without
-/// a live runtime).
-fn stop_verdict(decision: StopDecision) -> String {
-    match decision {
-        StopDecision::Allow => json!({"continue": true}).to_string(),
-        StopDecision::Block { reason } => {
-            json!({"decision": "block", "reason": reason}).to_string()
-        }
-    }
-}
-
 fn allow_json() -> String {
     json!({"continue": true}).to_string()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{allow_json, stop_verdict};
-    use exo_framework::StopDecision;
+    use super::allow_json;
 
     #[test]
     fn allow_shape_is_claude() {
         assert_eq!(allow_json(), r#"{"continue":true}"#);
-    }
-
-    #[test]
-    fn stop_allow_shape_is_claude() {
-        assert_eq!(stop_verdict(StopDecision::Allow), r#"{"continue":true}"#);
-    }
-
-    #[test]
-    fn stop_block_emits_block() {
-        let out = stop_verdict(StopDecision::Block {
-            reason: exo_caps::Reason::new("commit first".into()).unwrap(),
-        });
-        assert!(out.contains(r#""decision":"block""#));
-        assert!(out.contains("commit first"));
     }
 }

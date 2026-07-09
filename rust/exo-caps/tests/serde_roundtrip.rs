@@ -164,8 +164,8 @@ fn test_message_kind_roundtrip() {
             grace_ms: 100,
             force: true,
         }),
-        MessageKind::Lifecycle(Lifecycle::ChildIdle {
-            summary: Summary::new("done".into()).unwrap(),
+        MessageKind::Lifecycle(Lifecycle::ChildExited {
+            reason: "done".into(),
         }),
     ];
     for v in variants {
@@ -209,9 +209,6 @@ fn test_shutdown_status_roundtrip() {
 #[test]
 fn test_lifecycle_roundtrip() {
     let variants = [
-        Lifecycle::ChildIdle {
-            summary: Summary::new("idle".into()).unwrap(),
-        },
         Lifecycle::ChildExited {
             reason: "done".into(),
         },
@@ -229,9 +226,6 @@ fn test_lifecycle_roundtrip() {
 
 #[test]
 fn test_lifecycle_wire_pinning() {
-    let idle: Lifecycle = serde_json::from_str(r#"{"type":"child_idle","summary":"ok"}"#).unwrap();
-    assert!(matches!(idle, Lifecycle::ChildIdle { .. }));
-
     let exited: Lifecycle =
         serde_json::from_str(r#"{"type":"child_exited","reason":"bye"}"#).unwrap();
     assert!(matches!(exited, Lifecycle::ChildExited { .. }));
@@ -287,6 +281,7 @@ fn test_node_papers_roundtrip() {
         PaneId::new("%1".into()).unwrap(),
         Some(InboxPath::new("/tmp/inbox".into())),
         true,
+        false,
         false,
     )
     .unwrap();

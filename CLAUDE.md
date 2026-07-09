@@ -129,7 +129,7 @@ Spawn a recursive tree of heterogeneous agents:
 - **`spawn_worker`** — ephemeral worker in a tmux pane (no branch, no merge); reports via `notify_parent`. v2: Sonnet Claude.
 - **`merge`** — fold a child's submitted branch into yours (v2: local `git merge`; Classic: PR via `merge_pr`).
 
-**Agent types:** v2 node-mode is all Claude 🤖 — Opus TLs (root/tl, session default) + Sonnet leaves (dev/worker/reviewer) — plus Shoal 🌊 (custom binary agents over rmcp + HTTP-over-UDS) as an external companion backend. (Gemini 💎 was the v2 leaf runtime before the cut and is now Classic-only.) **Identity** = birth-branch (immutable, deterministic); root = `root`. The filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/`.
+**Agent types:** v2 node-mode is all Claude 🤖 — Opus TLs (spawned `tl`; root inherits the human's own session model instead, since it's never spawned via `birth`) + Sonnet leaves (dev/worker/reviewer) — plus Shoal 🌊 (custom binary agents over rmcp + HTTP-over-UDS) as an external companion backend. (Gemini 💎 was the v2 leaf runtime before the cut and is now Classic-only.) **Identity** = birth-branch (immutable, deterministic); root = `root`. The filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/`.
 
 **Coordination is push-based** via the sidecar: a child calls `notify_parent` (or `send_message` for peer-to-peer), the message lands on the bus, and the recipient's sidecar tmux-pastes it into the agent's pane as a `[from: X]` note between turns. The TL idles — no polling, no blocking. (CC Agent Teams native delivery was retired — as of CC 2.1.178 a solo session-lead never drains its teammate inbox; exo owns its delivery channel.)
 

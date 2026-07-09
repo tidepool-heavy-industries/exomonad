@@ -6,8 +6,8 @@
 
 use exo_caps::{AgentName, AgentType, CapResult, ChildKind, Persona, Reason, RoleKind, SpawnSpec};
 use exo_framework::{
-    BoxFuture, Exomonad, HookDecision, HookInput, RoleDef, SessionStartOutput, StopDecision,
-    SystemCtx, SystemOutcome,
+    BoxFuture, Exomonad, HookDecision, HookInput, RoleDef, SessionStartOutput, SystemCtx,
+    SystemOutcome,
 };
 use exo_runtime::Runtime;
 use serde::{Deserialize, Serialize};
@@ -61,9 +61,6 @@ fn pre<'a>(_: &'a Runtime, input: &'a HookInput) -> BoxFuture<'a, HookDecision> 
         }
     })
 }
-fn stop(_: &Runtime) -> BoxFuture<'_, StopDecision> {
-    Box::pin(async { StopDecision::Allow })
-}
 fn session(_: &Runtime) -> BoxFuture<'_, SessionStartOutput> {
     Box::pin(async { SessionStartOutput::default() })
 }
@@ -111,7 +108,6 @@ impl Exomonad for TestDomain {
         RoleDef {
             tools: vec![],
             pre_tool_use: pre,
-            stop,
             session_start: session,
         }
     }

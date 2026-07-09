@@ -7,9 +7,7 @@
 //! NO `dyn Caps` — the table is parameterized by the concrete runtime `R`. The [`RoleDef<R>`] shape
 //! and the fn-pointer aliases are the framework contract ([`exo_framework::roles`]).
 
-use crate::gates::{
-    pre_tool_use, session_start, stop, stop_allow, stop_dev, stop_notify, stop_reviewer,
-};
+use crate::gates::{pre_tool_use, session_start};
 use crate::tools::dismiss::DismissWorker;
 use crate::tools::merge::Merge;
 use crate::tools::messaging::{NotifyParent, SendMessage};
@@ -62,9 +60,16 @@ impl RoleKind for ExoRole {
     }
     fn model(&self) -> Option<&'static str> {
         match self {
-            // Expensive decomposition stays on the session default (the human runs Opus); cheap
-            // leaves — implement / review — run on Sonnet.
-            ExoRole::Root | ExoRole::Tl => None,
+            // Root is the human's own top-level session (`exo init`, never spawned via `birth`) —
+            // this value is inert for it; the human's own model choice governs (`--model` /
+            // `.exo/config.toml`), and that's their call to make for their own interactive use.
+            ExoRole::Root => None,
+            // Every SPAWNED node is explicitly capped — NEVER `None` ("inherit the launcher's
+            // default"), because that default is whatever the human's own session happens to be set
+            // to (e.g. a cheap/fast tier picked for interactive chat), not a choice made for
+            // subagent work. TLs decompose, so they're worth the expensive tier (Opus); leaves
+            // (dev/worker/reviewer) implement/review and run on Sonnet.
+            ExoRole::Tl => Some("opus"),
             ExoRole::Dev | ExoRole::Worker | ExoRole::Reviewer => Some("sonnet"),
         }
     }
@@ -108,8 +113,6 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
                 tool(Tree),
             ],
             pre_tool_use,
-            // Root has nothing to fold upward — never gate its exit (blocking it bricks the session).
-            stop: stop_allow,
             session_start,
         },
         // A spawned TL spawns + folds its own subtree, then submits its own branch up to its
@@ -127,34 +130,29 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
                 tool(Tree),
             ],
             pre_tool_use,
-            stop,
             session_start,
         },
-        // A dev leaf works on its own branch and submits it for the parent to merge. stop_dev runs
-        // the committed-unsubmitted guard (blocks if clean+ahead+never submitted) then falls through
-        // to the idle-notify path. Workers share the parent's branch and must not use stop_dev.
+        // A dev leaf works on its own branch and submits it for the parent to merge.
+        // `submit_branch`'s own precondition check enforces "committed before converging" — no
+        // Stop-time backstop needed.
         ExoRole::Dev => RoleDef {
             tools: vec![tool(NotifyParent), tool(SubmitBranch)],
             pre_tool_use,
-            stop: stop_dev,
             session_start,
         },
         // A worker is an inline child sharing the parent's worktree — no own branch to submit, so it
-        // only reports back, but it still signals the parent when it yields control.
+        // only reports back via `notify_parent`.
         ExoRole::Worker => RoleDef {
             tools: vec![tool(NotifyParent)],
             pre_tool_use,
-            stop: stop_notify,
             session_start,
         },
         // A reviewer reads the under-review branch and emits a `verdict`, then exits. It does not
-        // submit or merge; `notify_parent` is its colleague back-channel ("why'd you do this?").
+        // submit or merge; `notify_parent` is its colleague back-channel ("why'd you do this?"). Its
+        // abandonment timeout is `handle_review_tick` (the sidecar's watchdog loop), not a hook.
         ExoRole::Reviewer => RoleDef {
             tools: vec![tool(Verdict), tool(NotifyParent)],
             pre_tool_use,
-            // Ephemeral; it exits after the verdict — nothing to fold, so don't gate (would only
-            // risk wedging on stray review artifacts).
-            stop: stop_reviewer,
             session_start,
         },
     }
@@ -164,7 +162,6 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
 mod tests {
     use super::*;
     use crate::testing::MockRuntime;
-    use exo_framework::StopDecision;
 
     #[tokio::test]
     async fn every_role_builds_non_empty_tools() {
@@ -183,17 +180,6 @@ mod tests {
                 rd.pre_tool_use as usize,
                 pre_tool_use::<MockRuntime> as *const () as usize
             );
-            // Root → stop_allow (no parent). Reviewer → stop_reviewer (ReviewAborted on miss).
-            // Dev → stop_dev (commit-guard + idle-notify). Worker → stop_notify (idle-notify only).
-            // Tl → stop (dirty-gate + commit-guard + idle-notify).
-            let expected_stop = match kind {
-                ExoRole::Root => stop_allow::<MockRuntime> as *const () as usize,
-                ExoRole::Reviewer => stop_reviewer::<MockRuntime> as *const () as usize,
-                ExoRole::Dev => stop_dev::<MockRuntime> as *const () as usize,
-                ExoRole::Worker => stop_notify::<MockRuntime> as *const () as usize,
-                ExoRole::Tl => stop::<MockRuntime> as *const () as usize,
-            };
-            assert_eq!(rd.stop as usize, expected_stop, "Role {:?} stop fn", kind);
             assert_eq!(
                 rd.session_start as usize,
                 session_start::<MockRuntime> as *const () as usize
@@ -266,7 +252,8 @@ mod tests {
             // Every role is a Claude instance now; the model is the axis that varies.
             assert_eq!(kind.agent_type(), AgentType::Claude);
             match kind {
-                ExoRole::Root | ExoRole::Tl => assert_eq!(kind.model(), None),
+                ExoRole::Root => assert_eq!(kind.model(), None),
+                ExoRole::Tl => assert_eq!(kind.model(), Some("opus")),
                 ExoRole::Dev | ExoRole::Worker | ExoRole::Reviewer => {
                     assert_eq!(kind.model(), Some("sonnet"))
                 }
@@ -283,21 +270,5 @@ mod tests {
             }
         }
         assert_eq!(strs.len(), 5, "role_str must be unique");
-    }
-
-    #[tokio::test]
-    async fn test_role_stop_gate_blocks_when_dirty() {
-        let rd = role_def::<MockRuntime>(ExoRole::Tl);
-        let ctx = MockRuntime {
-            is_clean: false,
-            ..Default::default()
-        };
-
-        match (rd.stop)(&ctx).await {
-            StopDecision::Block { reason } => {
-                assert!(reason.as_str().contains("Uncommitted changes"));
-            }
-            _ => panic!("Should be blocked by uncommitted changes"),
-        }
     }
 }

@@ -280,14 +280,14 @@ impl Runtime {
         exo_caps::paths::inbox_path(Path::new(&home), &self.run_id, pane)
     }
 
-    /// This node's child-launch policy (`yolo`, `wrap_nix`), read from its own papers and
-    /// inherited down the tree: `birth` stamps it onto each child's papers and uses it in
-    /// the launch command. A node whose papers can't be read (or whose papers predate these
+    /// This node's child-launch policy (`yolo`, `wrap_nix`, `review_enabled`), read from its own
+    /// papers and inherited down the tree: `birth` stamps it onto each child's papers and uses it
+    /// in the launch command. A node whose papers can't be read (or whose papers predate these
     /// fields — they default on parse) falls back to [`NodePapers`]' behavior-preserving
     /// defaults, so the root and any older node launch children exactly as before.
     /// Papers live at `{working_dir}/.exo/node.json` for a worktree node, or the
     /// run-namespaced `root.json` for the root.
-    async fn own_launch_policy(&self) -> (bool, bool) {
+    async fn own_launch_policy(&self) -> (bool, bool, bool) {
         let candidates = [
             self.working_dir.join(".exo/node.json"),
             self.working_dir
@@ -301,9 +301,10 @@ impl Runtime {
                             path = %path.display(),
                             yolo = p.yolo,
                             wrap_nix = p.wrap_nix,
+                            review_enabled = p.review_enabled,
                             "own_launch_policy: loaded from papers"
                         );
-                        return (p.yolo, p.wrap_nix);
+                        return (p.yolo, p.wrap_nix, p.review_enabled);
                     }
                     Err(e) => {
                         tracing::warn!(
@@ -318,9 +319,14 @@ impl Runtime {
         tracing::info!(
             yolo = NodePapers::DEFAULT_YOLO,
             wrap_nix = NodePapers::DEFAULT_WRAP_NIX,
+            review_enabled = NodePapers::DEFAULT_REVIEW_ENABLED,
             "own_launch_policy: no readable papers found; using behavior-preserving defaults"
         );
-        (NodePapers::DEFAULT_YOLO, NodePapers::DEFAULT_WRAP_NIX)
+        (
+            NodePapers::DEFAULT_YOLO,
+            NodePapers::DEFAULT_WRAP_NIX,
+            NodePapers::DEFAULT_REVIEW_ENABLED,
+        )
     }
 
     /// Resolve a role's steering protocol: the optional on-disk override
@@ -454,11 +460,6 @@ impl Runtime {
             return Err(e);
         }
 
-        // A freshly launched child starts working — seed its busy bit. The idle gate
-        // (`ChildLiveness`) combines this with pane-liveness, so a child that later dies without
-        // ever reporting `ChildIdle` still reads idle via its dead pane.
-        self.mark_child_busy(&core.name);
-
         Ok(core.name)
     }
 
@@ -507,10 +508,10 @@ impl Runtime {
         self.append_child_record(&record).await?;
 
         // (e) Write child papers. The child inherits this node's launch policy (yolo /
-        // wrap_nix), so it stamps the same onto its own children — config set on one node
-        // flows down its whole subtree.
+        // wrap_nix / review_enabled), so it stamps the same onto its own children — config set
+        // on one node flows down its whole subtree.
         let parent_inbox = Some(self.own_inbox());
-        let (yolo, wrap_nix) = self.own_launch_policy().await;
+        let (yolo, wrap_nix, review_enabled) = self.own_launch_policy().await;
 
         // Struct literal (not `NodePapers::new`, which takes a *typed* role): the role is already
         // erased into a `RoleRecord` on `BirthCore`, so birth stays non-generic over the domain role.
@@ -524,6 +525,7 @@ impl Runtime {
             yolo,
             wrap_nix,
             kind: core.kind,
+            review_enabled,
         };
 
         let papers_path = match core.kind {
