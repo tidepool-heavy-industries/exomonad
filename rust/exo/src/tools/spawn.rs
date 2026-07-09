@@ -218,9 +218,8 @@ impl<R: Spawner + Fs + Send + Sync> Tool<R> for ForkWave {
          scaffold-fork-converge on its subtree and calls `submit_branch` when its branch is \
          ready; you then `merge` it locally — no PRs, no remote, convergence is on-disk. \
          Decompose and delegate aggressively: every token you spend on work a child could do is \
-         wasted. Create a team (TeamCreate) BEFORE calling so children's messages reach you. \
-         Requires a clean worktree. After spawning, return immediately — idle and wait, do not \
-         poll.";
+         wasted. Requires a clean worktree. After spawning, return immediately — idle and wait, \
+         do not poll; children's messages arrive between your turns.";
     type Args = ForkWaveArgs;
 
     async fn run(ctx: &R, args: ForkWaveArgs) -> CapResult<ToolOutput> {
