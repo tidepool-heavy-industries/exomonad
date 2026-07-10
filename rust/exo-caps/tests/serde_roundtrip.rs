@@ -298,25 +298,17 @@ fn test_child_record_roundtrip() {
         inbox: InboxPath::new("/tmp/i".into()),
         model_label: None,
     };
-    let r2 = ChildRecord::Started {
-        child: AgentName::new("a".into()).unwrap(),
-    };
     assert_roundtrip(&r1);
-    assert_roundtrip(&r2);
 
     // Tag pinning
     assert!(serde_json::to_string(&r1)
         .unwrap()
         .contains(r#""record":"spawned""#));
-    assert!(serde_json::to_string(&r2)
-        .unwrap()
-        .contains(r#""record":"started""#));
-}
 
-#[test]
-fn test_child_lifecycle_roundtrip() {
-    assert_roundtrip(&ChildLifecycle::Spawned);
-    assert_roundtrip(&ChildLifecycle::Started);
+    // Existing children.jsonl lines must keep parsing: raw wire format for `Spawned`.
+    let raw = r#"{"record":"spawned","child":"a","kind":"worktree","pane":"%2","inbox":"/tmp/i"}"#;
+    let parsed: ChildRecord = serde_json::from_str(raw).unwrap();
+    assert_eq!(parsed, r1);
 }
 
 #[test]

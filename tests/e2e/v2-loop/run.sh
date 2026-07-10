@@ -196,12 +196,6 @@ CHILD_PANE="$(echo "$SPAWNED_LINE" | jq -r .pane)"
 [[ -n "$CHILD_PANE" && "$CHILD_PANE" != "null" ]] || fail "Spawned record missing a pane id"
 echo "  [ok] Spawned record carries pane $CHILD_PANE"
 
-# NOTE: `ChildRecord::Started` (the child's own boot check-in) is defined in
-# rust/exo-caps/src/lifecycle.rs but nothing in the current runtime/exo-node ever appends
-# one (verified: no `ChildRecord::Started` construction outside tests) — so we deliberately
-# do NOT assert a Started record here. This is a real gap in the v2 loop, not a shim
-# limitation; flagged in this scenario's notify_parent report.
-
 if [[ "${E2E_INJECT_FAILURE:-}" == "1" ]]; then
   fail "injected failure (E2E_INJECT_FAILURE=1) — verifying the cleanup trap runs unconditionally"
 fi

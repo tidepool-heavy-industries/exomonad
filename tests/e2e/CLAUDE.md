@@ -93,13 +93,6 @@ straight to the parent with no reviewer spawn — no different in effect from th
 a live child sidecar for full fidelity (needs a second `exo node` subprocess kept alive in the
 child's worktree, reading the child's own inbox for the `[READY]`-equivalent bus message).
 
-**A real gap surfaced while building this:** `ChildRecord::Started` (rust/exo-caps/src/lifecycle.rs)
-— the child's own boot check-in record — is fully defined and documented ("a `Spawned` with no
-matching `Started` after a timeout is a failed/ghost spawn") but **nothing in the current
-runtime or `exo-node` ever appends one** (verified: no `ChildRecord::Started` construction
-outside `exo-caps`' own tests). This scenario asserts only the `Spawned` record for that
-reason — it is not a shim limitation, it's unimplemented production infrastructure.
-
 **tmux gotcha this scenario works around:** a brand-new tmux *session* does **not** inherit
 the environment of the client process that created it when the tmux *server* was already
 running (verified empirically) — it inherits the server's original startup environment

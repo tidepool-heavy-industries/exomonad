@@ -451,7 +451,7 @@ pub enum MessageKind {
 #[serde(transparent)]
 pub struct DomainPayload(pub String);
 
-/// A directed control **message**. Lifecycle **records** (`AgentSpawned`/`AgentStarted`)
+/// A directed control **message**. Lifecycle **records** (`ChildRecord::Spawned`)
 /// live in the json record log, not here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -5,15 +5,16 @@
 //! records are immutable facts; folding them yields state. That's deliberate — the
 //! interesting transitions (running → exited) are driven by *external* OS events, so
 //! they're computed **live** (pane-alive), never recorded. We only type the part that is
-//! genuinely recorded: `Spawned` (parent logs the intent) then `Started` (child checks
-//! in).
+//! genuinely recorded: `Spawned` (parent logs the intent).
 
 use crate::types::{AgentName, ChildKind, InboxPath, PaneId};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// One append-only lifecycle record. RECORDS — distinct from `MessageKind::Event`
-/// world-events and from `Control` messages (the conflation the review caught).
+/// world-events and from `Control` messages (the conflation the review caught). A single
+/// variant today; the ledger stays a tag-dispatched enum on purpose so a future genuinely
+/// recorded fact (e.g. a tombstone) is an added variant, not a wire-format break.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "record", rename_all = "snake_case")]
 pub enum ChildRecord {
@@ -35,52 +36,33 @@ pub enum ChildRecord {
         #[serde(default)]
         model_label: Option<String>,
     },
-    /// Appended by the **child** on boot (its check-in). A `Spawned` with no matching
-    /// `Started` after a timeout is a failed/ghost spawn → the parent reaps/retries.
-    Started { child: AgentName },
 }
 
 impl ChildRecord {
     pub fn child(&self) -> &AgentName {
         match self {
-            ChildRecord::Spawned { child, .. } | ChildRecord::Started { child } => child,
+            ChildRecord::Spawned { child, .. } => child,
         }
     }
 }
 
-/// The **recorded** lifecycle phase of a child. Deliberately only two states — the ones
-/// the parent actually records. Running-vs-exited is observed **live** (pane-alive) and
-/// never stored, so it is *not* a phase here (the observe-don't-store rule: we do not
-/// reintroduce a persisted run-state machine).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ChildLifecycle {
-    /// Parent logged the spawn; child has not checked in (ghost-spawn candidate on timeout).
-    Spawned,
-    /// Child appended its boot check-in.
-    Started,
-}
-
 /// A parent's handle on one child — the fold of its records. This is the "child-handle"
-/// the `NodeRef` discussion landed on: the folded record + its recorded lifecycle, not a
-/// separate floating type. (`agent_type` is absent on purpose — a *sender* never needs
-/// it; the recipient picks its own last-hop.)
+/// the `NodeRef` discussion landed on: the folded record, not a separate floating type.
+/// (`agent_type` is absent on purpose — a *sender* never needs it; the recipient picks its
+/// own last-hop.)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Child {
     pub name: AgentName,
     pub kind: ChildKind,
     pub pane: PaneId,
     pub inbox: InboxPath,
-    pub lifecycle: ChildLifecycle,
     /// Cosmetic model tag (e.g. `"kimi"`) folded from the `Spawned` record; `None` for default Claude.
     pub model_label: Option<String>,
 }
 
 /// Fold append-only records into the current child set, **keyed by name** — uniqueness
 /// is in the return type, and down-routing (find-child-by-`AgentName`) is an O(log n)
-/// lookup. Newest `Spawned` wins (a retry is a fresh append); a `Started` upgrades the
-/// lifecycle. A `Started` with no prior `Spawned` is ignored (cannot occur when the
-/// parent logs spawn-first).
+/// lookup. Newest `Spawned` wins (a retry is a fresh append).
 pub fn fold_children(records: &[ChildRecord]) -> BTreeMap<AgentName, Child> {
     let mut map: BTreeMap<AgentName, Child> = BTreeMap::new();
     for r in records {
@@ -99,15 +81,9 @@ pub fn fold_children(records: &[ChildRecord]) -> BTreeMap<AgentName, Child> {
                         kind: *kind,
                         pane: pane.clone(),
                         inbox: inbox.clone(),
-                        lifecycle: ChildLifecycle::Spawned,
                         model_label: model_label.clone(),
                     },
                 );
-            }
-            ChildRecord::Started { child } => {
-                if let Some(c) = map.get_mut(child) {
-                    c.lifecycle = ChildLifecycle::Started;
-                }
             }
         }
     }
@@ -129,7 +105,7 @@ mod tests {
     }
 
     #[test]
-    fn fold_tracks_spawn_then_start() {
+    fn fold_tracks_spawns() {
         let recs = vec![
             ChildRecord::Spawned {
                 child: name("a"),
@@ -145,12 +121,9 @@ mod tests {
                 inbox: inbox(),
                 model_label: Some("kimi".into()),
             },
-            ChildRecord::Started { child: name("a") },
         ];
         let kids = fold_children(&recs);
         assert_eq!(kids.len(), 2);
-        assert_eq!(kids[&name("a")].lifecycle, ChildLifecycle::Started);
-        assert_eq!(kids[&name("b")].lifecycle, ChildLifecycle::Spawned); // ghost-spawn candidate
         // the cosmetic model tag folds through from the Spawned record
         assert_eq!(kids[&name("a")].model_label, None);
         assert_eq!(kids[&name("b")].model_label.as_deref(), Some("kimi"));
@@ -181,9 +154,15 @@ mod tests {
 
     #[test]
     fn record_serde_is_tagged() {
-        let r = ChildRecord::Started { child: name("a") };
+        let r = ChildRecord::Spawned {
+            child: name("a"),
+            kind: ChildKind::Worktree,
+            pane: pane("%1"),
+            inbox: inbox(),
+            model_label: None,
+        };
         let json = serde_json::to_string(&r).unwrap();
-        assert!(json.contains(r#""record":"started""#));
+        assert!(json.contains(r#""record":"spawned""#));
         let back: ChildRecord = serde_json::from_str(&json).unwrap();
         assert_eq!(r, back);
     }

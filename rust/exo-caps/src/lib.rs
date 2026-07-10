@@ -41,7 +41,7 @@ pub use fs::{Fs, FsError};
 pub use git::{Git, GitError};
 pub use hook_rpc::{HookEvent, HookRequest, HookVerdict};
 pub use kv::{Kv, KvError};
-pub use lifecycle::{fold_children, Child, ChildLifecycle, ChildRecord};
+pub use lifecycle::{fold_children, Child, ChildRecord};
 pub use liveness::ChildLiveness;
 pub use papers::{NodePapers, RoleRecord};
 pub use process::{Process, ProcessError};
