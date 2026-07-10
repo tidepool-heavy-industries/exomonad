@@ -223,6 +223,7 @@ mod tests {
             NodePapers::DEFAULT_YOLO,
             NodePapers::DEFAULT_WRAP_NIX,
             NodePapers::DEFAULT_REVIEW_ENABLED,
+            Some(Branch::new("root".into()).unwrap()),
         )
         .unwrap();
 

@@ -70,10 +70,17 @@ fn committed<C: Git + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), String>> {
 /// sibling was already merged is now behind the parent branch — and the parent's `git merge` of it
 /// would conflict, forcing the parent to hand-resolve (violating "the TL never touches child
 /// code"). Push the update to the child, which has the most context: prompt it to rebase onto the
-/// parent's current commit and re-submit, so the parent's eventual merge is trivial. Fails open —
-/// an unresolvable parent name (a direct child of root derives `root`, which is never a live git
-/// branch) reads as "not behind" via `Git::is_behind`, never a block.
-fn needs_rebase<C: Git + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), String>> {
+/// parent's current commit and re-submit, so the parent's eventual merge is trivial.
+///
+/// The parent branch comes from our OWN papers (`.exo/node.json`'s `parent_branch`, stamped at
+/// birth by the spawner from ITS OWN current branch) — NOT the dot-derived tree-address
+/// coordinate (a direct child of root derives the literal `root`, which is root's exo IDENTITY,
+/// not the branch the human's root session is actually on; `Git::is_behind("root")` then fails
+/// open unconditionally, so the gate never fired for root's direct children — the most common
+/// case). Fails open on `None`/unreadable/corrupt papers or an `is_behind` git error — same fail-
+/// open posture as before, now reserved for the cases that are actually unresolvable (the root
+/// itself, or a genuinely missing/broken papers file), not the common case.
+fn needs_rebase<C: Git + Fs + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), String>> {
     Box::pin(async move {
         let branch = match ctx.current_branch().await {
             Ok(b) => b,
@@ -83,8 +90,11 @@ fn needs_rebase<C: Git + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), String>> {
                 return Ok(());
             }
         };
-        let parent = parent_branch(&branch);
-        match ctx.is_behind(parent).await {
+        let parent = match own_parent_branch(ctx).await {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+        match ctx.is_behind(parent.as_str()).await {
             Ok(false) => Ok(()),
             Ok(true) => Err(format!(
                 "your branch `{branch}` is behind its parent `{parent}` (the parent advanced since \
@@ -93,14 +103,48 @@ fn needs_rebase<C: Git + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), String>> {
                  conflict-free: run `git rebase {parent}`, resolve any conflicts, commit, then call \
                  submit_branch again.",
                 branch = branch.as_str(),
+                parent = parent.as_str(),
             )),
             // A git error resolving the parent → fail-open (same posture as is_behind's own).
             Err(e) => {
-                tracing::warn!("rebase gate: is_behind({parent}) failed, skipping: {e}");
+                tracing::warn!(
+                    "rebase gate: is_behind({}) failed, skipping: {e}",
+                    parent.as_str()
+                );
                 Ok(())
             }
         }
     })
+}
+
+/// This node's real parent git branch — `.exo/node.json`'s `parent_branch`, birth-stamped by the
+/// spawner from ITS OWN current branch. `None` covers the root (no parent), an unreadable papers
+/// file (not yet written / IO error), a corrupt one, and older papers predating this field — all
+/// fail the rebase gate open, warning loudly only for the corrupt/unreadable cases (the other two
+/// are legitimate, expected states, not surprises worth a warn).
+async fn own_parent_branch<C: Fs + Sync>(ctx: &C) -> Option<exo_caps::Branch> {
+    match ctx.read(std::path::Path::new(".exo/node.json")).await {
+        Ok(bytes) => match serde_json::from_slice::<NodePapers>(&bytes) {
+            Ok(papers) => papers.parent_branch,
+            Err(e) => {
+                tracing::warn!(
+                    "rebase gate: .exo/node.json failed to parse ({e}); skipping (fail-open)"
+                );
+                None
+            }
+        },
+        Err(exo_caps::FsError::At { source, .. } | exo_caps::FsError::Io(source))
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            None
+        }
+        Err(e) => {
+            tracing::warn!(
+                "rebase gate: could not read .exo/node.json ({e}); skipping (fail-open)"
+            );
+            None
+        }
+    }
 }
 
 /// Run every script in `.exo/checks/pre-merge/*` (relative to the node's worktree). Each must
@@ -209,7 +253,7 @@ async fn own_review_enabled<C: Fs + Sync>(ctx: &C) -> bool {
 /// The ordered precondition list. Append here to add a gate. Order matters: `committed` first (a
 /// clean tree is a precondition for a sane rebase check), then `needs_rebase` (don't waste a review
 /// / forward a stale `[READY]` on a branch that must be rebased first), then the project's scripts.
-fn checks<C: Git + Process + Sync>() -> Vec<Check<C>> {
+fn checks<C: Git + Process + Fs + Sync>() -> Vec<Check<C>> {
     vec![
         Check {
             name: "committed",
@@ -434,22 +478,29 @@ mod tests {
     use exo_framework::Tool;
 
     /// Minimal valid `NodePapers` JSON for seeding `mock.files` at `.exo/node.json` — the shape
-    /// `own_review_enabled` reads. Only `review_enabled` varies across tests; the rest is filler.
-    fn papers_json(review_enabled: bool) -> Vec<u8> {
+    /// `own_review_enabled`/`own_parent_branch` read. `review_enabled` and `parent_branch` vary
+    /// across tests; the rest is filler. `parent_branch: None` omits the field entirely (the
+    /// absent-from-older-papers case), matching real serde `#[serde(default)]` behavior.
+    fn papers_json(review_enabled: bool, parent_branch: Option<&str>) -> Vec<u8> {
+        let parent_branch_field = match parent_branch {
+            Some(p) => format!(r#","parent_branch":"{p}""#),
+            None => String::new(),
+        };
         format!(
-            r#"{{"path":["root","dev-node"],"branch":"dev.policy-claude","role":"dev","pane":"%1","parent_inbox":null,"review_enabled":{review_enabled}}}"#
+            r#"{{"path":["root","dev-node"],"branch":"dev.policy-claude","role":"dev","pane":"%1","parent_inbox":null,"review_enabled":{review_enabled}{parent_branch_field}}}"#
         )
         .into_bytes()
     }
 
-    /// A mock with reviewers turned on (`review_enabled: true` in its own papers) — the shared
-    /// setup for every test exercising the normal reviewer-spawn path.
+    /// A mock with reviewers turned on (`review_enabled: true` in its own papers) and a real
+    /// parent branch (`dev`, matching `current_branch = dev.policy-claude`) — the shared setup
+    /// for every test exercising the normal reviewer-spawn path.
     fn mock_with_reviews_enabled() -> MockRuntime {
         let mock = MockRuntime::default(); // is_clean = true, branch = dev.policy-claude
         mock.files
             .lock()
             .unwrap()
-            .insert(".exo/node.json".to_string(), papers_json(true));
+            .insert(".exo/node.json".to_string(), papers_json(true, Some("dev")));
         mock
     }
 
@@ -543,7 +594,7 @@ mod tests {
         mock.files
             .lock()
             .unwrap()
-            .insert(".exo/node.json".to_string(), papers_json(false));
+            .insert(".exo/node.json".to_string(), papers_json(false, None));
         let out = SubmitBranch::run(
             &mock,
             SubmitBranchArgs {
@@ -602,7 +653,7 @@ mod tests {
         mock.files
             .lock()
             .unwrap()
-            .insert(".exo/node.json".to_string(), papers_json(true));
+            .insert(".exo/node.json".to_string(), papers_json(true, Some("dev")));
         SubmitBranch::run(
             &mock,
             SubmitBranchArgs {
@@ -638,7 +689,7 @@ mod tests {
         mock.files
             .lock()
             .unwrap()
-            .insert(".exo/node.json".to_string(), papers_json(true));
+            .insert(".exo/node.json".to_string(), papers_json(true, Some("dev")));
         SubmitBranch::run(
             &mock,
             SubmitBranchArgs {
@@ -721,11 +772,17 @@ mod tests {
     #[tokio::test]
     async fn behind_parent_blocks_even_with_reviewer_skipped() {
         // The rebase gate is a precondition — it runs even when review is being skipped, since a
-        // stale branch's merge conflicts regardless of whether it was reviewed.
+        // stale branch's merge conflicts regardless of whether it was reviewed. Needs a papers
+        // file recording a real `parent_branch` — the gate no longer derives one from the branch
+        // name — so seed it explicitly here rather than relying on `MockRuntime::default()`.
         let mock = MockRuntime {
             is_behind: true,
             ..Default::default()
         };
+        mock.files
+            .lock()
+            .unwrap()
+            .insert(".exo/node.json".to_string(), papers_json(false, Some("dev")));
         let res = SubmitBranch::run(
             &mock,
             SubmitBranchArgs {
@@ -739,6 +796,54 @@ mod tests {
             .calls_made()
             .iter()
             .any(|c| matches!(c, Call::BusDeliver { .. })));
+    }
+
+    #[tokio::test]
+    async fn rebase_gate_passes_open_when_parent_branch_is_none() {
+        // Root (or any papers with no recorded parent) — the gate must NOT block even when
+        // `is_behind` would report true, since there's no real parent branch to compare against.
+        let mock = MockRuntime {
+            is_behind: true,
+            ..Default::default()
+        };
+        mock.files
+            .lock()
+            .unwrap()
+            .insert(".exo/node.json".to_string(), papers_json(false, None));
+        let res = SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "trivial".into(),
+                dangerously_skip_reviewer: true,
+            },
+        )
+        .await;
+        assert!(
+            res.is_ok(),
+            "a None parent_branch must fail the rebase gate open: {res:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rebase_gate_passes_open_when_papers_unreadable() {
+        // No `.exo/node.json` seeded at all (papers not yet written, or genuinely absent) — must
+        // fail open exactly like an explicit `None`.
+        let mock = MockRuntime {
+            is_behind: true,
+            ..Default::default()
+        };
+        let res = SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "trivial".into(),
+                dangerously_skip_reviewer: true,
+            },
+        )
+        .await;
+        assert!(
+            res.is_ok(),
+            "unreadable papers must fail the rebase gate open: {res:?}"
+        );
     }
 
     #[tokio::test]

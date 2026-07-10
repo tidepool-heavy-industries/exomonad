@@ -591,6 +591,24 @@ impl Runtime {
         let parent_inbox = Some(self.own_inbox());
         let (yolo, wrap_nix, review_enabled) = self.own_launch_policy().await;
 
+        // The child's birth-identity parent branch: THIS node's own real git branch (the parent
+        // is, by definition, on the branch the child forks from) — never the child's own
+        // dot-derived tree-address coordinate, which for a direct child of root would be the
+        // literal `root` (root's exo IDENTITY, not a live git ref). A failure to read our own
+        // branch degrades to `None`, which fails `submit_branch`'s rebase gate open — never
+        // blocks the spawn.
+        let parent_branch = match exo_caps::Git::current_branch(self).await {
+            Ok(b) => Some(b),
+            Err(e) => {
+                tracing::warn!(
+                    child = core.name.as_str(),
+                    "birth: could not read own current_branch for child's parent_branch papers \
+                     field ({e}); child's rebase gate will fail open"
+                );
+                None
+            }
+        };
+
         // Struct literal (not `NodePapers::new`, which takes a *typed* role): the role is already
         // erased into a `RoleRecord` on `BirthCore`, so birth stays non-generic over the domain role.
         let papers = NodePapers {
@@ -604,6 +622,7 @@ impl Runtime {
             wrap_nix,
             kind: core.kind,
             review_enabled,
+            parent_branch,
         };
 
         let papers_path = match core.kind {
