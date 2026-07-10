@@ -63,10 +63,20 @@ contract ([`exo-framework`](../exo-framework/CLAUDE.md)); this crate provides th
 `exo doctor` is a health-check and cleanup tool for node-mode workspaces. It audits the `.exo/worktrees/` directory and identifies stale (merged) worktrees.
 
 - **Dry-run (default)**: `exo doctor` reports merged and unmerged worktrees but removes nothing.
-- **Reclaim**: `exo doctor --fix` reclaims merged worktrees by running `git worktree remove --force` and deleting their associated branches.
+- **Reclaim**: `exo doctor --fix` reclaims merged worktrees and deletes their associated branches.
 - **Force**: `exo doctor --fix --include-unmerged` reclaims even unmerged worktrees (dangerous).
 
 Worktrees are considered reclaimable if their HEAD is an ancestor of the current branch's HEAD. The current worktree (repo root) is never removed.
+
+The actual removal (nested-worktree walk, kill each nested child's recorded tmux pane, then
+`git worktree remove --force` innermost-first) is **not** doctor's own logic — it's
+`exo_runtime::Runtime::reclaim_worktree_tree`, the same code path `Spawner::reclaim_worktree` uses
+at merge-time (see `exo-runtime/CLAUDE.md` § "Reclaim ordering"). `doctor.rs` constructs a minimal
+root-rooted `Runtime` (a placeholder identity — doctor is a foreground CLI, not a spawned node) and
+calls that method once per top-level reclaimable worktree (sorted shallowest-first; a worktree
+already swallowed by an enclosing one's nested-walk is skipped, not re-removed). Branch deletion
+(`git branch -D`) stays doctor-specific and runs after a successful reclaim, for every worktree
+(root or nested) that was actually removed.
 
 Every tool implements `Tool::description()`; `exo-node`'s `tools/list` emits it, so the toolset is
 self-documenting — an agent learns the local-merge loop (commit → `submit_branch` → parent `merge`,

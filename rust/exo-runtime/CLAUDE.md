@@ -65,25 +65,35 @@ Three tree-wide knobs are config, not literals: `yolo` and `wrap_nix` (wrap the 
 
 ## Reclaim ordering: kill nested panes before nested removal
 
-`Spawner::reclaim_worktree` (`spawner.rs`) walks a child's worktree for **nested** worktree
-directories (`.exo/worktrees/**` inside it — e.g. a reviewer spawned inside a leaf being merged)
-and force-removes them innermost-first. A nested worktree's pane is **not** recorded in the
-outermost child's own ledger — it's recorded in its immediate ENCLOSING directory's
-`children.jsonl` (the parent that actually spawned it). Before removing a nested dir, the walk
-reads that enclosing ledger (`Runtime::read_child_records_at`, a path-parametrized sibling of
-`read_child_records` sharing the same tolerant-parse helper) and kills the recorded pane
-(`kill_nested_pane_before_removal`, wrapped in `retry_teardown`) — so a live nested agent's process
-dies before its cwd is force-removed out from under it. A missing ledger, missing record, or a
-kill that fails after retries is logged at `warn!` and swallowed: the pane-kill is best-effort, not
-a precondition for the removal. The **outermost** worktree's own pane-kill stays the caller's job
-(`merge`/reviewer-verdict teardown already call `Spawner::kill_pane` before `reclaim_worktree`).
+The nested-worktree walk (discover `.exo/worktrees/**` inside a worktree being torn down — e.g. a
+reviewer spawned inside a leaf being merged — kill each nested child's recorded pane, then
+`git worktree remove --force` innermost-first) is **one implementation**: `Runtime::reclaim_worktree_tree`
+(`spawner.rs`, `pub`, takes a labelling `AgentName` + the `base_path` to reclaim). `Spawner::reclaim_worktree`
+(the ledger-driven, parent-side-at-convergence entrypoint) is a thin wrapper over it for `ChildKind::Worktree`;
+`exo doctor --fix` (`rust/exo/src/doctor.rs`) constructs its own root-rooted `Runtime` (a placeholder-identity
+instance — doctor has no birth identity of its own) and calls the same method directly, once per
+top-level reclaimable worktree it discovers via `git worktree list`. There is exactly one place that
+knows how to safely tear down a worktree subtree; a domain caller only decides *which* worktrees are
+reclaimable.
+
+A nested worktree's pane is **not** recorded in the outermost worktree's own ledger — it's recorded
+in its immediate ENCLOSING directory's `children.jsonl` (the parent that actually spawned it). Before
+removing a nested dir, the walk reads that enclosing ledger (`Runtime::read_child_records_at`, a
+path-parametrized sibling of `read_child_records` sharing the same tolerant-parse helper) and kills
+the recorded pane (`kill_nested_pane_before_removal`, wrapped in `retry_teardown`) — so a live nested
+agent's process dies before its cwd is force-removed out from under it. A missing ledger, missing
+record, or a kill that fails after retries is logged at `warn!` and swallowed: the pane-kill is
+best-effort, not a precondition for the removal. The **outermost** worktree's own pane-kill stays the
+caller's job (`merge`/reviewer-verdict teardown already call `Spawner::kill_pane` before
+`reclaim_worktree`; `exo doctor` has no live pane to kill for its top-level path since it discovers
+worktrees independent of any ledger).
 
 The discovery walk (`read_dir`/`next_entry`/`file_type` over each `.exo/worktrees` dir) used to
 silently drop errors via `if let Ok`; every failure now logs at `warn!` naming the path — discovery
 stays best-effort but loud. A nested removal that still fails after retries is collected and
 surfaced as an `Err` (`op: "reclaim_nested"`) **after** the outermost removal is still attempted —
-so a caller (the `merge` tool) never reports a clean "(reclaimed X)" when nested dirs were left
-behind; the outermost-failure path (already an `Err`) is unchanged.
+so a caller (the `merge` tool, or `exo doctor`) never reports a clean reclaim when nested dirs were
+left behind; the outermost-failure path (already an `Err`) is unchanged.
 
 ## Gaps / not-yet
 

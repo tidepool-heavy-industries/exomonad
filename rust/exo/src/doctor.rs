@@ -1,7 +1,14 @@
 //! `exo doctor` — health-check + cleanup tool for node-mode workspaces.
 //! Audits `.exo/worktrees/` and reclaims stale (merged) ones.
+//!
+//! `--fix` removal delegates the actual nested-worktree walk (discover → kill each nested
+//! child's recorded pane → `git worktree remove` innermost-first) to
+//! [`exo_runtime::Runtime::reclaim_worktree_tree`] — the SAME code path `Spawner::reclaim_worktree`
+//! uses at merge-time. There is exactly one implementation of that walk; doctor only decides
+//! *which* worktrees are reclaimable and reports outcomes.
 
 use anyhow::{Context, Result};
+use exo_caps::{AgentName, Branch, ChildKind, NodePath, PaneId};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -124,14 +131,14 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
     // Actually fix
     println!("\nReclaiming merged worktrees...");
 
-    // Sort by depth DESC so nested children are removed before parents
-    worktrees.sort_by(|a, b| {
-        let da = a.path.components().count();
-        let db = b.path.components().count();
-        db.cmp(&da)
-    });
+    // Sort by depth ASC so an outer worktree is visited (and reclaimed, nested subtree and
+    // all) before any of its nested children are considered.
+    worktrees.sort_by_key(|wt| wt.path.components().count());
 
-    for wt in worktrees {
+    let rt = doctor_runtime(&root_path);
+    let mut reclaimed_paths: Vec<PathBuf> = vec![];
+
+    for wt in &worktrees {
         let should_remove = match wt.status {
             WorktreeStatus::Merged => true,
             WorktreeStatus::Unmerged if include_unmerged => {
@@ -144,8 +151,49 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
             _ => false,
         };
 
-        if should_remove {
-            remove_worktree(&wt.path, &wt.branch)?;
+        if !should_remove {
+            continue;
+        }
+
+        // Already swallowed by an outer worktree's reclaim (its own nested-worktree walk) —
+        // don't attempt a second, redundant `git worktree remove` on a dir that's already gone.
+        if reclaimed_paths
+            .iter()
+            .any(|r| wt.path != *r && wt.path.starts_with(r))
+        {
+            println!(
+                "  {} was reclaimed as part of its enclosing worktree",
+                wt.path.display()
+            );
+            continue;
+        }
+
+        println!("  Removing worktree: {}", wt.path.display());
+        let name = wt
+            .path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        match AgentName::new(name) {
+            Ok(agent_name) => match rt.reclaim_worktree_tree(&agent_name, &wt.path).await {
+                Ok(()) => reclaimed_paths.push(wt.path.clone()),
+                Err(e) => eprintln!(
+                    "    FAILED to remove worktree at {}: {e}",
+                    wt.path.display()
+                ),
+            },
+            Err(e) => eprintln!(
+                "    FAILED to remove worktree at {}: invalid agent name: {e}",
+                wt.path.display()
+            ),
+        }
+    }
+
+    // Branch cleanup for everything actually reclaimed above (root or swallowed-nested).
+    for wt in &worktrees {
+        if reclaimed_paths.iter().any(|r| wt.path.starts_with(r)) {
+            delete_branch(&wt.branch);
         }
     }
 
@@ -285,29 +333,38 @@ fn check_is_ancestor(head: &str, base: &str) -> Result<bool> {
     Ok(status.success())
 }
 
-fn remove_worktree(path: &Path, branch: &str) -> Result<()> {
-    println!("  Removing worktree: {}", path.display());
-    let status = Command::new("git")
-        .args(["worktree", "remove", "--force", &path.to_string_lossy()])
-        .status()
-        .context("removing worktree")?;
+/// Construct a minimal root-rooted [`exo_runtime::Runtime`] purely to reach
+/// [`exo_runtime::Runtime::reclaim_worktree_tree`] — doctor has no birth identity of its own (it's
+/// a foreground CLI, not a spawned node), so every field beyond `working_dir` is a
+/// behavior-preserving placeholder: `reclaim_worktree_tree` never reads `node_path`/`branch`/
+/// `run_id`/`own_pane`, and `tmux_session` is unused by `Tmux::kill_pane` (it targets a `%N` pane
+/// id directly, not a session-qualified path).
+fn doctor_runtime(root_path: &Path) -> exo_runtime::Runtime {
+    exo_runtime::Runtime::new(
+        NodePath::new(vec![AgentName::new("doctor".into()).expect("static name")])
+            .expect("non-empty"),
+        Branch::new("doctor".into()).expect("static name is a valid ref"),
+        root_path.to_path_buf(),
+        None,
+        "doctor".into(),
+        std::env::var("EXOMONAD_TMUX_SESSION").unwrap_or_default(),
+        PaneId::new("%0".into()).expect("static pane id"),
+        ChildKind::Worktree,
+    )
+}
 
-    if !status.success() {
-        eprintln!("    FAILED to remove worktree at {}", path.display());
+fn delete_branch(branch: &str) {
+    if branch == "detached" || branch == "main" || branch == "master" {
+        return;
     }
-
-    if branch != "detached" && branch != "main" && branch != "master" {
-        println!("  Deleting branch: {}", branch);
-        match Command::new("git").args(["branch", "-D", branch]).status() {
-            Ok(status) if !status.success() => {
-                eprintln!("    FAILED to delete branch {branch} (exit {status})");
-            }
-            Err(e) => eprintln!("    FAILED to run git branch -D {branch}: {e}"),
-            Ok(_) => {}
+    println!("  Deleting branch: {}", branch);
+    match Command::new("git").args(["branch", "-D", branch]).status() {
+        Ok(status) if !status.success() => {
+            eprintln!("    FAILED to delete branch {branch} (exit {status})");
         }
+        Err(e) => eprintln!("    FAILED to run git branch -D {branch}: {e}"),
+        Ok(_) => {}
     }
-
-    Ok(())
 }
 
 #[cfg(test)]
