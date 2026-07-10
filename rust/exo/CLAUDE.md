@@ -52,7 +52,7 @@ contract ([`exo-framework`](../exo-framework/CLAUDE.md)); this crate provides th
 | `spawn_worker` | `Spawner` | root, tl | Spawn an ephemeral Sonnet Claude worker (inline pane). |
 | `dismiss_worker` | `Spawner` | root, tl | Dismiss an inline worker by name: unconditional parent-side `kill_pane` resolved via the children ledger. Matched to `spawn_worker`; the reliable teardown primitive for workers that never registered as a teammate. |
 | `merge` | `Git`+`Spawner` | root, tl | **The local fold:** `git merge <child-branch>`, followed by best-effort teardown (`kill_pane` + `reclaim_worktree`) of the child. |
-| `submit_branch` | `Git`+`Process`+`Spawner`+`Fs`+`Bus` | tl, dev | **Request review** — if reviewers are enabled (`review_enabled` in `.exo/config.toml`, off by default; read from the node's own papers). Runs the ordered precondition checks (committed → **needs_rebase** → `.exo/checks/pre-merge/*` scripts); the rebase gate blocks + prompts `git rebase <parent>` when the branch is behind its parent's current commit (fails open when the parent name isn't a live ref, e.g. root's `root`). Then spawns a **reviewer** off this branch (fork-point `git diff` base via `Git::merge_base`) and returns "stop & wait". It does NOT deliver `[READY]` itself except via the skip path — only the sidecar does, on an approve-verdict (the structural gate). **Continuity:** reads the latest `ReviewLog` and appends unresolved Error findings from the prior round to the reviewer task. Explicit escape hatch regardless of config: `dangerously_skip_reviewer: true`. |
+| `submit_branch` | `Git`+`Process`+`Spawner`+`Fs`+`Bus` | tl, dev | **Request review** — if reviewers are enabled (`review_enabled` in `.exo/config.toml`, off by default; read from the node's own papers). Runs the ordered precondition checks (committed → **needs_rebase** → `.exo/checks/pre-merge/*` scripts); the rebase gate blocks + prompts `git rebase <parent>` when the branch is behind its parent's REAL git branch (`NodePapers.parent_branch`, birth-stamped by the spawner from ITS OWN current branch — not a dot-derived tree-address coordinate, so the gate fires at every depth, including a direct child of root; fails open only on the root itself, or unreadable/corrupt/pre-field papers). Then spawns a **reviewer** off this branch (fork-point `git diff` base via `Git::merge_base`) and returns "stop & wait". It does NOT deliver `[READY]` itself except via the skip path — only the sidecar does, on an approve-verdict (the structural gate). **Continuity:** reads the latest `ReviewLog` and appends unresolved Error findings from the prior round to the reviewer task. Explicit escape hatch regardless of config: `dangerously_skip_reviewer: true`. |
 | `verdict` | `Bus`+`Kv` | reviewer | A reviewer's one output → a `System(Reviewed)` message to its parent: `summary` + structured `findings` {`file`, `line`, `severity`, `body`, `suggestion`?}. Triggers reviewer teardown (handled in `exo-node`). |
 | `notify_parent` | `Bus` | tl, dev, worker, reviewer | Status/failure update to `Addressee::Parent` (NOT the done-signal). |
 | `send_message` | `Bus` | root, tl | Deliver to a child by name (`to: <child>`) — **tree-edges only**; inline vs worktree is transparent. |
@@ -82,10 +82,11 @@ Every tool implements `Tool::description()`; `exo-node`'s `tools/list` emits it,
 self-documenting — an agent learns the local-merge loop (commit → `submit_branch` → parent `merge`,
 no PR/remote) from the tools it has. `submit_branch`'s preconditions are an **ordered, extensible
 fn-pointer list** (`tools/submit.rs`) mirroring the role hook fn-pointers — currently `committed`
-(clean tree), `needs_rebase` (branch not behind its parent — prompts `git rebase <parent>`, keeps
-the parent's fold conflict-free by resolving in the child's own context), and `pre_merge_checks`
-(project `.exo/checks/pre-merge/*` scripts). Any check failing surfaces as a tool error the agent
-acts on, before either the review-spawn or the skip-forward path.
+(clean tree), `needs_rebase` (branch not behind its parent's REAL git branch, read off the node's
+own `.exo/node.json` `parent_branch` — prompts `git rebase <parent>`, keeps the parent's fold
+conflict-free by resolving in the child's own context), and `pre_merge_checks` (project
+`.exo/checks/pre-merge/*` scripts). Any check failing surfaces as a tool error the agent acts on,
+before either the review-spawn or the skip-forward path.
 
 ## Roles
 

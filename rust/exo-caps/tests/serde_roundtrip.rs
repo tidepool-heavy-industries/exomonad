@@ -283,6 +283,7 @@ fn test_node_papers_roundtrip() {
         true,
         false,
         false,
+        Some(Branch::new("main".into()).unwrap()),
     )
     .unwrap();
     assert_roundtrip(&papers);

@@ -97,6 +97,17 @@ pub struct NodePapers {
     /// `.exo/config.toml`'s `review_enabled = true` rather than getting them by default.
     #[serde(default = "default_review_enabled")]
     pub review_enabled: bool,
+    /// The parent's real git branch, stamped at birth by the spawner from ITS OWN current
+    /// branch (the parent is, by definition, on the branch its children fork from). `None` for
+    /// the root (no parent). Backs `submit_branch`'s `needs_rebase` gate: the branch name
+    /// embedded in `path`/`branch` is a tree-address coordinate, NOT necessarily a live git ref
+    /// (a direct child of root has a derived parent coordinate of `root`, which is the root's
+    /// exo IDENTITY, not the branch the human's root session is actually on) — this field
+    /// carries the real ref instead. Defaulted on read (`#[serde(default)]`) so papers written
+    /// by an older binary, which had no such field, still parse — they read back as `None`,
+    /// which fails the rebase gate open exactly as it did before this field existed.
+    #[serde(default)]
+    pub parent_branch: Option<Branch>,
 }
 
 fn default_papers_version() -> u32 {
@@ -131,7 +142,7 @@ impl NodePapers {
 
     /// Construct papers for a node being born (`v` set to the current [`VERSION`]). The role is
     /// recorded erased; `yolo` / `wrap_nix` / `review_enabled` are the launch policy stamped onto
-    /// the child.
+    /// the child. `parent_branch` is the parent's own real git branch (`None` for the root).
     #[allow(clippy::too_many_arguments)]
     pub fn new<R: RoleKind>(
         path: NodePath,
@@ -142,6 +153,7 @@ impl NodePapers {
         yolo: bool,
         wrap_nix: bool,
         review_enabled: bool,
+        parent_branch: Option<Branch>,
     ) -> CapResult<Self> {
         Ok(NodePapers {
             v: Self::VERSION,
@@ -154,6 +166,7 @@ impl NodePapers {
             wrap_nix,
             kind: ChildKind::Worktree,
             review_enabled,
+            parent_branch,
         })
     }
 
@@ -171,6 +184,7 @@ impl NodePapers {
             Self::DEFAULT_YOLO,
             Self::DEFAULT_WRAP_NIX,
             Self::DEFAULT_REVIEW_ENABLED,
+            None,
         )
     }
 }
@@ -221,6 +235,7 @@ mod tests {
             NodePapers::DEFAULT_YOLO,
             NodePapers::DEFAULT_WRAP_NIX,
             NodePapers::DEFAULT_REVIEW_ENABLED,
+            Some(Branch::new("dev".into()).unwrap()),
         )
         .unwrap();
         let json = serde_json::to_string(&papers).unwrap();
@@ -230,6 +245,7 @@ mod tests {
         assert_eq!(papers, back);
         // and the role types back to the domain enum
         assert_eq!(back.role.typed::<TestRole>().unwrap(), TestRole::Dev);
+        assert_eq!(back.parent_branch.unwrap().as_str(), "dev");
     }
 
     #[test]
@@ -247,6 +263,9 @@ mod tests {
         assert_eq!(papers.kind, ChildKind::Worktree);
         // `review_enabled` is absent from older papers — defaults to off.
         assert_eq!(papers.review_enabled, NodePapers::DEFAULT_REVIEW_ENABLED);
+        // `parent_branch` is absent from older papers — defaults to `None`, which fails the
+        // rebase gate open exactly as the old string-derivation did for an unresolvable ref.
+        assert_eq!(papers.parent_branch, None);
     }
 
     #[test]

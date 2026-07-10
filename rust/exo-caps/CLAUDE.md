@@ -16,7 +16,7 @@ This is the seam that replaces the old Haskell-WASM boundary. WASM *physically* 
 | `bus` | `Bus` trait + `Addressee` (tree-edges only) + `BusError` |
 | `spawner` | `Spawner` trait + the generic `SpawnSpec` (one `spawn<S>`; the domain's per-op spec fixes role/kind). Historical per-op method names `WorkerSpec`/`GeminiSpec`/`ForkSpec` are gone. |
 | `lifecycle` | `ChildRecord` (append-only `Spawned`/`Started`) + `fold_children`. `Spawned` carries an optional non-secret `model_label` (e.g. `"kimi"`) for a launch-profiled node — surfaced by `tree`, never the token. |
-| `papers` | `NodePapers` (`node.json`) — a node's immutable birth identity. Gains a `kind: ChildKind` field (`#[serde(default = "Worktree")]`) so old papers still parse. `NodePapers::new` hardcodes `Worktree`; only `birth_finish`'s struct literal sets `kind: core.kind`. |
+| `papers` | `NodePapers` (`node.json`) — a node's immutable birth identity. Gains a `kind: ChildKind` field (`#[serde(default = "Worktree")]`) so old papers still parse. `NodePapers::new` hardcodes `Worktree`; only `birth_finish`'s struct literal sets `kind: core.kind`. Also carries `parent_branch: Option<Branch>` (`#[serde(default)]`) — the parent's REAL git branch, stamped at birth from the spawner's own `current_branch` (`None` for the root); backs `submit_branch`'s `needs_rebase` gate at every depth instead of a string-derived (and often unresolvable) coordinate. |
 | `paths` | Inbox/papers path scheme (`~/.claude/exo/inboxes/{run_id}/pane-N.jsonl`) |
 | `invocation` | Single source of truth for a child's `exo node/hook` argv |
 | `git` `tmux` `fs` `kv` `process` | The IO capability traits (signatures only) |
