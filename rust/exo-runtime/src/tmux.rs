@@ -56,11 +56,10 @@ impl Tmux for Runtime {
     }
 
     async fn kill_pane(&self, pane: &PaneId) -> Result<(), TmuxError> {
-        let shared_pane =
-            SharedPaneId::parse(pane.as_str()).map_err(|e| TmuxError::Failed {
-                op: "kill_pane",
-                detail: e.to_string(),
-            })?;
+        let shared_pane = SharedPaneId::parse(pane.as_str()).map_err(|e| TmuxError::Failed {
+            op: "kill_pane",
+            detail: e.to_string(),
+        })?;
         TmuxIpc::new(&self.tmux_session)
             .kill_pane(&shared_pane)
             .await

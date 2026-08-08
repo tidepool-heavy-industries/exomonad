@@ -45,7 +45,7 @@ use exo_caps::{
     fold_children, AgentName, AgentType, Branch, Child, ChildKind, ChildRecord, FsError, InboxPath,
     NodePapers, PaneId, RoleKind, RoleRecord, SpawnError, SpawnSpec, Spawner,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -78,7 +78,7 @@ fn home_or_warn(site: &str) -> String {
 /// last record from a crash mid-append must not block the whole ledger, only the affected
 /// record. Shared by [`Runtime::read_child_records`] (this node's own ledger) and
 /// [`Runtime::read_child_records_at`] (an arbitrary enclosing directory's ledger).
-fn parse_child_ledger(data: &[u8], ledger_path: &Path) -> Vec<ChildRecord> {
+pub(crate) fn parse_child_ledger(data: &[u8], ledger_path: &Path) -> Vec<ChildRecord> {
     let mut records = Vec::new();
     for line in data.split(|&b| b == b'\n') {
         if line.is_empty() {
@@ -95,6 +95,24 @@ fn parse_child_ledger(data: &[u8], ledger_path: &Path) -> Vec<ChildRecord> {
         }
     }
     records
+}
+
+/// The pure decision behind [`Runtime::detect_child_deaths`]: which of `candidates` (assumed
+/// already filtered to non-terminal) are missing from the probed alive set. `alive = None` means
+/// the pane probe failed — unknown, never "no panes exist" — so it yields nothing rather than
+/// treating every candidate as dead. Split out so the truth table is testable without tmux (mirrors
+/// `liveness.rs`'s `any_busy`).
+fn missing_from_alive<'a>(
+    candidates: &'a [Child],
+    alive: Option<&HashSet<String>>,
+) -> Vec<&'a Child> {
+    match alive {
+        None => Vec::new(),
+        Some(set) => candidates
+            .iter()
+            .filter(|c| !set.contains(c.pane.as_str()))
+            .collect(),
+    }
 }
 
 /// Run a best-effort teardown op with **bounded** retry + linear backoff. Each transient failure
@@ -202,9 +220,13 @@ pub(crate) struct BirthCore {
     /// The child's resolved role-steering protocol (override-or-const), passed to Claude via
     /// `--append-system-prompt`. Empty ⇒ no steering injected.
     pub protocol: String,
-    /// The child's `--model` (from [`RoleKind::model`](exo_caps::RoleKind)). `None` ⇒ inherit the
-    /// launcher's default model. `exo` pins its leaf roles (dev/worker/reviewer) to `sonnet`.
+    /// The child's `--model` (from [`RoleKind::model`](exo_caps::RoleKind), overridden by
+    /// [`SpawnSpec::model_override`] when the domain sets one). `None` ⇒ inherit the launcher's
+    /// default model. `exo` pins its leaf roles (dev/worker/reviewer) to `sonnet`.
     pub model: Option<String>,
+    /// A hash of the directives bundle this child was launched with ([`SpawnSpec::directives_hash`]).
+    /// `None` when nothing computes one yet — the runtime records whatever it's given.
+    pub directives_hash: Option<String>,
     /// Optional per-role launch redirect (from [`RoleKind::launch_profile_env_prefix`]): point this
     /// child's Claude at a non-default Anthropic-compatible endpoint/model (e.g. a local proxy
     /// serving Kimi). `None` ⇒ default Claude launch. Carries the auth token **in memory only**.
@@ -230,7 +252,11 @@ impl Runtime {
 
     /// Append one lifecycle record. **Single-writer** (this node owns its ledger), so a
     /// plain `append` is race-free — none of the multi-writer-bus PIPE_BUF dance applies.
-    pub(crate) async fn append_child_record(&self, rec: &ChildRecord) -> Result<(), SpawnError> {
+    ///
+    /// `pub` (not a cap-trait method) so the sidecar's `Submitted`-record writer can reach it
+    /// directly — it stays an INHERENT method on `Runtime`, never a `Bus`/`Spawner` trait method,
+    /// so a policy tool can never reach the ledger.
+    pub async fn append_child_record(&self, rec: &ChildRecord) -> Result<(), SpawnError> {
         let path = self.children_log_path();
         if let Some(dir) = path.parent() {
             tokio::fs::create_dir_all(dir).await?;
@@ -348,6 +374,111 @@ impl Runtime {
     pub(crate) async fn read_children(&self) -> Result<BTreeMap<AgentName, Child>, SpawnError> {
         let records = self.read_child_records().await?;
         Ok(fold_children(&records))
+    }
+
+    /// Record `Reaped` for `child` if the ledger still shows it non-terminal. Called by the
+    /// runtime's own teardown paths (`kill_pane` after a successful kill, `reclaim_worktree` after
+    /// a successful reclaim) — never by a tool. Re-folding and checking [`ChildState::is_terminal`]
+    /// first is what makes the normal kill-then-reclaim sequence append exactly one `Reaped` record
+    /// (the second call finds the child already terminal and does nothing).
+    ///
+    /// A child's cooperative self-reap and the forced shutdown cascade never go through
+    /// `Spawner::kill_pane` on the parent side, so those children are NOT recorded as `Reaped`
+    /// here — they surface as `Died` on the parent's next watchdog tick instead. That is intended,
+    /// not a gap.
+    ///
+    /// Any failure (ledger read or append) is logged and swallowed — a teardown must never fail
+    /// because a ledger write failed.
+    pub async fn record_reaped_if_active(&self, child: &AgentName) {
+        let records = match self.read_child_records().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    child = child.as_str(),
+                    error = %e,
+                    "record_reaped_if_active: ledger read failed; not recording"
+                );
+                return;
+            }
+        };
+        let Some(entry) = fold_children(&records).get(child).cloned() else {
+            return;
+        };
+        if entry.state.is_terminal() {
+            return;
+        }
+        if let Err(e) = self
+            .append_child_record(&ChildRecord::Reaped {
+                child: child.clone(),
+                at: Some(chrono::Utc::now()),
+            })
+            .await
+        {
+            tracing::warn!(
+                child = child.as_str(),
+                error = %e,
+                "record_reaped_if_active: append failed"
+            );
+        }
+    }
+
+    /// Scan for non-terminal children whose recorded pane no longer exists in tmux and record
+    /// `Died` for each. **Once-only is structural**: a `Died` child folds terminal and is excluded
+    /// from every later scan — no separate "already reported" set needed.
+    ///
+    /// A [`exo_caps::Tmux::list_panes`] probe failure means "could not tell", never "no panes
+    /// exist" — it returns an empty vec and records nothing, rather than treating every non-
+    /// terminal child as dead.
+    pub async fn detect_child_deaths(&self) -> Vec<Child> {
+        let records = match self.read_child_records().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "detect_child_deaths: ledger read failed; recording nothing"
+                );
+                return Vec::new();
+            }
+        };
+        let candidates: Vec<Child> = fold_children(&records)
+            .into_values()
+            .filter(|c| !c.state.is_terminal())
+            .collect();
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+
+        let alive = match exo_caps::Tmux::list_panes(self).await {
+            Ok(set) => Some(set),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "detect_child_deaths: pane probe failed; recording nothing"
+                );
+                None
+            }
+        };
+
+        let mut died = Vec::new();
+        for child in missing_from_alive(&candidates, alive.as_ref()) {
+            if let Err(e) = self
+                .append_child_record(&ChildRecord::Died {
+                    child: child.name.clone(),
+                    pane: child.pane.clone(),
+                    at: Some(chrono::Utc::now()),
+                })
+                .await
+            {
+                tracing::warn!(
+                    child = child.name.as_str(),
+                    error = %e,
+                    "detect_child_deaths: append failed"
+                );
+                continue;
+            }
+            died.push(child.clone());
+        }
+        died
     }
 
     /// The child's OWN ingestion inbox, derived from its pane + the run-id namespace:
@@ -574,6 +705,17 @@ impl Runtime {
         // (d) RECORD FIRST — before launching the agent (the load-bearing race guard: the record
         // precedes the *agent*, so a crash never leaves an untracked agent — the pane here is a
         // bare holding shell).
+        //
+        // The launch model: a launch profile's model (e.g. kimi-for-coding) wins over the spec's
+        // resolved model (role default or explicit override) — profiles are proxy-backed and serve
+        // exactly one model, so pointing a profiled child at any other model 404s. Resolved here,
+        // before the record append, and reused below at the `ClaudeInvocation` site so there is one
+        // binding, not two independently-computed ones.
+        let launch_model = core
+            .launch_profile
+            .as_ref()
+            .and_then(|p| p.model.clone())
+            .or_else(|| core.model.clone());
         let inbox = self.child_inbox_path(pane);
         let record = ChildRecord::Spawned {
             child: core.name.clone(),
@@ -582,8 +724,8 @@ impl Runtime {
             inbox,
             // Non-secret cosmetic tag (e.g. "kimi") so the `tree` tool can show it; never the token.
             model_label: core.launch_profile.as_ref().and_then(|p| p.label.clone()),
-            model: None,
-            directives_hash: None,
+            model: launch_model.clone(),
+            directives_hash: core.directives_hash.clone(),
         };
         self.append_child_record(&record).await?;
 
@@ -796,14 +938,6 @@ impl Runtime {
             None
         };
 
-        // The launch model: a launch profile's model (e.g. kimi-for-coding) wins over the role's
-        // default (`exo` pins leaves to sonnet); `None` inherits the launcher's default.
-        let launch_model = core
-            .launch_profile
-            .as_ref()
-            .and_then(|p| p.model.clone())
-            .or_else(|| core.model.clone());
-
         // Build the typed launch invocation. The ordered render enforces the structural invariant:
         // --mcp-config (variadic) is always capped by --append-system-prompt/--model before the
         // positional prompt, so it can never swallow the prompt as a config path.
@@ -1008,8 +1142,12 @@ impl Spawner for Runtime {
             ChildKind::Inline => self.branch().clone(),
         };
         let agent_type = RoleKind::agent_type(&role);
-        // The role's launch model (`exo` pins leaves to sonnet); resolved while the role is typed.
-        let model = RoleKind::model(&role).map(|m| m.to_string());
+        // The role's launch model (`exo` pins leaves to sonnet), unless the spec names an explicit
+        // override — resolved while the role is typed AND before `spec.into_task()` consumes it.
+        let model = spec
+            .model_override()
+            .or_else(|| RoleKind::model(&role).map(String::from));
+        let directives_hash = spec.directives_hash();
         // The role's optional launch profile: resolve `{prefix}_*` from this node's own env while
         // the role is typed. The token lives only here + in the child's launch env (never papers).
         let launch_profile =
@@ -1038,6 +1176,7 @@ impl Spawner for Runtime {
             task,
             protocol,
             model,
+            directives_hash,
             launch_profile,
             fork_session,
         };
@@ -1052,13 +1191,18 @@ impl Spawner for Runtime {
             detail: "unknown child".into(),
         })?;
 
-        match record.kind {
+        let result = match record.kind {
             ChildKind::Worktree => {
                 let base_path = self.working_dir.join(".exo/worktrees").join(child.as_str());
                 self.reclaim_worktree_tree(child, &base_path).await
             }
             ChildKind::Inline => Ok(()),
+        };
+
+        if result.is_ok() {
+            self.record_reaped_if_active(child).await;
         }
+        result
     }
 
     async fn kill_pane(&self, child: &AgentName) -> Result<(), SpawnError> {
@@ -1077,7 +1221,10 @@ impl Spawner for Runtime {
             op: "kill_pane",
             child: Some(child.clone()),
             detail: e.to_string(),
-        })
+        })?;
+
+        self.record_reaped_if_active(child).await;
+        Ok(())
     }
 }
 
@@ -1541,5 +1688,172 @@ mod tests {
             !outer_path.exists(),
             "outer removal must still be attempted and succeed despite the nested failure"
         );
+    }
+
+    /// Guarantees a throwaway tmux session is killed even if the test body panics.
+    struct TmuxSessionGuard(String);
+    impl Drop for TmuxSessionGuard {
+        fn drop(&mut self) {
+            let _ = std::process::Command::new("tmux")
+                .args(["kill-session", "-t", &self.0])
+                .status();
+        }
+    }
+
+    /// A real kill-then-reclaim sequence appends exactly ONE `Reaped` record — the fold-check in
+    /// `record_reaped_if_active` is what prevents the second call from double-reaping.
+    #[tokio::test]
+    async fn reap_records_exactly_once() {
+        let tmp = tempdir().unwrap();
+        let repo = tmp.path();
+        init_git_repo(repo);
+
+        let session = format!("exo-test-reap-{}", std::process::id());
+        assert!(
+            std::process::Command::new("tmux")
+                .args(["new-session", "-d", "-s", &session, "-x", "80", "-y", "24"])
+                .status()
+                .unwrap()
+                .success(),
+            "failed to create throwaway tmux session for the test"
+        );
+        let _guard = TmuxSessionGuard(session.clone());
+
+        let rt = Runtime::new(
+            NodePath::new(vec![an("root")]).unwrap(),
+            Branch::new("main".into()).unwrap(),
+            repo.to_path_buf(),
+            None,
+            "run".into(),
+            session,
+            PaneId::new("%0".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
+        );
+
+        let child = an("leaf");
+        let branch = Branch::new("leaf-branch".into()).unwrap();
+        let child_dir = repo.join(".exo/worktrees/leaf");
+        exo_caps::Git::worktree_add(&rt, &branch, &child_dir)
+            .await
+            .unwrap();
+
+        let pane = exo_caps::Tmux::new_pane(&rt, &child_dir, "/bin/sh")
+            .await
+            .unwrap();
+        rt.append_child_record(&ChildRecord::Spawned {
+            child: child.clone(),
+            kind: ChildKind::Worktree,
+            pane: pane.clone(),
+            inbox: rt.child_inbox_path(&pane),
+            model_label: None,
+            model: None,
+            directives_hash: None,
+        })
+        .await
+        .unwrap();
+
+        exo_caps::Spawner::kill_pane(&rt, &child).await.unwrap();
+        exo_caps::Spawner::reclaim_worktree(&rt, &child)
+            .await
+            .unwrap();
+
+        let records = rt.read_child_records().await.unwrap();
+        let reaped = records
+            .iter()
+            .filter(|r| matches!(r, ChildRecord::Reaped { child: c, .. } if c == &child))
+            .count();
+        assert_eq!(
+            reaped, 1,
+            "kill_pane + reclaim_worktree must append exactly one Reaped record: {records:?}"
+        );
+    }
+
+    /// `detect_child_deaths` records `Died` for a child whose pane no longer exists, exactly once
+    /// — a second scan finds it already terminal and appends nothing.
+    #[tokio::test]
+    async fn death_scan_appends_died_once() {
+        let tmp = tempdir().unwrap();
+        let rt = root_runtime_no_git(tmp.path());
+
+        let child = an("worker-1");
+        // A pane id that (with overwhelming probability) is not live in any real tmux session —
+        // `list_panes` is a genuine `tmux list-panes -a` call.
+        let pane = PaneId::new("%99999999".into()).unwrap();
+        rt.append_child_record(&ChildRecord::Spawned {
+            child: child.clone(),
+            kind: ChildKind::Inline,
+            pane: pane.clone(),
+            inbox: rt.child_inbox_path(&pane),
+            model_label: None,
+            model: None,
+            directives_hash: None,
+        })
+        .await
+        .unwrap();
+
+        let died = rt.detect_child_deaths().await;
+        assert_eq!(died.len(), 1);
+        assert_eq!(died[0].name, child);
+
+        let records = rt.read_child_records().await.unwrap();
+        let died_records = records
+            .iter()
+            .filter(|r| matches!(r, ChildRecord::Died { .. }))
+            .count();
+        assert_eq!(died_records, 1);
+
+        // Second scan: the child is now terminal, so it's excluded from the candidate set —
+        // nothing new is appended, and the scan reports nothing.
+        let died_again = rt.detect_child_deaths().await;
+        assert!(died_again.is_empty());
+        let records2 = rt.read_child_records().await.unwrap();
+        assert_eq!(records2.len(), records.len(), "no new record appended");
+    }
+
+    fn root_runtime_no_git(dir: &std::path::Path) -> Runtime {
+        Runtime::new(
+            NodePath::new(vec![an("root")]).unwrap(),
+            Branch::new("main".into()).unwrap(),
+            dir.to_path_buf(),
+            None,
+            "run".into(),
+            "session".into(),
+            PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
+        )
+    }
+
+    fn child(name: &str, pane: &str) -> Child {
+        Child {
+            name: an(name),
+            kind: ChildKind::Inline,
+            pane: PaneId::new(pane.into()).unwrap(),
+            inbox: InboxPath::new(format!("/tmp/{name}.jsonl").into()),
+            model_label: None,
+            model: None,
+            state: exo_caps::ChildState::Live,
+        }
+    }
+
+    #[test]
+    fn missing_from_alive_probe_failure_yields_nothing() {
+        let candidates = vec![child("a", "%1"), child("b", "%2")];
+        assert!(missing_from_alive(&candidates, None).is_empty());
+    }
+
+    #[test]
+    fn missing_from_alive_finds_dead_panes() {
+        let candidates = vec![child("a", "%1"), child("b", "%2")];
+        let alive: HashSet<String> = ["%1".to_string()].into_iter().collect();
+        let missing = missing_from_alive(&candidates, Some(&alive));
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].name.as_str(), "b");
+    }
+
+    #[test]
+    fn missing_from_alive_none_missing_when_all_alive() {
+        let candidates = vec![child("a", "%1")];
+        let alive: HashSet<String> = ["%1".to_string()].into_iter().collect();
+        assert!(missing_from_alive(&candidates, Some(&alive)).is_empty());
     }
 }

@@ -32,8 +32,8 @@ use crate::runtime::Runtime;
 use async_trait::async_trait;
 use chrono::Utc;
 use exo_caps::{
-    Addressee, Bus, BusError, InboxPath, IngestionEntry, Message, MessageBody, MessageKind,
-    Persona, SpawnError,
+    Addressee, Bus, BusError, ChildState, InboxPath, IngestionEntry, Message, MessageBody,
+    MessageKind, Persona, SpawnError,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::AsyncWriteExt;
@@ -67,10 +67,23 @@ impl Runtime {
                     }
                 })?;
 
-                children
-                    .get(name)
-                    .map(|c| c.inbox.clone())
-                    .ok_or_else(|| BusError::Unresolved(to.clone()))
+                let Some(c) = children.get(name) else {
+                    return Err(BusError::Unresolved(to.clone()));
+                };
+                // A tombstoned child's inbox has no reader, and its recorded pane may since have
+                // been recycled onto a different live agent — fail loud rather than silently
+                // appending into a black hole.
+                match &c.state {
+                    ChildState::Reaped => Err(BusError::Tombstoned {
+                        child: name.clone(),
+                        state: "reaped",
+                    }),
+                    ChildState::Died => Err(BusError::Tombstoned {
+                        child: name.clone(),
+                        state: "died",
+                    }),
+                    ChildState::Live | ChildState::Submitted { .. } => Ok(c.inbox.clone()),
+                }
             }
         }
     }
@@ -120,7 +133,7 @@ impl Bus for Runtime {
             v: 1,
             ts: Utc::now(),
             from: Persona::Agent(self.name()),
-            id: None,
+            id: Some(uuid::Uuid::new_v4().to_string()),
             spill: None,
             msg,
         };
@@ -140,7 +153,9 @@ impl Bus for Runtime {
                 v: 1,
                 ts: entry.ts,
                 from: entry.from.clone(),
-                id: None,
+                // The pointer and the spilled side-file entry are ONE logical message — they must
+                // share an id, not each mint their own.
+                id: entry.id.clone(),
                 spill: Some(spill_path.clone()),
                 msg: Message {
                     text: MessageBody::new("[spilled: full content in side-file]".into())
@@ -594,5 +609,135 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resolved, good_inbox);
+    }
+
+    #[tokio::test]
+    async fn tombstoned_delivery_errs() {
+        let dir = tempdir().unwrap();
+        let exo_dir = dir.path().join(".exo");
+        std::fs::create_dir_all(&exo_dir).unwrap();
+        let children_file = exo_dir.join("children.jsonl");
+
+        let child_name = AgentName::new("kid".into()).unwrap();
+        let records = [
+            ChildRecord::Spawned {
+                child: child_name.clone(),
+                kind: exo_caps::ChildKind::Inline,
+                pane: PaneId::new("%1".into()).unwrap(),
+                inbox: InboxPath::new(dir.path().join("kid.jsonl")),
+                model_label: None,
+                model: None,
+                directives_hash: None,
+            },
+            ChildRecord::Reaped {
+                child: child_name.clone(),
+                at: None,
+            },
+        ];
+        let body: String = records
+            .iter()
+            .map(|r| format!("{}\n", serde_json::to_string(r).unwrap()))
+            .collect();
+        std::fs::write(&children_file, body).unwrap();
+
+        let node_path = NodePath::new(vec![AgentName::new("parent".into()).unwrap()]).unwrap();
+        let runtime = Runtime::new(
+            node_path,
+            Branch::new("main".into()).unwrap(),
+            dir.path().to_path_buf(),
+            None,
+            "run-1".into(),
+            "session-1".into(),
+            PaneId::new("%100".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
+        );
+
+        let msg = Message {
+            text: MessageBody::new("hi".into()).unwrap(),
+            summary: Summary::new("hi".into()).unwrap(),
+            kind: MessageKind::Chat,
+            reply_to: None,
+        };
+        match runtime
+            .deliver(Addressee::Child(child_name.clone()), msg)
+            .await
+        {
+            Err(BusError::Tombstoned { child, state }) => {
+                assert_eq!(child, child_name);
+                assert_eq!(state, "reaped");
+            }
+            other => panic!("expected Tombstoned, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn every_delivery_carries_an_id() {
+        let dir = tempdir().unwrap();
+        let inbox_path = dir.path().join("inbox.jsonl");
+        let inbox = InboxPath::new(inbox_path.clone());
+
+        let node_path = NodePath::new(vec![AgentName::new("node".into()).unwrap()]).unwrap();
+        let runtime = Runtime::new(
+            node_path,
+            Branch::new("main".into()).unwrap(),
+            dir.path().to_path_buf(),
+            Some(inbox),
+            "run-1".into(),
+            "session-1".into(),
+            PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
+        );
+
+        let msg = Message {
+            text: MessageBody::new("hello".into()).unwrap(),
+            summary: Summary::new("hi".into()).unwrap(),
+            kind: MessageKind::Chat,
+            reply_to: None,
+        };
+        runtime.deliver(Addressee::Parent, msg).await.unwrap();
+
+        let content = std::fs::read_to_string(&inbox_path).unwrap();
+        let entry: IngestionEntry = serde_json::from_str(content.lines().next().unwrap()).unwrap();
+        assert!(entry.id.is_some(), "every delivery must carry a fresh id");
+    }
+
+    #[tokio::test]
+    async fn spill_pointer_id_matches_spilled_entry() {
+        let dir = tempdir().unwrap();
+        let inbox_path = dir.path().join("inbox.jsonl");
+        let inbox = InboxPath::new(inbox_path.clone());
+
+        let node_path = NodePath::new(vec![AgentName::new("node".into()).unwrap()]).unwrap();
+        let runtime = Runtime::new(
+            node_path,
+            Branch::new("main".into()).unwrap(),
+            dir.path().to_path_buf(),
+            Some(inbox),
+            "run-1".into(),
+            "session-1".into(),
+            PaneId::new("%1".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
+        );
+
+        let msg = Message {
+            text: MessageBody::new("A".repeat(4000)).unwrap(),
+            summary: Summary::new("big".into()).unwrap(),
+            kind: MessageKind::Chat,
+            reply_to: None,
+        };
+        runtime.deliver(Addressee::Parent, msg).await.unwrap();
+
+        let content = std::fs::read_to_string(&inbox_path).unwrap();
+        let pointer: IngestionEntry =
+            serde_json::from_str(content.lines().next().unwrap()).unwrap();
+        let spill_path = pointer.spill.clone().expect("oversized entry spills");
+        let spilled: IngestionEntry =
+            serde_json::from_slice(&std::fs::read(&spill_path).unwrap()).unwrap();
+
+        assert!(pointer.id.is_some());
+        assert_eq!(
+            pointer.id, spilled.id,
+            "the pointer and its spilled side-file entry are one logical message and must share an id"
+        );
     }
 }

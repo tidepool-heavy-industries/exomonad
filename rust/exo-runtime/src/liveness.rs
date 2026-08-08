@@ -37,8 +37,14 @@ impl ChildLiveness for Runtime {
             }
         };
         let children = exo_caps::fold_children(&records);
-        if children.is_empty() {
-            return false; // no children → nothing to wait on
+        // Tombstoned children have nothing to probe — tmux recycles pane ids, so their recorded
+        // pane may since have been recycled onto a different live agent.
+        let live: Vec<_> = children
+            .values()
+            .filter(|c| !c.state.is_terminal())
+            .collect();
+        if live.is_empty() {
+            return false; // no live children → nothing to wait on
         }
 
         // Probe pane liveness once ([`exo_caps::Tmux::list_panes`]). A probe failure maps to
@@ -53,7 +59,7 @@ impl ChildLiveness for Runtime {
         };
 
         any_busy(
-            children.values().map(|c| (&c.name, c.pane.as_str())),
+            live.iter().map(|c| (&c.name, c.pane.as_str())),
             alive.as_ref(),
         )
     }

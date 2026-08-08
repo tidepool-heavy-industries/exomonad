@@ -80,17 +80,25 @@ fn subtree(working_dir: &Path, alive: &HashSet<String>, depth: usize) -> Vec<Tre
         .into_values()
         .map(|c| {
             let pane = c.pane.clone();
-            let children = match c.kind {
-                ChildKind::Worktree => {
-                    let child_wd = working_dir.join(".exo/worktrees").join(c.name.as_str());
-                    subtree(&child_wd, alive, depth - 1)
+            let terminal = c.state.is_terminal();
+            // A terminal child's recorded pane may since have been recycled by tmux onto a
+            // different, live agent — never consult the probe set for it, and never recurse into
+            // its worktree dir (it's gone, or about to be reclaimed).
+            let children = if terminal {
+                Vec::new()
+            } else {
+                match c.kind {
+                    ChildKind::Worktree => {
+                        let child_wd = working_dir.join(".exo/worktrees").join(c.name.as_str());
+                        subtree(&child_wd, alive, depth - 1)
+                    }
+                    ChildKind::Inline => Vec::new(),
                 }
-                ChildKind::Inline => Vec::new(),
             };
             TreeNode {
                 name: c.name.clone(),
                 kind: Some(c.kind),
-                pane_alive: alive.contains(pane.as_str()),
+                pane_alive: !terminal && alive.contains(pane.as_str()),
                 pane,
                 state: Some(c.state.clone()),
                 model: c.model.clone(),
@@ -106,28 +114,15 @@ fn subtree(working_dir: &Path, alive: &HashSet<String>, depth: usize) -> Vec<Tre
 /// each `warn!`-ed and skipped — best-effort like the bus/inbound parse, but never silent about
 /// a genuine problem (which would otherwise make the topology view quietly wrong).
 fn read_records(path: &Path) -> Vec<ChildRecord> {
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
+    let data = match std::fs::read(path) {
+        Ok(d) => d,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
         Err(e) => {
             tracing::warn!("topology: could not read {}: {e}", path.display());
             return Vec::new();
         }
     };
-    content
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| match serde_json::from_str::<ChildRecord>(l) {
-            Ok(r) => Some(r),
-            Err(e) => {
-                tracing::warn!(
-                    "topology: skipping malformed children.jsonl line in {}: {e}",
-                    path.display()
-                );
-                None
-            }
-        })
-        .collect()
+    crate::spawner::parse_child_ledger(&data, path)
 }
 
 #[cfg(test)]
@@ -190,6 +185,47 @@ mod tests {
     fn missing_ledger_is_empty_not_an_error() {
         let dir = tempfile::tempdir().unwrap();
         assert!(subtree(dir.path(), &HashSet::new(), MAX_DEPTH).is_empty());
+    }
+
+    /// A `Died` child whose recorded pane IS in the alive set (tmux recycled the pane id onto a
+    /// different, live agent) still renders `pane_alive: false` and no children — the terminal
+    /// state forces the answer without ever consulting the probe set, and the worktree is never
+    /// recursed into (even though it has its own nested ledger on disk).
+    #[test]
+    fn recycled_pane_tombstone_reads_dead() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_ledger(
+            root,
+            &[
+                spawned("a", ChildKind::Worktree, "%1"),
+                ChildRecord::Died {
+                    child: AgentName::new("a".into()).unwrap(),
+                    pane: PaneId::new("%1".into()).unwrap(),
+                    at: None,
+                },
+            ],
+        );
+        // A nested ledger under "a" that would normally be recursed into.
+        let a_wd = root.join(".exo/worktrees/a");
+        write_ledger(&a_wd, &[spawned("c", ChildKind::Worktree, "%3")]);
+
+        // "%1" IS in the alive set — simulating tmux having recycled the pane id onto a
+        // different, live agent.
+        let alive: HashSet<String> = ["%1".to_string()].into_iter().collect();
+        let tree = subtree(root, &alive, MAX_DEPTH);
+
+        assert_eq!(tree.len(), 1);
+        let a = &tree[0];
+        assert_eq!(a.name.as_str(), "a");
+        assert!(
+            !a.pane_alive,
+            "a terminal child must read as dead regardless of the probe set"
+        );
+        assert!(
+            a.children.is_empty(),
+            "a terminal child's worktree must not be recursed into"
+        );
     }
 
     #[tokio::test]

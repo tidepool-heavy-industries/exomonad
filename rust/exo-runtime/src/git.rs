@@ -408,4 +408,88 @@ mod tests {
         );
         assert!(rt.is_clean().await.unwrap());
     }
+
+    #[tokio::test]
+    async fn status_porcelain_empty_on_clean_tree() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        let rt = runtime_at(p);
+        assert!(rt.status_porcelain().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn status_porcelain_names_dirty_files() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        std::fs::write(p.join("f.txt"), "changed\n").unwrap();
+        std::fs::write(p.join("new.txt"), "new\n").unwrap();
+        run_git(p, &["add", "new.txt"]);
+
+        let rt = runtime_at(p);
+        let lines = rt.status_porcelain().await.unwrap();
+        assert_eq!(
+            lines.len(),
+            2,
+            "expected one line per dirty file: {lines:?}"
+        );
+        assert!(lines.iter().any(|l| l.contains("f.txt")));
+        assert!(lines.iter().any(|l| l.contains("new.txt")));
+    }
+
+    #[tokio::test]
+    async fn commits_between_newest_first_with_files() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        let base = rt_head(p).await;
+
+        std::fs::write(p.join("a.txt"), "a\n").unwrap();
+        run_git(p, &["add", "a.txt"]);
+        run_git(p, &["commit", "-q", "-m", "add a"]);
+
+        std::fs::write(p.join("b.txt"), "b\n").unwrap();
+        run_git(p, &["add", "b.txt"]);
+        run_git(p, &["commit", "-q", "-m", "add b"]);
+
+        let rt = runtime_at(p);
+        let head = rt.head_sha().await.unwrap();
+        let commits = rt.commits_between(&base, &head).await.unwrap();
+
+        assert_eq!(commits.len(), 2);
+        // newest first
+        assert_eq!(commits[0].sha, head);
+        assert_eq!(commits[0].files, vec!["b.txt".to_string()]);
+        assert_eq!(commits[1].files, vec!["a.txt".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn commits_between_empty_for_equal_base_and_head() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        let rt = runtime_at(p);
+        let head = rt.head_sha().await.unwrap();
+        let commits = rt.commits_between(&head, &head).await.unwrap();
+        assert!(commits.is_empty());
+    }
+
+    #[tokio::test]
+    async fn commits_between_errs_on_unresolved_base() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        let rt = runtime_at(p);
+        let head = rt.head_sha().await.unwrap();
+        let res = rt.commits_between("nonexistent-ref", &head).await;
+        assert!(
+            matches!(res, Err(GitError::Failed { .. })),
+            "an unresolvable base must Err, not silently return empty: {res:?}"
+        );
+    }
+
+    async fn rt_head(p: &std::path::Path) -> String {
+        runtime_at(p).head_sha().await.unwrap()
+    }
 }

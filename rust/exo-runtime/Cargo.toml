@@ -24,5 +24,6 @@ chrono = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tempfile = { workspace = true }
+uuid = { workspace = true }
 # Quote values interpolated into the agent launch command pasted into a tmux pane.
 shell-escape = "0.1"

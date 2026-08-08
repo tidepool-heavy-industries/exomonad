@@ -103,10 +103,11 @@ impl Runtime {
         exo_caps::paths::inbox_path(&home(), &self.run_id, &self.own_pane)
     }
 
-    /// Map a tree-edge agent name to its bus [`Addressee`]: this node's parent, or a current child
-    /// (by ledger [`ChildKind`]). `None` if the name is neither — the outbound Teams bridge uses
-    /// this to drop a message addressed to a non-edge (e.g. a stale teammate), since messaging is
-    /// tree-edges only.
+    /// Map a tree-edge agent name to its bus [`Addressee`]: this node's parent, or a current
+    /// **non-tombstoned** child (by ledger [`ChildKind`]). `None` if the name is neither, or is a
+    /// child whose folded state is terminal — the outbound Teams bridge uses this to drop a
+    /// message addressed to a non-edge (e.g. a stale teammate) or a dead child, since messaging is
+    /// tree-edges only and a tombstoned child's inbox has no reader.
     pub async fn resolve_edge(&self, name: &AgentName) -> Option<Addressee> {
         if let Some(parent) = self.node_path.parent() {
             if &parent.name() == name {
@@ -124,9 +125,18 @@ impl Runtime {
                 return None;
             }
         };
-        exo_caps::fold_children(&records)
-            .get(name)
-            .map(|_| Addressee::Child(name.clone()))
+        match exo_caps::fold_children(&records).get(name) {
+            Some(c) if c.state.is_terminal() => {
+                tracing::warn!(
+                    target = name.as_str(),
+                    state = ?c.state,
+                    "resolve_edge: child is tombstoned; not resolving"
+                );
+                None
+            }
+            Some(_) => Some(Addressee::Child(name.clone())),
+            None => None,
+        }
     }
 
     /// Build a periodic status snapshot. `role_str` is the node's domain role as its stable string
@@ -167,6 +177,7 @@ impl Runtime {
         };
         let children = folded
             .into_values()
+            .filter(|c| !c.state.is_terminal())
             .map(|c| ChildStatus {
                 busy: match &alive {
                     Some(set) => set.contains(c.pane.as_str()),
