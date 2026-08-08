@@ -52,10 +52,10 @@ contract ([`exo-framework`](../exo-framework/CLAUDE.md)); this crate provides th
 | `spawn_worker` | `Spawner` | root, tl | Spawn an ephemeral Sonnet Claude worker (inline pane). |
 | `dismiss_worker` | `Spawner` | root, tl | Dismiss an inline worker by name: unconditional parent-side `kill_pane` resolved via the children ledger. Matched to `spawn_worker`; the reliable teardown primitive for workers that never registered as a teammate. |
 | `merge` | `Git`+`Spawner` | root, tl | **The local fold:** `git merge <child-branch>`, followed by best-effort teardown (`kill_pane` + `reclaim_worktree`) of the child. |
-| `submit_branch` | `Git`+`Process`+`Spawner`+`Fs`+`Bus` | tl, dev | **Request review** — if reviewers are enabled (`review_enabled` in `.exo/config.toml`, off by default; read from the node's own papers). Runs the ordered precondition checks (committed → **needs_rebase** → `.exo/checks/pre-merge/*` scripts); the rebase gate blocks + prompts `git rebase <parent>` when the branch is behind its parent's REAL git branch (`NodePapers.parent_branch`, birth-stamped by the spawner from ITS OWN current branch — not a dot-derived tree-address coordinate, so the gate fires at every depth, including a direct child of root; fails open only on the root itself, or unreadable/corrupt/pre-field papers). Then spawns a **reviewer** off this branch (fork-point `git diff` base via `Git::merge_base`) and returns "stop & wait". It does NOT deliver `[READY]` itself except via the skip path — only the sidecar does, on an approve-verdict (the structural gate). **Continuity:** reads the latest `ReviewLog` and appends unresolved Error findings from the prior round to the reviewer task. Explicit escape hatch regardless of config: `dangerously_skip_reviewer: true`. |
+| `submit_branch` | `Git`+`Process`+`Spawner`+`Fs`+`Bus` | tl, dev | **Request review** — if reviewers are enabled (`review_enabled` in `.exo/config.toml`, off by default; read from the node's own papers). Runs the ordered precondition checks (committed → **needs_rebase** → `.exo/checks/pre-merge/*` scripts); the rebase gate blocks + prompts `git rebase <parent>` when the branch is behind its parent's REAL git branch (`NodePapers.parent_branch`, birth-stamped by the spawner from ITS OWN current branch — not a dot-derived tree-address coordinate, so the gate fires at every depth, including a direct child of root; fails open only on the root itself, or unreadable/corrupt/pre-field papers). Then spawns a **reviewer** off this branch (fork-point `git diff` base via `Git::merge_base`) and returns "stop & wait". It does NOT deliver `[READY]` itself except via the skip path — only the sidecar does, on an approve-verdict (the structural gate). **Continuity:** reads the latest `ReviewLog` and appends unresolved Error findings from the prior round to the reviewer task. Explicit escape hatch regardless of config: `dangerously_skip_reviewer: true`. **Structured receipts:** an optional typed `receipts` block (`commit_tested`, `verify_commands_run`, `metrics: Vec<LabeledValue>`, `deviations`) rendered compactly into the parent-bound `[READY]` text and carried in full in the tool's `data`. `commit_tested` drives the **transfer proof** — see [Receipts and the transfer proof](#receipts-and-the-transfer-proof). |
 | `verdict` | `Bus`+`Kv` | reviewer | A reviewer's one output → a `System(Reviewed)` message to its parent: `summary` + structured `findings` {`file`, `line`, `severity`, `body`, `suggestion`?}. Triggers reviewer teardown (handled in `exo-node`). |
-| `notify_parent` | `Bus` | tl, dev, worker, reviewer | Status/failure update to `Addressee::Parent` (NOT the done-signal). |
-| `send_message` | `Bus` | root, tl | Deliver to a child by name (`to: <child>`) — **tree-edges only**; inline vs worktree is transparent. |
+| `notify_parent` | `Bus` | tl, dev, worker, reviewer | Status/failure update to `Addressee::Parent` (NOT the done-signal). Optional `reply_to` — see [Reply threading](#reply-threading). |
+| `send_message` | `Bus` | root, tl | Deliver to a child by name (`to: <child>`) — **tree-edges only**; inline vs worktree is transparent. Optional `reply_to` — see [Reply threading](#reply-threading). |
 | `tree` | `Topology`+`Fs` | root, tl | Read-only: the caller's subtree (recursive ledger fold) + parent + per-node liveness, effective `model`, and a `(label)` for any launch-profiled node (e.g. a Kimi reviewer). **Compact by default:** shows Live + Submitted + Died and hides routine `Reaped` tombstones behind a `(k reaped hidden — pass all:true)` count; `{"all": true}` shows everything. A Submitted node renders `submitted @ <sha8>, awaiting merge` (the pending-merge queue) and keeps its liveness bracket — it's still running. A **tombstoned** node gets no `[alive]`/`[dead]` bracket, no busy bit, and no status-file lookup at all: those are pane-keyed and tmux recycles pane ids, so for a corpse the honest answer is to show nothing rather than a possibly-wrong something. |
 
 ## exo doctor
@@ -133,9 +133,20 @@ abandonment-timeout and nested-teardown history in this file), so a project turn
 deliberately rather than getting them by surprise. `submit_branch` reads its own `review_enabled`
 (`.exo/node.json`, via `Fs`) at call time; when it's off (or the agent explicitly passes
 `dangerously_skip_reviewer: true`), it forwards `[READY]` straight to the parent, flagged as
-unreviewed, with wording that differs by *why*: plain "reviewers are disabled for this project" when
-it's the config default, vs. the loud "dangerously skipped, be suspicious" framing only when the
-agent itself opted out of a normally-on gate.
+unreviewed. The body is **compact flag form**, not paragraphs — a parent merging a wave reads these
+back to back, so the state has to be scannable in one line:
+
+```
+[READY] branch `X` @ {sha} — review: SKIPPED-BY-AGENT (dangerously_skip_reviewer; inspect the diff yourself, be more suspicious than usual)
+[READY] branch `X` @ {sha} — review: disabled (config)
+note: {the submitter's note}
+{the receipts block, when receipts were passed}
+```
+
+The two cases still read differently by *why* — the loud "be more suspicious" framing appears only
+when the agent itself opted out of a normally-on gate, never for a project that simply hasn't turned
+reviewers on. The `summary` line (`[READY] {branch}` / `[READY skipped] {branch}`) and the typed
+`Lifecycle::Submitted { branch, sha, reviewed }` kind are unchanged.
 
 When reviewers ARE enabled: a node commits, then calls `submit_branch`. It runs the checks, then
 spawns a **reviewer** (a full Sonnet Claude in its own worktree branched off the under-review code)
@@ -162,6 +173,60 @@ the pending-merge queue survives the parent's context window instead of living o
 When reviewers are enabled, `submit_branch` never delivers `[READY]` itself except through the
 skip path, so the gate is **structural** — the LLM has no other tool that fabricates approval. The
 reviewer is torn down (best-effort) as soon as the `verdict` (or the abandonment timeout) is processed.
+
+## Receipts and the transfer proof
+
+`receipts.rs` — the typed half of a `[READY]`. A submit used to be prose ("did the thing") that a
+parent could only take on faith; `Receipts { commit_tested, verify_commands_run, metrics:
+Vec<LabeledValue>, deviations }` makes the claim checkable. Every field is `#[serde(default)]` —
+receipts are an upgrade to the submit path, not a new mandatory ceremony. Fields are **typed, never
+free-form JSON**: the tool schema has to inline cleanly (`schema_json` inlines subschemas), and a
+`Value` field would be an unbounded blob smuggled through a bounded channel.
+
+The load-bearing part is the **transfer proof**. A node verifies at one commit and submits at
+another — a rebase, a follow-up fix, "one more small thing" all land in that gap, and the parent
+could not previously see it at all. `commit_tested` closes it via `Git::commits_between`:
+
+| `TransferProof` | When | What the parent is told |
+|-----------------|------|-------------------------|
+| `AtHead` | `commit_tested` prefix-matches HEAD (≥7 chars) | `tested@HEAD {sha}` — the strongest receipt available |
+| `Moved` | commits landed in `tested..HEAD` | how many, the files they touched, and whether any **overlap the diff being merged** (`Some(empty)` = the real, reassuring "none overlap"; `None` = no diff base resolved, so the question is unanswerable and says so) |
+| `Unverifiable` | the tested sha doesn't resolve / git errored | `treat as untested transfer` — loud, in both the message text and the tool output |
+
+`Unverifiable` is a **variant, not a flag**, precisely so the case cannot be silently dropped into a
+reassuring blank; the renderer has to handle it.
+
+`render_receipts_summary` is pure, total, and **deliberately truncating** — per-string
+(`MAX_STRING_RENDER_BYTES`), per-list (verify commands / metrics / deviations / file lists), each
+clipped on a char boundary. Every truncation leaves a **visible marker** (`…`, `(+N more)`): a
+reader must always be able to tell "that's all there was" from "there was more". Size is guarded at
+both ends, and both are LOUD `CapError::invalid` failures rather than a silent trim — any single
+receipt string over `MAX_FIELD_BYTES` is rejected **before the preconditions run and before any
+delivery** (on both paths, including the skip path where receipts wouldn't otherwise render), and a
+rendered block over `MAX_RENDERED_BYTES` is rejected before it reaches `MessageBody::new` (which caps
+at 4 KiB and *errors* on overflow — the budget leaves room for the `[READY]` line and the note).
+
+Receipts ride the **message text + `ToolOutput` data only**. They are deliberately NOT in
+`Lifecycle::Submitted`: `exo-caps` sits below this crate and cannot name a domain type. Full
+untruncated receipts go in the tool's `data`; only the message text is budgeted.
+
+**Not yet:** receipts render on the skip/no-review path only. On the reviewer-enabled path the
+`[READY]` is escalated by the sidecar on an approve-verdict, which never sees the submitter's
+receipts — validation still runs, but the block is not carried. Closing that means routing receipts
+through the review round, not a tweak here.
+
+## Reply threading
+
+`Message.reply_to` (an `Option<String>` pointing at another message's envelope `id`) has been
+rendered as `re:` in the recipient's delivery header for a while, but nothing could populate it —
+both messaging tools hardcoded `None`. `notify_parent` and `send_message` now take an optional
+`reply_to`, so an agent that receives three messages and answers the second can say which one it is
+answering. Carried verbatim; omitted ⇒ `None` and byte-identical prior behavior.
+
+**Ids are reference-only, never a dedup key.** The inbound cursor advances only after a successful
+last-hop delivery, so redelivery is at-least-once *by design* and a redelivered line arrives with its
+ORIGINAL id — an "already seen" check would swallow exactly the retry the protocol exists to
+guarantee. Nothing here validates, generates, or looks up the referenced id.
 
 ## The gates
 

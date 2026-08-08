@@ -453,7 +453,12 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
          `[READY]` to your parent automatically; on deny / changes you'll be woken with feedback to \
          address and re-submit. Set `dangerously_skip_reviewer: true` to force-skip review even when \
          reviewers are enabled (only for a trivial/safe change) — forwards `[READY]` straight to \
-         your parent, flagged as unreviewed. After calling it, STOP and end your turn.";
+         your parent, flagged as unreviewed. Pass `receipts` so your parent can CHECK your claim \
+         instead of taking it on faith: the commands you actually ran, any counts worth handing up, \
+         and anywhere you knowingly departed from your spec. Set `receipts.commit_tested` to the sha \
+         you last verified at — it is checked against HEAD, and any commits you added since are \
+         named to your parent along with whether they touch the diff it's about to merge. \
+         After calling it, STOP and end your turn.";
     type Args = SubmitBranchArgs;
 
     async fn run(ctx: &R, args: SubmitBranchArgs) -> CapResult<ToolOutput> {
