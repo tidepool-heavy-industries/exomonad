@@ -87,6 +87,7 @@ fn test_merge_args_roundtrip() {
     let args = MergeArgs {
         branch: "b1".into(),
         child: Some("c1".into()),
+        gate: None,
     };
     let back = assert_roundtrip(&args);
     assert_eq!(args.branch, back.branch);
