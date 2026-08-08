@@ -1,6 +1,9 @@
-//! **N1 — Outbound.** Serves the node's role tools (from the injected roster) over rmcp/stdio and routes
-//! communication through the node's ingestion system. This module implements the rmcp
-//! stdio server that Claude Code or other agents connect to for tool execution.
+//! **Outbound.** Serves the node's role tools (from the injected roster) over a hand-written
+//! minimal MCP/JSON-RPC stdio server (`initialize` / `tools/list` / `tools/call`, over raw
+//! `serde_json::Value`) and routes communication through the node's ingestion system. This is
+//! the server that Claude Code or other agents connect to for tool execution. Known limits: no
+//! capability negotiation beyond the three methods above, and malformed JSON is logged and
+//! dropped rather than answered with a JSON-RPC parse-error reply.
 //!
 //! It exposes the tools from the injected `RoleRegistry` for the node's specific role.
 //! Tools like `send_message` and `notify_parent` are routed through the `Bus::deliver`
@@ -19,7 +22,7 @@ use tracing::warn;
 use crate::bootstrap::NodeContext;
 use crate::error::NodeResult;
 
-/// Serve the policy toolset over rmcp/stdio until the stream closes.
+/// Serve the policy toolset over the hand-written MCP/JSON-RPC stdio server until the stream closes.
 pub async fn serve<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
     let tools = D::role_def(ctx.kind).tools;
     let stdin = tokio::io::stdin();

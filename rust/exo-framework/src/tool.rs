@@ -23,7 +23,7 @@ use std::pin::Pin;
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// What a tool's `run` returns. Plain text plus optional structured data; the sidecar (N1)
-/// maps this to the rmcp `CallToolResult`. Kept minimal — a richer content model is a
+/// maps this to its MCP `tools/call` JSON-RPC response. Kept minimal — a richer content model is a
 /// Wave-2 concern, not policy's.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolOutput {
