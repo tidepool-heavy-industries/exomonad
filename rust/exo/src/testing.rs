@@ -12,9 +12,10 @@
 
 use async_trait::async_trait;
 use exo_caps::{
-    Addressee, AgentName, Branch, Bus, BusError, ChildKind, ChildLiveness, Fs, FsError, Git,
-    GitError, Kv, KvError, Message, PaneId, Process, ProcessError, RoleKind, SpawnError, SpawnSpec,
-    Spawner, Tmux, TmuxError, Topology, TopologyError, TopologyView, TreeNode,
+    Addressee, AgentName, Branch, Bus, BusError, ChildKind, ChildLiveness, ChildState, CommitFiles,
+    Fs, FsError, Git, GitError, Kv, KvError, Message, PaneId, Process, ProcessError, RoleKind,
+    SpawnError, SpawnSpec, Spawner, Tmux, TmuxError, Topology, TopologyError, TopologyView,
+    TreeNode,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -94,6 +95,11 @@ pub struct MockRuntime {
     /// What [`Git::is_behind`] returns. Default `false` (branch up-to-date with its parent, so the
     /// rebase gate passes). Set `true` to model a parent that advanced past the fork point.
     pub is_behind: bool,
+    /// What [`Git::status_porcelain`] returns — the raw `git status --porcelain` lines. Default
+    /// empty (clean), matching `is_clean: true`. Set entries to model a named-dirty-files gate.
+    pub dirty_files: Vec<String>,
+    /// What [`Git::commits_between`] returns for any `(base, head)`. Default empty.
+    pub commits_between: Vec<CommitFiles>,
     /// What [`ChildLiveness::any_child_busy`] returns — a canned stand-in for "does any direct
     /// child have a live pane" (the cap is a live tmux probe in production; this mock just returns
     /// the configured value). Default `true`; set `false` to model a quiescent subtree.
@@ -121,6 +127,8 @@ impl Default for MockRuntime {
             is_clean: true,
             is_ahead: false,
             is_behind: false,
+            dirty_files: Vec::new(),
+            commits_between: Vec::new(),
             child_busy: true,
             fail: Mutex::new(None),
             process_output: std::process::Output {
@@ -181,6 +189,28 @@ impl Git for MockRuntime {
     }
     async fn is_clean(&self) -> Result<bool, GitError> {
         Ok(self.is_clean)
+    }
+    async fn status_porcelain(&self) -> Result<Vec<String>, GitError> {
+        if self.should_fail("status_porcelain") {
+            return Err(GitError::Failed {
+                op: "status_porcelain",
+                detail: "mock forced failure".into(),
+            });
+        }
+        Ok(self.dirty_files.clone())
+    }
+    async fn commits_between(
+        &self,
+        _base: &str,
+        _head: &str,
+    ) -> Result<Vec<CommitFiles>, GitError> {
+        if self.should_fail("commits_between") {
+            return Err(GitError::Failed {
+                op: "commits_between",
+                detail: "mock forced failure".into(),
+            });
+        }
+        Ok(self.commits_between.clone())
     }
     async fn is_ahead_of(&self, _base: &str) -> Result<bool, GitError> {
         if self.should_fail("is_ahead_of") {
@@ -401,24 +431,66 @@ impl Process for MockRuntime {
 #[async_trait]
 impl Topology for MockRuntime {
     async fn topology(&self) -> Result<TopologyView, TopologyError> {
-        // A small canned tree: self `mock` (under `mock-parent`) with one worktree child.
+        // A canned tree covering every `ChildState` the `tree` tool renders differently: self
+        // `mock` (under `mock-parent`) with a live child, a submitted child, and two tombstones.
+        // The tombstones deliberately carry `pane_alive: true` — a real `Topology` impl forces it
+        // false, so a renderer that shows a liveness bracket for them is visibly wrong here.
         Ok(TopologyView {
             node: TreeNode {
                 name: AgentName::new("mock".into()).unwrap(),
                 kind: None,
                 pane: PaneId::new("%0".into()).unwrap(),
                 pane_alive: true,
+                state: None,
+                model: None,
                 model_label: None,
-                children: vec![TreeNode {
-                    name: AgentName::new("child-a".into()).unwrap(),
-                    kind: Some(ChildKind::Worktree),
-                    pane: PaneId::new("%1".into()).unwrap(),
-                    // Topology reports pane *existence* only (for the `tree` tool); idle is a
-                    // separate axis, modelled by `child_busy` via the `ChildLiveness` impl below.
-                    pane_alive: true,
-                    model_label: Some("kimi".into()),
-                    children: vec![],
-                }],
+                children: vec![
+                    TreeNode {
+                        name: AgentName::new("child-a".into()).unwrap(),
+                        kind: Some(ChildKind::Worktree),
+                        pane: PaneId::new("%1".into()).unwrap(),
+                        // Topology reports pane *existence* only (for the `tree` tool); idle is a
+                        // separate axis, modelled by `child_busy` via the `ChildLiveness` impl below.
+                        pane_alive: true,
+                        state: Some(ChildState::Live),
+                        model: Some("sonnet".into()),
+                        model_label: Some("kimi".into()),
+                        children: vec![],
+                    },
+                    TreeNode {
+                        name: AgentName::new("child-submitted".into()).unwrap(),
+                        kind: Some(ChildKind::Worktree),
+                        pane: PaneId::new("%2".into()).unwrap(),
+                        pane_alive: true,
+                        state: Some(ChildState::Submitted {
+                            sha: "abcdef1234567890".into(),
+                            reviewed: false,
+                        }),
+                        model: Some("sonnet".into()),
+                        model_label: None,
+                        children: vec![],
+                    },
+                    TreeNode {
+                        name: AgentName::new("child-reaped".into()).unwrap(),
+                        kind: Some(ChildKind::Worktree),
+                        pane: PaneId::new("%3".into()).unwrap(),
+                        pane_alive: true,
+                        state: Some(ChildState::Reaped),
+                        model: None,
+                        model_label: None,
+                        children: vec![],
+                    },
+                    TreeNode {
+                        name: AgentName::new("child-died".into()).unwrap(),
+                        kind: Some(ChildKind::Worktree),
+                        pane: PaneId::new("%4".into()).unwrap(),
+                        pane_alive: true,
+                        state: Some(ChildState::Died),
+                        model: None,
+                        model_label: None,
+                        children: vec![],
+                    },
+                ],
             },
             parent: Some("mock-parent".into()),
             path: vec![
@@ -456,6 +528,7 @@ mod tests {
             text: exo_caps::MessageBody::new("hi".into()).unwrap(),
             summary: exo_caps::Summary::new("hi".into()).unwrap(),
             kind: exo_caps::MessageKind::Chat,
+            reply_to: None,
         };
         m.deliver(Addressee::Parent, msg.clone()).await.unwrap();
         assert_eq!(

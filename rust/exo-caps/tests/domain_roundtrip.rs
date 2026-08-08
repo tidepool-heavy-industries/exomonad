@@ -22,11 +22,13 @@ fn domain_message_in_ingestion_entry_round_trips() {
         v: 1,
         ts: Utc::now(),
         from: Persona::Agent(AgentName::new("dev".into()).unwrap()),
+        id: None,
         spill: None,
         msg: Message {
             text: MessageBody::new("domain msg".into()).unwrap(),
             summary: Summary::new("summary".into()).unwrap(),
             kind: MessageKind::Domain(DomainPayload(json)),
+            reply_to: None,
         },
     };
 
@@ -45,11 +47,13 @@ fn chat_message_in_ingestion_entry_round_trips() {
         v: 1,
         ts: Utc::now(),
         from: Persona::Agent(AgentName::new("dev".into()).unwrap()),
+        id: None,
         spill: None,
         msg: Message {
             text: MessageBody::new("chat msg".into()).unwrap(),
             summary: Summary::new("summary".into()).unwrap(),
             kind: MessageKind::Chat,
+            reply_to: None,
         },
     };
 

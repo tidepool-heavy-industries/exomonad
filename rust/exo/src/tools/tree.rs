@@ -5,9 +5,7 @@
 //! walk + tmux probe; this tool just surfaces the structured view. Served by Root/Tl (the roles
 //! that have children).
 
-use exo_caps::{
-    paths::status_path, CapError, CapResult, Fs, NodeStatus, Topology, TreeNode,
-};
+use exo_caps::{paths::status_path, CapError, CapResult, Fs, NodeStatus, Topology, TreeNode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -23,7 +21,6 @@ pub struct TreeArgs {}
 pub struct Tree;
 
 impl Tree {
-
     async fn collect_status<C: Fs>(
         ctx: &C,
         node: &TreeNode,
@@ -210,7 +207,7 @@ mod tests {
         let view: exo_caps::TopologyView = serde_json::from_value(data).unwrap();
         assert_eq!(view.node.name.as_str(), "mock");
         assert_eq!(view.parent.as_deref(), Some("mock-parent"));
-        assert_eq!(view.node.children.len(), 1);
+        assert_eq!(view.node.children.len(), 4);
         assert_eq!(view.node.children[0].name.as_str(), "child-a");
     }
 }

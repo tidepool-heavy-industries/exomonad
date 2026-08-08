@@ -10,6 +10,7 @@
 //! stdio-bound to its agent, not socket-pingable).
 
 use crate::fs::Fs;
+use crate::lifecycle::ChildState;
 use crate::tmux::Tmux;
 use crate::types::{AgentName, ChildKind, PaneId};
 use async_trait::async_trait;
@@ -36,8 +37,18 @@ pub struct TreeNode {
     pub kind: Option<ChildKind>,
     /// The node's tmux pane id.
     pub pane: PaneId,
-    /// Liveness proxy: the node's tmux pane still exists.
+    /// Liveness proxy: the node's tmux pane still exists. **Forced `false` for a node whose
+    /// [`state`](TreeNode::state) is terminal** — tmux recycles pane ids, so probing a tombstoned
+    /// node's recorded pane can alias onto a different, live agent and report a dead child alive.
     pub pane_alive: bool,
+    /// The node's folded lifecycle state; `None` for the caller itself (a node records no state
+    /// about itself — only its parent's ledger does).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<ChildState>,
+    /// The effective launch model folded from the node's `Spawned` record (e.g. `"sonnet"`);
+    /// `None` for the caller itself or a pre-field ledger.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// Cosmetic model tag (e.g. `"kimi"`) for a node launched on a non-default model via a
     /// launch profile; `None` for default Claude / the caller itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]

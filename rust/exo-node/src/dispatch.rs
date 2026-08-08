@@ -56,6 +56,7 @@ pub(crate) async fn deliver_synthetic<D: Exomonad>(
     let entry = IngestionEntry {
         v: 1,
         ts: Utc::now(),
+        id: None,
         spill: None,
         from: Persona::Synthetic(
             SyntheticName::new(from.to_string())
@@ -67,6 +68,7 @@ pub(crate) async fn deliver_synthetic<D: Exomonad>(
             summary: Summary::new(summary.to_string())
                 .map_err(|e| std::io::Error::other(e.to_string()))?,
             kind: MessageKind::Chat,
+            reply_to: None,
         },
     };
     dispatch(ctx, &entry).await
@@ -181,11 +183,13 @@ mod tests {
             v: 1,
             ts: Utc::now(),
             from: Persona::Agent(AgentName::new("alice".to_string()).unwrap()),
+            id: None,
             spill: None,
             msg: Message {
                 text: MessageBody::new("Hello world".to_string()).unwrap(),
                 summary: Summary::new("Greeting".to_string()).unwrap(),
                 kind: MessageKind::Chat,
+                reply_to: None,
             },
         };
 
@@ -200,11 +204,13 @@ mod tests {
             v: 1,
             ts: Utc::now(),
             from: Persona::Synthetic(exo_caps::SyntheticName::new("github".to_string()).unwrap()),
+            id: None,
             spill: None,
             msg: Message {
                 text: MessageBody::new("PR #1 Approved".to_string()).unwrap(),
                 summary: Summary::new("[PR READY]".to_string()).unwrap(),
                 kind: MessageKind::Event,
+                reply_to: None,
             },
         };
 

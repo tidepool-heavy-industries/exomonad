@@ -34,6 +34,15 @@ pub enum BusError {
     /// The addressee couldn't be resolved to an inbox (unknown child, no parent).
     #[error("cannot resolve {0:?}")]
     Unresolved(Addressee),
+    /// The addressee resolved to a child that is **tombstoned** (`Reaped`/`Died` — see
+    /// [`ChildState`](crate::ChildState)). Its inbox path still exists on the ledger, but nothing
+    /// is reading it and its recorded pane may since have been recycled onto a different agent, so
+    /// a "successful" append would be a silent black hole. Fail loud instead.
+    #[error("child {} is {state} — its inbox is a black hole; nothing is reading it", child.as_str())]
+    Tombstoned {
+        child: AgentName,
+        state: &'static str,
+    },
     #[error("bus append failed: {detail}")]
     Append { detail: String },
     #[error(transparent)]
@@ -48,6 +57,7 @@ pub enum BusError {
 pub trait Bus: Fs {
     /// Append `msg` to the target's ingestion inbox. The runtime stamps the envelope
     /// (`from`/`id`/`ts`/`v` — see [`IngestionEntry`](crate::IngestionEntry)); policy
-    /// supplies only the [`Message`]. Resolution (`Addressee` → `InboxPath`) is internal.
+    /// supplies only the [`Message`]. Resolution (`Addressee` → `InboxPath`) is internal, and
+    /// refuses a tombstoned child with [`BusError::Tombstoned`].
     async fn deliver(&self, to: Addressee, msg: Message) -> Result<(), BusError>;
 }

@@ -32,8 +32,8 @@ use crate::runtime::Runtime;
 use async_trait::async_trait;
 use chrono::Utc;
 use exo_caps::{
-    Addressee, Bus, BusError, InboxPath, IngestionEntry, Message, MessageBody, MessageKind, Persona,
-    SpawnError,
+    Addressee, Bus, BusError, InboxPath, IngestionEntry, Message, MessageBody, MessageKind,
+    Persona, SpawnError,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::AsyncWriteExt;
@@ -61,6 +61,9 @@ impl Runtime {
                     SpawnError::Io(io) => BusError::Io(io),
                     SpawnError::Failed { detail, .. } => {
                         BusError::Io(std::io::Error::other(detail))
+                    }
+                    SpawnError::UnknownChild(child) => {
+                        BusError::Unresolved(Addressee::Child(child))
                     }
                 })?;
 
@@ -117,6 +120,7 @@ impl Bus for Runtime {
             v: 1,
             ts: Utc::now(),
             from: Persona::Agent(self.name()),
+            id: None,
             spill: None,
             msg,
         };
@@ -136,12 +140,14 @@ impl Bus for Runtime {
                 v: 1,
                 ts: entry.ts,
                 from: entry.from.clone(),
+                id: None,
                 spill: Some(spill_path.clone()),
                 msg: Message {
                     text: MessageBody::new("[spilled: full content in side-file]".into())
                         .expect("static spill-stub body is valid"),
                     summary: entry.msg.summary.clone(),
                     kind: MessageKind::Chat,
+                    reply_to: None,
                 },
             };
             line = serde_json::to_string(&pointer).map_err(|e| BusError::Append {
@@ -217,6 +223,7 @@ mod tests {
             text: MessageBody::new("hello".into()).unwrap(),
             summary: Summary::new("hi".into()).unwrap(),
             kind: MessageKind::Chat,
+            reply_to: None,
         };
 
         runtime
@@ -255,6 +262,7 @@ mod tests {
             text: MessageBody::new(large_body.clone()).unwrap(),
             summary: Summary::new("big verdict".into()).unwrap(),
             kind: MessageKind::Chat,
+            reply_to: None,
         };
 
         // Delivery SUCCEEDS via the claim-check spill (was an error before).
@@ -274,9 +282,14 @@ mod tests {
 
         // That line is a pointer; the side-file holds the full entry with the original body.
         let pointer: IngestionEntry = serde_json::from_str(lines[0]).unwrap();
-        let spill = pointer.spill.expect("oversized entry carries a spill pointer");
+        let spill = pointer
+            .spill
+            .expect("oversized entry carries a spill pointer");
         let full: IngestionEntry = serde_json::from_slice(&std::fs::read(&spill).unwrap()).unwrap();
-        assert!(full.spill.is_none(), "the full entry carries no further pointer");
+        assert!(
+            full.spill.is_none(),
+            "the full entry carries no further pointer"
+        );
         assert_eq!(full.msg, msg);
         assert_eq!(full.msg.text.as_str(), large_body);
     }
@@ -297,6 +310,8 @@ mod tests {
             pane: exo_caps::PaneId::new("%1".into()).unwrap(),
             inbox: child_inbox.clone(),
             model_label: None,
+            model: None,
+            directives_hash: None,
         };
 
         let line = serde_json::to_string(&record).unwrap() + "\n";
@@ -344,6 +359,7 @@ mod tests {
             text: MessageBody::new("A".repeat(MessageBody::MAX_LEN)).unwrap(),
             summary: Summary::new("overflow".into()).unwrap(),
             kind: MessageKind::Chat,
+            reply_to: None,
         };
         runtime.deliver(Addressee::Parent, msg).await.unwrap();
 
@@ -374,6 +390,7 @@ mod tests {
             text: MessageBody::new("hello".into()).unwrap(),
             summary: Summary::new("hi".into()).unwrap(),
             kind: MessageKind::Chat,
+            reply_to: None,
         };
         runtime.deliver(Addressee::Parent, msg).await.unwrap();
 
@@ -417,6 +434,8 @@ mod tests {
                 pane: PaneId::new("%2".into()).unwrap(),
                 inbox: inline_inbox,
                 model_label: None,
+                model: None,
+                directives_hash: None,
             },
             ChildRecord::Spawned {
                 child: worktree_name.clone(),
@@ -424,6 +443,8 @@ mod tests {
                 pane: PaneId::new("%3".into()).unwrap(),
                 inbox: worktree_inbox,
                 model_label: None,
+                model: None,
+                directives_hash: None,
             },
         ];
 
@@ -454,6 +475,7 @@ mod tests {
             text: MessageBody::new("hi".into()).unwrap(),
             summary: Summary::new("greeting".into()).unwrap(),
             kind: MessageKind::Chat,
+            reply_to: None,
         };
 
         // Deliver to Parent
@@ -500,11 +522,13 @@ mod tests {
             text: MessageBody::new("first".into()).unwrap(),
             summary: Summary::new("1".into()).unwrap(),
             kind: MessageKind::Chat,
+            reply_to: None,
         };
         let msg2 = Message {
             text: MessageBody::new("second".into()).unwrap(),
             summary: Summary::new("2".into()).unwrap(),
             kind: MessageKind::Chat,
+            reply_to: None,
         };
 
         runtime
@@ -542,6 +566,8 @@ mod tests {
             pane: PaneId::new("%1".into()).unwrap(),
             inbox: good_inbox.clone(),
             model_label: None,
+            model: None,
+            directives_hash: None,
         };
 
         // garbage line, then a good record (mirrors a crash-torn append followed by a fresh one)

@@ -54,6 +54,8 @@ fn build_spawn(
             &args.done_criteria,
         ),
         fork_session: args.fork_session,
+        model_override: None,
+        directives_hash: None,
     })
 }
 

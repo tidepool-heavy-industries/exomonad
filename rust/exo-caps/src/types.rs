@@ -392,21 +392,36 @@ pub struct Message {
     pub text: MessageBody,
     pub summary: Summary,
     pub kind: MessageKind,
+    /// The [`IngestionEntry::id`] of the message this one answers, for threading a reply back to
+    /// its question. Lives on the *policy* half (not the envelope) because a **tool** supplies it
+    /// from its own args — so populating it later needs no change to `Bus::deliver`'s signature.
+    /// The `#[serde(flatten)]` in [`IngestionEntry`] puts it at the same wire position either way.
+    /// Nothing populates it yet; it is rendered by the last hop when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<String>,
 }
 
 /// One line of an ingestion inbox — the **wire** form. The runtime stamps `from` (the
 /// true sender; `Agent(me)` for a node send, `Synthetic(src)` for an event injection),
-/// `ts`, and the schema version `v`; the [`Message`] is flattened in, so the line is
-/// exactly `{v,ts,from,kind,summary,text}`. **Ordering is the append order**
-/// (line order) — no message-id is carried; at-least-once redelivery may show the agent
-/// a duplicate line, which is benign. `v` defaults and unknown fields are tolerated (no
-/// `deny_unknown_fields`) — a mixed-version swarm won't crash.
+/// `ts`, `id`, and the schema version `v`; the [`Message`] is flattened in, so the line is
+/// exactly `{v,ts,from,id,kind,summary,text}`. **Ordering is the append order** (line order).
+/// `v` defaults and unknown fields are tolerated (no `deny_unknown_fields`) — a mixed-version
+/// swarm won't crash.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IngestionEntry {
     #[serde(default)]
     pub v: u32,
     pub ts: DateTime<Utc>,
     pub from: Persona,
+    /// A per-message UUID v4, stamped by the runtime at append. **Reference only** — a handle an
+    /// agent (or a log) can name a specific message by, and what [`Message::reply_to`] points at.
+    ///
+    /// **It is NEVER a dedup key.** The cursor protocol is deliberately at-least-once (the cursor
+    /// advances only after a successful last-hop delivery), so a redelivered line arrives with the
+    /// *same* id by design. Treating a repeated id as "already seen" would silently drop the retry
+    /// the protocol depends on. Omitted from the wire when `None` (a pre-field line).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     /// **Claim-check pointer.** When `Some(path)`, THIS line is a small stand-in: the real
     /// (oversized) entry is the JSON in that side-file, and the reader loads + processes *that*
     /// instead of the inline `msg` (a stub here). The bus writes it when a serialized entry would
@@ -512,6 +527,19 @@ pub enum Lifecycle {
         busy: bool,
         #[serde(default)]
         reason: String,
+    },
+    /// A child reports that `branch@sha` is committed and awaiting this node's merge. The parent's
+    /// sidecar records it (`ChildRecord::Submitted`) so the pending-merge queue is durable, then
+    /// still renders the `[READY]` prose into the parent's LLM.
+    ///
+    /// **Wire note:** an older node receiving this variant fails the whole-line `IngestionEntry`
+    /// parse and warn-drops the line (its cursor advances past it). That is accepted — a swarm run
+    /// is single-version by construction (one binary births the whole tree).
+    Submitted {
+        branch: Branch,
+        sha: String,
+        #[serde(default)]
+        reviewed: bool,
     },
 }
 
@@ -646,11 +674,13 @@ mod tests {
                 .unwrap()
                 .with_timezone(&Utc),
             from: Persona::Synthetic(SyntheticName::new("github".into()).unwrap()),
+            id: Some("11111111-2222-3333-4444-555555555555".into()),
             spill: None,
             msg: Message {
                 text: MessageBody::new("PR #5 approved".into()).unwrap(),
                 summary: Summary::new("approved".into()).unwrap(),
                 kind: MessageKind::Event,
+                reply_to: None,
             },
         };
         let json = serde_json::to_string(&entry).unwrap();

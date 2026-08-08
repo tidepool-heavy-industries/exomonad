@@ -50,7 +50,10 @@ impl Topology for Runtime {
             // derived from the `alive` probe set: a best-effort `tmux list-panes` failure would
             // then mis-report this node as dead, which is strictly wrong (it's clearly running).
             pane_alive: true,
-            // Self never tags its own model — the label is a parent-side cosmetic on a child.
+            // Self records no lifecycle state or model about itself — both are parent-side facts,
+            // folded from the parent's ledger.
+            state: None,
+            model: None,
             model_label: None,
             children,
         };
@@ -89,6 +92,8 @@ fn subtree(working_dir: &Path, alive: &HashSet<String>, depth: usize) -> Vec<Tre
                 kind: Some(c.kind),
                 pane_alive: alive.contains(pane.as_str()),
                 pane,
+                state: Some(c.state.clone()),
+                model: c.model.clone(),
                 model_label: c.model_label.clone(),
                 children,
             }
@@ -146,6 +151,8 @@ mod tests {
             pane: PaneId::new(pane.into()).unwrap(),
             inbox: InboxPath::new(format!("/tmp/{name}.jsonl").into()),
             model_label: None,
+            model: None,
+            directives_hash: None,
         }
     }
 

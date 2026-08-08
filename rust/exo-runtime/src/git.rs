@@ -3,7 +3,7 @@
 
 use crate::runtime::Runtime;
 use async_trait::async_trait;
-use exo_caps::{Branch, Git, GitError};
+use exo_caps::{Branch, CommitFiles, Git, GitError};
 use std::path::Path;
 use tokio::process::Command;
 use tracing::debug;
@@ -83,6 +83,36 @@ impl Git for Runtime {
     async fn is_clean(&self) -> Result<bool, GitError> {
         let output = self.git(&["status", "--porcelain"]).await?;
         Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())
+    }
+
+    async fn status_porcelain(&self) -> Result<Vec<String>, GitError> {
+        let output = self.git(&["status", "--porcelain"]).await?;
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(str::to_string)
+            .collect())
+    }
+
+    async fn commits_between(&self, base: &str, head: &str) -> Result<Vec<CommitFiles>, GitError> {
+        // `%x1e` (ASCII record separator) prefixes each commit, so the parse can't confuse a
+        // changed *file* whose name happens to look like a sha with a commit boundary.
+        let range = format!("{base}..{head}");
+        let output = self
+            .git(&["log", "--format=%x1e%H", "--name-only", &range])
+            .await?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(stdout
+            .split('\u{1e}')
+            .filter_map(|chunk| {
+                let mut lines = chunk.lines().filter(|l| !l.trim().is_empty());
+                let sha = lines.next()?.trim().to_string();
+                Some(CommitFiles {
+                    sha,
+                    files: lines.map(|l| l.trim().to_string()).collect(),
+                })
+            })
+            .collect())
     }
 
     async fn is_ahead_of(&self, base: &str) -> Result<bool, GitError> {

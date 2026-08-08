@@ -130,8 +130,12 @@ fn test_message_roundtrip() {
         text: MessageBody::new("body".into()).unwrap(),
         summary: Summary::new("summary".into()).unwrap(),
         kind: MessageKind::Chat,
+        reply_to: None,
     };
     assert_roundtrip(&m);
+    // `reply_to` is omitted from the wire when unset — an ordinary message is byte-identical
+    // to what a pre-field node wrote.
+    assert!(!serde_json::to_string(&m).unwrap().contains("reply_to"));
 }
 
 #[test]
@@ -140,19 +144,32 @@ fn test_ingestion_entry_roundtrip() {
         v: 1,
         ts: Utc::now(),
         from: Persona::Agent(AgentName::new("root".into()).unwrap()),
+        id: Some("6f1c9b0e-0000-4000-8000-000000000001".into()),
         spill: None,
         msg: Message {
             text: MessageBody::new("hello".into()).unwrap(),
             summary: Summary::new("hi".into()).unwrap(),
             kind: MessageKind::Chat,
+            reply_to: Some("6f1c9b0e-0000-4000-8000-000000000000".into()),
         },
     };
     assert_roundtrip(&entry);
 
-    // Verify flattening
+    // Verify flattening — `reply_to` rides at the same top level as the rest of the Message.
     let json = serde_json::to_value(&entry).unwrap();
     assert!(json.get("text").is_some());
     assert!(json.get("msg").is_none());
+    assert!(json.get("id").is_some());
+    assert!(json.get("reply_to").is_some());
+}
+
+#[test]
+fn test_ingestion_entry_without_id_still_parses() {
+    // A line written before the envelope carried an id (or by a sender that didn't stamp one).
+    let raw = r#"{"v":1,"ts":"2026-05-31T22:00:00Z","from":{"agent":"root"},"kind":"chat","summary":"hi","text":"hello"}"#;
+    let entry: IngestionEntry = serde_json::from_str(raw).unwrap();
+    assert!(entry.id.is_none());
+    assert!(entry.msg.reply_to.is_none());
 }
 
 #[test]
@@ -166,6 +183,11 @@ fn test_message_kind_roundtrip() {
         }),
         MessageKind::Lifecycle(Lifecycle::Exiting {
             reason: "done".into(),
+        }),
+        MessageKind::Lifecycle(Lifecycle::Submitted {
+            branch: Branch::new("root.dev-0".into()).unwrap(),
+            sha: "deadbeef".into(),
+            reviewed: true,
         }),
     ];
     for v in variants {
@@ -218,6 +240,11 @@ fn test_lifecycle_roundtrip() {
             busy: false,
             reason: "ok".into(),
         },
+        Lifecycle::Submitted {
+            branch: Branch::new("root.dev-0".into()).unwrap(),
+            sha: "deadbeef".into(),
+            reviewed: false,
+        },
     ];
     for v in variants {
         assert_roundtrip(&v);
@@ -235,6 +262,22 @@ fn test_lifecycle_wire_pinning() {
         assert_eq!(status, ShutdownStatus::Accepted);
     } else {
         panic!("not shutdown_response");
+    }
+
+    // `reviewed` defaults to false when the sender omits it.
+    let submitted: Lifecycle =
+        serde_json::from_str(r#"{"type":"submitted","branch":"root.dev-0","sha":"abc"}"#).unwrap();
+    if let Lifecycle::Submitted {
+        branch,
+        sha,
+        reviewed,
+    } = submitted
+    {
+        assert_eq!(branch.as_str(), "root.dev-0");
+        assert_eq!(sha, "abc");
+        assert!(!reviewed);
+    } else {
+        panic!("not submitted");
     }
 }
 
@@ -296,6 +339,8 @@ fn test_child_record_roundtrip() {
         pane: PaneId::new("%2".into()).unwrap(),
         inbox: InboxPath::new("/tmp/i".into()),
         model_label: None,
+        model: None,
+        directives_hash: None,
     };
     assert_roundtrip(&r1);
 
@@ -311,18 +356,107 @@ fn test_child_record_roundtrip() {
 }
 
 #[test]
+fn test_child_record_lifecycle_variants_roundtrip() {
+    let child = AgentName::new("a".into()).unwrap();
+    let at = Some(Utc::now());
+    let variants = [
+        ChildRecord::Reaped {
+            child: child.clone(),
+            at,
+        },
+        ChildRecord::Died {
+            child: child.clone(),
+            pane: PaneId::new("%2".into()).unwrap(),
+            at,
+        },
+        ChildRecord::Submitted {
+            child: child.clone(),
+            branch: Branch::new("root.a".into()).unwrap(),
+            sha: "deadbeef".into(),
+            reviewed: true,
+            at,
+        },
+    ];
+    for v in &variants {
+        assert_roundtrip(v);
+    }
+}
+
+#[test]
+fn test_child_record_lifecycle_wire_pinning() {
+    // Tag names + `at`/`reviewed` defaulting when a writer omits them.
+    let reaped: ChildRecord = serde_json::from_str(r#"{"record":"reaped","child":"a"}"#).unwrap();
+    assert_eq!(
+        reaped,
+        ChildRecord::Reaped {
+            child: AgentName::new("a".into()).unwrap(),
+            at: None
+        }
+    );
+
+    let died: ChildRecord =
+        serde_json::from_str(r#"{"record":"died","child":"a","pane":"%2"}"#).unwrap();
+    assert_eq!(
+        died,
+        ChildRecord::Died {
+            child: AgentName::new("a".into()).unwrap(),
+            pane: PaneId::new("%2".into()).unwrap(),
+            at: None
+        }
+    );
+
+    let submitted: ChildRecord =
+        serde_json::from_str(r#"{"record":"submitted","child":"a","branch":"root.a","sha":"abc"}"#)
+            .unwrap();
+    assert_eq!(
+        submitted,
+        ChildRecord::Submitted {
+            child: AgentName::new("a".into()).unwrap(),
+            branch: Branch::new("root.a".into()).unwrap(),
+            sha: "abc".into(),
+            reviewed: false,
+            at: None
+        }
+    );
+}
+
+#[test]
+fn test_child_state_wire_pinning() {
+    for (state, tag) in [
+        (ChildState::Live, r#"{"state":"live"}"#),
+        (ChildState::Reaped, r#"{"state":"reaped"}"#),
+        (ChildState::Died, r#"{"state":"died"}"#),
+    ] {
+        assert_eq!(serde_json::to_string(&state).unwrap(), tag);
+        assert_eq!(serde_json::from_str::<ChildState>(tag).unwrap(), state);
+    }
+    let submitted = ChildState::Submitted {
+        sha: "abc".into(),
+        reviewed: true,
+    };
+    assert_roundtrip(&submitted);
+    assert!(serde_json::to_string(&submitted)
+        .unwrap()
+        .contains(r#""state":"submitted""#));
+}
+
+#[test]
 fn test_topology_roundtrip() {
     let node = TreeNode {
         name: AgentName::new("root".into()).unwrap(),
         kind: None,
         pane: PaneId::new("%1".into()).unwrap(),
         pane_alive: true,
+        state: None,
+        model: None,
         model_label: None,
         children: vec![TreeNode {
             name: AgentName::new("child".into()).unwrap(),
             kind: Some(ChildKind::Worktree),
             pane: PaneId::new("%2".into()).unwrap(),
             pane_alive: false,
+            state: Some(ChildState::Died),
+            model: Some("sonnet".into()),
             model_label: Some("kimi".into()),
             children: vec![],
         }],

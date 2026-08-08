@@ -24,6 +24,12 @@ pub struct ExoSpawn {
     pub task: String,
     /// Opt-in Claude context inheritance (`--resume --fork-session`).
     pub fork_session: bool,
+    /// An explicit `--model` for this child, overriding the role's default. `None` ⇒ the role
+    /// default (`ExoRole::model`). A launch profile still wins over both.
+    pub model_override: Option<String>,
+    /// Hash of the directives bundle this child is launched with, recorded on its `Spawned` ledger
+    /// row. `None` ⇒ nothing to record.
+    pub directives_hash: Option<String>,
 }
 
 impl SpawnSpec for ExoSpawn {
@@ -43,6 +49,12 @@ impl SpawnSpec for ExoSpawn {
     }
     fn fork_session(&self) -> bool {
         self.fork_session
+    }
+    fn model_override(&self) -> Option<String> {
+        self.model_override.clone()
+    }
+    fn directives_hash(&self) -> Option<String> {
+        self.directives_hash.clone()
     }
     fn into_task(self) -> String {
         self.task
@@ -166,6 +178,8 @@ mod tests {
             name_prefix: "dev".into(),
             task: "t".into(),
             fork_session: true,
+            model_override: Some("opus".into()),
+            directives_hash: Some("sha256:abc".into()),
         };
         assert_eq!(spawn.role(), ExoRole::Dev);
         assert_eq!(spawn.role().role_str(), "dev");
@@ -173,6 +187,24 @@ mod tests {
         assert_eq!(spawn.name(), Some(name));
         assert_eq!(spawn.name_prefix(), "dev");
         assert!(spawn.fork_session());
+        assert_eq!(spawn.model_override().as_deref(), Some("opus"));
+        assert_eq!(spawn.directives_hash().as_deref(), Some("sha256:abc"));
         assert_eq!(spawn.into_task(), "t");
+    }
+
+    #[test]
+    fn exo_spawn_defaults_carry_no_model_or_directives() {
+        let spawn = ExoSpawn {
+            role: ExoRole::Dev,
+            kind: ChildKind::Worktree,
+            name: None,
+            name_prefix: "dev".into(),
+            task: "t".into(),
+            fork_session: false,
+            model_override: None,
+            directives_hash: None,
+        };
+        assert!(spawn.model_override().is_none());
+        assert!(spawn.directives_hash().is_none());
     }
 }

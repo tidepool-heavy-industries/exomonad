@@ -39,6 +39,7 @@ impl<R: Bus + Send + Sync> Tool<R> for NotifyParent {
             text: MessageBody::new(args.text)?,
             summary: Summary::new(args.summary)?,
             kind: args.kind.into(),
+            reply_to: None,
         };
         ctx.deliver(Addressee::Parent, msg).await?;
         Ok(ToolOutput::text("delivered"))
@@ -106,6 +107,7 @@ impl<R: Bus + Send + Sync> Tool<R> for SendMessage {
             text: MessageBody::new(args.text)?,
             summary: Summary::new(args.summary)?,
             kind: args.kind.into(),
+            reply_to: None,
         };
         ctx.deliver(to, msg).await?;
         Ok(ToolOutput::text("delivered"))
@@ -127,7 +129,10 @@ mod tests {
             "summary": "Greeting"
         });
 
-        let res = tool(NotifyParent).call(&mock, args).await.expect("tool call failed");
+        let res = tool(NotifyParent)
+            .call(&mock, args)
+            .await
+            .expect("tool call failed");
         assert_eq!(res, json!({ "text": "delivered" }));
 
         let calls = mock.calls_made();
@@ -151,7 +156,10 @@ mod tests {
             "summary": "Greeting"
         });
 
-        tool(SendMessage).call(&mock, args).await.expect("tool call failed");
+        tool(SendMessage)
+            .call(&mock, args)
+            .await
+            .expect("tool call failed");
 
         let calls = mock.calls_made();
         assert_eq!(calls.len(), 1);
@@ -178,7 +186,10 @@ mod tests {
             "kind": { "shutdown": { "grace_ms": 5000 } }
         });
 
-        tool(SendMessage).call(&mock, args).await.expect("tool call failed");
+        tool(SendMessage)
+            .call(&mock, args)
+            .await
+            .expect("tool call failed");
 
         let calls = mock.calls_made();
         assert_eq!(calls.len(), 1);

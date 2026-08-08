@@ -102,6 +102,18 @@ pub trait SpawnSpec: Send + Sync + 'static {
     /// Opt-in Claude context inheritance (`--resume --fork-session`); honored only for a Claude
     /// worktree child, ignored otherwise.
     fn fork_session(&self) -> bool;
+    /// An explicit `--model` for this child, overriding the role's default
+    /// ([`RoleKind::model`]). **Defaults to `None`** (use the role default), so a domain that
+    /// doesn't tier its spawns compiles unchanged. A launch profile still wins over both.
+    fn model_override(&self) -> Option<String> {
+        None
+    }
+    /// A hash of the directives bundle this child is launched with, recorded on its `Spawned`
+    /// ledger row so a later audit can tell which instructions a node actually ran under.
+    /// **Defaults to `None`** — nothing computes one yet; the runtime records whatever it's given.
+    fn directives_hash(&self) -> Option<String> {
+        None
+    }
     /// The fully-rendered prompt/task body delivered to the child. Consumes the spec — it is the
     /// last thing the birth tail reads.
     fn into_task(self) -> String;
@@ -126,6 +138,7 @@ pub async fn deliver_domain<C: Bus + ?Sized, S: DomainSystem>(
         text: MessageBody::new(text.to_string())?,
         summary: Summary::new(summary.to_string())?,
         kind: MessageKind::Domain(DomainPayload(json)),
+        reply_to: None,
     };
     bus.deliver(to, msg).await?;
     Ok(())

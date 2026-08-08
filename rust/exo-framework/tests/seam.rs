@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use exo_caps::{
     Addressee, AgentName, AgentType, Branch, Bus, BusError, CapResult, ChildKind, ChildLiveness,
-    Fs, FsError, Git, GitError, Kv, KvError, Message, PaneId, Persona, Process, ProcessError,
-    RoleKind, SpawnError, SpawnSpec, Spawner, Tmux, TmuxError, ToolName, Topology, TopologyError,
-    TopologyView,
+    CommitFiles, Fs, FsError, Git, GitError, Kv, KvError, Message, PaneId, Persona, Process,
+    ProcessError, RoleKind, SpawnError, SpawnSpec, Spawner, Tmux, TmuxError, ToolName, Topology,
+    TopologyError, TopologyView,
 };
 use exo_framework::{
     ok_json, parse, schema_json, BoxFuture, ErasedTool, Exomonad, HookDecision, HookInput, RoleDef,
@@ -58,6 +58,16 @@ impl Git for TestCaps {
         unimplemented!()
     }
     async fn is_clean(&self) -> Result<bool, GitError> {
+        unimplemented!()
+    }
+    async fn status_porcelain(&self) -> Result<Vec<String>, GitError> {
+        unimplemented!()
+    }
+    async fn commits_between(
+        &self,
+        _base: &str,
+        _head: &str,
+    ) -> Result<Vec<CommitFiles>, GitError> {
         unimplemented!()
     }
     async fn fetch(&self) -> Result<(), GitError> {

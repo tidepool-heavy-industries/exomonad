@@ -14,6 +14,15 @@ pub enum GitError {
     Io(#[from] std::io::Error),
 }
 
+/// One commit and the files it touched — what [`Git::commits_between`] yields per commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitFiles {
+    /// Full 40-char sha.
+    pub sha: String,
+    /// Paths changed by this commit, repo-relative.
+    pub files: Vec<String>,
+}
+
 #[async_trait]
 pub trait Git {
     async fn current_branch(&self) -> Result<Branch, GitError>;
@@ -31,6 +40,16 @@ pub trait Git {
     /// other branch shares history with HEAD. Name-agnostic: needs no parent-branch name.
     async fn fork_point(&self) -> Result<Option<String>, GitError>;
     async fn is_clean(&self) -> Result<bool, GitError>;
+    /// The raw `git status --porcelain` lines — one per entry, empty when the tree is clean.
+    /// [`is_clean`](Git::is_clean) answers *whether*; this answers *what*, so a gate that refuses
+    /// a dirty tree can NAME the offending files instead of making the agent go re-run git itself.
+    async fn status_porcelain(&self) -> Result<Vec<String>, GitError>;
+    /// The commits in `base..head` (reachable from `head`, not from `base`), **newest first**, each
+    /// with the files it changed (`git log --format=%H --name-only base..head`). `Err` when `base`
+    /// does not resolve — unlike the fail-open ancestry predicates, a caller enumerating a branch's
+    /// commits needs to know it got an empty answer because there are none, not because the base
+    /// was garbage.
+    async fn commits_between(&self, base: &str, head: &str) -> Result<Vec<CommitFiles>, GitError>;
     /// True if HEAD has commits that `base` does not. `Ok(false)` when the base ref does not
     /// resolve or any git error occurs (fail-open — never block a stop on a bad base).
     async fn is_ahead_of(&self, base: &str) -> Result<bool, GitError>;

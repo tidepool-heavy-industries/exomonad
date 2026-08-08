@@ -582,6 +582,8 @@ impl Runtime {
             inbox,
             // Non-secret cosmetic tag (e.g. "kimi") so the `tree` tool can show it; never the token.
             model_label: core.launch_profile.as_ref().and_then(|p| p.label.clone()),
+            model: None,
+            directives_hash: None,
         };
         self.append_child_record(&record).await?;
 
@@ -726,21 +728,11 @@ impl Runtime {
             }
         };
 
-        let preamble = match core.kind {
-            ChildKind::Worktree => format!(
-                "You are working in an ISOLATED git worktree at `{}` — this is your repo root. ALL file \
-                 paths are relative to it. Do NOT read or write files outside this directory (never touch \
-                 the parent repository). Commit your work to your branch here.\n\n",
-                child_dir.display()
-            ),
-            ChildKind::Inline => format!(
-                "You are working in the repository at `{}`. ALL file paths are relative to it. \
-                 Do NOT read or write files outside this directory.\n\n",
-                child_dir.display()
-            ),
-        };
-
-        let worktree_prompt = format!("{}{}", preamble, core.task);
+        let worktree_prompt = format!(
+            "{}{}",
+            exo_caps::birth_preamble(core.kind, child_dir),
+            core.task
+        );
 
         let prompt_file = exomonad_shared::services::agent_control::launch::write_prompt_file(
             child_dir,
@@ -1177,6 +1169,8 @@ mod tests {
             pane: pane.clone(),
             inbox: rt.child_inbox_path(&pane),
             model_label: None,
+            model: None,
+            directives_hash: None,
         };
 
         rt.append_child_record(&record).await.unwrap();
@@ -1216,6 +1210,8 @@ mod tests {
             pane: pane.clone(),
             inbox: rt.child_inbox_path(&pane),
             model_label: None,
+            model: None,
+            directives_hash: None,
         })
         .await
         .unwrap();
@@ -1357,6 +1353,8 @@ mod tests {
                 pane: pane.clone(),
                 inbox: rt_parent.child_inbox_path(&pane),
                 model_label: None,
+                model: None,
+                directives_hash: None,
             })
             .await
             .unwrap();
@@ -1446,6 +1444,8 @@ mod tests {
             pane: outer_pane.clone(),
             inbox: rt.child_inbox_path(&outer_pane),
             model_label: None,
+            model: None,
+            directives_hash: None,
         })
         .await
         .unwrap();
@@ -1470,6 +1470,8 @@ mod tests {
             pane: nested_pane.clone(),
             inbox: rt.child_inbox_path(&nested_pane),
             model_label: None,
+            model: None,
+            directives_hash: None,
         };
         let nested_ledger = outer_path.join(".exo/children.jsonl");
         tokio::fs::create_dir_all(nested_ledger.parent().unwrap())
@@ -1519,6 +1521,8 @@ mod tests {
             pane: outer_pane.clone(),
             inbox: rt.child_inbox_path(&outer_pane),
             model_label: None,
+            model: None,
+            directives_hash: None,
         })
         .await
         .unwrap();

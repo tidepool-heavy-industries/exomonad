@@ -38,14 +38,14 @@ pub use bus::{Addressee, Bus, BusError};
 pub use domain::{deliver_domain, DomainSystem, RoleKind, SpawnSpec};
 pub use error::{CapError, CapResult};
 pub use fs::{Fs, FsError};
-pub use git::{Git, GitError};
+pub use git::{CommitFiles, Git, GitError};
 pub use hook_rpc::{HookEvent, HookRequest, HookVerdict};
 pub use kv::{Kv, KvError};
-pub use lifecycle::{fold_children, Child, ChildRecord};
+pub use lifecycle::{fold_children, Child, ChildRecord, ChildState};
 pub use liveness::ChildLiveness;
 pub use papers::{NodePapers, RoleRecord};
 pub use process::{Process, ProcessError};
-pub use spawner::{SpawnError, Spawner};
+pub use spawner::{birth_preamble, SpawnError, Spawner};
 pub use tmux::{Tmux, TmuxError};
 pub use topology::{Topology, TopologyError, TopologyView, TreeNode};
 pub use types::{

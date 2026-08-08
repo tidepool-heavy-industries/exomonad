@@ -263,7 +263,7 @@ impl<D: Exomonad> InboundHandler for RealHandler<D> {
             // Engine-owned lifecycle signals — the sidecar acts on them itself. The enclosing span
             // already carries `from`/`kind`; the per-arm logs in `handle_lifecycle` carry the variant.
             MessageKind::Lifecycle(lc) => {
-                self.handle_lifecycle(&entry.from, lc).await?;
+                self.handle_lifecycle(entry, lc).await?;
                 Ok(Some(false))
             }
             // Domain-opaque inter-node payload — typed back to the concrete `D::System` and
@@ -278,9 +278,12 @@ impl<D: Exomonad> InboundHandler for RealHandler<D> {
 
 impl<D: Exomonad> RealHandler<D> {
     /// Handle an engine-owned [`Lifecycle`] signal (sidecar-side; never injected into the LLM
-    /// except via the render helpers). These are the closed set the engine acts on itself.
-    #[tracing::instrument(skip(self, lc), fields(from = %persona_label(from), kind = "lifecycle"))]
-    async fn handle_lifecycle(&self, from: &Persona, lc: &Lifecycle) -> NodeResult<()> {
+    /// except via the render helpers). These are the closed set the engine acts on itself. Takes
+    /// the whole entry, not just its `from`: an arm that both records a fact AND still shows the
+    /// message to the LLM needs the original envelope (`ts`/`id`) to re-dispatch it unchanged.
+    #[tracing::instrument(skip(self, entry, lc), fields(from = %persona_label(&entry.from), kind = "lifecycle"))]
+    async fn handle_lifecycle(&self, entry: &IngestionEntry, lc: &Lifecycle) -> NodeResult<()> {
+        let from = &entry.from;
         match lc {
             // A child is about to reap itself — advisory only, receipt doesn't prove the pane is
             // gone. Re-evaluate our own pending shutdown now (covers the common case where the
@@ -296,6 +299,19 @@ impl<D: Exomonad> RealHandler<D> {
                     try_reap(&ctx).await;
                 });
                 Ok(())
+            }
+            // A child reports `branch@sha` awaiting our merge. The durable half — appending a
+            // `ChildRecord::Submitted` to our own ledger so the pending-merge queue survives a
+            // context window — is not wired yet; until it is, the message is rendered to our LLM
+            // exactly as the `[READY]` prose it carries, so no submission is ever lost.
+            Lifecycle::Submitted { branch, sha, .. } => {
+                warn!(
+                    outcome = "submitted_render_only",
+                    branch = %branch.as_str(),
+                    sha = %sha,
+                    "Lifecycle::Submitted is rendered but not yet recorded to the children ledger"
+                );
+                self.redispatch_as_chat(entry).await
             }
             // A child replied to a shutdown we sent it. Render it to our LLM; never tear it down.
             Lifecycle::ShutdownResponse {
@@ -363,6 +379,20 @@ impl<D: Exomonad> RealHandler<D> {
         Ok(())
     }
 
+    /// Show a `Lifecycle` entry to this node's LLM as an ordinary chat line, preserving the
+    /// original envelope (`from`/`ts`/`id`) and prose — the sidecar acted on the typed payload,
+    /// and the human-readable body is what the agent still needs to read.
+    async fn redispatch_as_chat(&self, entry: &IngestionEntry) -> NodeResult<()> {
+        let as_chat = IngestionEntry {
+            msg: Message {
+                kind: MessageKind::Chat,
+                ..entry.msg.clone()
+            },
+            ..entry.clone()
+        };
+        crate::dispatch::dispatch(&self.ctx, &as_chat).await
+    }
+
     /// Render a child's [`ShutdownResponse`](exo_caps::Lifecycle::ShutdownResponse) into THIS
     /// node's LLM as a chat line, attributed to the child (`from`). Never tears anyone down.
     async fn render_shutdown_response(
@@ -380,6 +410,7 @@ impl<D: Exomonad> RealHandler<D> {
         let entry = IngestionEntry {
             v: 1,
             ts: Utc::now(),
+            id: None,
             spill: None,
             from: from.clone(),
             msg: Message {
@@ -393,6 +424,7 @@ impl<D: Exomonad> RealHandler<D> {
                 summary: Summary::new(summary.to_string())
                     .map_err(|e| std::io::Error::other(e.to_string()))?,
                 kind: MessageKind::Chat,
+                reply_to: None,
             },
         };
         crate::dispatch::dispatch(&self.ctx, &entry).await
@@ -418,6 +450,7 @@ impl<D: Exomonad> RealHandler<D> {
                 busy,
                 reason: reason.to_string(),
             }),
+            reply_to: None,
         };
         exo_caps::Bus::deliver(&*self.ctx.runtime, Addressee::Parent, msg)
             .await
@@ -630,6 +663,7 @@ fn shutdown_message(grace_ms: u32) -> NodeResult<Message> {
             grace_ms,
             force: true,
         }),
+        reply_to: None,
     })
 }
 
@@ -658,6 +692,7 @@ pub(crate) async fn try_reap<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> bool {
         kind: MessageKind::Lifecycle(Lifecycle::Exiting {
             reason: "shutdown".to_string(),
         }),
+        reply_to: None,
     };
     if let Err(e) = exo_caps::Bus::deliver(&*ctx.runtime, Addressee::Parent, exiting).await {
         warn!(node = %ctx.runtime.name().as_str(), "try_reap: Exiting poke to parent failed (ok for root): {e}");
@@ -797,12 +832,14 @@ mod tests {
         IngestionEntry {
             v: 1,
             ts: Utc::now(),
+            id: None,
             spill: None,
             from: Persona::Agent(AgentName::new("rev".into()).unwrap()),
             msg: Message {
                 text: MessageBody::new(text.to_string()).unwrap(),
                 summary: Summary::new("s".into()).unwrap(),
                 kind: MessageKind::Chat,
+                reply_to: None,
             },
         }
     }
@@ -884,11 +921,13 @@ mod tests {
             v: 1,
             ts: Utc::now(),
             from: Persona::Agent(AgentName::new("test".to_string()).unwrap()),
+            id: None,
             spill: None,
             msg: Message {
                 text: MessageBody::new(text.to_string()).unwrap(),
                 summary: Summary::new("test".to_string()).unwrap(),
                 kind: MessageKind::Chat,
+                reply_to: None,
             },
         };
         let mut line = serde_json::to_vec(&entry).unwrap();
@@ -948,11 +987,13 @@ mod tests {
             v: 1,
             ts: Utc::now(),
             from: Persona::Agent(AgentName::new("test".to_string()).unwrap()),
+            id: None,
             spill: None,
             msg: Message {
                 text: MessageBody::new("partial".to_string()).unwrap(),
                 summary: Summary::new("test".to_string()).unwrap(),
                 kind: MessageKind::Chat,
+                reply_to: None,
             },
         };
         let line = serde_json::to_vec(&entry).unwrap();

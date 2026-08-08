@@ -177,6 +177,7 @@ pub async fn handle_review_system<C: SystemCtx + ?Sized>(
                     text: MessageBody::new(text)?,
                     summary: Summary::new(msg_summary)?,
                     kind: MessageKind::Chat,
+                    reply_to: None,
                 };
                 ctx.deliver_parent(msg).await?;
                 tracing::info!(
@@ -613,7 +614,9 @@ mod tests {
     #[tokio::test]
     async fn tick_before_timeout_is_noop() {
         let mock = crate::testing::MockRuntime::default();
-        handle_review_tick(&mock, Duration::from_secs(1)).await.unwrap();
+        handle_review_tick(&mock, Duration::from_secs(1))
+            .await
+            .unwrap();
         assert!(!delivered_review_aborted(&mock.calls_made()));
     }
 
@@ -623,17 +626,25 @@ mod tests {
         mock.set(crate::tools::verdict::VERDICT_PRODUCED, "true")
             .await
             .unwrap();
-        handle_review_tick(&mock, REVIEW_ABANDON_TIMEOUT).await.unwrap();
+        handle_review_tick(&mock, REVIEW_ABANDON_TIMEOUT)
+            .await
+            .unwrap();
         assert!(!delivered_review_aborted(&mock.calls_made()));
     }
 
     #[tokio::test]
     async fn tick_after_timeout_without_verdict_delivers_aborted_once() {
         let mock = crate::testing::MockRuntime::default();
-        handle_review_tick(&mock, REVIEW_ABANDON_TIMEOUT).await.unwrap();
+        handle_review_tick(&mock, REVIEW_ABANDON_TIMEOUT)
+            .await
+            .unwrap();
         assert!(delivered_review_aborted(&mock.calls_made()));
         assert_eq!(
-            mock.kv.lock().unwrap().get(REVIEW_ABANDON_SENT).map(String::as_str),
+            mock.kv
+                .lock()
+                .unwrap()
+                .get(REVIEW_ABANDON_SENT)
+                .map(String::as_str),
             Some("true")
         );
 
@@ -649,6 +660,9 @@ mod tests {
                     if matches!(&msg.kind, MessageKind::Domain(_)))
             })
             .count();
-        assert_eq!(deliveries, 1, "must not re-deliver ReviewAborted on a later tick");
+        assert_eq!(
+            deliveries, 1,
+            "must not re-deliver ReviewAborted on a later tick"
+        );
     }
 }

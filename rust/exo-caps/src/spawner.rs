@@ -11,9 +11,10 @@
 use crate::fs::Fs;
 use crate::git::Git;
 use crate::tmux::Tmux;
-use crate::types::AgentName;
+use crate::types::{AgentName, ChildKind};
 use crate::SpawnSpec;
 use async_trait::async_trait;
+use std::path::Path;
 use thiserror::Error;
 
 // `ChildKind` lives in `types` — it's a shared domain enum (used here and by
@@ -27,8 +28,33 @@ pub enum SpawnError {
         child: Option<AgentName>,
         detail: String,
     },
+    /// The named child is not in this node's `children.jsonl` fold — a typo, a name that belongs to
+    /// a different node's subtree, or a child that was never born. Distinct from
+    /// [`Failed`](SpawnError::Failed) so a caller can tell "you named the wrong thing" from "the op
+    /// itself broke".
+    #[error("unknown child {0:?} — not in this node's children ledger")]
+    UnknownChild(AgentName),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+/// The isolation preamble prepended to every child's launch prompt. Lives here — beside the
+/// [`ChildKind`] it branches on — rather than inside the runtime's birth tail, so the wording is
+/// one shared string and a caller that renders a prompt outside `birth` can't drift from it.
+pub fn birth_preamble(kind: ChildKind, child_dir: &Path) -> String {
+    match kind {
+        ChildKind::Worktree => format!(
+            "You are working in an ISOLATED git worktree at `{}` — this is your repo root. ALL file \
+             paths are relative to it. Do NOT read or write files outside this directory (never touch \
+             the parent repository). Commit your work to your branch here.\n\n",
+            child_dir.display()
+        ),
+        ChildKind::Inline => format!(
+            "You are working in the repository at `{}`. ALL file paths are relative to it. \
+             Do NOT read or write files outside this directory.\n\n",
+            child_dir.display()
+        ),
+    }
 }
 
 /// **Composite cap** — birth orchestrates across the primitives it declares as supertraits:

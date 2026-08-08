@@ -335,6 +335,7 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
                 text: MessageBody::new(text)?,
                 summary: Summary::new(summary)?,
                 kind: MessageKind::Chat,
+                reply_to: None,
             };
             ctx.deliver(Addressee::Parent, msg).await?;
             return Ok(ToolOutput::with_data(
@@ -447,6 +448,8 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
             name_prefix: review_prefix,
             task: review_task,
             fork_session: false,
+            model_override: None,
+            directives_hash: None,
         };
         let reviewer = ctx.spawn(spec).await?;
 

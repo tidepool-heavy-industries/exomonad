@@ -76,6 +76,7 @@ async fn message_round_trips_parent_inbox_over_the_bus() {
                 text: MessageBody::new("wave 2 converged".into()).unwrap(),
                 summary: Summary::new("status".into()).unwrap(),
                 kind: MessageKind::Chat,
+                reply_to: None,
             },
         )
         .await
