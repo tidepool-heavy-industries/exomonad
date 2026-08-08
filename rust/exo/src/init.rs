@@ -93,18 +93,6 @@ fn wrapper_on_path(wrapper: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Whether a tmux server is already listening on `socket` — `has-session` (no `-t`) succeeds iff
-/// the server exists (regardless of session count), and fails (can't connect) iff it doesn't.
-fn tmux_socket_has_server(socket: &str) -> bool {
-    Command::new("tmux")
-        .args(["-L", socket, "has-session"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
 /// The confined tmux server's own pid, via a plain (no `-t`) `display-message` — targeting no
 /// pane, tmux answers with the SERVER's own pid rather than a pane's.
 fn tmux_server_pid(socket: &str) -> Option<u32> {
@@ -154,7 +142,12 @@ fn confine_server(wrapper: &str, socket: &str) -> ConfineOutcome {
         };
     }
 
-    let already_running = tmux_socket_has_server(socket);
+    // `tmux_server_pid` (a plain `display-message`, no `-t`), not `has-session` — `has-session`
+    // without `-t` resolves against a "current session" and fails with "no current target" even
+    // when the server IS up but has zero sessions (exactly the state right after the
+    // `exit-empty off` bootstrap below, and a real reachable state whenever a confined server
+    // outlives a killed session, since `exit-empty` is deliberately off).
+    let already_running = tmux_server_pid(socket).is_some();
     if already_running {
         tracing::info!(
             socket,
@@ -307,6 +300,27 @@ pub async fn run(
     let set_session = Command::new("tmux").args(&set_session_args).status()?;
     if !set_session.success() {
         anyhow::bail!("Failed to set EXOMONAD_TMUX_SESSION in tmux session");
+    }
+
+    // Only stamped when confinement was actually verified. Set on the SESSION (not just the root's
+    // own launch env below) so it reaches every descendant pane too — `boot_root_session`'s holding
+    // shell predates this call and needs it embedded directly (see `env_vars` below), but every
+    // `Tmux::new_window`/`new_pane` spawned tree-wide happens well after this, and a tmux pane's
+    // initial process environment is seeded from the session environment at creation time (verified
+    // live: `set-environment` + a later `new-window` sees the var via plain `printenv`) — the same
+    // mechanism `EXOMONAD_SWARM_RUN_ID`/`EXOMONAD_TMUX_SESSION` above already rely on. `tree.rs`'s
+    // per-node self-check reads this via `std::env::var`, so every spawned TL/dev/worker/reviewer
+    // must see it, not just root.
+    if confine_outcome.confirmed {
+        let mut set_confined_args: Vec<&str> = Vec::new();
+        if let Some(s) = socket {
+            set_confined_args.extend(["-L", s]);
+        }
+        set_confined_args.extend(["set-environment", "-t", &session, "EXO_CONFINED", "1"]);
+        let set_confined = Command::new("tmux").args(&set_confined_args).status()?;
+        if !set_confined.success() {
+            anyhow::bail!("Failed to set EXO_CONFINED in tmux session");
+        }
     }
 
     // Stamp the configured child-launch policy onto the root's papers. `birth` reads a node's own
