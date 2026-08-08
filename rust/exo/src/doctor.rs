@@ -139,11 +139,12 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
         }
         acknowledged_count += 1;
         if fix {
-            rt.record_reaped_if_active(name).await;
-            println!(
-                "  Acknowledged dead child with no worktree left: {}",
-                name.as_str()
-            );
+            if record_acknowledged(&rt, name).await {
+                println!(
+                    "  Acknowledged dead child with no worktree left: {}",
+                    name.as_str()
+                );
+            }
         } else {
             println!(
                 "  Would acknowledge dead child with no worktree left: {}",
@@ -223,12 +224,12 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
             Ok(agent_name) => match rt.reclaim_worktree_tree(&agent_name, &wt.path).await {
                 Ok(()) => {
                     reclaimed_paths.push(wt.path.clone());
-                    // Mirrors `Spawner::reclaim_worktree`, which makes this same call on the
-                    // normal merge-time path — a doctor-driven reclaim leaves the ledger in the
-                    // same state an ordinary reclaim would (fold self-heals Died -> Reaped, or
-                    // a never-tombstoned Live child is marked Reaped for the first time).
-                    rt.record_reaped_if_active(&agent_name).await;
-                    reclaimed_reaped_count += 1;
+                    // Direct append, not `record_reaped_if_active`: a doctor-reclaimed child is
+                    // usually already `Died` (terminal), which that helper's guard skips. The
+                    // fold's later-record-wins rule makes the extra `Reaped` the acknowledgment.
+                    if record_acknowledged(&rt, &agent_name).await {
+                        reclaimed_reaped_count += 1;
+                    }
                 }
                 Err(e) => eprintln!(
                     "    FAILED to remove worktree at {}: {e}",
@@ -451,6 +452,28 @@ fn doctor_runtime(root_path: &Path) -> exo_runtime::Runtime {
     )
 }
 
+/// Record `Reaped` for `child` by direct ledger append — the acknowledgment transition.
+/// Doctor already knows the child's folded state (`Died`, or just physically reclaimed), so it
+/// must NOT go through `record_reaped_if_active`: that helper's not-yet-terminal guard exists
+/// for the runtime teardown path and refuses exactly the `Died -> Reaped` transition doctor
+/// performs. Returns whether the record actually landed — callers gate their success print on it.
+async fn record_acknowledged(rt: &exo_runtime::Runtime, child: &AgentName) -> bool {
+    let rec = ChildRecord::Reaped {
+        child: child.clone(),
+        at: None,
+    };
+    match rt.append_child_record(&rec).await {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!(
+                "    FAILED to record Reaped for {}: {e} — tombstone stays Died; re-run doctor --fix",
+                child.as_str()
+            );
+            false
+        }
+    }
+}
+
 fn delete_branch(branch: &str) {
     if branch == "detached" || branch == "main" || branch == "master" {
         return;
@@ -505,6 +528,38 @@ mod tests {
             },
             false
         ));
+    }
+
+    #[tokio::test]
+    async fn record_acknowledged_persists_over_died_state() {
+        // The transition doctor exists to perform: Died -> Reaped must actually LAND in the
+        // ledger (record_reaped_if_active's not-yet-terminal guard would silently skip it —
+        // the bug this test pins).
+        let dir = std::env::temp_dir().join(format!(
+            "exo-doctor-test-ack-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(dir.join(".exo")).unwrap();
+        std::fs::write(
+            dir.join(".exo/children.jsonl"),
+            concat!(
+                r#"{"record":"spawned","child":"x","kind":"worktree","pane":"%9","inbox":"/tmp/x.jsonl","model_label":null}"#,
+                "\n",
+                r#"{"record":"died","child":"x","pane":"%9"}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
+
+        let rt = doctor_runtime(&dir);
+        let child = AgentName::new("x".into()).unwrap();
+        assert!(record_acknowledged(&rt, &child).await);
+
+        let folded = fold_children(&read_root_child_records(&dir));
+        assert_eq!(folded.get(&child).unwrap().state, ChildState::Reaped);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
