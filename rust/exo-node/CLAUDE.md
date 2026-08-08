@@ -93,8 +93,12 @@ SessionStart instruction were all **removed**; tmux-paste (the former floor) is 
 
 The paste path (`exomonad_shared::services::tmux_ipc::inject_input`) is hardened: per-target async
 lock, **Rewind/modal dismissal** (capture pane → if it looks like the Rewind menu, send Escape — else
-the modal swallows the paste), copy/scroll-mode exit, temp-file `load-buffer`, 150ms debounce, 3×
-Enter retry, SIGWINCH wake, session-qualified target, and spill-to-file for payloads >480B.
+the modal swallows the paste), copy/scroll-mode exit, temp-file `load-buffer`, a SIGWINCH wake
+*before* Enter (drains the pasted text as its own input event so a parked TUI can't coalesce text+\r
+into one paste chunk), then **verified submission**: after Enter, the pane's bottom lines are
+captured and checked for the payload tail — still visible ⇒ wake + re-Enter (bounded, backoff),
+exhausted ⇒ loud `Err` so the bus cursor stays unadvanced and at-least-once redelivery recovers.
+Session-qualified targets, spill-to-file for payloads >480B.
 
 Outbound is symmetric and exo-owned: a child reaches its parent via the **`notify_parent` MCP tool**
 (→ Bus → the parent's inbound→paste); `send_message` addresses a child. No native CC team tools are
