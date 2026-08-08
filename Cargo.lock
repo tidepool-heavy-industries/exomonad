@@ -996,6 +996,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "sha2",
  "shell-escape",
  "tokio",
  "toml 0.8.23",

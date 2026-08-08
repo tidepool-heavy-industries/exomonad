@@ -21,10 +21,13 @@
 //! - [`review`] — the domain's inter-node behavior: [`ReviewSystem`](review::ReviewSystem)
 //!   (`D::System`) + the relocated review-gate logic ([`handle_review_system`](review::handle_review_system)).
 //! - [`spawn`] — [`ExoSpawn`](spawn::ExoSpawn), the domain's `D::Spawn`.
+//! - [`directives`] — the node's local untracked standing directives, injected into every child's
+//!   spec, copied into worktree children, hashed onto their ledger rows.
 //! - [`testing`] — the shared [`MockRuntime`](testing::MockRuntime) every tool unit-tests against.
 //!
 //! [`Exomonad`]: exo_framework::Exomonad
 
+pub mod directives;
 pub mod gates;
 pub mod protocol;
 pub mod receipts;
