@@ -16,6 +16,8 @@
 //!   `stop` variants, `session_start`).
 //! - [`roles`] — [`role_def`](roles::role_def) (the `ExoRole` table the domain's [`Exomonad`]
 //!   impl resolves through).
+//! - [`receipts`] — the typed [`Receipts`](receipts::Receipts) block + transfer proof a submitting
+//!   node hands its parent on `[READY]` (pure; rendered into the message text).
 //! - [`review`] — the domain's inter-node behavior: [`ReviewSystem`](review::ReviewSystem)
 //!   (`D::System`) + the relocated review-gate logic ([`handle_review_system`](review::handle_review_system)).
 //! - [`spawn`] — [`ExoSpawn`](spawn::ExoSpawn), the domain's `D::Spawn`.
@@ -25,6 +27,7 @@
 
 pub mod gates;
 pub mod protocol;
+pub mod receipts;
 pub mod review;
 pub mod roles;
 pub mod spawn;
@@ -35,6 +38,7 @@ pub(crate) mod branching;
 #[cfg(test)]
 pub mod testing;
 
+pub use receipts::{render_receipts_summary, LabeledValue, Receipts, TransferProof};
 pub use review::{handle_review_system, handle_review_tick, ReviewSystem};
 pub use roles::{role_def, ExoRole};
 pub use spawn::ExoSpawn;
