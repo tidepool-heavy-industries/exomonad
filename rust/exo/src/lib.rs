@@ -11,6 +11,9 @@
 //! that seam is the whole point of the framework/domain split.
 //!
 //! ## Shape
+//! - [`boundary`] — [`FileBoundary`](boundary::FileBoundary), the fold-time file-boundary check:
+//!   a spawner's optional per-child allowlist, persisted parent-side and verified against the
+//!   child's actual diff by `merge` before it commits.
 //! - [`tools`] — one module per MCP tool (a type + `Args` + generic-over-caps `run` + adapter).
 //! - [`gates`] — the concrete hook bodies (`pre_tool_use` nudge, `stop` clean-gate, the per-role
 //!   `stop` variants, `session_start`).
@@ -27,6 +30,7 @@
 //!
 //! [`Exomonad`]: exo_framework::Exomonad
 
+pub mod boundary;
 pub mod directives;
 pub mod gates;
 pub mod protocol;

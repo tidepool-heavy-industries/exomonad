@@ -5,8 +5,9 @@
 //! when added, runs *before* this (gating the merge); this tool is just the fold. A merge
 //! conflict surfaces as a tool error for the TL to resolve.
 
+use crate::boundary::{matches as boundary_matches, read_boundary};
 use crate::branching::child_name;
-use exo_caps::{AgentName, Branch, CapError, CapResult, Git, Process, SpawnError, Spawner};
+use exo_caps::{AgentName, Branch, CapError, CapResult, Fs, Git, Process, SpawnError, Spawner};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -27,6 +28,11 @@ pub struct MergeArgs {
     /// is skipped, so the failing child is left alive to fix its work.
     #[serde(default)]
     pub gate: Option<String>,
+    /// Merge anyway when the child's recorded file boundary (`spawn_dev`/`fork_wave`'s
+    /// `file_boundary`) is violated by its actual diff. Ignored when the child has no recorded
+    /// boundary — there's nothing to override. Default false: a violation refuses the merge.
+    #[serde(default)]
+    pub boundary_override: bool,
 }
 
 /// The `merge` tool: local fold of a child branch.
@@ -41,20 +47,23 @@ fn gate_output_tail(out: &std::process::Output) -> String {
 }
 
 #[async_trait::async_trait]
-impl<R: Git + Spawner + Process + Send + Sync> Tool<R> for Merge {
+impl<R: Git + Spawner + Process + Fs + Send + Sync> Tool<R> for Merge {
     const NAME: &'static str = "merge";
     const DESCRIPTION: &'static str =
         "Fold a child's branch into yours with a local `git merge` AND reclaim the child (kill its \
          pane + remove its worktree) — one-step fold + cleanup. ALWAYS prefer this over a raw `git \
          merge`, which leaks the child's pane and worktree. The child names its branch in its \
          `submit_branch` [READY] message. Children are worktrees of the same repo, so this needs \
-         no remote, no PR. A merge conflict surfaces as an error for you to resolve. Optional \
-         `gate`: a whitespace-split verification command run after the merge and before teardown — \
-         on failure the merge stays committed but teardown is skipped, leaving the child alive to \
-         fix its work. `branch` accepts ANY local ref, not just a tracked child's — this is the \
-         supported succession escape hatch for dead-TL recovery (folding an orphaned descendant's \
-         branch back in); pane/worktree reclaim only works for your own ledger children and is \
-         best-effort otherwise.";
+         no remote, no PR. A merge conflict surfaces as an error for you to resolve. If the child \
+         was spawned with `file_boundary`, its actual diff is checked against that boundary BEFORE \
+         merging — a violation refuses with the offending files named; pass \
+         `boundary_override: true` to merge anyway. A child with no recorded boundary merges \
+         unrestricted, exactly as before. Optional `gate`: a whitespace-split verification command \
+         run after the merge and before teardown — on failure the merge stays committed but \
+         teardown is skipped, leaving the child alive to fix its work. `branch` accepts ANY local \
+         ref, not just a tracked child's — this is the supported succession escape hatch for \
+         dead-TL recovery (folding an orphaned descendant's branch back in); pane/worktree reclaim \
+         only works for your own ledger children and is best-effort otherwise.";
     type Args = MergeArgs;
 
     async fn run(ctx: &R, args: MergeArgs) -> CapResult<ToolOutput> {
@@ -70,6 +79,65 @@ impl<R: Git + Spawner + Process + Send + Sync> Tool<R> for Merge {
             Some(g) => Some(g.to_string()),
             None => None,
         };
+
+        // Resolve the child's name once, up front — the boundary check (before the merge) and
+        // teardown (after it) both key off it.
+        let child_agent = args
+            .child
+            .clone()
+            .or_else(|| Some(child_name(&branch).to_string()))
+            .and_then(|n| AgentName::new(n).ok());
+
+        let mut boundary_suffix = String::new();
+        let mut boundary_data: Option<serde_json::Value> = None;
+        if let Some(child) = &child_agent {
+            if let Some(boundary) = read_boundary(ctx, child).await? {
+                match ctx.merge_base(branch.as_str()).await? {
+                    Some(base) => {
+                        let commits = ctx.commits_between(&base, branch.as_str()).await?;
+                        let mut changed: Vec<String> =
+                            commits.into_iter().flat_map(|c| c.files).collect();
+                        changed.sort();
+                        changed.dedup();
+                        let violations: Vec<&String> = changed
+                            .iter()
+                            .filter(|f| !boundary_matches(&boundary.allowed, f))
+                            .collect();
+                        if violations.is_empty() {
+                            boundary_suffix = format!(" (boundary ok: {} files)", changed.len());
+                        } else if args.boundary_override {
+                            boundary_suffix =
+                                format!(" (boundary OVERRIDDEN: {} violations)", violations.len());
+                            boundary_data = Some(json!({
+                                "boundary": { "violations": violations }
+                            }));
+                        } else {
+                            return Err(CapError::invalid(
+                                "boundary",
+                                format!(
+                                    "branch `{}` touches file(s) outside its recorded boundary: \
+                                     {} — pass boundary_override: true to merge anyway",
+                                    branch.as_str(),
+                                    violations
+                                        .iter()
+                                        .map(|s| s.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                ),
+                            ));
+                        }
+                    }
+                    None => {
+                        // Unrelated histories — the succession case (folding an orphaned
+                        // descendant's branch back into a live ancestor). There is no shared base
+                        // to diff against, so the check cannot run; say so rather than silently
+                        // treating it as clean.
+                        boundary_suffix =
+                            " (boundary check skipped: no common history)".to_string();
+                    }
+                }
+            }
+        }
 
         ctx.merge(&branch).await?;
 
@@ -108,42 +176,39 @@ impl<R: Git + Spawner + Process + Send + Sync> Tool<R> for Merge {
         }
 
         let mut teardown = String::new();
-        let child_candidate = args.child.or_else(|| Some(child_name(&branch).to_string()));
 
-        if let Some(name_str) = child_candidate {
-            if let Ok(child) = AgentName::new(name_str) {
-                // UFCS: `Spawner::kill_pane` (by child name) — `Tmux::kill_pane` (by pane id)
-                // is also in scope via the supertrait, so the bare method call is ambiguous.
-                let killed = Spawner::kill_pane(ctx, &child).await;
-                let reclaimed = ctx.reclaim_worktree(&child).await;
+        if let Some(child) = &child_agent {
+            // UFCS: `Spawner::kill_pane` (by child name) — `Tmux::kill_pane` (by pane id)
+            // is also in scope via the supertrait, so the bare method call is ambiguous.
+            let killed = Spawner::kill_pane(ctx, child).await;
+            let reclaimed = ctx.reclaim_worktree(child).await;
 
-                let both_unknown_child = matches!(&killed, Err(SpawnError::UnknownChild(_)))
-                    && matches!(&reclaimed, Err(SpawnError::UnknownChild(_)));
+            let both_unknown_child = matches!(&killed, Err(SpawnError::UnknownChild(_)))
+                && matches!(&reclaimed, Err(SpawnError::UnknownChild(_)));
 
-                let k_msg = match &killed {
-                    Ok(_) => "ok".to_string(),
-                    Err(e) => e.to_string(),
-                };
-                let r_msg = match &reclaimed {
-                    Ok(_) => "ok".to_string(),
-                    Err(e) => e.to_string(),
-                };
+            let k_msg = match &killed {
+                Ok(_) => "ok".to_string(),
+                Err(e) => e.to_string(),
+            };
+            let r_msg = match &reclaimed {
+                Ok(_) => "ok".to_string(),
+                Err(e) => e.to_string(),
+            };
 
-                // `merge` deliberately accepts any local ref so a live ancestor can fold an
-                // orphaned descendant's branch after a TL dies. In that case there IS no ledger
-                // child to tear down, so reporting a generic 'teardown best-effort' failure would
-                // be actively misleading — it reads as 'cleanup broke' when the truth is 'there
-                // was nothing of mine to clean up'.
-                teardown = if k_msg == "ok" && r_msg == "ok" {
-                    format!(" (reclaimed {})", child.as_str())
-                } else if both_unknown_child {
-                    " — merged non-child ref; no teardown performed (succession escape hatch: \
-                     pane/worktree reclaim only works for your own ledger children)"
-                        .to_string()
-                } else {
-                    format!(" (teardown best-effort: kill={} reclaim={})", k_msg, r_msg)
-                };
-            }
+            // `merge` deliberately accepts any local ref so a live ancestor can fold an
+            // orphaned descendant's branch after a TL dies. In that case there IS no ledger
+            // child to tear down, so reporting a generic 'teardown best-effort' failure would
+            // be actively misleading — it reads as 'cleanup broke' when the truth is 'there
+            // was nothing of mine to clean up'.
+            teardown = if k_msg == "ok" && r_msg == "ok" {
+                format!(" (reclaimed {})", child.as_str())
+            } else if both_unknown_child {
+                " — merged non-child ref; no teardown performed (succession escape hatch: \
+                 pane/worktree reclaim only works for your own ledger children)"
+                    .to_string()
+            } else {
+                format!(" (teardown best-effort: kill={} reclaim={})", k_msg, r_msg)
+            };
         }
 
         let gate_suffix = if args.gate.is_some() {
@@ -152,14 +217,26 @@ impl<R: Git + Spawner + Process + Send + Sync> Tool<R> for Merge {
             ""
         };
 
+        let mut data = json!({ "branch": branch.as_str() });
+        if let Some(boundary_data) = boundary_data {
+            if let (Some(obj), Some(boundary_obj)) =
+                (data.as_object_mut(), boundary_data.as_object())
+            {
+                for (k, v) in boundary_obj {
+                    obj.insert(k.clone(), v.clone());
+                }
+            }
+        }
+
         Ok(ToolOutput::with_data(
             format!(
-                "merged branch {}{}{}",
+                "merged branch {}{}{}{}",
                 branch.as_str(),
+                boundary_suffix,
                 teardown,
                 gate_suffix
             ),
-            json!({ "branch": branch.as_str() }),
+            data,
         ))
     }
 }
@@ -192,11 +269,13 @@ mod tests {
         }
     }
 
-    /// A bare stand-in for `R: Git + Spawner + Process`, used only to make `kill_pane`/
+    /// A bare stand-in for `R: Git + Spawner + Process + Fs`, used only to make `kill_pane`/
     /// `reclaim_worktree` report [`SpawnError::UnknownChild`] — `MockRuntime`'s `fail()` can only
     /// produce `SpawnError::Failed`, so it can't exercise the succession-escape-hatch
-    /// classification in `Merge::run`. Every method besides `merge`/`kill_pane`/
-    /// `reclaim_worktree` is unreachable — `Merge::run` never calls them for a `gate: None` merge.
+    /// classification in `Merge::run`. `Fs::read` reports NotFound (standing in for "no file
+    /// boundary was recorded" — the ordinary case for these tests); every other method besides
+    /// `merge`/`kill_pane`/`reclaim_worktree` is unreachable — `Merge::run` never calls them for a
+    /// `gate: None` merge with no recorded boundary.
     struct SuccessionMock {
         kill: Teardown,
         reclaim: Teardown,
@@ -289,8 +368,12 @@ mod tests {
 
     #[async_trait::async_trait]
     impl exo_caps::Fs for SuccessionMock {
-        async fn read(&self, _path: &std::path::Path) -> Result<Vec<u8>, exo_caps::FsError> {
-            unreachable!()
+        async fn read(&self, path: &std::path::Path) -> Result<Vec<u8>, exo_caps::FsError> {
+            Err(exo_caps::FsError::At {
+                op: "read",
+                path: path.display().to_string(),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, "mock: no such file"),
+            })
         }
         async fn write_atomic(
             &self,
@@ -343,6 +426,7 @@ mod tests {
                 branch: "main.root.feature".into(),
                 child: None,
                 gate: None,
+                boundary_override: false,
             },
         )
         .await
@@ -365,6 +449,7 @@ mod tests {
                 branch: "main.root.feature".into(),
                 child: None,
                 gate: None,
+                boundary_override: false,
             },
         )
         .await
@@ -383,6 +468,7 @@ mod tests {
                 branch: "main.root.feature".into(),
                 child: None,
                 gate: None,
+                boundary_override: false,
             },
         )
         .await
@@ -416,6 +502,7 @@ mod tests {
                 branch: "main.root.v1-2".into(),
                 child: Some("v1.2".into()),
                 gate: None,
+                boundary_override: false,
             },
         )
         .await
@@ -437,6 +524,7 @@ mod tests {
                 branch: "main.root.feature".into(),
                 child: None,
                 gate: None,
+                boundary_override: false,
             },
         )
         .await
@@ -456,6 +544,7 @@ mod tests {
                 branch: "main.root.feature".into(),
                 child: None,
                 gate: None,
+                boundary_override: false,
             },
         )
         .await;
@@ -471,6 +560,7 @@ mod tests {
                 branch: "main.root.feature".into(),
                 child: None,
                 gate: Some("cargo check -p exo".into()),
+                boundary_override: false,
             },
         )
         .await
@@ -511,6 +601,7 @@ mod tests {
                 branch: "main.root.feature".into(),
                 child: None,
                 gate: Some("cargo check -p exo".into()),
+                boundary_override: false,
             },
         )
         .await
@@ -543,6 +634,7 @@ mod tests {
                 branch: "main.root.feature".into(),
                 child: None,
                 gate: Some("   ".into()),
+                boundary_override: false,
             },
         )
         .await;
@@ -561,6 +653,7 @@ mod tests {
                 branch: "main.root.feature".into(),
                 child: None,
                 gate: None,
+                boundary_override: false,
             },
         )
         .await
@@ -571,5 +664,163 @@ mod tests {
             "merged branch main.root.feature (reclaimed feature)"
         );
         assert!(!out.text.contains("gate ok"));
+    }
+
+    fn seed_boundary(mock: &MockRuntime, child: &str, allowed: Vec<&str>) {
+        mock.files.lock().unwrap().insert(
+            crate::boundary::boundary_path(child).display().to_string(),
+            serde_json::to_vec(&crate::boundary::FileBoundary {
+                allowed: allowed.into_iter().map(str::to_string).collect(),
+            })
+            .unwrap(),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_merge_boundary_ok_allows_in_bounds_diff() {
+        let mock = MockRuntime {
+            commits_between: vec![exo_caps::CommitFiles {
+                sha: "abc123".into(),
+                files: vec!["rust/exo/src/tools/merge.rs".into()],
+            }],
+            ..Default::default()
+        };
+        seed_boundary(&mock, "feature", vec!["rust/exo/src/tools"]);
+
+        let out = Merge::run(
+            &mock,
+            MergeArgs {
+                branch: "main.root.feature".into(),
+                child: None,
+                gate: None,
+                boundary_override: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(out.text.contains("(boundary ok: 1 files)"));
+        assert!(mock
+            .calls_made()
+            .iter()
+            .any(|c| matches!(c, Call::Merge { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_merge_boundary_violation_refuses_before_merge() {
+        let mock = MockRuntime {
+            commits_between: vec![exo_caps::CommitFiles {
+                sha: "abc123".into(),
+                files: vec!["rust/exo/src/tools/spawn.rs".into()],
+            }],
+            ..Default::default()
+        };
+        seed_boundary(&mock, "feature", vec!["rust/exo/src/tools/merge.rs"]);
+
+        let err = Merge::run(
+            &mock,
+            MergeArgs {
+                branch: "main.root.feature".into(),
+                child: None,
+                gate: None,
+                boundary_override: false,
+            },
+        )
+        .await
+        .unwrap_err();
+
+        let msg = err.to_string();
+        assert!(msg.contains("rust/exo/src/tools/spawn.rs"));
+        assert!(msg.contains("boundary_override: true"));
+        assert!(!mock
+            .calls_made()
+            .iter()
+            .any(|c| matches!(c, Call::Merge { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_merge_boundary_override_merges_with_violations_noted() {
+        let mock = MockRuntime {
+            commits_between: vec![exo_caps::CommitFiles {
+                sha: "abc123".into(),
+                files: vec!["rust/exo/src/tools/spawn.rs".into()],
+            }],
+            ..Default::default()
+        };
+        seed_boundary(&mock, "feature", vec!["rust/exo/src/tools/merge.rs"]);
+
+        let out = Merge::run(
+            &mock,
+            MergeArgs {
+                branch: "main.root.feature".into(),
+                child: None,
+                gate: None,
+                boundary_override: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(out.text.contains("(boundary OVERRIDDEN: 1 violations)"));
+        let data = out.data.unwrap();
+        assert_eq!(
+            data["boundary"]["violations"][0],
+            "rust/exo/src/tools/spawn.rs"
+        );
+        assert!(mock
+            .calls_made()
+            .iter()
+            .any(|c| matches!(c, Call::Merge { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_merge_no_boundary_file_is_byte_identical_to_today() {
+        let mock = MockRuntime::default();
+        let out = Merge::run(
+            &mock,
+            MergeArgs {
+                branch: "main.root.feature".into(),
+                child: None,
+                gate: None,
+                boundary_override: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            out.text,
+            "merged branch main.root.feature (reclaimed feature)"
+        );
+        assert!(!out.text.contains("boundary"));
+    }
+
+    #[tokio::test]
+    async fn test_merge_boundary_skipped_when_no_merge_base() {
+        let mock = MockRuntime {
+            merge_base: None,
+            ..Default::default()
+        };
+        seed_boundary(&mock, "feature", vec!["rust/exo/src/tools/merge.rs"]);
+
+        let out = Merge::run(
+            &mock,
+            MergeArgs {
+                branch: "main.root.feature".into(),
+                child: None,
+                gate: None,
+                boundary_override: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(out
+            .text
+            .contains("boundary check skipped: no common history"));
+        assert!(mock
+            .calls_made()
+            .iter()
+            .any(|c| matches!(c, Call::Merge { .. })));
     }
 }
