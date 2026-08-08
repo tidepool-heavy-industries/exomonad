@@ -31,6 +31,8 @@ pub enum WorktreeStatus {
     Merged,
     /// Not yet merged into the base branch. Kept unless --include-unmerged.
     Unmerged,
+    /// A working agent per the children ledger (non-terminal state). NEVER reclaimed by doctor.
+    Live,
 }
 
 impl std::fmt::Display for WorktreeStatus {
@@ -39,6 +41,7 @@ impl std::fmt::Display for WorktreeStatus {
             WorktreeStatus::Current => write!(f, "CURRENT"),
             WorktreeStatus::Merged => write!(f, "MERGED"),
             WorktreeStatus::Unmerged => write!(f, "UNMERGED"),
+            WorktreeStatus::Live => write!(f, "LIVE"),
         }
     }
 }
@@ -52,9 +55,18 @@ pub struct WorktreeInfo {
 }
 
 /// Pure classification logic: given worktree facts, decide what to do.
-pub fn classify(path: &Path, root_path: &Path, is_ancestor: bool) -> WorktreeStatus {
+///
+/// `is_live` comes from the children ledger fold: a child whose state is non-terminal
+/// (Live/Submitted) is a WORKING AGENT regardless of git ancestry — a freshly-spawned child's
+/// branch sits at the fork point with no commits yet, so the ancestor check alone reads it as
+/// "merged" and `--fix` would destroy a live agent's worktree. Live wins over everything except
+/// Current, and is never reclaimable (not even with `--include-unmerged` — tearing down a live
+/// agent is `merge`/`dismiss_worker`/shutdown's job, not doctor's).
+pub fn classify(path: &Path, root_path: &Path, is_ancestor: bool, is_live: bool) -> WorktreeStatus {
     if path == root_path {
         WorktreeStatus::Current
+    } else if is_live {
+        WorktreeStatus::Live
     } else if is_ancestor {
         WorktreeStatus::Merged
     } else {
@@ -95,6 +107,17 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
     let mut worktrees = list_worktrees()?;
     let mut reclaimed_count = 0;
     let mut unmerged_count = 0;
+    let mut live_count = 0;
+
+    // The ledger fold is the live-agent authority: ancestry alone misreads a freshly-spawned
+    // child (branch at fork point, no commits) as "merged". Folded once, reused by the
+    // acknowledgment pass below.
+    let root_children = fold_children(&read_root_child_records(&root_path));
+    let live_names: BTreeSet<&str> = root_children
+        .iter()
+        .filter(|(_, c)| !c.state.is_terminal())
+        .map(|(n, _)| n.as_str())
+        .collect();
 
     // Filter to only those under .exo/worktrees/ or the root itself
     worktrees
@@ -107,7 +130,12 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
             check_is_ancestor(&wt.head, &base_head)?
         };
 
-        wt.status = classify(&wt.path, &root_path, is_ancestor);
+        let is_live = wt
+            .path
+            .file_name()
+            .map(|n| live_names.contains(n.to_string_lossy().as_ref()))
+            .unwrap_or(false);
+        wt.status = classify(&wt.path, &root_path, is_ancestor, is_live);
 
         let relative_path = wt.path.strip_prefix(&root_path).unwrap_or(&wt.path);
         println!(
@@ -122,6 +150,8 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
             reclaimed_count += 1;
         } else if wt.status == WorktreeStatus::Unmerged {
             unmerged_count += 1;
+        } else if wt.status == WorktreeStatus::Live {
+            live_count += 1;
         }
     }
 
@@ -132,13 +162,18 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
     if unmerged_count > 0 {
         println!("{} unmerged worktrees detected (skipped).", unmerged_count);
     }
+    if live_count > 0 {
+        println!(
+            "{} LIVE children (working agents per the ledger) — never reclaimed by doctor.",
+            live_count
+        );
+    }
 
     // Acknowledgment pass: a `Died` child with no worktree directory left on disk has nothing
     // left to reclaim — recording `Reaped` for it IS the acknowledgment (the ledger fold
     // self-heals `Died` -> `Reaped`, the same transition an ordinary reclaim already produces).
     // Runs in BOTH dry-run and --fix, so a plain `exo doctor` previews what --fix would do;
     // dry-run records nothing. Only reaches the root's own ledger (see `read_root_child_records`).
-    let root_children = fold_children(&read_root_child_records(&root_path));
     let worktrees_root = root_path.join(".exo/worktrees");
     let mut acknowledged_count = 0;
     for (name, child) in &root_children {
@@ -768,10 +803,26 @@ mod tests {
         let wt_merged = Path::new("/repo/.exo/worktrees/a");
         let wt_unmerged = Path::new("/repo/.exo/worktrees/b");
 
-        assert_eq!(classify(wt_root, root, false), WorktreeStatus::Current);
-        assert_eq!(classify(wt_root, root, true), WorktreeStatus::Current);
-        assert_eq!(classify(wt_merged, root, true), WorktreeStatus::Merged);
-        assert_eq!(classify(wt_unmerged, root, false), WorktreeStatus::Unmerged);
+        assert_eq!(
+            classify(wt_root, root, false, false),
+            WorktreeStatus::Current
+        );
+        assert_eq!(classify(wt_root, root, true, false), WorktreeStatus::Current);
+        assert_eq!(
+            classify(wt_merged, root, true, false),
+            WorktreeStatus::Merged
+        );
+        assert_eq!(
+            classify(wt_unmerged, root, false, false),
+            WorktreeStatus::Unmerged
+        );
+        // A live child (per the ledger) is NEVER reclaimable, even when its branch sits at the
+        // fork point and ancestry alone would read it as merged — the bug this arm pins.
+        assert_eq!(classify(wt_merged, root, true, true), WorktreeStatus::Live);
+        assert_eq!(
+            classify(wt_unmerged, root, false, true),
+            WorktreeStatus::Live
+        );
     }
 
     #[test]
