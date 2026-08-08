@@ -22,7 +22,7 @@ Use exomonad MCP tools for orchestration. Git operations use the `git` CLI direc
 | `spawn_dev` | root, tl | Spawn a Sonnet Claude dev in its own worktree+branch |
 | `spawn_worker` | root, tl | Spawn an ephemeral Sonnet Claude worker in a tmux pane (no branch) |
 | `dismiss_worker` | root, tl | Tear down an inline worker by name (parent-side `kill_pane`) |
-| `merge` | root, tl | The local fold: `git merge <child-branch>` + best-effort child teardown |
+| `merge` | root, tl | The local fold: `git merge <child-branch>` + best-effort child teardown. Optional `gate` command runs post-merge, pre-teardown |
 | `submit_branch` | tl, dev | Request review/convergence — see "Convergence Protocol" below |
 | `verdict` | reviewer | A reviewer's one output: `summary` + structured `findings` → a message to its parent |
 | `notify_parent` | tl, dev, worker, reviewer | Status/failure update to the parent (NOT the done-signal) |
@@ -106,6 +106,8 @@ The TL does NOT iterate on children's work. Convergence is **leaf + reviewer**, 
 5. TL calls `merge` when `[READY]` arrives.
 
 The TL never manually reviews code, never fixes a leaf's implementation. There is no Copilot in v2 — Copilot review and `file_pr`/`merge_pr` are Classic-only.
+
+`merge` accepts any local ref, not just a tracked child's branch — this is the supported succession escape hatch for dead-TL recovery (folding an orphaned descendant's branch back into a live ancestor); pane/worktree reclaim only works for your own ledger children and is best-effort otherwise. An optional `gate` command runs after the merge commits and before teardown; a failed gate leaves the child alive (merge stays committed, teardown is skipped) so it can fix its work and be re-merged.
 
 ## Branch Naming
 

@@ -64,6 +64,10 @@ pub enum Call {
     ReclaimWorktree {
         child: AgentName,
     },
+    ProcessRun {
+        program: String,
+        args: Vec<String>,
+    },
 }
 
 /// Canned return values + a recording log. Interior-mutable so the cap methods take `&self`
@@ -97,6 +101,10 @@ pub struct MockRuntime {
     /// If set, the named cap method returns its `*Error` instead of the happy path. Keyed by
     /// a short op label (e.g. "merge") so a test can exercise error branches.
     pub fail: Mutex<Option<&'static str>>,
+    /// Canned return for [`Process::run`] — a test overrides this (e.g. to a non-zero exit
+    /// status) to model a failing gate command. Defaults to a successful empty output. Spawn
+    /// failure (the command couldn't even start) is still modeled via `fail("run")`.
+    pub process_output: std::process::Output,
 }
 
 impl Default for MockRuntime {
@@ -115,6 +123,11 @@ impl Default for MockRuntime {
             is_behind: false,
             child_busy: true,
             fail: Mutex::new(None),
+            process_output: std::process::Output {
+                status: Default::default(),
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            },
         }
     }
 }
@@ -362,14 +375,25 @@ impl Tmux for MockRuntime {
 impl Process for MockRuntime {
     async fn run(
         &self,
-        _program: &str,
-        _args: &[String],
+        program: &str,
+        args: &[String],
     ) -> Result<std::process::Output, ProcessError> {
-        // A successful empty output. Tools needing a specific exit code construct their own.
+        if self.should_fail("run") {
+            return Err(ProcessError::Spawn {
+                program: program.to_string(),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, "mock: spawn failed"),
+            });
+        }
+        self.record(Call::ProcessRun {
+            program: program.to_string(),
+            args: args.to_vec(),
+        });
+        // `process_output` defaults to a successful empty output; a test overrides it to model
+        // a specific exit status (e.g. a failing gate command).
         Ok(std::process::Output {
-            status: Default::default(),
-            stdout: Vec::new(),
-            stderr: Vec::new(),
+            status: self.process_output.status,
+            stdout: self.process_output.stdout.clone(),
+            stderr: self.process_output.stderr.clone(),
         })
     }
 }
