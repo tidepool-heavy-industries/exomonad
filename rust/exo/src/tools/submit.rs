@@ -623,6 +623,7 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
         // the ONLY path that escalates is the sidecar reacting to an approve-verdict for this sha
         // (see exo-node `handle_system`). That makes the gate structural: the LLM has no tool that
         // can skip review (the explicit opt-out above is the one exception, and it's loud).
+        let directives = crate::directives::load_directives(ctx).await?;
         let review_task = format!(
             "You are a code reviewer. Review branch `{branch}` (commit {sha}). {diff_instruction}. \
              READ ONLY: judge the diff by reading it, not by running it — do NOT run the build, the \
@@ -644,6 +645,7 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
             note = args.note,
             prior = prior_round_context,
         );
+        let review_task = directives.apply(review_task);
         // Spawn a reviewer in its own worktree off the under-review branch (role fixed here, the
         // domain tool boundary). It reads the diff + acceptance criteria, emits a `verdict`, exits.
         // Name it after the branch under review — its last `.`-segment is the submitter's name — so a
@@ -658,7 +660,7 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
             task: review_task,
             fork_session: false,
             model_override: None,
-            directives_hash: None,
+            directives_hash: directives.hash(),
         };
         let reviewer = ctx.spawn(spec).await?;
 
@@ -1369,5 +1371,43 @@ mod tests {
             }
             other => panic!("expected Lifecycle::Submitted, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn submit_injects_standing_directives_into_reviewer_task() {
+        let mock = mock_with_reviews_enabled();
+        mock.dirs.lock().unwrap().insert(
+            crate::directives::DIRECTIVES_DIR.to_string(),
+            vec![std::path::PathBuf::from(".exo/directives/a.md")],
+        );
+        mock.files.lock().unwrap().insert(
+            ".exo/directives/a.md".to_string(),
+            b"reject any new unwrap() in library code".to_vec(),
+        );
+
+        SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "did the thing".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let calls = mock.calls_made();
+        let spawn = calls
+            .iter()
+            .find_map(|c| {
+                if let Call::Spawn { role, task, .. } = c {
+                    if role == "reviewer" {
+                        return Some(task);
+                    }
+                }
+                None
+            })
+            .expect("reviewer should be spawned");
+
+        assert!(spawn.contains("reject any new unwrap() in library code"));
     }
 }

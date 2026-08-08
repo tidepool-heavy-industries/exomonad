@@ -6,7 +6,7 @@
 //! conflict surfaces as a tool error for the TL to resolve.
 
 use crate::branching::child_name;
-use exo_caps::{AgentName, Branch, CapError, CapResult, Git, Process, Spawner};
+use exo_caps::{AgentName, Branch, CapError, CapResult, Git, Process, SpawnError, Spawner};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -117,17 +117,29 @@ impl<R: Git + Spawner + Process + Send + Sync> Tool<R> for Merge {
                 let killed = Spawner::kill_pane(ctx, &child).await;
                 let reclaimed = ctx.reclaim_worktree(&child).await;
 
-                let k_msg = match killed {
+                let both_unknown_child = matches!(&killed, Err(SpawnError::UnknownChild(_)))
+                    && matches!(&reclaimed, Err(SpawnError::UnknownChild(_)));
+
+                let k_msg = match &killed {
                     Ok(_) => "ok".to_string(),
                     Err(e) => e.to_string(),
                 };
-                let r_msg = match reclaimed {
+                let r_msg = match &reclaimed {
                     Ok(_) => "ok".to_string(),
                     Err(e) => e.to_string(),
                 };
 
+                // `merge` deliberately accepts any local ref so a live ancestor can fold an
+                // orphaned descendant's branch after a TL dies. In that case there IS no ledger
+                // child to tear down, so reporting a generic 'teardown best-effort' failure would
+                // be actively misleading — it reads as 'cleanup broke' when the truth is 'there
+                // was nothing of mine to clean up'.
                 teardown = if k_msg == "ok" && r_msg == "ok" {
                     format!(" (reclaimed {})", child.as_str())
+                } else if both_unknown_child {
+                    " — merged non-child ref; no teardown performed (succession escape hatch: \
+                     pane/worktree reclaim only works for your own ledger children)"
+                        .to_string()
                 } else {
                     format!(" (teardown best-effort: kill={} reclaim={})", k_msg, r_msg)
                 };
@@ -157,6 +169,210 @@ mod tests {
     use super::*;
     use crate::testing::{Call, MockRuntime};
     use exo_framework::Tool;
+
+    /// What a teardown method on [`SuccessionMock`] reports for a given call. The "both ok"
+    /// path is already covered by the `MockRuntime`-based tests below, so this mock only needs
+    /// to model the two failure shapes `MockRuntime::fail()` can't produce together.
+    #[derive(Clone, Copy)]
+    enum Teardown {
+        Unknown,
+        Failed,
+    }
+
+    impl Teardown {
+        fn resolve(self, child: &AgentName) -> Result<(), SpawnError> {
+            match self {
+                Teardown::Unknown => Err(SpawnError::UnknownChild(child.clone())),
+                Teardown::Failed => Err(SpawnError::Failed {
+                    op: "mock",
+                    child: Some(child.clone()),
+                    detail: "mock forced failure".into(),
+                }),
+            }
+        }
+    }
+
+    /// A bare stand-in for `R: Git + Spawner + Process`, used only to make `kill_pane`/
+    /// `reclaim_worktree` report [`SpawnError::UnknownChild`] — `MockRuntime`'s `fail()` can only
+    /// produce `SpawnError::Failed`, so it can't exercise the succession-escape-hatch
+    /// classification in `Merge::run`. Every method besides `merge`/`kill_pane`/
+    /// `reclaim_worktree` is unreachable — `Merge::run` never calls them for a `gate: None` merge.
+    struct SuccessionMock {
+        kill: Teardown,
+        reclaim: Teardown,
+    }
+
+    #[async_trait::async_trait]
+    impl exo_caps::Git for SuccessionMock {
+        async fn current_branch(&self) -> Result<Branch, exo_caps::GitError> {
+            unreachable!()
+        }
+        async fn head_sha(&self) -> Result<String, exo_caps::GitError> {
+            unreachable!()
+        }
+        async fn merge_base(&self, _refish: &str) -> Result<Option<String>, exo_caps::GitError> {
+            unreachable!()
+        }
+        async fn fork_point(&self) -> Result<Option<String>, exo_caps::GitError> {
+            unreachable!()
+        }
+        async fn is_clean(&self) -> Result<bool, exo_caps::GitError> {
+            unreachable!()
+        }
+        async fn status_porcelain(&self) -> Result<Vec<String>, exo_caps::GitError> {
+            unreachable!()
+        }
+        async fn commits_between(
+            &self,
+            _base: &str,
+            _head: &str,
+        ) -> Result<Vec<exo_caps::CommitFiles>, exo_caps::GitError> {
+            unreachable!()
+        }
+        async fn is_ahead_of(&self, _base: &str) -> Result<bool, exo_caps::GitError> {
+            unreachable!()
+        }
+        async fn is_behind(&self, _base: &str) -> Result<bool, exo_caps::GitError> {
+            unreachable!()
+        }
+        async fn fetch(&self) -> Result<(), exo_caps::GitError> {
+            unreachable!()
+        }
+        async fn merge(&self, _branch: &Branch) -> Result<(), exo_caps::GitError> {
+            Ok(())
+        }
+        async fn worktree_add(
+            &self,
+            _branch: &Branch,
+            _at: &std::path::Path,
+        ) -> Result<(), exo_caps::GitError> {
+            unreachable!()
+        }
+        async fn worktree_remove(&self, _at: &std::path::Path) -> Result<(), exo_caps::GitError> {
+            unreachable!()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl exo_caps::Tmux for SuccessionMock {
+        async fn new_pane(
+            &self,
+            _cwd: &std::path::Path,
+            _cmd: &str,
+        ) -> Result<exo_caps::PaneId, exo_caps::TmuxError> {
+            unreachable!()
+        }
+        async fn new_window(
+            &self,
+            _name: &str,
+            _cwd: &std::path::Path,
+            _cmd: &str,
+        ) -> Result<exo_caps::PaneId, exo_caps::TmuxError> {
+            unreachable!()
+        }
+        async fn paste(
+            &self,
+            _pane: &exo_caps::PaneId,
+            _text: &str,
+        ) -> Result<(), exo_caps::TmuxError> {
+            unreachable!()
+        }
+        async fn kill_pane(&self, _pane: &exo_caps::PaneId) -> Result<(), exo_caps::TmuxError> {
+            unreachable!()
+        }
+        async fn list_panes(
+            &self,
+        ) -> Result<std::collections::HashSet<String>, exo_caps::TmuxError> {
+            unreachable!()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl exo_caps::Fs for SuccessionMock {
+        async fn read(&self, _path: &std::path::Path) -> Result<Vec<u8>, exo_caps::FsError> {
+            unreachable!()
+        }
+        async fn write_atomic(
+            &self,
+            _path: &std::path::Path,
+            _bytes: &[u8],
+        ) -> Result<(), exo_caps::FsError> {
+            unreachable!()
+        }
+        async fn read_dir(
+            &self,
+            _path: &std::path::Path,
+        ) -> Result<Vec<std::path::PathBuf>, exo_caps::FsError> {
+            unreachable!()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Process for SuccessionMock {
+        async fn run(
+            &self,
+            _program: &str,
+            _args: &[String],
+        ) -> Result<std::process::Output, exo_caps::ProcessError> {
+            unreachable!()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Spawner for SuccessionMock {
+        async fn spawn<S: exo_caps::SpawnSpec>(&self, _spec: S) -> Result<AgentName, SpawnError> {
+            unreachable!()
+        }
+        async fn reclaim_worktree(&self, child: &AgentName) -> Result<(), SpawnError> {
+            self.reclaim.resolve(child)
+        }
+        async fn kill_pane(&self, child: &AgentName) -> Result<(), SpawnError> {
+            self.kill.resolve(child)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_merge_unknown_child_reports_succession_note() {
+        let mock = SuccessionMock {
+            kill: Teardown::Unknown,
+            reclaim: Teardown::Unknown,
+        };
+        let out = Merge::run(
+            &mock,
+            MergeArgs {
+                branch: "main.root.feature".into(),
+                child: None,
+                gate: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(out.text.contains("merged non-child ref"));
+        assert!(out.text.contains("succession escape hatch"));
+        assert!(!out.text.contains("teardown best-effort"));
+    }
+
+    #[tokio::test]
+    async fn test_merge_mixed_unknown_and_other_error_keeps_generic_message() {
+        let mock = SuccessionMock {
+            kill: Teardown::Unknown,
+            reclaim: Teardown::Failed,
+        };
+        let out = Merge::run(
+            &mock,
+            MergeArgs {
+                branch: "main.root.feature".into(),
+                child: None,
+                gate: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(out.text.contains("teardown best-effort"));
+        assert!(!out.text.contains("succession escape hatch"));
+    }
 
     #[tokio::test]
     async fn test_merge_local_fold() {
