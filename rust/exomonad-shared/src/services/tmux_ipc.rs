@@ -125,6 +125,45 @@ fn looks_like_rewind_modal(content: &str) -> bool {
         .any(|(a, b)| lower.contains(a) && lower.contains(b))
 }
 
+/// True if the tail of `payload` (whitespace-normalized) is still visible in
+/// `captured_tail` — i.e. the injected text is still sitting in the pane's input
+/// box, unsubmitted. Used to verify that a submitting Enter actually registered
+/// (the TRUTH: what the TUI shows) instead of trusting tmux's send-keys exit code
+/// (the PROXY: only proves the keystroke was delivered to the pty, not that the
+/// TUI drained it as a submit).
+///
+/// Safety argument this heuristic relies on: a false positive (the tail reads as
+/// "still visible" because the TUI echoed the submitted text back near the bottom
+/// of its transcript) causes a spurious re-Enter into an already-empty input box —
+/// a no-op in both Claude Code's Ink TUI and Gemini's readline. So the heuristic
+/// only needs to avoid false NEGATIVES; a false negative just reproduces prior
+/// (pre-fix) behavior, no worse.
+fn payload_tail_visible(captured_tail: &str, payload: &str) -> bool {
+    const TAIL_WINDOW_CHARS: usize = 40;
+
+    fn normalize(s: &str) -> String {
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    let normalized_payload = normalize(payload);
+    if normalized_payload.is_empty() {
+        return false;
+    }
+    let tail_start = normalized_payload
+        .char_indices()
+        .rev()
+        .nth(TAIL_WINDOW_CHARS.saturating_sub(1))
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let payload_tail = &normalized_payload[tail_start..];
+
+    let normalized_captured = normalize(captured_tail);
+    if normalized_captured.is_empty() {
+        return false;
+    }
+    normalized_captured.contains(payload_tail)
+}
+
 /// tmux CLI wrapper for a specific session.
 #[derive(Debug, Clone)]
 pub struct TmuxIpc {
@@ -629,10 +668,27 @@ impl TmuxIpc {
 
     /// Inject text into a target pane via tmux buffer pattern.
     ///
-    /// Uses load-buffer → paste-buffer → send-keys Enter. The text is written
-    /// without a trailing newline so that send-keys Enter is the sole execution
-    /// trigger (avoids double-submit). No bracketed paste (-p) — Claude Code's
-    /// Ink TUI and Gemini CLI's readline can't handle the escape sequences.
+    /// Sequence: load-buffer → paste-buffer → wake → debounce → send-keys Enter →
+    /// verify → bounded re-Enter → Err. The text is written without a trailing
+    /// newline so that send-keys Enter is the sole execution trigger (avoids
+    /// double-submit). No bracketed paste (-p) — Claude Code's Ink TUI and Gemini
+    /// CLI's readline can't handle the escape sequences.
+    ///
+    /// The wake fires *before* Enter, not just after: a parked TUI doesn't poll
+    /// stdin until a terminal event arrives, so without a pre-Enter wake the pasted
+    /// text and the Enter keystroke can drain as a single coalesced read burst —
+    /// and with no bracketed paste, the `\r` inside that burst reads as pasted
+    /// multiline content, not submit (deliberate paste-safety behavior in both Ink
+    /// and readline). Waking first forces the TUI to drain the paste as its own
+    /// event, so Enter arrives separately.
+    ///
+    /// After Enter, submission is verified against the TRUTH (pane content via
+    /// `capture-pane`), not the PROXY (tmux's send-keys exit code) — send-keys can
+    /// report success while the TUI's input box still holds the pasted text. If
+    /// the payload's tail is still visible, this wakes + backs off + re-sends Enter
+    /// up to 3 rounds, then returns a loud `Err`. On `Err`, the caller must leave
+    /// its bus cursor unadvanced — at-least-once redelivery is the designed
+    /// recovery path, not a silent "delivered" outcome.
     ///
     /// The target is session-qualified (`{session}:{target}`) to ensure all
     /// commands resolve to the same pane. Without qualification, tmux resolves
@@ -790,45 +846,101 @@ impl TmuxIpc {
             );
         }
 
+        // Wake BEFORE Enter: see the doc comment above for why a parked TUI needs
+        // this to avoid coalescing the paste and the Enter into one read burst.
+        if let Err(e) = self.wake_pane(target).await {
+            warn!(target = %qualified_target, error = %e, "pre-Enter SIGWINCH wake failed (non-fatal)");
+        }
+
         // Debounce: allow TUI (Claude Code Ink, Gemini CLI readline) to process
         // the pasted text before sending Enter.
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
-        // Submit with retry — TUIs may drop the first Enter keystroke
-        // if still processing pasted text.
-        let enter_policy = crate::services::resilience::RetryPolicy::new(
-            3,
-            crate::services::resilience::Backoff::Linear {
-                initial: std::time::Duration::from_millis(200),
-            },
-        );
-        let qt = qualified_target.clone();
-        crate::services::resilience::retry(&enter_policy, || async {
-            let output = self
-                .tmux_cmd()
-                .args(["send-keys", "-t", &qt, "Enter"])
-                .output()
-                .await
-                .context("Failed to run tmux send-keys")?;
-            if output.status.success() {
-                Ok(())
-            } else {
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                warn!(target = %qt, "send-keys Enter failed: {}", stderr);
-                anyhow::bail!("send-keys Enter failed: {}", stderr)
-            }
-        })
-        .await
-        .context("send-keys Enter failed after 3 attempts")?;
+        self.send_enter(&qualified_target).await?;
 
-        // Wake the target pane's TUI event loop via SIGWINCH so it processes
-        // the injected input. Non-fatal — input was already delivered.
-        if let Err(e) = self.wake_pane(target).await {
-            warn!(target = %qualified_target, error = %e, "SIGWINCH wake failed (non-fatal)");
+        // Verify submission against pane content (the TRUTH), not tmux's exit code
+        // (the PROXY). See the doc comment above and `payload_tail_visible` for the
+        // rationale and the false-positive/false-negative safety argument.
+        let backoff = crate::services::resilience::Backoff::Linear {
+            initial: std::time::Duration::from_millis(300),
+        };
+        const MAX_VERIFY_ROUNDS: u32 = 3;
+        let mut round = 0u32;
+        loop {
+            let captured_tail = self.capture_pane_tail(&qualified_target, 5).await?;
+            if !payload_tail_visible(&captured_tail, payload) {
+                break;
+            }
+            if round >= MAX_VERIFY_ROUNDS {
+                anyhow::bail!(
+                    "inject_input: Enter not verified as submitted after {} retries (target={}); \
+                     leaving bus cursor unadvanced for at-least-once redelivery",
+                    round,
+                    qualified_target
+                );
+            }
+            warn!(
+                target = %qualified_target,
+                round = round + 1,
+                "Enter not verified as submitted (payload tail still visible in pane); retrying"
+            );
+            if let Err(e) = self.wake_pane(target).await {
+                warn!(target = %qualified_target, error = %e, "retry SIGWINCH wake failed (non-fatal)");
+            }
+            tokio::time::sleep(backoff.delay(round)).await;
+            self.send_enter(&qualified_target).await?;
+            round += 1;
         }
 
-        debug!(target = %qualified_target, chars = text.len(), "Injected input via tmux buffer");
+        // Wake the target pane's TUI event loop via SIGWINCH so it processes
+        // the injected input. Non-fatal — input was already delivered and verified.
+        if let Err(e) = self.wake_pane(target).await {
+            warn!(target = %qualified_target, error = %e, "post-Enter SIGWINCH wake failed (non-fatal)");
+        }
+
+        debug!(target = %qualified_target, chars = text.len(), verify_rounds = round, "Injected input via tmux buffer");
         Ok(())
+    }
+
+    /// Send a submitting Enter keystroke to `qualified_target`. Only bails if the
+    /// tmux process itself could not be run — a non-zero exit from send-keys is
+    /// logged but not treated as fatal, since it is the PROXY signal that
+    /// `inject_input`'s pane-content verification deliberately does not trust.
+    async fn send_enter(&self, qualified_target: &str) -> Result<()> {
+        let output = self
+            .tmux_cmd()
+            .args(["send-keys", "-t", qualified_target, "Enter"])
+            .output()
+            .await
+            .context("Failed to run tmux send-keys")?;
+        if !output.status.success() {
+            warn!(
+                target = %qualified_target,
+                stderr = %String::from_utf8_lossy(&output.stderr),
+                "send-keys Enter reported non-zero exit (verified against pane content, not this)"
+            );
+        }
+        Ok(())
+    }
+
+    /// Capture the target pane's visible content and return its last `n` lines
+    /// joined with `\n`. Used as the TRUTH source for submit verification.
+    async fn capture_pane_tail(&self, qualified_target: &str, n: usize) -> Result<String> {
+        let output = self
+            .tmux_cmd()
+            .args(["capture-pane", "-p", "-t", qualified_target])
+            .output()
+            .await
+            .context("Failed to run tmux capture-pane")?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "tmux capture-pane failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let content = String::from_utf8_lossy(&output.stdout);
+        let tail: Vec<&str> = content.lines().rev().take(n).collect();
+        Ok(tail.into_iter().rev().collect::<Vec<_>>().join("\n"))
     }
 
     /// Trigger SIGWINCH in the target pane by briefly resizing its window.
@@ -1077,6 +1189,61 @@ mod tests {
             "❯ implement the feature\n✻ Cooked for 1s"
         ));
         assert!(!looks_like_rewind_modal(""));
+    }
+
+    #[test]
+    fn payload_tail_visible_exact_match() {
+        assert!(payload_tail_visible(
+            "some prior output\n[READY] merged branch foo",
+            "[READY] merged branch foo"
+        ));
+    }
+
+    #[test]
+    fn payload_tail_visible_absent_when_submitted() {
+        // Pane now shows the TUI's own prompt/spinner, not the payload — submitted.
+        assert!(!payload_tail_visible(
+            "❯ \n✻ Cooked for 1s",
+            "[READY] merged branch foo"
+        ));
+    }
+
+    #[test]
+    fn payload_tail_visible_whitespace_normalized() {
+        // Terminal wrapping/reflow can change whitespace runs without changing content.
+        assert!(payload_tail_visible(
+            "some prior output\n[READY]   merged\n  branch   foo",
+            "[READY] merged branch foo"
+        ));
+    }
+
+    #[test]
+    fn payload_tail_visible_payload_shorter_than_window() {
+        assert!(payload_tail_visible("prompt> hi", "hi"));
+        assert!(!payload_tail_visible("prompt> ", "hi"));
+    }
+
+    #[test]
+    fn payload_tail_visible_empty_capture() {
+        assert!(!payload_tail_visible("", "[READY] merged branch foo"));
+    }
+
+    #[test]
+    fn payload_tail_visible_empty_payload() {
+        assert!(!payload_tail_visible("some prior output", ""));
+    }
+
+    #[test]
+    fn payload_tail_visible_only_checks_last_40_chars() {
+        let prefix = "PREFIX SHOULD BE IGNORED BY THE 40-CHAR WINDOW ";
+        let suffix = "abcdefghijklmnopqrstuvwxyz0123456789ABCDE";
+        let payload = format!("{prefix}{suffix}");
+        // Captured content contains the (>=40-char) suffix but never saw the prefix
+        // (e.g. it scrolled off) — still counts as visible since only the tail matters.
+        assert!(payload_tail_visible(
+            &format!("unrelated prompt echo\n{}", suffix),
+            &payload
+        ));
     }
 
     #[test]
