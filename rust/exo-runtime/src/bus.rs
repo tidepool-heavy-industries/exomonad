@@ -291,7 +291,7 @@ mod tests {
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(lines.len(), 1);
         assert!(
-            lines[0].len() + 1 <= PIPE_BUF,
+            lines[0].len() < PIPE_BUF,
             "the pointer line must fit one atomic append"
         );
 

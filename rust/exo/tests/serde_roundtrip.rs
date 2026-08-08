@@ -30,7 +30,7 @@ fn test_exo_role_roundtrip() {
     }
 
     // Pin wire form
-    assert_eq!(serde_json::to_value(&ExoRole::Dev).unwrap(), json!("dev"));
+    assert_eq!(serde_json::to_value(ExoRole::Dev).unwrap(), json!("dev"));
 }
 
 #[test]
