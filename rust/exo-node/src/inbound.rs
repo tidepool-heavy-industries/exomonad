@@ -872,10 +872,9 @@ async fn process_inbox<H: InboundHandler>(
 
 /// Resolve a claim-check pointer (see [`IngestionEntry::spill`]): if `spill` is set, load + parse the
 /// full entry from its side-file; otherwise pass the entry through. The loaded entry carries `spill:
-/// None`, so this never recurses. The side-file is left in place — nothing deletes it, so spill
-/// files accumulate for the life of the run's inbox directory. No GC is built: leaving the file in
-/// place is what keeps an at-least-once re-read idempotent, and a GC is deliberately not worth
-/// building — the files are small and a run's inbox directory is bounded in lifetime.
+/// None`, so this never recurses. The side-file is left in place during the run — leaving it is
+/// what keeps an at-least-once re-read idempotent. Dead runs' side-files (and the whole home-dir
+/// run state) are reclaimed by `exo doctor --fix`'s run-artifact GC pass, never by the sidecar.
 fn resolve_spilled(entry: IngestionEntry) -> std::io::Result<IngestionEntry> {
     match &entry.spill {
         None => Ok(entry),
