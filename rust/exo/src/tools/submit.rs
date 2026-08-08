@@ -661,6 +661,7 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
             fork_session: false,
             model_override: None,
             directives_hash: directives.hash(),
+            review_override: None,
         };
         let reviewer = ctx.spawn(spec).await?;
 

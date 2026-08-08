@@ -30,6 +30,10 @@ pub struct ExoSpawn {
     /// Hash of the directives bundle this child is launched with, recorded on its `Spawned` ledger
     /// row. `None` ⇒ nothing to record.
     pub directives_hash: Option<String>,
+    /// Per-spawn override of the child's review gate. `None` ⇒ inherit the spawner's own
+    /// `review_enabled`; `Some(b)` stamps the child's papers with `b`, inheriting onward to its
+    /// own children.
+    pub review_override: Option<bool>,
 }
 
 impl SpawnSpec for ExoSpawn {
@@ -55,6 +59,9 @@ impl SpawnSpec for ExoSpawn {
     }
     fn directives_hash(&self) -> Option<String> {
         self.directives_hash.clone()
+    }
+    fn review_override(&self) -> Option<bool> {
+        self.review_override
     }
     fn into_task(self) -> String {
         self.task
@@ -180,6 +187,7 @@ mod tests {
             fork_session: true,
             model_override: Some("opus".into()),
             directives_hash: Some("sha256:abc".into()),
+            review_override: Some(true),
         };
         assert_eq!(spawn.role(), ExoRole::Dev);
         assert_eq!(spawn.role().role_str(), "dev");
@@ -189,6 +197,7 @@ mod tests {
         assert!(spawn.fork_session());
         assert_eq!(spawn.model_override().as_deref(), Some("opus"));
         assert_eq!(spawn.directives_hash().as_deref(), Some("sha256:abc"));
+        assert_eq!(spawn.review_override(), Some(true));
         assert_eq!(spawn.into_task(), "t");
     }
 
@@ -203,8 +212,10 @@ mod tests {
             fork_session: false,
             model_override: None,
             directives_hash: None,
+            review_override: None,
         };
         assert!(spawn.model_override().is_none());
         assert!(spawn.directives_hash().is_none());
+        assert!(spawn.review_override().is_none());
     }
 }

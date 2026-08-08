@@ -133,6 +133,7 @@ struct SpawnArgs {
     read_first: Vec<String>,
     fork_session: bool,
     model: Option<String>,
+    review: Option<bool>,
 }
 
 /// Resolve the name, render the spec prompt (with standing directives applied), and assemble an
@@ -166,6 +167,7 @@ fn build_spawn(
         fork_session: args.fork_session,
         model_override: args.model,
         directives_hash: directives.hash(),
+        review_override: args.review,
     })
 }
 
@@ -231,6 +233,7 @@ impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnWorker {
                 read_first: args.read_first,
                 fork_session: false,
                 model: args.model,
+                review: None,
             },
             &directives,
         )?;
@@ -263,6 +266,13 @@ pub struct SpawnDevArgs {
     /// profile's proxy serves exactly one model, so overriding it would 404.
     #[serde(default)]
     pub model: Option<String>,
+    /// Per-spawn override of this child's review gate. Omitted/`None` inherits your own
+    /// `review_enabled` exactly as today. `Some(true)`/`Some(false)` stamps the child's papers
+    /// directly, and that value inherits onward to its own children — turn review ON for a
+    /// subtree doing subtle cross-cutting work, or OFF for mechanical leaf work where receipts +
+    /// the typed unreviewed flag already carry the audit trail.
+    #[serde(default)]
+    pub review: Option<bool>,
 }
 
 pub struct SpawnDev;
@@ -306,6 +316,7 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for SpawnDev {
                 read_first: args.read_first,
                 fork_session: false,
                 model: args.model,
+                review: args.review,
             },
             &directives,
         )?;
@@ -350,6 +361,13 @@ pub struct ForkChildArgs {
     /// profile's proxy serves exactly one model, so overriding it would 404.
     #[serde(default)]
     pub model: Option<String>,
+    /// Per-spawn override of this child's review gate. Omitted/`None` inherits your own
+    /// `review_enabled` exactly as today. `Some(true)`/`Some(false)` stamps the child's papers
+    /// directly, and that value inherits onward to its own children — turn review ON for a
+    /// subtree doing subtle cross-cutting work, or OFF for mechanical leaf work where receipts +
+    /// the typed unreviewed flag already carry the audit trail.
+    #[serde(default)]
+    pub review: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -421,6 +439,7 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
                     read_first: child.read_first,
                     fork_session: child.fork_session,
                     model: child.model,
+                    review: child.review,
                 },
                 &directives,
             )?;
@@ -570,6 +589,7 @@ mod tests {
             boundary: vec![],
             read_first: vec![],
             model: None,
+            review: None,
         };
         let out = SpawnDev::run(&mock, args).await.unwrap();
         assert!(out.text.contains("Spawned dev"));
@@ -599,6 +619,7 @@ mod tests {
                     read_first: vec![],
                     fork_session: false,
                     model: None,
+                    review: None,
                 },
                 ForkChildArgs {
                     name: Some("child-2".to_string()),
@@ -611,6 +632,7 @@ mod tests {
                     read_first: vec![],
                     fork_session: false,
                     model: None,
+                    review: None,
                 },
             ],
             preview: false,
@@ -649,6 +671,7 @@ mod tests {
             boundary: vec![],
             read_first: vec![],
             model: Some("sonnet".to_string()),
+            review: None,
         };
         assert!(SpawnDev::run(&mock, args).await.is_ok());
         assert!(mock
@@ -674,6 +697,7 @@ mod tests {
             boundary: vec![],
             read_first: vec![],
             model: Some("fable".to_string()),
+            review: None,
         };
         let err = SpawnDev::run(&mock, args).await.unwrap_err();
         let msg = err.to_string();
@@ -703,6 +727,7 @@ mod tests {
             boundary: vec![],
             read_first: vec![],
             model: Some("fable".to_string()),
+            review: None,
         };
         assert!(SpawnDev::run(&mock, args).await.is_err());
     }
@@ -720,6 +745,7 @@ mod tests {
             boundary: vec![],
             read_first: vec![],
             model: Some("gpt-nonsense-4".to_string()),
+            review: None,
         };
         assert!(SpawnDev::run(&mock, args).await.is_ok());
     }
@@ -737,6 +763,7 @@ mod tests {
             boundary: vec![],
             read_first: vec![],
             model: Some("sonnet; rm -rf /".to_string()),
+            review: None,
         };
         assert!(SpawnDev::run(&mock, args).await.is_err());
     }
@@ -757,6 +784,7 @@ mod tests {
             boundary: vec![],
             read_first: vec![],
             model: None,
+            review: None,
         };
         let err = SpawnDev::run(&mock, args).await.unwrap_err();
         let msg = err.to_string();
@@ -786,6 +814,7 @@ mod tests {
                 read_first: vec![],
                 fork_session: false,
                 model: None,
+                review: None,
             }],
             preview: false,
         };
@@ -836,6 +865,7 @@ mod tests {
             boundary: vec![],
             read_first: vec![],
             model: None,
+            review: None,
         };
         assert!(SpawnDev::run(&mock, args).await.is_err());
     }
@@ -861,6 +891,7 @@ mod tests {
             boundary: vec![],
             read_first: vec![],
             model: None,
+            review: None,
         };
         SpawnDev::run(&mock, args).await.unwrap();
         let calls = mock.calls_made();
@@ -895,6 +926,7 @@ mod tests {
             boundary: vec![],
             read_first: vec![],
             model: None,
+            review: None,
         };
         SpawnDev::run(&mock, args).await.unwrap();
         assert!(mock
@@ -917,6 +949,7 @@ mod tests {
             read_first: vec![],
             fork_session: false,
             model: None,
+            review: None,
         };
 
         let nonempty = Directives {
@@ -961,6 +994,7 @@ mod tests {
                 read_first: vec![],
                 fork_session: false,
                 model: Some("opus".to_string()),
+                review: None,
             },
             &Directives::default(),
         )
@@ -986,6 +1020,7 @@ mod tests {
                 read_first: vec![],
                 fork_session: false,
                 model: None,
+                review: None,
             }],
             preview: true,
         };
@@ -1011,6 +1046,7 @@ mod tests {
             boundary: vec![],
             read_first: vec![],
             model: None,
+            review: None,
         };
         SpawnDev::run(&mock, args).await.unwrap();
         let calls = mock.calls_made();
@@ -1027,5 +1063,99 @@ mod tests {
             task,
             render_spec_prompt("do something else", &[], &[], &[], &[], None, &[])
         );
+    }
+
+    #[test]
+    fn review_absent_from_json_parses_as_none() {
+        let dev: SpawnDevArgs =
+            serde_json::from_str(r#"{"name":"dev-1","task":"do work"}"#).unwrap();
+        assert_eq!(dev.review, None);
+
+        let child: ForkChildArgs =
+            serde_json::from_str(r#"{"name":"child-1","task":"do work"}"#).unwrap();
+        assert_eq!(child.review, None);
+    }
+
+    #[test]
+    fn review_explicit_true_false_round_trips_through_json() {
+        let dev: SpawnDevArgs =
+            serde_json::from_str(r#"{"name":"dev-1","task":"t","review":true}"#).unwrap();
+        assert_eq!(dev.review, Some(true));
+
+        let dev: SpawnDevArgs =
+            serde_json::from_str(r#"{"name":"dev-1","task":"t","review":false}"#).unwrap();
+        assert_eq!(dev.review, Some(false));
+    }
+
+    #[tokio::test]
+    async fn spawn_dev_review_override_rides_into_the_spawned_spec() {
+        let mock = MockRuntime::default();
+        let args = SpawnDevArgs {
+            name: Some("dev-1".to_string()),
+            task: "do work".to_string(),
+            steps: vec![],
+            verify: vec![],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec![],
+            read_first: vec![],
+            model: None,
+            review: Some(true),
+        };
+        SpawnDev::run(&mock, args).await.unwrap();
+        // build_spawn threads `review` straight onto ExoSpawn.review_override — covered directly by
+        // `build_spawn_review_override_rides_the_spec` below; here we only assert the tool call
+        // succeeds end-to-end with the field set (MockRuntime's `Call::Spawn` doesn't record it).
+        assert!(mock
+            .calls_made()
+            .iter()
+            .any(|c| matches!(c, Call::Spawn { .. })));
+    }
+
+    #[test]
+    fn build_spawn_review_override_rides_the_spec() {
+        let base_args = |review| SpawnArgs {
+            name: None,
+            task: "t".into(),
+            steps: vec![],
+            verify: vec![],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec![],
+            read_first: vec![],
+            fork_session: false,
+            model: None,
+            review,
+        };
+
+        let spawn = build_spawn(
+            ExoRole::Dev,
+            ChildKind::Worktree,
+            "dev",
+            base_args(Some(true)),
+            &Directives::default(),
+        )
+        .unwrap();
+        assert_eq!(spawn.review_override, Some(true));
+
+        let spawn = build_spawn(
+            ExoRole::Dev,
+            ChildKind::Worktree,
+            "dev",
+            base_args(Some(false)),
+            &Directives::default(),
+        )
+        .unwrap();
+        assert_eq!(spawn.review_override, Some(false));
+
+        let spawn = build_spawn(
+            ExoRole::Dev,
+            ChildKind::Worktree,
+            "dev",
+            base_args(None),
+            &Directives::default(),
+        )
+        .unwrap();
+        assert_eq!(spawn.review_override, None);
     }
 }

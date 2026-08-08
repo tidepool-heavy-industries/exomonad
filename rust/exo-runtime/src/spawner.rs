@@ -115,6 +115,15 @@ fn missing_from_alive<'a>(
     }
 }
 
+/// The pure decision behind the `birth_finish` papers stamp: a spec's per-spawn
+/// [`SpawnSpec::review_override`](exo_caps::SpawnSpec::review_override) wins when set; `None`
+/// falls back to the spawner's own inherited `review_enabled`. Split out (mirrors
+/// [`missing_from_alive`]/`LaunchProfile::resolve`) so the resolution is unit-testable without a
+/// live tmux/git `Runtime`.
+fn resolve_review_enabled(spec_override: Option<bool>, inherited: bool) -> bool {
+    spec_override.unwrap_or(inherited)
+}
+
 /// Run a best-effort teardown op with **bounded** retry + linear backoff. Each transient failure
 /// is logged at `warn`; a final failure after [`MAX_TEARDOWN_ATTEMPTS`] is logged LOUD and
 /// structured (`op` + `child` + `attempts`) and the last error is returned.
@@ -237,6 +246,11 @@ pub(crate) struct BirthCore {
     /// `ForkSpec::fork_session`); false for every other op. Default-false keeps launch
     /// byte-identical unless explicitly opted in.
     pub fork_session: bool,
+    /// Per-spawn override of the child's `NodePapers.review_enabled` ([`SpawnSpec::review_override`]).
+    /// `None` ⇒ stamp the spawner's own inherited `review_enabled` (today's behavior); `Some(b)` ⇒
+    /// stamp `b` instead, which then inherits onward to the child's own children exactly like an
+    /// inherited value would.
+    pub review_override: Option<bool>,
 }
 
 // ── Shared ledger + inbox-scheme helpers (Spawner-TL scaffold) ───────────────────────────
@@ -733,7 +747,11 @@ impl Runtime {
         // wrap_nix / review_enabled), so it stamps the same onto its own children — config set
         // on one node flows down its whole subtree.
         let parent_inbox = Some(self.own_inbox());
-        let (yolo, wrap_nix, review_enabled) = self.own_launch_policy().await;
+        let (yolo, wrap_nix, inherited_review_enabled) = self.own_launch_policy().await;
+        // `None` inherits the spawner's own review_enabled exactly as before this field existed;
+        // `Some(b)` stamps the child's papers with `b` instead, which then inherits onward to its
+        // own children exactly like an inherited value would.
+        let review_enabled = resolve_review_enabled(core.review_override, inherited_review_enabled);
 
         // The child's birth-identity parent branch: THIS node's own real git branch (the parent
         // is, by definition, on the branch the child forks from) — never the child's own
@@ -1148,6 +1166,7 @@ impl Spawner for Runtime {
             .model_override()
             .or_else(|| RoleKind::model(&role).map(String::from));
         let directives_hash = spec.directives_hash();
+        let review_override = spec.review_override();
         // The role's optional launch profile: resolve `{prefix}_*` from this node's own env while
         // the role is typed. The token lives only here + in the child's launch env (never papers).
         let launch_profile =
@@ -1179,6 +1198,7 @@ impl Spawner for Runtime {
             directives_hash,
             launch_profile,
             fork_session,
+            review_override,
         };
         self.birth(core).await
     }
@@ -1293,6 +1313,23 @@ mod tests {
             LaunchProfile::resolve(Some("EXO_REVIEWER"), |k: &str| no_url.get(k).cloned())
                 .is_none()
         );
+    }
+
+    #[test]
+    fn resolve_review_enabled_none_inherits_true_and_false() {
+        // `None` must inherit the spawner's own value byte-identically, whichever it is.
+        assert!(resolve_review_enabled(None, true));
+        assert!(!resolve_review_enabled(None, false));
+    }
+
+    #[test]
+    fn resolve_review_enabled_some_overrides_regardless_of_inherited() {
+        // `Some(b)` wins over the inherited value in both directions.
+        assert!(resolve_review_enabled(Some(true), false));
+        assert!(!resolve_review_enabled(Some(false), true));
+        // ...and is a no-op when it happens to match the inherited value.
+        assert!(resolve_review_enabled(Some(true), true));
+        assert!(!resolve_review_enabled(Some(false), false));
     }
 
     #[tokio::test]

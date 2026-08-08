@@ -114,6 +114,16 @@ pub trait SpawnSpec: Send + Sync + 'static {
     fn directives_hash(&self) -> Option<String> {
         None
     }
+    /// Per-spawn override of the child's review gate (`NodePapers.review_enabled`). `None`
+    /// **inherits** the spawner's own `review_enabled` exactly as today (the value
+    /// `own_launch_policy` reads); `Some(b)` stamps the child's papers with `b` instead, and that
+    /// stamped value inherits onward to the child's own children exactly like an inherited value
+    /// would. **Defaults to `None`**, so a domain that doesn't set this compiles and behaves
+    /// unchanged. This is a cost/quality knob (review-on for subtle cross-cutting work, review-off
+    /// for mechanical leaf work), never a security gate — any spawner may set it either direction.
+    fn review_override(&self) -> Option<bool> {
+        None
+    }
     /// The fully-rendered prompt/task body delivered to the child. Consumes the spec — it is the
     /// last thing the birth tail reads.
     fn into_task(self) -> String;
