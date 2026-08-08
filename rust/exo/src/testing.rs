@@ -428,6 +428,13 @@ impl Process for MockRuntime {
     }
 }
 
+/// The sha256 `Directives::hash()` of a single-file bundle `[("d.md", "directive body")]` — the
+/// exact hex digest a test gets back from loading that bundle via `crate::directives::load_directives`.
+/// `child-submitted`'s canned `directives_hash` below matches this, so a test that configures the
+/// mock's own directives to that same bundle pins the `directives:ok` render.
+pub const MOCK_CALLER_DIRECTIVES_HASH: &str =
+    "35ec41d2f49584ba6c92d2339db49645ae3aa7d7a61f92cd8c7f50701255cabd";
+
 #[async_trait]
 impl Topology for MockRuntime {
     async fn topology(&self) -> Result<TopologyView, TopologyError> {
@@ -444,6 +451,7 @@ impl Topology for MockRuntime {
                 state: None,
                 model: None,
                 model_label: None,
+                directives_hash: None,
                 children: vec![
                     TreeNode {
                         name: AgentName::new("child-a".into()).unwrap(),
@@ -455,6 +463,11 @@ impl Topology for MockRuntime {
                         state: Some(ChildState::Live),
                         model: Some("sonnet".into()),
                         model_label: Some("kimi".into()),
+                        // Deliberately STALE relative to `MOCK_CALLER_DIRECTIVES_HASH` — pins the
+                        // `directives:stale(hash8)` render.
+                        directives_hash: Some(
+                            "deadbeefcafebabe0000000000000000000000000000000000000000000000".into(),
+                        ),
                         children: vec![],
                     },
                     TreeNode {
@@ -468,6 +481,9 @@ impl Topology for MockRuntime {
                         }),
                         model: Some("sonnet".into()),
                         model_label: None,
+                        // Matches `MOCK_CALLER_DIRECTIVES_HASH` when a test loads that same bundle
+                        // as the caller's own directives — pins the `directives:ok` render.
+                        directives_hash: Some(MOCK_CALLER_DIRECTIVES_HASH.into()),
                         children: vec![],
                     },
                     TreeNode {
@@ -478,6 +494,7 @@ impl Topology for MockRuntime {
                         state: Some(ChildState::Reaped),
                         model: None,
                         model_label: None,
+                        directives_hash: None,
                         children: vec![],
                     },
                     TreeNode {
@@ -488,6 +505,7 @@ impl Topology for MockRuntime {
                         state: Some(ChildState::Died),
                         model: None,
                         model_label: None,
+                        directives_hash: None,
                         children: vec![],
                     },
                 ],

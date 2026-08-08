@@ -55,6 +55,7 @@ impl Topology for Runtime {
             state: None,
             model: None,
             model_label: None,
+            directives_hash: None,
             children,
         };
 
@@ -103,6 +104,7 @@ fn subtree(working_dir: &Path, alive: &HashSet<String>, depth: usize) -> Vec<Tre
                 state: Some(c.state.clone()),
                 model: c.model.clone(),
                 model_label: c.model_label.clone(),
+                directives_hash: c.directives_hash.clone(),
                 children,
             }
         })

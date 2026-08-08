@@ -450,6 +450,7 @@ fn test_topology_roundtrip() {
         state: None,
         model: None,
         model_label: None,
+        directives_hash: None,
         children: vec![TreeNode {
             name: AgentName::new("child".into()).unwrap(),
             kind: Some(ChildKind::Worktree),
@@ -458,6 +459,9 @@ fn test_topology_roundtrip() {
             state: Some(ChildState::Died),
             model: Some("sonnet".into()),
             model_label: Some("kimi".into()),
+            directives_hash: Some(
+                "deadbeef00000000000000000000000000000000000000000000000000000000".into(),
+            ),
             children: vec![],
         }],
     };
@@ -470,4 +474,30 @@ fn test_topology_roundtrip() {
         ],
     };
     assert_roundtrip(&view);
+}
+
+#[test]
+fn test_tree_node_wire_omits_directives_hash_when_none() {
+    let node = TreeNode {
+        name: AgentName::new("root".into()).unwrap(),
+        kind: None,
+        pane: PaneId::new("%1".into()).unwrap(),
+        pane_alive: true,
+        state: None,
+        model: None,
+        model_label: None,
+        directives_hash: None,
+        children: vec![],
+    };
+    assert!(!serde_json::to_string(&node)
+        .unwrap()
+        .contains("directives_hash"));
+}
+
+#[test]
+fn test_old_wire_tree_node_without_directives_hash_still_parses() {
+    // A `children.jsonl`-derived `TreeNode` written before `directives_hash` existed.
+    let raw = r#"{"name":"child","pane":"%2","pane_alive":true,"children":[]}"#;
+    let node: TreeNode = serde_json::from_str(raw).unwrap();
+    assert_eq!(node.directives_hash, None);
 }

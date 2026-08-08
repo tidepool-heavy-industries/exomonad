@@ -44,6 +44,29 @@ fn cgroup_content_in_slice(cgroup_content: &str, slice: &str) -> bool {
     cgroup_content.contains(slice)
 }
 
+/// The caller's own directives bundle, as needed to judge a child's `directives_hash` against it.
+/// A load failure degrades to `Unknown` (never an error) — see module docs.
+enum CallerDirectives {
+    /// The caller has a bundle with this hash.
+    Some(String),
+    /// The caller has no standing directives.
+    None,
+    /// The caller's own bundle failed to load; render children's hashes unlabeled.
+    Unknown,
+}
+
+impl CallerDirectives {
+    /// The status bit for a child that carries `hash`, judged against the caller's own bundle.
+    fn status_bit(&self, hash: &str) -> String {
+        let hash8 = &hash[..hash.len().min(8)];
+        match self {
+            CallerDirectives::Some(caller_hash) if caller_hash == hash => "directives:ok".into(),
+            CallerDirectives::Some(_) => format!("directives:stale({hash8})"),
+            CallerDirectives::None | CallerDirectives::Unknown => format!("directives:{hash8}"),
+        }
+    }
+}
+
 impl Tree {
     /// Prune `Reaped` nodes (and their subtrees) out of the rendered tree unless `all` is set.
     /// Returns the pruned copy; `hidden` is incremented once per `Reaped` node dropped.
@@ -68,6 +91,7 @@ impl Tree {
             state: node.state.clone(),
             model: node.model.clone(),
             model_label: node.model_label.clone(),
+            directives_hash: node.directives_hash.clone(),
             children,
         }
     }
@@ -101,6 +125,7 @@ impl Tree {
         depth: usize,
         status_map: &HashMap<String, NodeStatus>,
         parent_status: Option<&NodeStatus>,
+        caller_directives: &CallerDirectives,
         out: &mut String,
     ) {
         use std::fmt::Write;
@@ -108,8 +133,8 @@ impl Tree {
         let is_terminal = matches!(&node.state, Some(s) if s.is_terminal());
 
         if is_terminal {
-            // Tombstones get NO liveness bracket, NO busy bit, NO status-file lookup — the pane
-            // id may have been recycled onto a different, live agent.
+            // Tombstones get NO liveness bracket, NO busy bit, NO status-file lookup, NO
+            // directives bit — the pane id may have been recycled onto a different, live agent.
             let state_word = match &node.state {
                 Some(ChildState::Died) => "died",
                 Some(ChildState::Reaped) => "reaped",
@@ -123,7 +148,7 @@ impl Tree {
             )
             .unwrap();
             for child in &node.children {
-                Self::format_node(child, depth + 1, status_map, None, out);
+                Self::format_node(child, depth + 1, status_map, None, caller_directives, out);
             }
             return;
         }
@@ -147,6 +172,12 @@ impl Tree {
             let sha8 = &sha[..sha.len().min(8)];
             let unreviewed = if *reviewed { "" } else { ", unreviewed" };
             status_bits.push(format!("submitted @ {sha8}, awaiting merge{unreviewed}"));
+        }
+
+        // 0d. Directives audit — did this child get the memo? Skipped entirely when it was
+        // spawned without directives (`directives_hash: None`).
+        if let Some(hash) = &node.directives_hash {
+            status_bits.push(caller_directives.status_bit(hash));
         }
 
         // 1. Busy bit (from parent's view)
@@ -181,7 +212,14 @@ impl Tree {
 
         let my_status = status_map.get(node.name.as_str());
         for child in &node.children {
-            Self::format_node(child, depth + 1, status_map, my_status, out);
+            Self::format_node(
+                child,
+                depth + 1,
+                status_map,
+                my_status,
+                caller_directives,
+                out,
+            );
         }
     }
 
@@ -261,6 +299,22 @@ impl<R: Topology + Fs + Send + Sync> Tool<R> for Tree {
         let mut status_map = HashMap::new();
         Tree::collect_status(ctx, &pruned_node, &home, &run_id, &mut status_map).await;
 
+        // "Did everyone get the memo?" — load our own current directives bundle once, so each
+        // child's recorded `directives_hash` can be judged against it. A load failure degrades to
+        // showing children's bare hashes with a one-line warning — never an error (see module docs).
+        let caller_directives = match crate::directives::load_directives(ctx).await {
+            Ok(d) => match d.hash() {
+                Some(hash) => CallerDirectives::Some(hash),
+                None => CallerDirectives::None,
+            },
+            Err(e) => {
+                tracing::warn!(
+                    "tree: failed to load own directives, degrading to bare child hashes: {e}"
+                );
+                CallerDirectives::Unknown
+            }
+        };
+
         let mut text = String::new();
         use std::fmt::Write;
         // Self-check: this sidecar IS a session descendant, so its own cgroup is a valid proxy
@@ -283,7 +337,21 @@ impl<R: Topology + Fs + Send + Sync> Tool<R> for Tree {
         } else {
             writeln!(&mut text, "parent: none (root)").unwrap();
         }
-        Tree::format_node(&pruned_node, 0, &status_map, None, &mut text);
+        if matches!(caller_directives, CallerDirectives::Unknown) {
+            writeln!(
+                &mut text,
+                "⚠ could not load own directives — child directives hashes shown unlabeled"
+            )
+            .unwrap();
+        }
+        Tree::format_node(
+            &pruned_node,
+            0,
+            &status_map,
+            None,
+            &caller_directives,
+            &mut text,
+        );
 
         let pruned_view = exo_caps::TopologyView {
             node: pruned_node,
@@ -491,5 +559,102 @@ mod tests {
             "text: {}",
             out.text
         );
+    }
+
+    /// Caller has no directives of its own (the default mock) — a child with a recorded
+    /// `directives_hash` renders the bare, informational hash form, never ok/stale.
+    #[tokio::test]
+    async fn directives_bare_hash_when_caller_has_none() {
+        let mock = MockRuntime::default();
+        let out = Tree::run(&mock, TreeArgs { all: true }).await.unwrap();
+        let a_line = out.text.lines().find(|l| l.contains("child-a (")).unwrap();
+        assert!(a_line.contains("directives:deadbeef"), "line: {a_line}");
+        assert!(!a_line.contains("directives:ok"));
+        assert!(!a_line.contains("stale"));
+    }
+
+    /// A child whose `directives_hash` was never recorded (spawned without directives) gets no
+    /// directives status bit at all.
+    #[tokio::test]
+    async fn no_directives_bit_when_child_has_no_hash() {
+        let mock = MockRuntime::default();
+        let out = Tree::run(&mock, TreeArgs { all: true }).await.unwrap();
+        let died_line = out.text.lines().find(|l| l.contains("child-died")).unwrap();
+        assert!(!died_line.contains("directives:"));
+    }
+
+    /// When the caller's own directives bundle matches a child's recorded hash, the child renders
+    /// `directives:ok`; when it differs, `directives:stale(hash8)`.
+    #[tokio::test]
+    async fn directives_status_ok_and_stale_against_caller_bundle() {
+        let mock = MockRuntime::default();
+        mock.dirs.lock().unwrap().insert(
+            crate::directives::DIRECTIVES_DIR.to_string(),
+            vec![std::path::PathBuf::from(".exo/directives/d.md")],
+        );
+        mock.files.lock().unwrap().insert(
+            ".exo/directives/d.md".to_string(),
+            b"directive body".to_vec(),
+        );
+
+        let out = Tree::run(&mock, TreeArgs { all: true }).await.unwrap();
+
+        let submitted_line = out
+            .text
+            .lines()
+            .find(|l| l.contains("child-submitted"))
+            .unwrap();
+        assert!(
+            submitted_line.contains("directives:ok"),
+            "line: {submitted_line}"
+        );
+
+        let a_line = out.text.lines().find(|l| l.contains("child-a (")).unwrap();
+        assert!(
+            a_line.contains("directives:stale(deadbeef)"),
+            "line: {a_line}"
+        );
+    }
+
+    /// A load failure on the caller's own directives degrades to bare child hashes plus a
+    /// one-line warning — the tool call itself must never fail.
+    #[tokio::test]
+    async fn directives_load_error_degrades_with_warning() {
+        let mock = MockRuntime::default();
+        // A directory entry with no corresponding file content — `load_directives` errs loudly
+        // reading it (see `directives::missing_file_is_loud_error`).
+        mock.dirs.lock().unwrap().insert(
+            crate::directives::DIRECTIVES_DIR.to_string(),
+            vec![std::path::PathBuf::from(".exo/directives/missing.md")],
+        );
+
+        let out = Tree::run(&mock, TreeArgs { all: true }).await.unwrap();
+        assert!(
+            out.text.contains("could not load own directives"),
+            "text: {}",
+            out.text
+        );
+        let a_line = out.text.lines().find(|l| l.contains("child-a (")).unwrap();
+        assert!(a_line.contains("directives:deadbeef"), "line: {a_line}");
+    }
+
+    /// Terminal nodes never render a directives bit even when the caller has a matching or
+    /// stale bundle — tombstones get no status bits at all.
+    #[tokio::test]
+    async fn terminal_nodes_never_render_directives_bit() {
+        let mock = MockRuntime::default();
+        mock.dirs.lock().unwrap().insert(
+            crate::directives::DIRECTIVES_DIR.to_string(),
+            vec![std::path::PathBuf::from(".exo/directives/d.md")],
+        );
+        mock.files.lock().unwrap().insert(
+            ".exo/directives/d.md".to_string(),
+            b"directive body".to_vec(),
+        );
+        let out = Tree::run(&mock, TreeArgs { all: true }).await.unwrap();
+        for name in ["child-reaped", "child-died"] {
+            let line = out.text.lines().find(|l| l.contains(name)).unwrap();
+            assert!(!line.contains("directives:"), "line: {line}");
+        }
     }
 }

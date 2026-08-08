@@ -121,6 +121,7 @@ mod tests {
             inbox: InboxPath::new("/tmp/x.jsonl".into()),
             model_label: None,
             model: None,
+            directives_hash: None,
             state: ChildState::Died,
         }
     }

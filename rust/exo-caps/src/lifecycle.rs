@@ -127,6 +127,9 @@ pub struct Child {
     pub model_label: Option<String>,
     /// The effective launch model folded from the `Spawned` record.
     pub model: Option<String>,
+    /// Hash of the directives bundle this child was launched with, folded from the `Spawned`
+    /// record; `None` when the child was spawned without directives.
+    pub directives_hash: Option<String>,
     /// Where this child is in its lifecycle — see [`ChildState`].
     pub state: ChildState,
 }
@@ -152,7 +155,7 @@ pub fn fold_children(records: &[ChildRecord]) -> BTreeMap<AgentName, Child> {
                 inbox,
                 model_label,
                 model,
-                directives_hash: _,
+                directives_hash,
             } => {
                 map.insert(
                     child.clone(),
@@ -163,6 +166,7 @@ pub fn fold_children(records: &[ChildRecord]) -> BTreeMap<AgentName, Child> {
                         inbox: inbox.clone(),
                         model_label: model_label.clone(),
                         model: model.clone(),
+                        directives_hash: directives_hash.clone(),
                         state: ChildState::Live,
                     },
                 );

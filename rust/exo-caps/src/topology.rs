@@ -53,6 +53,10 @@ pub struct TreeNode {
     /// launch profile; `None` for default Claude / the caller itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_label: Option<String>,
+    /// Hash of the directives bundle the node was launched with, folded from its `Spawned`
+    /// record; `None` for the caller itself or a node spawned without directives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directives_hash: Option<String>,
     /// Children folded from this node's ledger (recursive; worktree children only — inline
     /// children share the parent's worktree and spawn nothing).
     pub children: Vec<TreeNode>,

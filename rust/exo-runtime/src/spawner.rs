@@ -1872,6 +1872,7 @@ mod tests {
             inbox: InboxPath::new(format!("/tmp/{name}.jsonl").into()),
             model_label: None,
             model: None,
+            directives_hash: None,
             state: exo_caps::ChildState::Live,
         }
     }
