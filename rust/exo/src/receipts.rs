@@ -35,6 +35,11 @@ pub const MAX_RENDERED_BYTES: usize = 2 * 1024;
 /// Per-string budget inside the rendered block. Longer strings are truncated with a visible `…`.
 pub const MAX_STRING_RENDER_BYTES: usize = 200;
 
+/// Per-string budget for `deviations` specifically — double the general cap. Deviations are the
+/// highest-value field on a `[READY]` (where a leaf knowingly departed from its spec), and the
+/// general 200B cap was clipping them mid-sentence in live use, forcing the parent to guess.
+pub const MAX_DEVIATION_STRING_RENDER_BYTES: usize = 400;
+
 /// Rendered-list caps. Overflow renders a visible `(+N more)`, never a silent cut.
 pub const MAX_VERIFY_COMMANDS: usize = 8;
 /// See [`MAX_VERIFY_COMMANDS`].
@@ -114,24 +119,25 @@ pub enum TransferProof {
     },
 }
 
-/// Clip `s` to [`MAX_STRING_RENDER_BYTES`] bytes, on a char boundary, with a trailing `…` when
-/// truncated. Used for every rendered string so a truncation is never silent.
-fn clip(s: &str) -> String {
-    if s.len() <= MAX_STRING_RENDER_BYTES {
+/// Clip `s` to `max` bytes, on a char boundary, with a trailing `…` when truncated. Used for every
+/// rendered string so a truncation is never silent.
+fn clip(s: &str, max: usize) -> String {
+    if s.len() <= max {
         return s.to_string();
     }
-    let mut end = MAX_STRING_RENDER_BYTES;
+    let mut end = max;
     while !s.is_char_boundary(end) {
         end -= 1;
     }
     format!("{}…", &s[..end])
 }
 
-/// Render a list of strings, each individually clipped ([`clip`]), joined by `sep`, capped at
-/// `max` shown items with a trailing `(+N more)` when the list overflows. Used for every rendered
-/// list (verify commands, metrics, deviations, file lists) so a truncated list is never silent.
-fn render_clipped_list(items: &[String], max: usize, sep: &str) -> String {
-    let shown: Vec<String> = items.iter().take(max).map(|s| clip(s)).collect();
+/// Render a list of strings, each individually clipped ([`clip`]) to `str_max` bytes, joined by
+/// `sep`, capped at `max` shown items with a trailing `(+N more)` when the list overflows. Used for
+/// every rendered list (verify commands, metrics, deviations, file lists) so a truncated list is
+/// never silent.
+fn render_clipped_list(items: &[String], max: usize, str_max: usize, sep: &str) -> String {
+    let shown: Vec<String> = items.iter().take(max).map(|s| clip(s, str_max)).collect();
     let mut out = shown.join(sep);
     if items.len() > max {
         if !out.is_empty() {
@@ -155,7 +161,9 @@ fn union_files(commits: &[CommitFiles]) -> Vec<String> {
 
 fn render_transfer_proof(p: &TransferProof) -> String {
     match p {
-        TransferProof::AtHead { sha } => format!("tested@HEAD {}", clip(sha)),
+        TransferProof::AtHead { sha } => {
+            format!("tested@HEAD {}", clip(sha, MAX_STRING_RENDER_BYTES))
+        }
         TransferProof::Moved {
             tested,
             head,
@@ -163,20 +171,20 @@ fn render_transfer_proof(p: &TransferProof) -> String {
             overlap,
         } => {
             let files = union_files(commits);
-            let files_str = render_clipped_list(&files, MAX_FILES, ", ");
+            let files_str = render_clipped_list(&files, MAX_FILES, MAX_STRING_RENDER_BYTES, ", ");
             let overlap_str = match overlap {
                 None => "(no diff base resolved — overlap unknown)".to_string(),
                 Some(ov) if ov.is_empty() => "none overlap your diff".to_string(),
                 Some(ov) => format!(
                     "{} overlap your diff: {}",
                     ov.len(),
-                    render_clipped_list(ov, MAX_FILES, ", ")
+                    render_clipped_list(ov, MAX_FILES, MAX_STRING_RENDER_BYTES, ", ")
                 ),
             };
             format!(
                 "tested at {}, submitting {} — {} commits between; files touched: {}; {}",
-                clip(tested),
-                clip(head),
+                clip(tested, MAX_STRING_RENDER_BYTES),
+                clip(head, MAX_STRING_RENDER_BYTES),
                 commits.len(),
                 files_str,
                 overlap_str,
@@ -189,9 +197,9 @@ fn render_transfer_proof(p: &TransferProof) -> String {
         } => format!(
             "tested-at commit {} could not be verified against HEAD {} — treat as untested \
              transfer ({})",
-            clip(tested),
-            clip(head),
-            clip(reason),
+            clip(tested, MAX_STRING_RENDER_BYTES),
+            clip(head, MAX_STRING_RENDER_BYTES),
+            clip(reason, MAX_STRING_RENDER_BYTES),
         ),
     }
 }
@@ -211,7 +219,12 @@ pub fn render_receipts_summary(r: &Receipts, proof: Option<&TransferProof>) -> S
     if !r.verify_commands_run.is_empty() {
         sections.push(format!(
             "  ran: {}",
-            render_clipped_list(&r.verify_commands_run, MAX_VERIFY_COMMANDS, " | ")
+            render_clipped_list(
+                &r.verify_commands_run,
+                MAX_VERIFY_COMMANDS,
+                MAX_STRING_RENDER_BYTES,
+                " | "
+            )
         ));
     }
     if !r.metrics.is_empty() {
@@ -222,13 +235,18 @@ pub fn render_receipts_summary(r: &Receipts, proof: Option<&TransferProof>) -> S
             .collect();
         sections.push(format!(
             "  metrics: {}",
-            render_clipped_list(&metric_strs, MAX_METRICS, " | ")
+            render_clipped_list(&metric_strs, MAX_METRICS, MAX_STRING_RENDER_BYTES, " | ")
         ));
     }
     if !r.deviations.is_empty() {
         sections.push(format!(
             "  deviations: {}",
-            render_clipped_list(&r.deviations, MAX_DEVIATIONS, " | ")
+            render_clipped_list(
+                &r.deviations,
+                MAX_DEVIATIONS,
+                MAX_DEVIATION_STRING_RENDER_BYTES,
+                " | "
+            )
         ));
     }
     if let Some(p) = proof {
@@ -261,6 +279,49 @@ mod tests {
         let out = render_receipts_summary(&r, None);
         assert!(out.contains('…'), "missing truncation marker: {out}");
         assert!(!out.contains(&long), "long string was not clipped: {out}");
+    }
+
+    #[test]
+    fn deviations_render_up_to_double_the_general_string_cap() {
+        // A deviation between the general 200B cap and the 400B deviations cap must survive
+        // untouched — this is exactly the "clipped mid-sentence" failure the wider cap fixes.
+        let mid = "d".repeat(MAX_STRING_RENDER_BYTES + 50);
+        let r = Receipts {
+            deviations: vec![mid.clone()],
+            ..Default::default()
+        };
+        let out = render_receipts_summary(&r, None);
+        assert!(
+            out.contains(&mid),
+            "deviation within the 400B cap must render untruncated: {out}"
+        );
+        assert!(!out.contains('…'), "must not truncate under the cap: {out}");
+
+        // Beyond the 400B cap it still truncates, with the marker.
+        let long = "d".repeat(MAX_DEVIATION_STRING_RENDER_BYTES + 50);
+        let r2 = Receipts {
+            deviations: vec![long.clone()],
+            ..Default::default()
+        };
+        let out2 = render_receipts_summary(&r2, None);
+        assert!(out2.contains('…'), "missing truncation marker: {out2}");
+        assert!(
+            !out2.contains(&long),
+            "long deviation was not clipped: {out2}"
+        );
+    }
+
+    #[test]
+    fn other_fields_still_clip_at_the_general_string_cap() {
+        // Non-deviation fields (verify_commands_run here) must NOT get the wider deviations cap.
+        let mid = "c".repeat(MAX_STRING_RENDER_BYTES + 50);
+        let r = Receipts {
+            verify_commands_run: vec![mid.clone()],
+            ..Default::default()
+        };
+        let out = render_receipts_summary(&r, None);
+        assert!(out.contains('…'), "missing truncation marker: {out}");
+        assert!(!out.contains(&mid), "long command was not clipped: {out}");
     }
 
     #[test]
