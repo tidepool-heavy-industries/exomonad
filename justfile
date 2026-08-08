@@ -112,8 +112,9 @@ _install profile:
     echo ">>> [3/3] Installing binaries..."
     mkdir -p ~/.cargo/bin
     mkdir -p ~/.exo/wasm
-    cp "target/${TARGET_DIR}/exomonad" ~/.cargo/bin/
-    cp "target/${TARGET_DIR}/exo" ~/.cargo/bin/
+    # -f: unlink and retry when the destination is a running binary (ETXTBSY)
+    cp -f "target/${TARGET_DIR}/exomonad" ~/.cargo/bin/
+    cp -f "target/${TARGET_DIR}/exo" ~/.cargo/bin/
     cp .exo/wasm/wasm-guest-devswarm.wasm ~/.exo/wasm/
     [ -f .exo/wasm/wasm-guest-e2e-test.wasm ] && cp .exo/wasm/wasm-guest-e2e-test.wasm ~/.exo/wasm/ || true
 
