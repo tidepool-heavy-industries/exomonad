@@ -37,7 +37,7 @@ pub struct Runtime {
     /// This node's own tmux pane id.
     pub(crate) own_pane: PaneId,
     /// Whether this node is `Inline` (shares the parent's worktree) or `Worktree` (own dir).
-    /// Drives team isolation, children-ledger access, and teamout spawning — see `is_inline()`.
+    /// Drives children-ledger access — see `is_inline()`.
     pub(crate) own_kind: ChildKind,
 }
 

@@ -146,9 +146,6 @@ pub async fn run(
     // up the session vars — `claude` (and the `exo node` sidecar it spawns) would
     // otherwise start without EXOMONAD_SWARM_RUN_ID and fail bootstrap. The session-env calls
     // above still serve descendant panes spawned later.
-    // `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` enables Teams (TeamCreate + the Teams inbox),
-    // which is the Bus's last hop into a running CC session — without it, the root can't lead
-    // a team and child messages fall back to raw tmux paste.
     // Carry any per-role launch-profile vars into the ROOT launch (the root pane predates the
     // session-env, so they're embedded inline like the boot vars above). `birth_finish` re-copies
     // them onto every descendant; only a profiled role's own launch translates them to `ANTHROPIC_*`.
@@ -165,7 +162,6 @@ pub async fn run(
     );
     env_vars.insert("EXOMONAD_SWARM_RUN_ID".into(), run_id.clone());
     env_vars.insert("EXOMONAD_TMUX_SESSION".into(), session.clone());
-    env_vars.insert("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".into(), "1".into());
     // On `--recreate` (e.g. restarting after a binary update), continue the prior root
     // conversation so the restart doesn't discard the human's context — `claude --continue`
     // resumes the most recent conversation in this cwd. A fresh `init` has nothing to continue.
@@ -181,7 +177,7 @@ pub async fn run(
         mcp_config_path: Some(mcp_config_path.to_string_lossy().into_owned()),
         append_system_prompt: None, // root has no role-steering prompt
         model: model.map(|m| m.to_string()),
-        prompt_file: None,          // interactive launch — no positional prompt
+        prompt_file: None, // interactive launch — no positional prompt
         fork_session_id: None,
         env_vars,
         yolo: false,

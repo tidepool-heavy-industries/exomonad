@@ -694,14 +694,6 @@ impl Runtime {
                     child: Some(core.name.clone()),
                     detail: e.to_string(),
                 })?;
-                // Enable Claude Code Teams so the Bus→Teams last hop (dispatch.rs) can
-                // deliver as a native `<teammate-message>` instead of falling back to paste.
-                // Worktree children only — inline workers share the parent's worktree and cwd,
-                // so their Teams resolution would land in the parent's team (the leak this PR fixes).
-                if core.kind == ChildKind::Worktree {
-                    env_vars.insert("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".into(), "1".into());
-                }
-
                 // Launch-profiled child only: translate the opaque profile to ANTHROPIC_* on THIS
                 // claude (the token stays in memory — never in papers). The model is applied below
                 // via claude_flags. A single-model proxy (kimi-for-coding) needs the background /
