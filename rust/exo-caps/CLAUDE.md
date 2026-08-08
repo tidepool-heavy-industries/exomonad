@@ -29,7 +29,7 @@ Nine caps, each one trait per file, in **two tiers**: *primitive* caps own one e
 
 - **`Git`** — `current_branch`, `head_sha` (sha-tag review verdicts), `merge_base` (fork-point base for a reviewer's `git diff`), `is_clean`, `is_ahead_of` / `is_behind` (branch-vs-base commit-count checks — `is_behind` backs `submit_branch`'s rebase gate; both fail-open to `false` on an unresolvable base), `fetch`, **`merge`** (the local on-disk fold — v2 convergence), `worktree_add`/`worktree_remove` (**force/reclaim semantics**: the worktree directory's state is discarded, the branch ref survives). **No `GitHub` cap** — v2 convergence is local git, no PR/Copilot (cut 2026-06-01; see `reactive-github-layer-stays` memory).
 - **`Tmux`** — `new_pane`, `new_window`, `paste`, `kill_pane`, `list_panes` (the liveness probe: `Err` = probe *failure*, never "no panes" — each consumer applies its own default).
-- **`Fs`** — `read`, `write_atomic` (temp+rename, creates parent dirs). Deliberately **no `append`**: the two append disciplines (single-writer ledger, multi-writer PIPE_BUF bus) live inside the `Spawner`/`Bus` impls, out of policy's reach.
+- **`Fs`** — `read`, `write_atomic` (temp+rename, creates parent dirs), `read_dir` (a directory's immediate entry paths; errors on a missing/unreadable directory — no recursion, no metadata, filtering stays with the caller). Deliberately **no `append`**: the two append disciplines (single-writer ledger, multi-writer PIPE_BUF bus) live inside the `Spawner`/`Bus` impls, out of policy's reach.
 - **`Kv`** — `get`, `set`.
 - **`Process`** — `run`.
 

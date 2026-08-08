@@ -6,7 +6,7 @@
 use crate::runtime::Runtime;
 use async_trait::async_trait;
 use exo_caps::{Fs, FsError};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[async_trait]
 impl Fs for Runtime {
@@ -26,6 +26,23 @@ impl Fs for Runtime {
                 path: path.display().to_string(),
                 source: e,
             })
+    }
+
+    async fn read_dir(&self, path: &Path) -> Result<Vec<PathBuf>, FsError> {
+        let mut rd = tokio::fs::read_dir(path).await.map_err(|e| FsError::At {
+            op: "read_dir",
+            path: path.display().to_string(),
+            source: e,
+        })?;
+        let mut entries = Vec::new();
+        while let Some(entry) = rd.next_entry().await.map_err(|e| FsError::At {
+            op: "read_dir",
+            path: path.display().to_string(),
+            source: e,
+        })? {
+            entries.push(entry.path());
+        }
+        Ok(entries)
     }
 }
 

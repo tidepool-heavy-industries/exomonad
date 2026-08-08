@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use exo_caps::{
     Addressee, AgentName, AgentType, Branch, Bus, BusError, CapResult, ChildKind, ChildLiveness,
     Fs, FsError, Git, GitError, Kv, KvError, Message, PaneId, Persona, Process, ProcessError,
-    RoleKind, SpawnError, SpawnSpec, Spawner, Tmux, TmuxError, Topology, TopologyError, ToolName,
+    RoleKind, SpawnError, SpawnSpec, Spawner, Tmux, TmuxError, ToolName, Topology, TopologyError,
     TopologyView,
 };
 use exo_framework::{
@@ -116,6 +116,9 @@ impl Fs for TestCaps {
         unimplemented!()
     }
     async fn write_atomic(&self, _path: &Path, _bytes: &[u8]) -> Result<(), FsError> {
+        unimplemented!()
+    }
+    async fn read_dir(&self, _path: &Path) -> Result<Vec<std::path::PathBuf>, FsError> {
         unimplemented!()
     }
 }

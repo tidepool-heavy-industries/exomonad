@@ -55,6 +55,9 @@ pub enum Call {
     FsWrite {
         path: String,
     },
+    FsReadDir {
+        path: String,
+    },
     KillPane {
         child: AgentName,
     },
@@ -70,6 +73,9 @@ pub struct MockRuntime {
     pub calls: Mutex<Vec<Call>>,
     pub kv: Mutex<HashMap<String, String>>,
     pub files: Mutex<HashMap<String, Vec<u8>>>,
+    /// Canned directory listings for `Fs::read_dir`, keyed by directory path. A key absent from
+    /// this map mocks a missing directory (`read_dir` returns a not-found `FsError`).
+    pub dirs: Mutex<HashMap<String, Vec<std::path::PathBuf>>>,
 
     // canned git state (the stop-gate clean check + merge tests read these)
     pub current_branch: Branch,
@@ -99,6 +105,7 @@ impl Default for MockRuntime {
             calls: Mutex::new(Vec::new()),
             kv: Mutex::new(HashMap::new()),
             files: Mutex::new(HashMap::new()),
+            dirs: Mutex::new(HashMap::new()),
             current_branch: Branch::new("dev.policy-claude".into()).unwrap(),
             head_sha: "0000000000000000000000000000000000000000".into(),
             merge_base: Some("basebasebasebasebasebasebasebasebasebase".into()),
@@ -310,6 +317,23 @@ impl Fs for MockRuntime {
         self.record(Call::FsWrite { path: key.clone() });
         self.files.lock().unwrap().insert(key, bytes.to_vec());
         Ok(())
+    }
+    async fn read_dir(&self, path: &Path) -> Result<Vec<std::path::PathBuf>, FsError> {
+        let key = path.display().to_string();
+        self.record(Call::FsReadDir { path: key.clone() });
+        self.dirs
+            .lock()
+            .unwrap()
+            .get(&key)
+            .cloned()
+            .ok_or_else(|| FsError::At {
+                op: "read_dir",
+                path: key,
+                source: std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "mock: no such directory",
+                ),
+            })
     }
 }
 

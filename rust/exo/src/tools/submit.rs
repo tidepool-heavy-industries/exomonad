@@ -150,25 +150,18 @@ async fn own_parent_branch<C: Fs + Sync>(ctx: &C) -> Option<exo_caps::Branch> {
 /// Run every script in `.exo/checks/pre-merge/*` (relative to the node's worktree). Each must
 /// print a JSON line `{"pass": bool, "detail": "..."}`; any non-pass (or non-zero exit with no
 /// JSON) blocks the submit. Absent dir / no scripts = pass (no gate).
-fn pre_merge_checks<C: Process + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), String>> {
+fn pre_merge_checks<C: Process + Fs + Sync>(ctx: &C) -> BoxFuture<'_, Result<(), String>> {
     Box::pin(async move {
         let dir = std::path::Path::new(".exo/checks/pre-merge");
-        let mut scripts: Vec<std::path::PathBuf> = match std::fs::read_dir(dir) {
-            Ok(rd) => rd
-                .filter_map(|e| match e {
-                    Ok(entry) => Some(entry.path()),
-                    Err(e) => {
-                        tracing::warn!(
-                            "pre_merge_checks: dropping unreadable entry in .exo/checks/pre-merge: {e}"
-                        );
-                        None
-                    }
-                })
-                .filter(|p| p.is_file())
-                .collect(),
+        let mut scripts: Vec<std::path::PathBuf> = match ctx.read_dir(dir).await {
+            Ok(entries) => entries.into_iter().filter(|p| p.is_file()).collect(),
             // A missing dir = no gate. Any OTHER error (permissions, IO) must NOT silently
             // disable the gate — fail the submit.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(exo_caps::FsError::At { source, .. } | exo_caps::FsError::Io(source))
+                if source.kind() == std::io::ErrorKind::NotFound =>
+            {
+                return Ok(())
+            }
             Err(e) => return Err(format!("could not read .exo/checks/pre-merge: {e}")),
         };
         scripts.sort();
@@ -779,10 +772,10 @@ mod tests {
             is_behind: true,
             ..Default::default()
         };
-        mock.files
-            .lock()
-            .unwrap()
-            .insert(".exo/node.json".to_string(), papers_json(false, Some("dev")));
+        mock.files.lock().unwrap().insert(
+            ".exo/node.json".to_string(),
+            papers_json(false, Some("dev")),
+        );
         let res = SubmitBranch::run(
             &mock,
             SubmitBranchArgs {
