@@ -164,7 +164,7 @@ fn test_message_kind_roundtrip() {
             grace_ms: 100,
             force: true,
         }),
-        MessageKind::Lifecycle(Lifecycle::ChildExited {
+        MessageKind::Lifecycle(Lifecycle::Exiting {
             reason: "done".into(),
         }),
     ];
@@ -209,7 +209,7 @@ fn test_shutdown_status_roundtrip() {
 #[test]
 fn test_lifecycle_roundtrip() {
     let variants = [
-        Lifecycle::ChildExited {
+        Lifecycle::Exiting {
             reason: "done".into(),
         },
         Lifecycle::ShutdownResponse {
@@ -226,9 +226,8 @@ fn test_lifecycle_roundtrip() {
 
 #[test]
 fn test_lifecycle_wire_pinning() {
-    let exited: Lifecycle =
-        serde_json::from_str(r#"{"type":"child_exited","reason":"bye"}"#).unwrap();
-    assert!(matches!(exited, Lifecycle::ChildExited { .. }));
+    let exiting: Lifecycle = serde_json::from_str(r#"{"type":"exiting","reason":"bye"}"#).unwrap();
+    assert!(matches!(exiting, Lifecycle::Exiting { .. }));
 
     let resp: Lifecycle =
         serde_json::from_str(r#"{"type":"shutdown_response","status":"accepted"}"#).unwrap();

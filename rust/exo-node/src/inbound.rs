@@ -2,8 +2,10 @@
 //! cursor/restart half the `Bus` cap (write side) leaves to the reader. The contract:
 //!
 //! - **Cursor = byte-offset** in a sibling `pane-N.cursor`. Resume = seek + read forward, O(1).
-//! - **Watch via the `notify` crate** (event-driven, never a poll loop, never hand-rolled
-//!   inotify); on each wake re-read from the cursor (absorbs coalesced events).
+//! - **Watch via the `notify` crate** (event-driven, never hand-rolled inotify), coalesced through
+//!   a [`tokio::sync::Notify`]; on each wake re-read from the cursor. A 15s periodic tick runs the
+//!   same re-read as a backstop, so a routing failure (cursor deliberately left unadvanced) is
+//!   retried even if no later filesystem write ever wakes the watcher.
 //! - **Read only up to the last `\n`** — a torn trailing line is re-read once complete.
 //! - **Advance the cursor AFTER a successful last-hop delivery**, written **temp + rename**
 //!   (atomic replace — a "small" overwrite is NOT crash-atomic). At-least-once, never dropped/corrupted.
@@ -15,9 +17,10 @@
 //!   native interface (Teams inbox or tmux paste), rendered with a `[from: X, kind: Y]` header.
 //! - `Control(Shutdown { grace_ms, force })` → the cooperative/forced matrix (see `decide`): a
 //!   cooperative request to a node with live children bounces an "are you sure" back to the
-//!   requester; a leaf winds down and is reaped on its next idle; a forced request cascades a
-//!   subtree teardown. The actual self-reap (`try_reap`) only fires when the subtree is clear,
-//!   signalling `ChildExited` up first. A child's `ChildExited` re-triggers its parent's reap.
+//!   requester; a leaf winds down and is reaped on the watchdog's next periodic tick; a forced
+//!   request cascades a subtree teardown. The actual self-reap (`try_reap`) only fires when the
+//!   subtree is clear (pane-liveness is the sole authority), sending an advisory `Lifecycle::Exiting`
+//!   poke up first. A child's `Lifecycle::Exiting` re-triggers its parent's reap check.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -27,7 +30,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
-use tokio::sync::mpsc;
+use tokio::sync::Notify;
 use tracing::{error, info, warn};
 
 use chrono::Utc;
@@ -79,13 +82,15 @@ pub async fn watch<D: Exomonad>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
         inbox_path, offset
     );
 
-    // Setup notify watcher
-    let (tx, mut rx) = mpsc::channel(100);
+    // Setup notify watcher. `Notify` gives coalescing wakeup semantics (any number of filesystem
+    // events between loop iterations collapse into one wake) with no bounded channel to overflow.
+    let notify = Arc::new(Notify::new());
+    let notify_writer = notify.clone();
     let mut watcher = RecommendedWatcher::new(
         move |res: notify::Result<Event>| {
             if let Ok(event) = res {
                 if event.kind.is_modify() || event.kind.is_create() {
-                    let _ = tx.blocking_send(());
+                    notify_writer.notify_one();
                 }
             }
         },
@@ -118,9 +123,18 @@ pub async fn watch<D: Exomonad>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
         warn!(node = %node.as_str(), "inbound initial pass failed (will retry on next event): {e}");
     }
 
-    while let Some(()) = rx.recv().await {
-        // Drain any coalesced events
-        while rx.try_recv().is_ok() {}
+    // A 15s periodic tick retries a delivery failure independent of any future filesystem write —
+    // `process_inbox` leaves the cursor unchanged on a routing failure, and without this tick that
+    // entry would only ever be retried by a later notify wake that may never come.
+    let mut retry_tick = tokio::time::interval(Duration::from_secs(15));
+    retry_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    retry_tick.tick().await; // first tick fires immediately; the initial pass above already ran
+
+    loop {
+        tokio::select! {
+            _ = notify.notified() => {}
+            _ = retry_tick.tick() => {}
+        }
 
         match process_inbox(
             node.as_str(),
@@ -134,7 +148,7 @@ pub async fn watch<D: Exomonad>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
             Ok(true) => break, // shutdown received
             Ok(false) => {}
             Err(e) => {
-                warn!(node = %node.as_str(), "inbound pass failed (will retry on next event): {e}")
+                warn!(node = %node.as_str(), "inbound pass failed (will retry within 15s): {e}")
             }
         }
     }
@@ -268,19 +282,19 @@ impl<D: Exomonad> RealHandler<D> {
     #[tracing::instrument(skip(self, lc), fields(from = %persona_label(from), kind = "lifecycle"))]
     async fn handle_lifecycle(&self, from: &Persona, lc: &Lifecycle) -> NodeResult<()> {
         match lc {
-            // A child reaped itself (its shutdown completed). Record it in the authoritative
-            // exited-set, then re-evaluate our own pending shutdown — if it was the last child, we
-            // reap ourselves now (which may kill our pane and end the process).
-            Lifecycle::ChildExited { .. } => {
-                info!(outcome = "child_exited", "handling child exit signal");
-                if let Persona::Agent(name) = from {
-                    self.ctx
-                        .exited_children
-                        .lock()
-                        .unwrap()
-                        .insert(name.as_str().to_string());
-                }
+            // A child is about to reap itself — advisory only, receipt doesn't prove the pane is
+            // gone. Re-evaluate our own pending shutdown now (covers the common case where the
+            // child's pane is already down), and once more after a short delay to cover the
+            // window where it's still dying. Pane-liveness (topology) is the sole authority for
+            // "this child is gone" — the watchdog tick remains the backstop either way.
+            Lifecycle::Exiting { .. } => {
+                info!(outcome = "child_exiting", "handling child exit poke");
                 try_reap(&self.ctx).await;
+                let ctx = self.ctx.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    try_reap(&ctx).await;
+                });
                 Ok(())
             }
             // A child replied to a shutdown we sent it. Render it to our LLM; never tear it down.
@@ -442,14 +456,14 @@ impl<D: Exomonad> RealHandler<D> {
                 self.ctx.set_shutdown_pending(grace_ms);
                 Ok(Some(try_reap(&self.ctx).await))
             }
-            // Cooperative leaf — wrap up, reap on next idle (the stop hook drives try_reap).
+            // Cooperative leaf — wrap up, reap on the watchdog's next periodic tick.
             ShutdownAction::GracefulPending => {
                 self.ctx.set_shutdown_pending(grace_ms);
                 crate::dispatch::deliver_synthetic(
                     &self.ctx,
                     "shutdown",
                     "[shutdown requested]",
-                    "[shutdown requested] Finish your work and yield — you'll be reaped when you go idle.",
+                    "[shutdown requested] Finish your work now — you will be reaped on a periodic check once your subtree is clear; this is a timeout, not an idle-detector.",
                 )
                 .await?;
                 self.respond_shutdown(ShutdownStatus::Accepted, vec![], false, "")
@@ -510,7 +524,7 @@ impl<D: Exomonad> RealHandler<D> {
 enum ShutdownAction {
     /// forced leaf → reap immediately.
     ReapNow,
-    /// cooperative leaf → wrap up, reap on next idle.
+    /// cooperative leaf → wrap up, reap on the watchdog's next periodic tick.
     GracefulPending,
     /// cooperative with live children → bounce "are you sure" to the requester.
     Defer,
@@ -557,7 +571,8 @@ fn format_shutdown_response(
         }
         ShutdownStatus::Accepted => {
             if reason.is_empty() {
-                "[shutdown accepted] I'll finish up and reap when I go idle.".to_string()
+                "[shutdown accepted] Finishing up; reap happens on the next periodic check."
+                    .to_string()
             } else {
                 format!("[shutdown accepted] {reason}")
             }
@@ -588,10 +603,9 @@ async fn live_children<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> Option<Vec<Age
     }
 }
 
-/// Live direct children NOT yet known-exited (the authoritative gone-set). On a topology error,
-/// returns a non-empty sentinel so `try_reap` errs toward NOT reaping.
+/// Live direct children per pane-liveness (topology) — the sole authority for "this child is
+/// gone". On a topology error, returns a non-empty sentinel so `try_reap` errs toward NOT reaping.
 async fn remaining_live_children<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> Vec<AgentName> {
-    let exited = ctx.exited_children.lock().unwrap().clone();
     match ctx.runtime.topology().await {
         Ok(view) => view
             .node
@@ -599,7 +613,6 @@ async fn remaining_live_children<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> Vec<
             .iter()
             .filter(|c| any_live(c))
             .map(|c| c.name.clone())
-            .filter(|n| !exited.contains(n.as_str()))
             .collect(),
         Err(_) => vec![AgentName::new("<topology-error>".to_string())
             .expect("static sentinel is a valid AgentName")],
@@ -620,10 +633,12 @@ fn shutdown_message(grace_ms: u32) -> NodeResult<Message> {
     })
 }
 
-/// Reap this node iff it's shutdown-pending and its subtree is clear: signal `ChildExited` up,
-/// wait the grace backstop, then kill its own pane (ending the process). Returns whether it
-/// reaped. Idempotent and safe to call on any stop / child-exit; a no-op when not pending or when
-/// children remain. Called from the stop-hook path (idle) and on inbound `ChildExited`.
+/// Reap this node iff it's shutdown-pending and its subtree is clear: send the advisory
+/// `Lifecycle::Exiting` poke up, wait the grace backstop, then kill its own pane (ending the
+/// process). Returns whether it reaped. Idempotent and safe to call at any time; a no-op when not
+/// pending or when children remain (per pane-liveness). Callers: the watchdog tick (unconditional,
+/// every interval — the backstop), and the inbound loop's `Lifecycle::Exiting` handler (an
+/// immediate re-check plus a delayed one, both best-effort early triggers).
 pub(crate) async fn try_reap<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> bool {
     let grace = *ctx.shutdown_pending.lock().unwrap();
     let Some(grace_ms) = grace else {
@@ -633,19 +648,19 @@ pub(crate) async fn try_reap<D: Exomonad>(ctx: &Arc<NodeContext<D>>) -> bool {
         return false; // subtree not clear yet
     }
     info!(node = %ctx.runtime.name().as_str(), outcome = "reaping", "try_reap: shutdown pending and subtree clear — reaping self");
-    // Tell the parent we're gone (authoritative trigger for its own pending shutdown). Root has no
-    // parent — that delivery just errors, which is fine.
-    let exited = Message {
-        text: MessageBody::new("[exited] shutdown".to_string())
+    // Poke the parent to re-check its own pending shutdown (advisory only — receipt doesn't prove
+    // our pane is gone yet). Root has no parent — that delivery just errors, which is fine.
+    let exiting = Message {
+        text: MessageBody::new("[exiting] shutdown".to_string())
             .ok()
-            .unwrap_or_else(|| MessageBody::new("exited".to_string()).unwrap()),
-        summary: Summary::new("[exited]".to_string()).unwrap(),
-        kind: MessageKind::Lifecycle(Lifecycle::ChildExited {
+            .unwrap_or_else(|| MessageBody::new("exiting".to_string()).unwrap()),
+        summary: Summary::new("[exiting]".to_string()).unwrap(),
+        kind: MessageKind::Lifecycle(Lifecycle::Exiting {
             reason: "shutdown".to_string(),
         }),
     };
-    if let Err(e) = exo_caps::Bus::deliver(&*ctx.runtime, Addressee::Parent, exited).await {
-        warn!(node = %ctx.runtime.name().as_str(), "try_reap: ChildExited to parent failed (ok for root): {e}");
+    if let Err(e) = exo_caps::Bus::deliver(&*ctx.runtime, Addressee::Parent, exiting).await {
+        warn!(node = %ctx.runtime.name().as_str(), "try_reap: Exiting poke to parent failed (ok for root): {e}");
     }
     if grace_ms > 0 {
         tokio::time::sleep(Duration::from_millis(grace_ms as u64)).await;

@@ -42,11 +42,8 @@ pub struct NodeContext<D: Exomonad> {
     pub run_id: String,
     /// Cooperative-shutdown state. `None` until a `Shutdown` is accepted (a cooperative leaf, or a
     /// forced node); `Some(grace_ms)` once pending — the sidecar reaps itself when its subtree is
-    /// clear (see `inbound::try_reap`). Read by both the inbound loop and the stop-hook path.
+    /// clear (see `inbound::try_reap`). Read by the inbound loop and the watchdog tick.
     pub shutdown_pending: std::sync::Mutex<Option<u32>>,
-    /// Children (by name) that have sent `ChildExited` — the authoritative "gone" set `try_reap`
-    /// uses to decide childlessness without racing pane-death timing.
-    pub exited_children: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 impl<D: Exomonad> NodeContext<D> {
@@ -73,7 +70,14 @@ fn install_parent_death_signal() {
     // SAFETY: prctl/getppid are simple syscalls with no memory effects.
     unsafe {
         let original_ppid = libc::getppid();
-        if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM as libc::c_ulong, 0, 0, 0) != 0 {
+        if libc::prctl(
+            libc::PR_SET_PDEATHSIG,
+            libc::SIGTERM as libc::c_ulong,
+            0,
+            0,
+            0,
+        ) != 0
+        {
             eprintln!("exo-node: prctl(PR_SET_PDEATHSIG) failed; orphaned-sidecar guard not armed");
             return;
         }
@@ -186,7 +190,6 @@ pub fn bootstrap<D: Exomonad<Caps = Runtime>>(
         parent_inbox,
         run_id,
         shutdown_pending: std::sync::Mutex::new(None),
-        exited_children: std::sync::Mutex::new(std::collections::HashSet::new()),
     })
 }
 

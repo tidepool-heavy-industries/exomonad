@@ -136,11 +136,7 @@ fn plan_paste(persona: &str, summary: &str, text: &str, full_render: &str) -> Pa
 
 /// Build the single-line `@`-reference paste that points at the spilled file. MUST be one line.
 fn render_atref(persona: &str, summary: &str, rel_path: &str) -> String {
-    let snippet: String = summary
-        .chars()
-        .filter(|c| *c != '\n')
-        .take(80)
-        .collect();
+    let snippet: String = summary.chars().filter(|c| *c != '\n').take(80).collect();
     format!(
         "New message from {} — read @{} and act on it. ({})",
         persona, rel_path, snippet

@@ -474,8 +474,9 @@ pub enum ControlKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ShutdownStatus {
-    /// The node accepted the shutdown and is winding down (cooperative leaf reaping on idle, or a
-    /// forced cascade tearing its subtree down). Not yet gone — its `ChildExited` follows later.
+    /// The node accepted the shutdown and is winding down (cooperative leaf reaping on the
+    /// watchdog's next periodic tick, or a forced cascade tearing its subtree down). Not yet gone
+    /// — its (advisory) `Lifecycle::Exiting` poke follows later.
     Accepted,
     /// The node refused for now: it has a live subtree that would be orphaned. The requester can
     /// re-send with `force: true` to cascade.
@@ -496,9 +497,11 @@ pub enum ShutdownStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Lifecycle {
-    /// A node is about to reap itself (its shutdown completed and its subtree is clear). Sent to
-    /// its parent just before it kills its own pane — the authoritative "this child is gone".
-    ChildExited { reason: String },
+    /// ADVISORY ONLY. Sent by a child to its parent just before it kills its own pane — receipt
+    /// does NOT prove the pane is gone (the kill can still fail, or race). The parent treats this
+    /// as a poke to re-evaluate its own pending shutdown (`try_reap`), never as proof of exit;
+    /// pane-liveness (`Topology`) is the sole authority for "this child is gone".
+    Exiting { reason: String },
     /// A node's structured reply to a [`ControlKind::Shutdown`] it received. The requester's
     /// sidecar renders it into a chat line for its LLM.
     ShutdownResponse {

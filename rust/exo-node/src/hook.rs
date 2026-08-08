@@ -171,7 +171,6 @@ mod tests {
             parent_inbox,
             run_id: "run-123".into(),
             shutdown_pending: std::sync::Mutex::new(None),
-            exited_children: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
 
