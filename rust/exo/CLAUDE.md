@@ -28,6 +28,7 @@ lib (`lib.rs` + `tools/` + `gates.rs` + `roles.rs`) stays generic over the caps 
 | `lib.rs` | Re-exports `role_def`, `ExoRole`, `ReviewSystem`/`handle_review_system` (the domain `System` + relocated gate: findings-based), `ExoSpawn` (the domain `Spawn`). Generic over `R`, depends only on `exo-framework` + `exo-caps` (+ `tracing`). |
 | `review.rs` | The domain's inter-node behavior: `ReviewSystem` (`D::System`) + `handle_review_system` (decision derived from structured findings; IO-free via the `SystemCtx` seam — unit-tested against a mock context). **Now persists each round to a durable `ReviewLog` (`ReviewRound`) at `.exo/reviews/{safe-branch}.json`** using the `safe_branch` helper. Also `handle_review_tick` — a reviewer's wall-clock abandonment timeout (`REVIEW_ABANDON_TIMEOUT`, 30 min), called from `ExoDomain::handle_tick` by the sidecar's watchdog loop instead of a Stop hook. |
 | `spawn.rs` | `ExoSpawn` (`D::Spawn`) implementing `SpawnSpec`, the role-fixing the per-op tools do; `render_spec_prompt` (moved from the runtime) + `write_acceptance` (the `.exo/acceptance.md` write via `Fs`, relocated out of birth). |
+| `directives.rs` | `Directives` — the node's **standing directives**, loaded from its local untracked `.exo/directives/*.md`, injected into every child's spec, copied into worktree children, content-hashed onto their ledger rows. See [Standing directives](#standing-directives) below. |
 | `domain.rs` | **Bin-only.** `ExoDomain` — the `Exomonad` impl that fixes `Caps = Runtime` and points `role_def`/`handle_system` at the lib. The one place that links `exo-runtime`. |
 | `main.rs` | The CLI dispatcher (bin): clap `Cli` → `init` / `node` / `hook`. `node` is the composition root — `exo node --papers <path>` → `exo_node::bootstrap::<ExoDomain>(papers, cwd)` → `run_node::<ExoDomain>`. |
 | `init.rs` | `exo init [--session <s>] [--recreate]` — bootstrap a node-mode ROOT (own tmux session, root papers, no server). Reuses `exo-runtime`/`exomonad-shared`. |
@@ -47,16 +48,76 @@ contract ([`exo-framework`](../exo-framework/CLAUDE.md)); this crate provides th
 
 | Tool | Caps | Roles | What it does |
 |------|------|-------|--------------|
-| `fork_wave` | `Spawner` | root, tl | Fork N Claude TL children (own worktrees). Per-child opt-in `fork_session: bool` (default false) inherits the parent's context via `--resume --fork-session`; default-false launches fresh. |
-| `spawn_dev` | `Spawner` | root, tl | Spawn a Sonnet Claude dev in its own worktree. |
-| `spawn_worker` | `Spawner` | root, tl | Spawn an ephemeral Sonnet Claude worker (inline pane). |
+| `fork_wave` | `Spawner`+`Fs`+`Git` | root, tl | Fork N Claude TL children (own worktrees). Per-child opt-in `fork_session: bool` (default false) inherits the parent's context via `--resume --fork-session`; default-false launches fresh. Per-child `model` override (tier-capped, see below). **Refuses on a dirty worktree**, naming the offending `git status --porcelain` lines — children fork from the spawner's current commit, so uncommitted state would be invisible to them; a git error fails *closed*. `preview: true` renders every child's fully-assembled spec (directives injected, `birth_preamble` reproduced) and spawns **nothing** — no clean gate, no acceptance writes — so a wave can be checked while the tree is still dirty. |
+| `spawn_dev` | `Spawner`+`Fs`+`Git` | root, tl | Spawn a Sonnet Claude dev in its own worktree. Takes the same tier-capped `model` override and the same dirty-worktree refusal as `fork_wave`. |
+| `spawn_worker` | `Spawner`+`Fs` | root, tl | Spawn an ephemeral Sonnet Claude worker (inline pane). Takes the `model` override, but is **not** clean-gated — an inline worker deliberately shares the parent's tree, and gets directives by text injection only (it already sees the parent's `.exo/directives/` on disk). |
 | `dismiss_worker` | `Spawner` | root, tl | Dismiss an inline worker by name: unconditional parent-side `kill_pane` resolved via the children ledger. Matched to `spawn_worker`; the reliable teardown primitive for workers that never registered as a teammate. |
-| `merge` | `Git`+`Spawner` | root, tl | **The local fold:** `git merge <child-branch>`, followed by best-effort teardown (`kill_pane` + `reclaim_worktree`) of the child. |
+| `merge` | `Git`+`Spawner` | root, tl | **The local fold:** `git merge <child-branch>`, followed by best-effort teardown (`kill_pane` + `reclaim_worktree`) of the child. When **both** teardown calls return `SpawnError::UnknownChild`, the note becomes an explicit `merged non-child ref; no teardown performed (succession escape hatch: …)` instead of the generic best-effort string — `merge` accepts any local ref so a live ancestor can fold a dead TL's orphaned descendant, and on that path there simply is no ledger child of yours to reclaim. Every other outcome (both ok, partial, mixed) renders exactly as before. |
 | `submit_branch` | `Git`+`Process`+`Spawner`+`Fs`+`Bus` | tl, dev | **Request review** — if reviewers are enabled (`review_enabled` in `.exo/config.toml`, off by default; read from the node's own papers). Runs the ordered precondition checks (committed → **needs_rebase** → `.exo/checks/pre-merge/*` scripts); the rebase gate blocks + prompts `git rebase <parent>` when the branch is behind its parent's REAL git branch (`NodePapers.parent_branch`, birth-stamped by the spawner from ITS OWN current branch — not a dot-derived tree-address coordinate, so the gate fires at every depth, including a direct child of root; fails open only on the root itself, or unreadable/corrupt/pre-field papers). Then spawns a **reviewer** off this branch (fork-point `git diff` base via `Git::merge_base`) and returns "stop & wait". It does NOT deliver `[READY]` itself except via the skip path — only the sidecar does, on an approve-verdict (the structural gate). **Continuity:** reads the latest `ReviewLog` and appends unresolved Error findings from the prior round to the reviewer task. Explicit escape hatch regardless of config: `dangerously_skip_reviewer: true`. **Structured receipts:** an optional typed `receipts` block (`commit_tested`, `verify_commands_run`, `metrics: Vec<LabeledValue>`, `deviations`) rendered compactly into the parent-bound `[READY]` text and carried in full in the tool's `data`. `commit_tested` drives the **transfer proof** — see [Receipts and the transfer proof](#receipts-and-the-transfer-proof). |
 | `verdict` | `Bus`+`Kv` | reviewer | A reviewer's one output → a `System(Reviewed)` message to its parent: `summary` + structured `findings` {`file`, `line`, `severity`, `body`, `suggestion`?}. Triggers reviewer teardown (handled in `exo-node`). |
 | `notify_parent` | `Bus` | tl, dev, worker, reviewer | Status/failure update to `Addressee::Parent` (NOT the done-signal). Optional `reply_to` — see [Reply threading](#reply-threading). |
 | `send_message` | `Bus` | root, tl | Deliver to a child by name (`to: <child>`) — **tree-edges only**; inline vs worktree is transparent. Optional `reply_to` — see [Reply threading](#reply-threading). |
 | `tree` | `Topology`+`Fs` | root, tl | Read-only: the caller's subtree (recursive ledger fold) + parent + per-node liveness, effective `model`, and a `(label)` for any launch-profiled node (e.g. a Kimi reviewer). **Compact by default:** shows Live + Submitted + Died and hides routine `Reaped` tombstones behind a `(k reaped hidden — pass all:true)` count; `{"all": true}` shows everything. A Submitted node renders `submitted @ <sha8>, awaiting merge` (the pending-merge queue) and keeps its liveness bracket — it's still running. A **tombstoned** node gets no `[alive]`/`[dead]` bracket, no busy bit, and no status-file lookup at all: those are pane-keyed and tmux recycles pane ids, so for a corpse the honest answer is to show nothing rather than a possibly-wrong something. |
+
+## Standing directives
+
+A node's **standing directives** are its persistent instructions to everything it spawns: plain
+`.md` files in `.exo/directives/`, **local and untracked** (the repo's `.git/info/exclude` covers
+`.exo/*`). They are deliberately not git-tracked — they are per-node local state, not repo content,
+so they never ride a merge and never leak sideways between subtrees. A human or a parent propagates
+one by ordinary message; adopting it is a file write.
+
+`directives.rs` is the whole implementation. Every spawn path does three things with the loaded
+bundle (`load_directives` is called **once per tool invocation**, not once per child):
+
+1. **Injects** it as text into the child's spec (`Directives::apply` appends a
+   `STANDING DIRECTIVES (inherited from your spawner — follow these):` section, one `## {file}`
+   block per file). This is what actually makes the child obey, and it is the only mechanism that
+   works for an inline worker with no worktree of its own. It reaches the **reviewer** too —
+   `submit_branch` applies it to the review task, since a directive like "reject any new `unwrap()`
+   in library code" is worthless if the one child judging the diff never sees it.
+2. **Copies** it into a *worktree* child's own `.exo/directives/` (`copy_directives`). Untracked
+   files do not materialize through `git worktree add`, so without this a mid-tree TL would inherit
+   its parent's directives in its prompt but have nothing to pass further down. Best-effort: a
+   failure warns and continues, because the text injection has already landed — only the child's
+   ability to re-propagate is lost.
+3. **Records** `Directives::hash()` onto the child's spec, which the birth path stamps into its
+   `ChildRecord::Spawned.directives_hash` — so "which directives was this node born under" stays
+   answerable after the fact. The hash is sha256 over the filename-sorted `(name, content)` pairs
+   with each field NUL-terminated (the terminators make the encoding injective, so `[("ab","c")]`
+   and `[("a","bc")]` cannot collide), and is `None` for an empty bundle: no directives is the
+   *absence* of a hash, not the hash of nothing.
+
+`load_directives` is **loud**. Only a `NotFound` on the directory itself maps to `Ok(empty)` — that
+is the ordinary "this node has no directives" case. An unreadable file or non-UTF-8 content is a
+hard error, because the failure it guards against is a node that *has* directives quietly spawning
+a whole subtree that never received them.
+
+### The model tier cap
+
+All three spawn tools take an optional per-spawn `model`. It is validated against the **spawner's
+own** role (`own_role` reads `.exo/node.json`) before anything is built:
+
+- **Root** — shape only: a single bare token matching `[A-Za-z0-9._-]+`. Root is the human's own
+  interactive session and may legitimately name any tier or full model id; the check exists to
+  catch typos and shell metacharacters, not to restrict choice.
+- **Tl** — must be in `TL_MODEL_ALLOWLIST` (`opus` / `sonnet` / `haiku`); anything else is rejected
+  with an error that *names the allowlist*. Without a cap a spawned TL could seed a whole subtree
+  on a costlier tier, or on a name the launcher does not understand — which otherwise fails late
+  and confusingly at pane-launch time rather than at the tool call.
+- **Dev / Worker / Reviewer** — unreachable (they have no spawn tools), but any override is
+  rejected defensively.
+
+`model: None` skips validation entirely and leaves behavior byte-identical to no override. An
+unknown name is never passed through: tools require well-formed args.
+
+Papers resolution fails **conservatively**: a `NotFound` on `.exo/node.json` means `Root` (the
+root's papers live outside the cwd under `~/.claude/exo`, so their absence in the cwd *is* the root
+signature), while corrupt or untyped papers warn and assume `Tl`. A spuriously-capped TL fails loud
+and actionably; a spuriously-uncapped one silently burns tokens on the wrong tier.
+
+A role redirected by a **launch profile** ignores the override — that profile's proxy serves exactly
+one model, so overriding it would 404.
 
 ## exo doctor
 
