@@ -31,16 +31,17 @@ use std::time::Duration;
 use async_trait::async_trait;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::Notify;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use chrono::Utc;
 use exo_caps::types::ShutdownStatus;
 use exo_caps::{
-    Addressee, AgentName, Branch, CapResult, ChildLiveness, ChildRecord, ControlKind,
+    Addressee, AgentName, Branch, CapResult, ChildKind, ChildLiveness, ChildRecord, ControlKind,
     DomainPayload, IngestionEntry, Lifecycle, Message, MessageBody, MessageKind, Persona, Summary,
     Tmux, Topology, TreeNode,
 };
 use exo_framework::{Exomonad, SystemCtx, SystemOutcome};
+use exo_runtime::Runtime;
 
 use crate::bootstrap::NodeContext;
 use crate::dispatch::{kind_label, persona_label};
@@ -316,15 +317,18 @@ impl<D: Exomonad> RealHandler<D> {
                         // `resolve_edge` returns `None` for a tombstoned child, but a tombstoned
                         // child's submission is still a real fact worth recording. `topology`'s
                         // children list keeps tombstones.
-                        let is_own_child = match self.ctx.runtime.topology().await {
-                            Ok(view) => view.node.children.iter().any(|c| c.name == *child),
+                        let (is_own_child, child_kind) = match self.ctx.runtime.topology().await {
+                            Ok(view) => {
+                                let found = view.node.children.iter().find(|c| c.name == *child);
+                                (found.is_some(), found.and_then(|c| c.kind))
+                            }
                             Err(e) => {
                                 warn!(
                                     outcome = "submitted_render_only",
                                     child = child.as_str(),
                                     "Lifecycle::Submitted: topology read failed ({e}); rendering only, no ledger row"
                                 );
-                                false
+                                (false, None)
                             }
                         };
                         if should_record_submission(from, is_own_child) {
@@ -339,6 +343,13 @@ impl<D: Exomonad> RealHandler<D> {
                                 })
                                 .await
                                 .map_err(|e| std::io::Error::other(e.to_string()))?;
+                            copy_full_receipts_if_present(
+                                &self.ctx.runtime,
+                                child,
+                                branch,
+                                child_kind,
+                            )
+                            .await;
                         } else {
                             warn!(
                                 outcome = "submitted_render_only",
@@ -596,6 +607,80 @@ impl<D: Exomonad> RealHandler<D> {
 /// only. Split out so the truth table is unit-testable without a live `NodeContext`/`Runtime`.
 fn should_record_submission(from: &Persona, is_own_child: bool) -> bool {
     matches!(from, Persona::Agent(_)) && is_own_child
+}
+
+/// Best-effort copy of a submitting child's full, untruncated receipts into this (parent) node's
+/// own worktree, so they survive alongside — not just inside — the rendered `[READY]` prose (which
+/// is truncated). Source: `.exo/worktrees/{child}/.exo/receipts-submitted.json`, written by
+/// `submit_branch` at submit time. Destination: `.exo/receipts/{safe-branch}.json`, the same path
+/// `submit_branch`'s `[READY]` text names to the parent. A free fn over the concrete `Runtime`
+/// (not a `RealHandler<D>` method) since `NodeContext<D>::runtime` is always concretely `Runtime`
+/// regardless of the domain `D` — this keeps the copy independently unit-testable.
+///
+/// Only a **worktree** child has a separate `.exo/` to read from — an inline child shares this
+/// node's own directory, so there is nothing to copy (its receipts file, if any, already lives
+/// right here). A missing source file is the ordinary "no receipts passed" case and stays quiet;
+/// every other failure is a `warn!` — this must never fail the ledger append or block the caller.
+async fn copy_full_receipts_if_present(
+    runtime: &Runtime,
+    child: &AgentName,
+    branch: &Branch,
+    child_kind: Option<ChildKind>,
+) {
+    if child_kind != Some(ChildKind::Worktree) {
+        return;
+    }
+    let src = Path::new(".exo/worktrees")
+        .join(child.as_str())
+        .join(".exo/receipts-submitted.json");
+    let bytes = match exo_caps::Fs::read(runtime, &src).await {
+        Ok(bytes) => bytes,
+        Err(exo_caps::FsError::At { source, .. } | exo_caps::FsError::Io(source))
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            debug!(
+                child = child.as_str(),
+                "no receipts-submitted.json for child; nothing to copy"
+            );
+            return;
+        }
+        Err(e) => {
+            warn!(
+                child = child.as_str(),
+                "failed to read child's receipts-submitted.json: {e}"
+            );
+            return;
+        }
+    };
+    let dest = Path::new(".exo/receipts").join(format!("{}.json", safe_branch(branch.as_str())));
+    if let Err(e) = exo_caps::Fs::write_atomic(runtime, &dest, &bytes).await {
+        warn!(
+            child = child.as_str(),
+            "failed to persist parent-side receipts copy at {dest:?}: {e}"
+        );
+    }
+}
+
+/// Sanitize a branch name to a safe filename: `[A-Za-z0-9_-]`, joined with `.`. Mirrors `exo`'s
+/// `review::safe_branch` exactly (same path convention for `.exo/receipts/{safe-branch}.json` as
+/// for `.exo/reviews/{safe-branch}.json`) — reimplemented locally because `exo-node` must never
+/// depend on the `exo` domain crate.
+fn safe_branch(branch: &str) -> String {
+    branch
+        .split('.')
+        .map(|seg| {
+            seg.chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
 /// Rewrite an entry's `kind` to `Chat`, preserving `from`/`ts`/`id`/`spill` and the message body
@@ -918,6 +1003,136 @@ mod tests {
         assert!(!should_record_submission(&agent, false));
         assert!(!should_record_submission(&synthetic, true));
         assert!(!should_record_submission(&synthetic, false));
+    }
+
+    #[test]
+    fn safe_branch_sanitizes() {
+        assert_eq!(safe_branch("root.dev-0"), "root.dev-0");
+        assert_eq!(safe_branch("root/dev-0"), "root-dev-0");
+        assert_eq!(safe_branch("root.feat/bug"), "root.feat-bug");
+    }
+
+    /// A `Runtime` rooted at `dir`, standing in for a parent node whose own worktree IS `dir` (the
+    /// crate-wide "sidecar cwd is its own worktree root" convention — `Fs::read`/`write_atomic`
+    /// resolve the RELATIVE paths this test uses against the process cwd, not this `working_dir`
+    /// field, so callers must additionally chdir into `dir` — see [`CwdGuard`]).
+    fn test_runtime(dir: &std::path::Path) -> Runtime {
+        Runtime::new(
+            exo_caps::NodePath::new(vec![
+                AgentName::new("root".into()).unwrap(),
+                AgentName::new("me".into()).unwrap(),
+            ])
+            .unwrap(),
+            Branch::new("root.me".into()).unwrap(),
+            dir.to_path_buf(),
+            None,
+            "test-run".into(),
+            "test-session".into(),
+            exo_caps::PaneId::new("%1".into()).unwrap(),
+            ChildKind::Worktree,
+        )
+    }
+
+    /// Moves the process cwd to `dir` for the guard's lifetime, restoring the original on drop
+    /// (even on panic) — `Fs::read`/`write_atomic` resolve relative paths against the real process
+    /// cwd (see `review_log_path`'s doc comment), so this is how a test points them at a scratch
+    /// tempdir. Serialized against any other test in this binary doing the same, since cwd is
+    /// process-global.
+    struct CwdGuard {
+        original: std::path::PathBuf,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+    impl CwdGuard {
+        fn enter(dir: &std::path::Path) -> Self {
+            static CWD_LOCK: Mutex<()> = Mutex::new(());
+            let lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let original = std::env::current_dir().unwrap();
+            std::env::set_current_dir(dir).unwrap();
+            CwdGuard {
+                original,
+                _lock: lock,
+            }
+        }
+    }
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original);
+        }
+    }
+
+    #[tokio::test]
+    async fn copy_full_receipts_writes_target_when_source_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd = CwdGuard::enter(dir.path());
+        let runtime = test_runtime(dir.path());
+        let child = AgentName::new("dev-0".into()).unwrap();
+        let branch = Branch::new("root.dev-0".into()).unwrap();
+
+        tokio::fs::create_dir_all(".exo/worktrees/dev-0/.exo")
+            .await
+            .unwrap();
+        tokio::fs::write(
+            ".exo/worktrees/dev-0/.exo/receipts-submitted.json",
+            b"{\"commit_tested\":\"abc\"}".as_slice(),
+        )
+        .await
+        .unwrap();
+
+        copy_full_receipts_if_present(&runtime, &child, &branch, Some(ChildKind::Worktree)).await;
+
+        let copied = tokio::fs::read(".exo/receipts/root.dev-0.json")
+            .await
+            .expect("target should have been written");
+        assert_eq!(copied, b"{\"commit_tested\":\"abc\"}");
+    }
+
+    #[tokio::test]
+    async fn copy_full_receipts_is_noop_when_source_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd = CwdGuard::enter(dir.path());
+        let runtime = test_runtime(dir.path());
+        let child = AgentName::new("dev-0".into()).unwrap();
+        let branch = Branch::new("root.dev-0".into()).unwrap();
+
+        // No source file written at all — must be a quiet no-op, no panic, no target file.
+        copy_full_receipts_if_present(&runtime, &child, &branch, Some(ChildKind::Worktree)).await;
+
+        assert!(
+            tokio::fs::metadata(".exo/receipts/root.dev-0.json")
+                .await
+                .is_err(),
+            "must not create a target file when the source is missing"
+        );
+    }
+
+    #[tokio::test]
+    async fn copy_full_receipts_skips_inline_children() {
+        let dir = tempfile::tempdir().unwrap();
+        let _cwd = CwdGuard::enter(dir.path());
+        let runtime = test_runtime(dir.path());
+        let child = AgentName::new("worker-0".into()).unwrap();
+        let branch = Branch::new("root.worker-0".into()).unwrap();
+
+        // Even if a same-named worktree receipts file exists on disk, an Inline child must never
+        // be read from — it shares the parent's own directory, so there is nothing there of its own.
+        tokio::fs::create_dir_all(".exo/worktrees/worker-0/.exo")
+            .await
+            .unwrap();
+        tokio::fs::write(
+            ".exo/worktrees/worker-0/.exo/receipts-submitted.json",
+            b"{}".as_slice(),
+        )
+        .await
+        .unwrap();
+
+        copy_full_receipts_if_present(&runtime, &child, &branch, Some(ChildKind::Inline)).await;
+
+        assert!(
+            tokio::fs::metadata(".exo/receipts/root.worker-0.json")
+                .await
+                .is_err(),
+            "inline children must never be copied from"
+        );
     }
 
     #[test]

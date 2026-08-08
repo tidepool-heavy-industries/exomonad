@@ -495,6 +495,29 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
             None => None,
         };
 
+        // Persist the FULL, untruncated receipts to our own worktree, at submit time, regardless
+        // of which path below is taken — the rendered `[READY]` text only ever carries a truncated
+        // summary, so the parent needs a byte-exact copy to read once it's folded (via its own
+        // sidecar copying these bytes on the `Lifecycle::Submitted` event). Best-effort: a receipts
+        // write failing must never block a submission the agent otherwise did correctly.
+        if let Some(receipts) = &args.receipts {
+            match serde_json::to_vec_pretty(receipts) {
+                Ok(bytes) => {
+                    if let Err(e) = ctx
+                        .write_atomic(std::path::Path::new(".exo/receipts-submitted.json"), &bytes)
+                        .await
+                    {
+                        tracing::warn!(
+                            "failed to persist full receipts to .exo/receipts-submitted.json: {e}"
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("failed to serialize receipts to JSON: {e}");
+                }
+            }
+        }
+
         // Two ways to end up here: the agent explicitly opted out (loud, "dangerous"), or this
         // project simply doesn't have reviewers turned on (quiet, the normal off-by-default case —
         // reviewers aren't a fully-cooked feature yet; see `rust/exo/CLAUDE.md`). Either way the gate
@@ -538,6 +561,13 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
                 }
                 text.push('\n');
                 text.push_str(&receipts_block);
+            }
+            if args.receipts.is_some() {
+                text.push('\n');
+                text.push_str(&format!(
+                    "full receipts: .exo/receipts/{}.json",
+                    crate::review::safe_branch(branch.as_str())
+                ));
             }
             let summary = if args.dangerously_skip_reviewer {
                 format!("[READY skipped] {}", branch.as_str())
@@ -1372,6 +1402,110 @@ mod tests {
             }
             other => panic!("expected Lifecycle::Submitted, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn receipts_present_writes_full_receipts_file() {
+        let mock = MockRuntime::default();
+        let receipts = Receipts {
+            commit_tested: Some("0000000".into()),
+            verify_commands_run: vec!["cargo test -p exo".into()],
+            metrics: vec![],
+            deviations: vec!["used an enum for TransferProof".into()],
+        };
+        submit_and_capture_ready(&mock, Some(receipts.clone())).await;
+
+        let calls = mock.calls_made();
+        assert!(
+            calls.iter().any(
+                |c| matches!(c, Call::FsWrite { path } if path == ".exo/receipts-submitted.json")
+            ),
+            "should write the full receipts to .exo/receipts-submitted.json: {calls:?}"
+        );
+        let written = mock
+            .files
+            .lock()
+            .unwrap()
+            .get(".exo/receipts-submitted.json")
+            .cloned()
+            .expect("receipts file should be written");
+        let parsed: Receipts = serde_json::from_slice(&written).unwrap();
+        assert_eq!(
+            serde_json::to_value(&parsed).unwrap(),
+            serde_json::to_value(&receipts).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn receipts_present_writes_full_receipts_file_on_reviewer_path() {
+        // The write must happen at submit time REGARDLESS of which path is taken afterward — the
+        // reviewer-spawn path doesn't render receipts into a message at all today, so without this
+        // the file would never land for a reviewed submission.
+        let mock = mock_with_reviews_enabled();
+        let receipts = Receipts {
+            commit_tested: Some("0000000".into()),
+            ..Default::default()
+        };
+        SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "did the thing".into(),
+                receipts: Some(receipts),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let calls = mock.calls_made();
+        assert!(
+            calls.iter().any(
+                |c| matches!(c, Call::FsWrite { path } if path == ".exo/receipts-submitted.json")
+            ),
+            "should write the full receipts even on the reviewer-spawn path: {calls:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn receipts_absent_does_not_write_receipts_file() {
+        let mock = MockRuntime::default();
+        submit_and_capture_ready(&mock, None).await;
+
+        let calls = mock.calls_made();
+        assert!(
+            !calls.iter().any(
+                |c| matches!(c, Call::FsWrite { path } if path == ".exo/receipts-submitted.json")
+            ),
+            "must not write a receipts file when no receipts were passed: {calls:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ready_text_names_parent_side_receipts_path_when_receipts_present() {
+        let mock = MockRuntime::default(); // branch = dev.policy-claude
+        let receipts = Receipts {
+            commit_tested: Some("0000000".into()),
+            ..Default::default()
+        };
+        let msg = submit_and_capture_ready(&mock, Some(receipts)).await;
+        assert!(
+            msg.text
+                .as_str()
+                .contains("full receipts: .exo/receipts/dev.policy-claude.json"),
+            "{}",
+            msg.text.as_str()
+        );
+    }
+
+    #[tokio::test]
+    async fn ready_text_omits_receipts_path_when_receipts_absent() {
+        let mock = MockRuntime::default();
+        let msg = submit_and_capture_ready(&mock, None).await;
+        assert!(
+            !msg.text.as_str().contains("full receipts:"),
+            "{}",
+            msg.text.as_str()
+        );
     }
 
     #[tokio::test]
