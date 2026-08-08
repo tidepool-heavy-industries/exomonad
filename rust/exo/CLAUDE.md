@@ -123,9 +123,10 @@ one model, so overriding it would 404.
 
 `exo doctor` is a health-check and cleanup tool for node-mode workspaces. It audits the `.exo/worktrees/` directory and identifies stale (merged) worktrees.
 
-- **Dry-run (default)**: `exo doctor` reports merged and unmerged worktrees but removes nothing.
+- **Dry-run (default)**: `exo doctor` reports merged and unmerged worktrees (and what the acknowledge pass WOULD do) but changes nothing.
 - **Reclaim**: `exo doctor --fix` reclaims merged worktrees and deletes their associated branches.
 - **Force**: `exo doctor --fix --include-unmerged` reclaims even unmerged worktrees (dangerous).
+- **Acknowledge (part of `--fix`)**: doctor is the acknowledgment path for `Died` tombstones — it records `Reaped` for every child it reclaims AND for every `Died` child with no worktree left on disk (nothing to reclaim ⇒ fold to routine history). The ledger fold's later-record-wins rule makes `Died → Reaped` the designed transition; afterwards the default `tree` view hides them (visible under `all: true`).
 
 Worktrees are considered reclaimable if their HEAD is an ancestor of the current branch's HEAD. The current worktree (repo root) is never removed.
 
