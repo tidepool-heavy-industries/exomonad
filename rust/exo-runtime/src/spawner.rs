@@ -392,7 +392,11 @@ impl Runtime {
 
     /// Record `Reaped` for `child` if the ledger still shows it non-terminal. Called by the
     /// runtime's own teardown paths (`kill_pane` after a successful kill, `reclaim_worktree` after
-    /// a successful reclaim) — never by a tool. Re-folding and checking [`ChildState::is_terminal`]
+    /// a successful reclaim) — never by a tool. Also callable from `exo doctor --fix`, a
+    /// foreground CLI holding a `Runtime` directly (not policy behind the cap seam): after its own
+    /// direct `reclaim_worktree_tree` call, and in its acknowledgment pass for a `Died` child whose
+    /// worktree directory is already gone. Those are the only two callers outside this crate's own
+    /// teardown paths. Re-folding and checking [`ChildState::is_terminal`]
     /// first is what makes the normal kill-then-reclaim sequence append exactly one `Reaped` record
     /// (the second call finds the child already terminal and does nothing).
     ///

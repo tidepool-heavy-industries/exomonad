@@ -8,7 +8,9 @@
 //! *which* worktrees are reclaimable and reports outcomes.
 
 use anyhow::{Context, Result};
-use exo_caps::{AgentName, Branch, ChildKind, NodePath, PaneId};
+use exo_caps::{
+    fold_children, AgentName, Branch, ChildKind, ChildRecord, ChildState, NodePath, PaneId,
+};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -65,6 +67,9 @@ fn short_sha(sha: &str) -> &str {
 pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
     let root_path = get_project_root()?;
     let (base_branch, base_head) = get_base_info()?;
+    // Built once, used by both the --fix reclaim loop and the (dry-run-safe) acknowledgment pass
+    // below — construction is a pure struct literal, no IO (see `doctor_runtime`'s doc comment).
+    let rt = doctor_runtime(&root_path);
 
     println!(
         "Auditing .exo/worktrees/ against base branch '{}' ({})",
@@ -119,6 +124,45 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
         println!("{} unmerged worktrees detected (skipped).", unmerged_count);
     }
 
+    // Acknowledgment pass: a `Died` child with no worktree directory left on disk has nothing
+    // left to reclaim — recording `Reaped` for it IS the acknowledgment (the ledger fold
+    // self-heals `Died` -> `Reaped`, the same transition an ordinary reclaim already produces).
+    // Runs in BOTH dry-run and --fix, so a plain `exo doctor` previews what --fix would do;
+    // dry-run records nothing. Only reaches the root's own ledger (see `read_root_child_records`).
+    let root_children = fold_children(&read_root_child_records(&root_path));
+    let worktrees_root = root_path.join(".exo/worktrees");
+    let mut acknowledged_count = 0;
+    for (name, child) in &root_children {
+        let worktree_exists = worktrees_root.join(name.as_str()).exists();
+        if !should_acknowledge(&child.state, worktree_exists) {
+            continue;
+        }
+        acknowledged_count += 1;
+        if fix {
+            rt.record_reaped_if_active(name).await;
+            println!(
+                "  Acknowledged dead child with no worktree left: {}",
+                name.as_str()
+            );
+        } else {
+            println!(
+                "  Would acknowledge dead child with no worktree left: {}",
+                name.as_str()
+            );
+        }
+    }
+    if acknowledged_count > 0 {
+        println!(
+            "{} dead children with no worktree left {}.",
+            acknowledged_count,
+            if fix {
+                "acknowledged"
+            } else {
+                "would be acknowledged"
+            }
+        );
+    }
+
     if !fix {
         if reclaimed_count > 0 {
             println!("\nRun 'exo doctor --fix' to reclaim merged worktrees.");
@@ -135,8 +179,8 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
     // all) before any of its nested children are considered.
     worktrees.sort_by_key(|wt| wt.path.components().count());
 
-    let rt = doctor_runtime(&root_path);
     let mut reclaimed_paths: Vec<PathBuf> = vec![];
+    let mut reclaimed_reaped_count = 0;
 
     for wt in &worktrees {
         let should_remove = match wt.status {
@@ -177,7 +221,15 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
             .to_string();
         match AgentName::new(name) {
             Ok(agent_name) => match rt.reclaim_worktree_tree(&agent_name, &wt.path).await {
-                Ok(()) => reclaimed_paths.push(wt.path.clone()),
+                Ok(()) => {
+                    reclaimed_paths.push(wt.path.clone());
+                    // Mirrors `Spawner::reclaim_worktree`, which makes this same call on the
+                    // normal merge-time path — a doctor-driven reclaim leaves the ledger in the
+                    // same state an ordinary reclaim would (fold self-heals Died -> Reaped, or
+                    // a never-tombstoned Live child is marked Reaped for the first time).
+                    rt.record_reaped_if_active(&agent_name).await;
+                    reclaimed_reaped_count += 1;
+                }
                 Err(e) => eprintln!(
                     "    FAILED to remove worktree at {}: {e}",
                     wt.path.display()
@@ -188,6 +240,13 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
                 wt.path.display()
             ),
         }
+    }
+
+    if reclaimed_reaped_count > 0 {
+        println!(
+            "{} reclaimed worktrees recorded as Reaped.",
+            reclaimed_reaped_count
+        );
     }
 
     // Branch cleanup for everything actually reclaimed above (root or swallowed-nested).
@@ -324,6 +383,45 @@ fn list_worktrees() -> Result<Vec<WorktreeInfo>> {
     Ok(worktrees)
 }
 
+/// Read + tolerantly parse the project root's own child ledger (`.exo/children.jsonl`) directly
+/// off disk. Doctor has no `Fs` cap and `exo_runtime::Runtime::read_child_records` is crate-private
+/// (ledger reads are not part of the tool-facing cap surface), so this reads the plain file itself
+/// — mirroring `exo_runtime`'s own tolerant-parse discipline (a malformed line is skipped and
+/// logged, never fatal to the rest of the ledger). A missing ledger means no children yet.
+fn read_root_child_records(root_path: &Path) -> Vec<ChildRecord> {
+    let path = root_path.join(".exo/children.jsonl");
+    let data = match std::fs::read(&path) {
+        Ok(d) => d,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(e) => {
+            eprintln!("    FAILED to read {}: {e}", path.display());
+            return Vec::new();
+        }
+    };
+    let mut records = Vec::new();
+    for line in data.split(|&b| b == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        match serde_json::from_slice::<ChildRecord>(line) {
+            Ok(r) => records.push(r),
+            Err(e) => eprintln!(
+                "    skipping malformed children.jsonl line at {}: {e}",
+                path.display()
+            ),
+        }
+    }
+    records
+}
+
+/// Pure decision for the acknowledgment pass: a `Died` child with no worktree directory left on
+/// disk has nothing left to reclaim — recording `Reaped` for it IS the acknowledgment (the ledger
+/// fold self-heals `Died` -> `Reaped`). A `Died` child whose worktree still exists is left alone
+/// here — it's only acknowledged via an actual reclaim, above.
+fn should_acknowledge(state: &ChildState, worktree_exists: bool) -> bool {
+    matches!(state, ChildState::Died) && !worktree_exists
+}
+
 fn check_is_ancestor(head: &str, base: &str) -> Result<bool> {
     let status = Command::new("git")
         .args(["merge-base", "--is-ancestor", head, base])
@@ -382,5 +480,64 @@ mod tests {
         assert_eq!(classify(wt_root, root, true), WorktreeStatus::Current);
         assert_eq!(classify(wt_merged, root, true), WorktreeStatus::Merged);
         assert_eq!(classify(wt_unmerged, root, false), WorktreeStatus::Unmerged);
+    }
+
+    #[test]
+    fn should_acknowledge_dead_with_no_worktree() {
+        assert!(should_acknowledge(&ChildState::Died, false));
+    }
+
+    #[test]
+    fn should_not_acknowledge_dead_with_worktree_present() {
+        // Still reclaimable via the normal worktree-removal path — not doctor's acknowledgment
+        // pass, which only fires once there is nothing left to reclaim.
+        assert!(!should_acknowledge(&ChildState::Died, true));
+    }
+
+    #[test]
+    fn should_not_acknowledge_live_or_already_terminal() {
+        assert!(!should_acknowledge(&ChildState::Live, false));
+        assert!(!should_acknowledge(&ChildState::Reaped, false));
+        assert!(!should_acknowledge(
+            &ChildState::Submitted {
+                sha: "deadbeef".into(),
+                reviewed: false
+            },
+            false
+        ));
+    }
+
+    #[test]
+    fn read_root_child_records_missing_ledger_is_empty() {
+        let dir = std::env::temp_dir().join(format!(
+            "exo-doctor-test-missing-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        assert!(read_root_child_records(&dir).is_empty());
+    }
+
+    #[test]
+    fn read_root_child_records_parses_and_skips_malformed_lines() {
+        let dir = std::env::temp_dir().join(format!(
+            "exo-doctor-test-parse-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(dir.join(".exo")).unwrap();
+        let record = ChildRecord::Died {
+            child: AgentName::new("leaf-1".into()).unwrap(),
+            pane: PaneId::new("%9".into()).unwrap(),
+            at: None,
+        };
+        let mut contents = serde_json::to_string(&record).unwrap();
+        contents.push('\n');
+        contents.push_str("not valid json\n");
+        std::fs::write(dir.join(".exo/children.jsonl"), contents).unwrap();
+
+        let records = read_root_child_records(&dir);
+        assert_eq!(records, vec![record]);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
