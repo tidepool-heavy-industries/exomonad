@@ -109,7 +109,14 @@ fn test_verdict_args_roundtrip() {
 }
 
 #[test]
+fn test_tree_args_defaults_to_all_false_from_empty_object() {
+    let args: TreeArgs = serde_json::from_str("{}").unwrap();
+    assert!(!args.all);
+}
+
+#[test]
 fn test_tree_args_roundtrip() {
-    let args = TreeArgs {};
-    let _back = assert_roundtrip(&args);
+    let args = TreeArgs { all: true };
+    let back = assert_roundtrip(&args);
+    assert_eq!(args.all, back.all);
 }

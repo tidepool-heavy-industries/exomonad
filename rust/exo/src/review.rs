@@ -9,12 +9,13 @@
 //! the engine to perform (the engine owns `kill_pane`/`reclaim_worktree`).
 
 use exo_caps::{
-    deliver_domain, Addressee, Branch, Bus, CapResult, Kv, Message, MessageBody, MessageKind,
-    Persona, Summary,
+    deliver_domain, Addressee, Branch, Bus, CapResult, Kv, Lifecycle, Message, MessageBody,
+    MessageKind, Persona, Summary,
 };
 use exo_framework::{SystemCtx, SystemOutcome};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// The severity of a review finding.
@@ -116,6 +117,15 @@ pub fn safe_branch(branch: &str) -> String {
         .join(".")
 }
 
+/// Where a branch's [`ReviewLog`] lives: `.exo/reviews/{safe_branch(branch)}.json`.
+///
+/// **Relative to the node's own worktree root.** The sidecar's cwd IS the worktree — that's the
+/// crate-wide anchor for every `.exo/` path in this crate. A foreground caller running from a
+/// different cwd (e.g. `exo doctor`) must NOT use this helper.
+pub fn review_log_path(branch: &str) -> PathBuf {
+    PathBuf::from(format!(".exo/reviews/{}.json", safe_branch(branch)))
+}
+
 /// Apply a review verdict (the relocated `apply_verdict`). Escalates `[READY]` to the parent on a
 /// matching approval (no blocking findings); wakes this node's LLM on blocked/aborted reviews.
 /// Always asks the engine to reclaim the one-shot reviewer (the sender) afterward — a reviewer is
@@ -176,7 +186,11 @@ pub async fn handle_review_system<C: SystemCtx + ?Sized>(
                 let msg = Message {
                     text: MessageBody::new(text)?,
                     summary: Summary::new(msg_summary)?,
-                    kind: MessageKind::Chat,
+                    kind: MessageKind::Lifecycle(Lifecycle::Submitted {
+                        branch: my_branch.clone(),
+                        sha: sha.clone(),
+                        reviewed: true,
+                    }),
                     reply_to: None,
                 };
                 ctx.deliver_parent(msg).await?;
@@ -192,8 +206,7 @@ pub async fn handle_review_system<C: SystemCtx + ?Sized>(
             }
 
             // BEST-EFFORT: Persist the review round to the durable log.
-            let safe = safe_branch(my_branch.as_str());
-            let path = std::path::PathBuf::from(format!(".exo/reviews/{safe}.json"));
+            let path = review_log_path(my_branch.as_str());
 
             let mut log = match ctx.read_file(&path).await {
                 Ok(Some(bytes)) => {
@@ -380,6 +393,10 @@ mod tests {
         branch: Branch,
         head: String,
         parent: Mutex<Vec<String>>,
+        /// The full delivered `Message` (kind + payload), for asserting the typed lifecycle
+        /// shape — `parent` above stays summary-only so the existing string assertions keep
+        /// working unchanged.
+        parent_messages: Mutex<Vec<Message>>,
         to_self: Mutex<Vec<String>>,
         persisted: Mutex<Vec<(std::path::PathBuf, Vec<u8>)>>,
     }
@@ -397,6 +414,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(msg.summary.as_str().to_string());
+            self.parent_messages.lock().unwrap().push(msg);
             Ok(())
         }
         async fn deliver_to_self(&self, _from: &str, summary: &str, _text: &str) -> CapResult<()> {
@@ -426,6 +444,7 @@ mod tests {
             branch: Branch::new(branch.into()).unwrap(),
             head: head.into(),
             parent: Mutex::new(vec![]),
+            parent_messages: Mutex::new(vec![]),
             to_self: Mutex::new(vec![]),
             persisted: Mutex::new(vec![]),
         }
@@ -458,6 +477,32 @@ mod tests {
             .unwrap()
             .iter()
             .any(|s| s.contains("[READY]")));
+    }
+
+    #[tokio::test]
+    async fn approval_delivers_typed_lifecycle_submitted_reviewed_true() {
+        let ctx = mock("root.dev-0", "abc");
+        let sys = ReviewSystem::Reviewed {
+            branch: Branch::new("root.dev-0".into()).unwrap(),
+            sha: "abc".into(),
+            summary: "looks good".into(),
+            findings: vec![],
+        };
+        handle_review_system(&ctx, &from(), &sys).await.unwrap();
+        let messages = ctx.parent_messages.lock().unwrap();
+        assert_eq!(messages.len(), 1);
+        match &messages[0].kind {
+            MessageKind::Lifecycle(Lifecycle::Submitted {
+                branch,
+                sha,
+                reviewed,
+            }) => {
+                assert_eq!(branch.as_str(), "root.dev-0");
+                assert_eq!(sha, "abc");
+                assert!(*reviewed);
+            }
+            other => panic!("expected Lifecycle::Submitted, got {other:?}"),
+        }
     }
 
     #[tokio::test]

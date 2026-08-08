@@ -12,8 +12,8 @@ use crate::branching::{child_name, parent_branch};
 use crate::roles::ExoRole;
 use crate::spawn::ExoSpawn;
 use exo_caps::{
-    Addressee, Bus, CapError, CapResult, ChildKind, Fs, Git, Kv, Message, MessageBody, MessageKind,
-    NodePapers, Process, Spawner, Summary,
+    Addressee, Bus, CapError, CapResult, ChildKind, Fs, Git, Kv, Lifecycle, Message, MessageBody,
+    MessageKind, NodePapers, Process, Spawner, Summary,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -334,7 +334,11 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
             let msg = Message {
                 text: MessageBody::new(text)?,
                 summary: Summary::new(summary)?,
-                kind: MessageKind::Chat,
+                kind: MessageKind::Lifecycle(Lifecycle::Submitted {
+                    branch: branch.clone(),
+                    sha: sha.clone(),
+                    reviewed: false,
+                }),
                 reply_to: None,
             };
             ctx.deliver(Addressee::Parent, msg).await?;
@@ -381,8 +385,7 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
         };
 
         // BEST-EFFORT: Read prior review rounds for continuity.
-        let safe = crate::review::safe_branch(branch.as_str());
-        let review_log_path = std::path::PathBuf::from(format!(".exo/reviews/{safe}.json"));
+        let review_log_path = crate::review::review_log_path(branch.as_str());
         let mut prior_round_context = String::new();
         if let Ok(bytes) = ctx.read(&review_log_path).await {
             if let Ok(log) = serde_json::from_slice::<crate::review::ReviewLog>(&bytes) {
@@ -546,6 +549,46 @@ mod tests {
             .any(|c| matches!(c, Call::BusDeliver { to, msg }
             if *to == exo_caps::Addressee::Parent
                 && msg.summary.as_str().contains("[READY skipped]"))));
+    }
+
+    #[tokio::test]
+    async fn skip_reviewer_delivers_typed_lifecycle_submitted() {
+        let mock = MockRuntime::default();
+        SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "trivial typo fix".into(),
+                dangerously_skip_reviewer: true,
+            },
+        )
+        .await
+        .unwrap();
+
+        let calls = mock.calls_made();
+        let msg = calls
+            .iter()
+            .find_map(|c| match c {
+                Call::BusDeliver {
+                    to: exo_caps::Addressee::Parent,
+                    msg,
+                } => Some(msg),
+                _ => None,
+            })
+            .expect("should forward [READY] to parent");
+        match &msg.kind {
+            exo_caps::MessageKind::Lifecycle(exo_caps::Lifecycle::Submitted {
+                branch,
+                sha,
+                reviewed,
+            }) => {
+                assert_eq!(branch.as_str(), "dev.policy-claude");
+                assert_eq!(sha, &mock.head_sha);
+                assert!(!reviewed);
+            }
+            other => panic!("expected Lifecycle::Submitted, got {other:?}"),
+        }
+        // Prose is unchanged — same wording as before the typed kind was introduced.
+        assert!(msg.summary.as_str().contains("[READY skipped]"));
     }
 
     #[tokio::test]
