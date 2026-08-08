@@ -15,8 +15,8 @@ Assembles `exo-runtime` (all caps) + a domain `D: Exomonad` (the domain's tools/
 | `outbound` (N1) | serve | Serve `role_def(kind).tools` as MCP over stdio (`tools/list` emits each tool's `name`/`description`/`inputSchema`, so the toolset is self-documenting). **Owns stdin/stdout → the node's lifetime anchor** (when it closes, the node ends). |
 | `inbound` (N2b) | watch | Watch the node's own ingestion inbox (byte-offset cursor + `notify` watch), route each new entry. |
 | `hooksock` (N5) | serve | Per-agent UDS hook-RPC channel — runs the role hook fn on the live runtime and shapes the verdict as the Claude hook-output JSON (`{"continue":true}` / `{"decision":"block",...}`). Only `pre_tool_use` and `session_start` route here now (`Stop` was removed — see Gaps history / `rust/exo/CLAUDE.md`). |
-| `watchdog` | watch | Periodic wall-clock self-check (fixed interval, tracks elapsed time since this loop started ≈ node boot). Calls `D::handle_tick(caps, role, elapsed)` (a domain's abandonment-timeout logic — e.g. the reviewer's `handle_review_tick`) and unconditionally re-checks `try_reap` every tick. Replaces the old `Stop`-triggered reap check: `Stop` fires on every turn-end including a legitimate async-wait yield, so it couldn't tell "done" from "paused"; a wall-clock interval can. |
-| `dispatch` (N2a) | — | The **last hop**: deliver one entry into the agent's pane via tmux-paste (buffer pattern), rendered with a `[from: X, kind: Y]` header. |
+| `watchdog` | watch | Periodic wall-clock self-check (fixed interval, tracks elapsed time since this loop started ≈ node boot). Each tick, in order: `D::handle_tick(caps, role, elapsed)` (a domain's abandonment-timeout logic — e.g. the reviewer's `handle_review_tick`), then the **child death scan** (`Runtime::detect_child_deaths` → a `[CHILD DIED: name]` note pasted into this node's own pane; see below), then an unconditional `try_reap` re-check. Replaces the old `Stop`-triggered reap check: `Stop` fires on every turn-end including a legitimate async-wait yield, so it couldn't tell "done" from "paused"; a wall-clock interval can. |
+| `dispatch` (N2a) | — | The **last hop**: deliver one entry into the agent's pane via tmux-paste (buffer pattern), rendered with a `[from: X, kind: Y, id: Z]` header (`, re: W` appended when the message carries a `reply_to`). The short single-line *preview* paste stays id-free — it's a preview, not the full render. |
 | `hook` (N4) | one-shot | `exo hook <event>` → bootstrap from papers → run the role's `pre_tool_use`/`session_start` → print the verdict. No server. On SessionStart it appends the node identity to the `additionalContext`; the role protocol is delivered via the launch-time `--append-system-prompt` instead. |
 | `bootstrap` | — | Self-ID: read `--papers` → `NodePapers`, enrich with ambient env (`$TMUX_PANE`, `EXOMONAD_SWARM_RUN_ID`, `EXOMONAD_TMUX_SESSION`, `$HOME`), build `NodeContext<D> { runtime, kind, own_inbox, parent_inbox, ... }`. Arms `PR_SET_PDEATHSIG` (Linux) as its first act so the sidecar self-terminates if its parent `claude` process dies — stdin-EOF alone is not a reliable lifetime anchor. |
 | `error` | — | `NodeError`. |
@@ -41,8 +41,38 @@ The sidecar initializes a persistent file subscriber at startup (in the binary c
   - *cooperative (`force=false`)* — **leaf**: deliver a "wrap up now" note to the agent, mark `shutdown_pending`, and reap once the watchdog loop's next tick finds the subtree clear (`try_reap`, re-checked unconditionally every tick — no longer triggered by the `Stop` hook, which was removed); **has live children**: bounce a `[shutdown deferred] you have N live children — re-send force:true` message back to the requester (the parent) and do nothing else (the "are you sure").
   - *forced (`force=true`)* — **leaf**: reap now (grace backstop); **has live children**: the sidecar cascades `Shutdown{force:true}` to every live child and reaps itself once they've all exited. Control-plane teardown — note it hard-kills the subtree (uncommitted work in a busy descendant is lost); revisit if that bites in dogfooding.
   - The actual self-reap (`try_reap`) only fires when `shutdown_pending` AND the subtree is clear — **pane-liveness (`Topology`) is the sole authority** for "children gone"; there is no separate exited-set. Before killing its own pane it sends an **advisory** `Lifecycle::Exiting` poke up (receipt does not prove the pane is dead); the parent's `handle_lifecycle(Exiting)` re-runs *its* `try_reap` immediately and once more after a 5s detached delay, so a forced teardown drains bottom-up without racing the child's own pane-kill. The watchdog tick is the unconditional backstop either way.
-- **`Lifecycle(Lifecycle)`** → `handle_lifecycle` (engine-owned, sidecar-consumed). `Exiting` / `ShutdownResponse` drive the reap / shutdown-render paths; a child is **never** torn down just for finishing a turn. (There used to be a third variant, `ChildIdle`, sent whenever a child's `Stop` hook fired — it flipped a busy-bit `ChildLiveness` read. Removed along with `Stop` itself: `Stop` fires on every turn-end including a legitimate async-wait yield, so the bit was routinely wrong. `ChildLiveness` now reads pane-existence directly instead.)
+- **`Lifecycle(Lifecycle)`** → `handle_lifecycle` (engine-owned, sidecar-consumed; it takes the whole entry, not just its `from`, because an arm that both records a fact *and* re-shows the message needs the original envelope). `Exiting` / `ShutdownResponse` drive the reap / shutdown-render paths; a child is **never** torn down just for finishing a turn. **`Submitted`** (a child reporting `branch@sha` awaiting this node's merge) appends a `ChildRecord::Submitted` to this node's own ledger **and then still re-dispatches the child's `[READY]` prose as chat** — recording never replaces showing: the ledger is for the machine (it outlives a context window), the pasted prose is what actually makes the agent act. Guards: the sender must be a `Persona::Agent` **and** one of this node's own direct children (checked against `Topology`'s children, deliberately *not* `resolve_edge`, which now returns `None` for a tombstone — a tombstoned child's submission is still a real fact worth recording); anything else is warned about and rendered only, never granted an invented ledger row. An append failure **returns `Err`** so the cursor stays unadvanced and the entry is retried — a retried `Submitted` folds to the same `ChildState`, so the duplicate is harmless while a lost submission is not. (There used to be a third variant, `ChildIdle`, sent whenever a child's `Stop` hook fired — it flipped a busy-bit `ChildLiveness` read. Removed along with `Stop` itself: `Stop` fires on every turn-end including a legitimate async-wait yield, so the bit was routinely wrong. `ChildLiveness` now reads pane-existence directly instead.)
 - **`Domain(DomainPayload)`** → `handle_domain` (domain-opaque, sidecar-consumed, never shown to the LLM unless the domain decides to act). The **one place** the erased wire payload is deserialized to the concrete `D::System` and handed to `D::handle_system` — for the `exo` domain that's `ReviewSystem` (decision derived from structured findings; the round is **best-effort RMW-appended to `.exo/reviews/{safe-branch}.json`** via the generic `read_file`/`write_file` `SystemCtx` methods). The engine then acts on the returned `SystemOutcome`: `ReclaimSender` tears the sender down (`kill_pane` + `reclaim_worktree` — how a one-shot reviewer dies; teardown is **verdict-only**). An undeserializable payload is logged + skipped (tolerant, like a malformed bus line).
+
+## Child death is announced, not just detected
+
+A child's pane can die without anyone deciding it should — a crash, an OOM, a closed window, a
+provider cutting it off. Nothing in the tree reports that on its own, so a parent would idle forever
+waiting for a `[READY]` that will never arrive, while the dead child's branch may hold real committed
+work and its worktree uncommitted work.
+
+The watchdog closes that: every tick it calls `Runtime::detect_child_deaths()`, which appends a
+`ChildRecord::Died` per newly-dead un-reaped child (see `exo-runtime/CLAUDE.md`) and hands them back,
+and the sidecar pastes a `[CHILD DIED: {name}]` synthetic note into its own agent's pane naming the
+dead pane and telling the TL to run `tree`, then merge what the branch holds or respawn the work.
+
+The order is **record-then-announce**: the `Died` record is durable *before* the note is attempted, so
+a paste failure is a `warn!` and the tick continues — the fact is not lost, and the announcement is
+not retried into a duplicate. Re-announcement is prevented structurally, not by a bookkeeping set: a
+child recorded `Died` folds to a terminal state and is excluded from every later scan.
+
+## Message ids: reference-only, never dedup
+
+Every bus-delivered entry carries a UUID `id` (stamped by `Bus::deliver`; the two entries this crate
+*authors* — `deliver_synthetic` and `render_shutdown_response` — mint their own, while the `Submitted`
+re-dispatch **preserves** the incoming id, since it is the same message shown a second way). The
+header renders it so an agent and a log can name a specific message, and `Message::reply_to` points at
+one.
+
+**Nothing anywhere deduplicates on an id, and nothing may start.** The inbound cursor advances only
+*after* a successful last-hop delivery — that is what makes delivery at-least-once — so a redelivered
+line arrives with its **original** id. An "already seen this id" check would silently swallow exactly
+the retry the protocol exists to guarantee. The comment at the cursor-advance site says so.
 
 ## Delivery: tmux-paste (exo owns its channel)
 

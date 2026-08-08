@@ -56,7 +56,7 @@ contract ([`exo-framework`](../exo-framework/CLAUDE.md)); this crate provides th
 | `verdict` | `Bus`+`Kv` | reviewer | A reviewer's one output → a `System(Reviewed)` message to its parent: `summary` + structured `findings` {`file`, `line`, `severity`, `body`, `suggestion`?}. Triggers reviewer teardown (handled in `exo-node`). |
 | `notify_parent` | `Bus` | tl, dev, worker, reviewer | Status/failure update to `Addressee::Parent` (NOT the done-signal). |
 | `send_message` | `Bus` | root, tl | Deliver to a child by name (`to: <child>`) — **tree-edges only**; inline vs worktree is transparent. |
-| `tree` | `Topology`+`Fs` | root, tl | Read-only: the caller's subtree (recursive ledger fold) + parent + per-node `pane_alive` liveness, plus a `(label)` for any launch-profiled node (e.g. a Kimi reviewer). |
+| `tree` | `Topology`+`Fs` | root, tl | Read-only: the caller's subtree (recursive ledger fold) + parent + per-node liveness, effective `model`, and a `(label)` for any launch-profiled node (e.g. a Kimi reviewer). **Compact by default:** shows Live + Submitted + Died and hides routine `Reaped` tombstones behind a `(k reaped hidden — pass all:true)` count; `{"all": true}` shows everything. A Submitted node renders `submitted @ <sha8>, awaiting merge` (the pending-merge queue) and keeps its liveness bracket — it's still running. A **tombstoned** node gets no `[alive]`/`[dead]` bracket, no busy bit, and no status-file lookup at all: those are pane-keyed and tmux recycles pane ids, so for a corpse the honest answer is to show nothing rather than a possibly-wrong something. |
 
 ## exo doctor
 
@@ -148,6 +148,12 @@ appends any unresolved Error findings from the prior round to the reviewer's tas
 The reviewer calls `verdict`, which rides the bus as a `System` message to the submitter's
 **sidecar**:
 - **Reviewed** (no Error-severity findings) & sha==HEAD → the sidecar escalates `[READY]` to the parent — *no LLM turn*.
+
+Both `[READY]` deliveries — this approve-escalation and `submit_branch`'s skip/no-review path — ride
+as a **typed `Lifecycle::Submitted { branch, sha, reviewed }`** (`reviewed: true` here, `false` on the
+skip path) rather than a plain `Chat`. The prose body is unchanged; the type is what lets the parent's
+sidecar append a durable `ChildRecord::Submitted` to its own ledger before re-showing that prose, so
+the pending-merge queue survives the parent's context window instead of living only in its scrollback.
 - **Reviewed** (with Error-severity findings) → findings are rendered and delivered into the submitter's LLM to address, then re-submit (new sha → fresh reviewer). **The verdict handler persists the round to the log.**
 - **Aborted** (the reviewer never produced a verdict — see `handle_review_tick` below) → the
   submitter is told explicitly NOT to spawn another reviewer (a second one is likely to hit the same
