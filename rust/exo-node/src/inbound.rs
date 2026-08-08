@@ -36,9 +36,9 @@ use tracing::{error, info, warn};
 use chrono::Utc;
 use exo_caps::types::ShutdownStatus;
 use exo_caps::{
-    Addressee, AgentName, Branch, CapResult, ChildLiveness, ControlKind, DomainPayload,
-    IngestionEntry, Lifecycle, Message, MessageBody, MessageKind, Persona, Summary, Tmux, Topology,
-    TreeNode,
+    Addressee, AgentName, Branch, CapResult, ChildLiveness, ChildRecord, ControlKind,
+    DomainPayload, IngestionEntry, Lifecycle, Message, MessageBody, MessageKind, Persona, Summary,
+    Tmux, Topology, TreeNode,
 };
 use exo_framework::{Exomonad, SystemCtx, SystemOutcome};
 
@@ -300,17 +300,61 @@ impl<D: Exomonad> RealHandler<D> {
                 });
                 Ok(())
             }
-            // A child reports `branch@sha` awaiting our merge. The durable half — appending a
-            // `ChildRecord::Submitted` to our own ledger so the pending-merge queue survives a
-            // context window — is not wired yet; until it is, the message is rendered to our LLM
-            // exactly as the `[READY]` prose it carries, so no submission is ever lost.
-            Lifecycle::Submitted { branch, sha, .. } => {
-                warn!(
-                    outcome = "submitted_render_only",
-                    branch = %branch.as_str(),
-                    sha = %sha,
-                    "Lifecycle::Submitted is rendered but not yet recorded to the children ledger"
-                );
+            // A child reports `branch@sha` awaiting our merge. Record-then-show: append a
+            // `ChildRecord::Submitted` to our own ledger (so the pending-merge queue survives a
+            // context window), THEN still render the `[READY]` prose to our LLM exactly as
+            // before — recording never replaces showing. Only a report from one of THIS node's
+            // own direct children is ever recorded; anything else is rendered only.
+            Lifecycle::Submitted {
+                branch,
+                sha,
+                reviewed,
+            } => {
+                match from {
+                    Persona::Agent(child) => {
+                        // Deliberately test `topology()`'s children list, not `Runtime::resolve_edge`:
+                        // `resolve_edge` returns `None` for a tombstoned child, but a tombstoned
+                        // child's submission is still a real fact worth recording. `topology`'s
+                        // children list keeps tombstones.
+                        let is_own_child = match self.ctx.runtime.topology().await {
+                            Ok(view) => view.node.children.iter().any(|c| c.name == *child),
+                            Err(e) => {
+                                warn!(
+                                    outcome = "submitted_render_only",
+                                    child = child.as_str(),
+                                    "Lifecycle::Submitted: topology read failed ({e}); rendering only, no ledger row"
+                                );
+                                false
+                            }
+                        };
+                        if should_record_submission(from, is_own_child) {
+                            self.ctx
+                                .runtime
+                                .append_child_record(&ChildRecord::Submitted {
+                                    child: child.clone(),
+                                    branch: branch.clone(),
+                                    sha: sha.clone(),
+                                    reviewed: *reviewed,
+                                    at: Some(Utc::now()),
+                                })
+                                .await
+                                .map_err(|e| std::io::Error::other(e.to_string()))?;
+                        } else {
+                            warn!(
+                                outcome = "submitted_render_only",
+                                child = child.as_str(),
+                                "Lifecycle::Submitted from a name that is not one of my direct children; rendering only, no ledger row"
+                            );
+                        }
+                    }
+                    Persona::Synthetic(name) => {
+                        warn!(
+                            outcome = "submitted_render_only",
+                            from = name.as_str(),
+                            "Lifecycle::Submitted from a non-agent persona; rendering only, no ledger row"
+                        );
+                    }
+                }
                 self.redispatch_as_chat(entry).await
             }
             // A child replied to a shutdown we sent it. Render it to our LLM; never tear it down.
@@ -383,14 +427,7 @@ impl<D: Exomonad> RealHandler<D> {
     /// original envelope (`from`/`ts`/`id`) and prose — the sidecar acted on the typed payload,
     /// and the human-readable body is what the agent still needs to read.
     async fn redispatch_as_chat(&self, entry: &IngestionEntry) -> NodeResult<()> {
-        let as_chat = IngestionEntry {
-            msg: Message {
-                kind: MessageKind::Chat,
-                ..entry.msg.clone()
-            },
-            ..entry.clone()
-        };
-        crate::dispatch::dispatch(&self.ctx, &as_chat).await
+        crate::dispatch::dispatch(&self.ctx, &rewrite_kind_to_chat(entry)).await
     }
 
     /// Render a child's [`ShutdownResponse`](exo_caps::Lifecycle::ShutdownResponse) into THIS
@@ -410,7 +447,7 @@ impl<D: Exomonad> RealHandler<D> {
         let entry = IngestionEntry {
             v: 1,
             ts: Utc::now(),
-            id: None,
+            id: Some(uuid::Uuid::new_v4().to_string()),
             spill: None,
             from: from.clone(),
             msg: Message {
@@ -549,6 +586,28 @@ impl<D: Exomonad> RealHandler<D> {
                 Ok(Some(false))
             }
         }
+    }
+}
+
+/// The pure decision behind the `Lifecycle::Submitted` handler: given the sender persona and
+/// whether the named child (already resolved against `topology()`'s children list) is one of
+/// this node's own direct children, should the report be appended to the ledger? Recording
+/// requires BOTH an `Agent` sender and direct-child membership; every other combination renders
+/// only. Split out so the truth table is unit-testable without a live `NodeContext`/`Runtime`.
+fn should_record_submission(from: &Persona, is_own_child: bool) -> bool {
+    matches!(from, Persona::Agent(_)) && is_own_child
+}
+
+/// Rewrite an entry's `kind` to `Chat`, preserving `from`/`ts`/`id`/`spill` and the message body
+/// untouched — the pure transform behind [`RealHandler::redispatch_as_chat`], split out so it's
+/// unit-testable without a live `NodeContext`.
+fn rewrite_kind_to_chat(entry: &IngestionEntry) -> IngestionEntry {
+    IngestionEntry {
+        msg: Message {
+            kind: MessageKind::Chat,
+            ..entry.msg.clone()
+        },
+        ..entry.clone()
     }
 }
 
@@ -789,7 +848,12 @@ async fn process_inbox<H: InboundHandler>(
                 return Ok(true);
             }
             Ok(_) => {
-                // Success (or no-op), advance cursor
+                // Success (or no-op), advance cursor. The cursor advances ONLY after a successful
+                // last-hop delivery, so redelivery is at-least-once BY DESIGN — a retried line
+                // arrives with its ORIGINAL `id`. `IngestionEntry::id` is reference-only: it names
+                // a message for logs/`reply_to`, never a dedup key. No code anywhere treats a
+                // repeated id as "already seen" — doing so would silently drop the very retry this
+                // cursor protocol exists to guarantee.
                 *offset += line_len + 1;
                 if let Err(e) = save_cursor(cursor_path, *offset) {
                     warn!(node = %node, "failed to persist cursor (will retry next wake): {e}");
@@ -808,8 +872,10 @@ async fn process_inbox<H: InboundHandler>(
 
 /// Resolve a claim-check pointer (see [`IngestionEntry::spill`]): if `spill` is set, load + parse the
 /// full entry from its side-file; otherwise pass the entry through. The loaded entry carries `spill:
-/// None`, so this never recurses. The side-file is left in place — a transient run artifact (GC'd with
-/// the inbox dir) — which keeps an at-least-once re-read idempotent.
+/// None`, so this never recurses. The side-file is left in place — nothing deletes it, so spill
+/// files accumulate for the life of the run's inbox directory. No GC is built: leaving the file in
+/// place is what keeps an at-least-once re-read idempotent, and a GC is deliberately not worth
+/// building — the files are small and a run's inbox directory is bounded in lifetime.
 fn resolve_spilled(entry: IngestionEntry) -> std::io::Result<IngestionEntry> {
     match &entry.spill {
         None => Ok(entry),
@@ -842,6 +908,37 @@ mod tests {
                 reply_to: None,
             },
         }
+    }
+
+    #[test]
+    fn should_record_submission_truth_table() {
+        let agent = Persona::Agent(AgentName::new("dev-0".into()).unwrap());
+        let synthetic = Persona::Synthetic(exo_caps::SyntheticName::new("github".into()).unwrap());
+
+        assert!(should_record_submission(&agent, true));
+        assert!(!should_record_submission(&agent, false));
+        assert!(!should_record_submission(&synthetic, true));
+        assert!(!should_record_submission(&synthetic, false));
+    }
+
+    #[test]
+    fn rewrite_kind_to_chat_preserves_envelope_and_rewrites_only_kind() {
+        let mut entry = sample_entry("branch@sha ready");
+        entry.id = Some("11111111-2222-3333-4444-555555555555".into());
+        entry.msg.kind = MessageKind::Lifecycle(Lifecycle::Submitted {
+            branch: Branch::new("root.dev-0".into()).unwrap(),
+            sha: "deadbeef".into(),
+            reviewed: true,
+        });
+
+        let chat = rewrite_kind_to_chat(&entry);
+
+        assert_eq!(chat.from, entry.from);
+        assert_eq!(chat.ts, entry.ts);
+        assert_eq!(chat.id, entry.id);
+        assert_eq!(chat.msg.text, entry.msg.text);
+        assert_eq!(chat.msg.summary, entry.msg.summary);
+        assert_eq!(chat.msg.kind, MessageKind::Chat);
     }
 
     #[test]

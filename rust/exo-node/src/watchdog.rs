@@ -37,6 +37,28 @@ pub async fn watch<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> Nod
             warn!(node = %ctx.runtime.name().as_str(), "watchdog: handle_tick failed: {e}");
         }
 
+        // Announce every child the runtime just detected as dead. The `Died` record is already
+        // durable by the time it's returned here (record-then-announce), so a delivery failure is
+        // a warn — never abort the tick or skip the remaining dead children.
+        for dead in ctx.runtime.detect_child_deaths().await {
+            let summary = format!("[CHILD DIED: {}]", dead.name.as_str());
+            let text = format!(
+                "pane {} no longer exists and the child was never reaped. Its branch and \
+                 worktree may still hold unmerged or uncommitted work. Run the `tree` tool to \
+                 see where it sat, then either merge what its branch holds or respawn the work.",
+                dead.pane.as_str()
+            );
+            if let Err(e) =
+                crate::dispatch::deliver_synthetic(&ctx, "watchdog", &summary, &text).await
+            {
+                warn!(
+                    node = %ctx.runtime.name().as_str(),
+                    child = dead.name.as_str(),
+                    "watchdog: failed to announce child death (record is durable; not retried): {e}"
+                );
+            }
+        }
+
         // Idempotent and independently gated (shutdown_pending + pane-alive subtree-clear via
         // Topology) — safe to re-check on every tick regardless of whether anything changed.
         crate::inbound::try_reap(&ctx).await;

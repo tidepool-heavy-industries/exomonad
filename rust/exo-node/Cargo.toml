@@ -26,6 +26,7 @@ tracing = { workspace = true }
 
 # Inbound watch (N2b): event-driven file watching — never a poll loop, never hand-rolled inotify.
 notify = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

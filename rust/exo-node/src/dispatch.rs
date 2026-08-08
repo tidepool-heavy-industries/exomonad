@@ -56,7 +56,7 @@ pub(crate) async fn deliver_synthetic<D: Exomonad>(
     let entry = IngestionEntry {
         v: 1,
         ts: Utc::now(),
-        id: None,
+        id: Some(uuid::Uuid::new_v4().to_string()),
         spill: None,
         from: Persona::Synthetic(
             SyntheticName::new(from.to_string())
@@ -100,11 +100,25 @@ fn render_persona(persona: &Persona) -> String {
     persona_label(persona).to_string()
 }
 
+/// Render the last-hop header. `id` is omitted entirely (not a placeholder) when the entry
+/// carries none — a pre-`id`-field or externally-written line has nothing to name, and a header
+/// with no `id:` segment is itself the signal, not a sentinel string a reader might mistake for a
+/// real id. `re:` is appended only when the entry answers another message.
 fn render_entry(entry: &IngestionEntry) -> String {
+    let id_segment = match &entry.id {
+        Some(id) => format!(", id: {id}"),
+        None => String::new(),
+    };
+    let reply_segment = match &entry.msg.reply_to {
+        Some(reply_to) => format!(", re: {reply_to}"),
+        None => String::new(),
+    };
     format!(
-        "[from: {}, kind: {}]\n\n{}\n{}",
+        "[from: {}, kind: {}{}{}]\n\n{}\n{}",
         render_persona(&entry.from),
         kind_label(&entry.msg.kind),
+        id_segment,
+        reply_segment,
         entry.msg.summary.as_str(),
         entry.msg.text.as_str()
     )
@@ -196,6 +210,69 @@ mod tests {
         let rendered = render_entry(&entry);
         assert!(rendered.contains("[from: alice, kind: chat]"));
         assert!(rendered.contains("\n\nGreeting\nHello world"));
+    }
+
+    #[test]
+    fn test_render_entry_with_id() {
+        let entry = IngestionEntry {
+            v: 1,
+            ts: Utc::now(),
+            from: Persona::Agent(AgentName::new("alice".to_string()).unwrap()),
+            id: Some("11111111-2222-3333-4444-555555555555".to_string()),
+            spill: None,
+            msg: Message {
+                text: MessageBody::new("Hello world".to_string()).unwrap(),
+                summary: Summary::new("Greeting".to_string()).unwrap(),
+                kind: MessageKind::Chat,
+                reply_to: None,
+            },
+        };
+
+        let rendered = render_entry(&entry);
+        assert!(rendered
+            .contains("[from: alice, kind: chat, id: 11111111-2222-3333-4444-555555555555]"));
+        assert!(!rendered.contains(", re:"));
+    }
+
+    #[test]
+    fn test_render_entry_with_reply_to() {
+        let entry = IngestionEntry {
+            v: 1,
+            ts: Utc::now(),
+            from: Persona::Agent(AgentName::new("alice".to_string()).unwrap()),
+            id: Some("aaaa".to_string()),
+            spill: None,
+            msg: Message {
+                text: MessageBody::new("Hello world".to_string()).unwrap(),
+                summary: Summary::new("Greeting".to_string()).unwrap(),
+                kind: MessageKind::Chat,
+                reply_to: Some("bbbb".to_string()),
+            },
+        };
+
+        let rendered = render_entry(&entry);
+        assert!(rendered.contains("[from: alice, kind: chat, id: aaaa, re: bbbb]"));
+    }
+
+    #[test]
+    fn test_render_entry_no_id_omits_segment() {
+        let entry = IngestionEntry {
+            v: 1,
+            ts: Utc::now(),
+            from: Persona::Agent(AgentName::new("alice".to_string()).unwrap()),
+            id: None,
+            spill: None,
+            msg: Message {
+                text: MessageBody::new("Hello world".to_string()).unwrap(),
+                summary: Summary::new("Greeting".to_string()).unwrap(),
+                kind: MessageKind::Chat,
+                reply_to: None,
+            },
+        };
+
+        let rendered = render_entry(&entry);
+        assert!(rendered.contains("[from: alice, kind: chat]"));
+        assert!(!rendered.contains("id:"));
     }
 
     #[test]
