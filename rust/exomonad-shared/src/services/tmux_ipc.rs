@@ -836,6 +836,11 @@ impl TmuxIpc {
     /// TUI frameworks (Ink, readline) in non-focused panes may not poll stdin
     /// until a terminal event arrives. A +1/-1 column resize triggers SIGWINCH,
     /// which wakes the event loop to process buffered input.
+    ///
+    /// `resize-window` has a documented side effect: it sets the window's
+    /// `window-size` option to `manual`, freezing it at its current size so it
+    /// no longer tracks the attached client. The final `set-option -u` undoes
+    /// that, restoring automatic resize-on-client-resize.
     pub async fn wake_pane(&self, target: &str) -> Result<()> {
         let resolved = self.resolve_target(target).await?;
         let qualified = self.qualify_target(&resolved);
@@ -901,6 +906,27 @@ impl TmuxIpc {
             ])
             .output()
             .await;
+
+        // Undo resize-window's `window-size = manual` side effect so the
+        // window resumes tracking the attached client's size.
+        let unset = self
+            .tmux_cmd()
+            .args(["set-option", "-w", "-t", &qualified, "-u", "window-size"])
+            .output()
+            .await;
+        match unset {
+            Ok(out) if !out.status.success() => {
+                warn!(
+                    target = %qualified,
+                    stderr = %String::from_utf8_lossy(&out.stderr),
+                    "Failed to unset window-size after SIGWINCH wake"
+                );
+            }
+            Err(e) => {
+                warn!(target = %qualified, error = %e, "Failed to unset window-size after SIGWINCH wake");
+            }
+            _ => {}
+        }
 
         debug!(target = %qualified, "SIGWINCH wake: resized {}x{} → {}x{} → {}x{}", width, height, width + 1, height, width, height);
         Ok(())
