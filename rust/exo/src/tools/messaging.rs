@@ -23,6 +23,11 @@ pub struct NotifyParentArgs {
     /// The kind of message (defaults to chat).
     #[serde(default)]
     pub kind: ToolMessageKind,
+    /// The id of the message you are replying to, taken from the `id:` field in the header of a
+    /// message that was delivered to you. Renders as `re:` on the recipient's side. Omit for a
+    /// message that is not a reply.
+    #[serde(default)]
+    pub reply_to: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -39,7 +44,7 @@ impl<R: Bus + Send + Sync> Tool<R> for NotifyParent {
             text: MessageBody::new(args.text)?,
             summary: Summary::new(args.summary)?,
             kind: args.kind.into(),
-            reply_to: None,
+            reply_to: args.reply_to,
         };
         ctx.deliver(Addressee::Parent, msg).await?;
         Ok(ToolOutput::text("delivered"))
@@ -60,6 +65,11 @@ pub struct SendMessageArgs {
     /// The kind of message (defaults to chat).
     #[serde(default)]
     pub kind: ToolMessageKind,
+    /// The id of the message you are replying to, taken from the `id:` field in the header of a
+    /// message that was delivered to you. Renders as `re:` on the recipient's side. Omit for a
+    /// message that is not a reply.
+    #[serde(default)]
+    pub reply_to: Option<String>,
 }
 
 /// The kind of message to send, porting the [`MessageKind`] vocabulary to a
@@ -107,7 +117,7 @@ impl<R: Bus + Send + Sync> Tool<R> for SendMessage {
             text: MessageBody::new(args.text)?,
             summary: Summary::new(args.summary)?,
             kind: args.kind.into(),
-            reply_to: None,
+            reply_to: args.reply_to,
         };
         ctx.deliver(to, msg).await?;
         Ok(ToolOutput::text("delivered"))
@@ -142,6 +152,34 @@ mod tests {
             assert_eq!(msg.text.as_str(), "Hello parent");
             assert_eq!(msg.summary.as_str(), "Greeting");
             assert_eq!(msg.kind, MessageKind::Chat);
+            assert_eq!(msg.reply_to, None);
+        } else {
+            panic!("expected BusDeliver call, got {:?}", calls[0]);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_notify_parent_reply_to() {
+        let mock = MockRuntime::default();
+        let args = json!({
+            "text": "Answering your question",
+            "summary": "Answer",
+            "reply_to": "11111111-2222-3333-4444-555555555555"
+        });
+
+        tool(NotifyParent)
+            .call(&mock, args)
+            .await
+            .expect("tool call failed");
+
+        let calls = mock.calls_made();
+        assert_eq!(calls.len(), 1);
+        if let Call::BusDeliver { to, msg } = &calls[0] {
+            assert_eq!(to, &Addressee::Parent);
+            assert_eq!(
+                msg.reply_to,
+                Some("11111111-2222-3333-4444-555555555555".to_string())
+            );
         } else {
             panic!("expected BusDeliver call, got {:?}", calls[0]);
         }
@@ -171,6 +209,38 @@ mod tests {
             assert_eq!(msg.text.as_str(), "Hello worker");
             assert_eq!(msg.summary.as_str(), "Greeting");
             assert_eq!(msg.kind, MessageKind::Chat);
+            assert_eq!(msg.reply_to, None);
+        } else {
+            panic!("expected BusDeliver call, got {:?}", calls[0]);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_send_message_reply_to() {
+        let mock = MockRuntime::default();
+        let args = json!({
+            "to": "worker-1",
+            "text": "Answering your question",
+            "summary": "Answer",
+            "reply_to": "66666666-7777-8888-9999-000000000000"
+        });
+
+        tool(SendMessage)
+            .call(&mock, args)
+            .await
+            .expect("tool call failed");
+
+        let calls = mock.calls_made();
+        assert_eq!(calls.len(), 1);
+        if let Call::BusDeliver { to, msg } = &calls[0] {
+            assert_eq!(
+                to,
+                &Addressee::Child(AgentName::new("worker-1".into()).unwrap())
+            );
+            assert_eq!(
+                msg.reply_to,
+                Some("66666666-7777-8888-9999-000000000000".to_string())
+            );
         } else {
             panic!("expected BusDeliver call, got {:?}", calls[0]);
         }
