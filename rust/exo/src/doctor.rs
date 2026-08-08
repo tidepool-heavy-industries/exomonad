@@ -11,8 +11,17 @@ use anyhow::{Context, Result};
 use exo_caps::{
     fold_children, AgentName, Branch, ChildKind, ChildRecord, ChildState, NodePath, PaneId,
 };
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, SystemTime};
+
+/// How long a run's home-dir state (`~/.claude/exo/{inboxes,status,papers}/{run_id}/`) may go
+/// without a fresh mtime before `exo doctor` calls it dead. The sidecar's status publisher writes
+/// a fresh status file every 5s while a node is alive (`exo_runtime::Runtime::status_snapshot`'s
+/// periodic caller in `exo-node`'s `run_node`), so hours of silence means the run ended, not that
+/// it's merely idle between turns.
+const STALE_RUN_THRESHOLD: Duration = Duration::from_secs(6 * 60 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorktreeStatus {
@@ -162,6 +171,90 @@ pub async fn run(fix: bool, include_unmerged: bool) -> Result<()> {
                 "would be acknowledged"
             }
         );
+    }
+
+    // Run-artifact GC: home-dir run state and repo-local tmux-paste spill files accumulate
+    // forever (nothing else deletes them — see `exo-node/src/inbound.rs`'s spill-file comment and
+    // `exo-node/src/dispatch.rs`'s `.exo/tmp/inbox-{pid}-*.md` writer). Runs in BOTH dry-run and
+    // --fix, same as the acknowledgment pass above.
+    println!();
+    let home = home_dir();
+    let current_run_id = std::env::var("EXOMONAD_SWARM_RUN_ID").ok();
+    let now = SystemTime::now();
+    println!("Run-artifact GC ({}):", home.join(".claude/exo").display());
+    let dead_runs = classify_dead_runs(&home, current_run_id.as_deref(), now);
+    if dead_runs.is_empty() {
+        println!("  No dead runs found.");
+    } else {
+        let mut freed = 0u64;
+        for info in &dead_runs {
+            let age = info
+                .newest_mtime
+                .and_then(|t| now.duration_since(t).ok())
+                .map(|d| format!("{}h old", d.as_secs() / 3600))
+                .unwrap_or_else(|| "no files found".to_string());
+            println!(
+                "  {} — {} dir(s), {} bytes, {}",
+                info.id,
+                info.dirs.len(),
+                info.total_size(),
+                age
+            );
+            if fix {
+                for (d, sz) in &info.dirs {
+                    match std::fs::remove_dir_all(d) {
+                        Ok(()) => freed += sz,
+                        Err(e) => eprintln!("    FAILED to remove {}: {e}", d.display()),
+                    }
+                }
+            }
+        }
+        if fix {
+            println!(
+                "{} dead run(s) removed, {} bytes freed.",
+                dead_runs.len(),
+                freed
+            );
+        } else {
+            let total: u64 = dead_runs.iter().map(RunGcInfo::total_size).sum();
+            println!(
+                "{} dead run(s), {} bytes would be freed.",
+                dead_runs.len(),
+                total
+            );
+        }
+    }
+
+    let spill_dir = root_path.join(".exo/tmp");
+    println!("Spill files ({}):", spill_dir.display());
+    let dead_spills = classify_dead_spill_files(&spill_dir);
+    if dead_spills.is_empty() {
+        println!("  No dead spill files found.");
+    } else {
+        let mut freed = 0u64;
+        for f in &dead_spills {
+            println!("  {} — {} bytes", f.path.display(), f.size);
+            if fix {
+                match std::fs::remove_file(&f.path) {
+                    Ok(()) => freed += f.size,
+                    Err(e) => eprintln!("    FAILED to remove {}: {e}", f.path.display()),
+                }
+            }
+        }
+        if fix {
+            println!(
+                "{} dead spill file(s) removed, {} bytes freed.",
+                dead_spills.len(),
+                freed
+            );
+        } else {
+            let total: u64 = dead_spills.iter().map(|f| f.size).sum();
+            println!(
+                "{} dead spill file(s), {} bytes would be freed.",
+                dead_spills.len(),
+                total
+            );
+        }
     }
 
     if !fix {
@@ -488,6 +581,182 @@ fn delete_branch(branch: &str) {
     }
 }
 
+/// `$HOME`, defaulting to `.` on an unset environment — mirrors `exo_runtime::runtime::home()`'s
+/// fallback so a misconfigured environment degrades to "nothing found under `.`" rather than
+/// panicking.
+fn home_dir() -> PathBuf {
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// One run id's home-dir footprint: the existing dirs among `{inboxes,status,papers}/{run_id}`,
+/// each paired with its total size, plus the mtime that decides liveness (see [`run_gc_info`]).
+struct RunGcInfo {
+    id: String,
+    dirs: Vec<(PathBuf, u64)>,
+    newest_mtime: Option<SystemTime>,
+}
+
+impl RunGcInfo {
+    fn total_size(&self) -> u64 {
+        self.dirs.iter().map(|(_, size)| size).sum()
+    }
+}
+
+/// Pure classification: is a run dead? The current run is never dead, regardless of `newest_mtime`
+/// — this is the absolute floor the rest of the pass builds on. `newest_mtime` is `None` only when
+/// the run's directories exist but hold no files at all, which is classified dead the same as any
+/// other silence (there is no heartbeat to point to).
+fn run_is_dead(newest_mtime: Option<SystemTime>, now: SystemTime, is_current: bool) -> bool {
+    if is_current {
+        return false;
+    }
+    match newest_mtime {
+        None => true,
+        Some(t) => now.duration_since(t).unwrap_or(Duration::ZERO) > STALE_RUN_THRESHOLD,
+    }
+}
+
+/// Recursively walk `dir`, returning its total file size and the newest mtime seen among its
+/// files. Unreadable entries are skipped, not fatal — discovery here is best-effort, matching the
+/// rest of doctor's read side; only a --fix removal is loud on failure.
+fn walk_dir_stats(dir: &Path) -> (u64, Option<SystemTime>) {
+    let mut total = 0u64;
+    let mut newest: Option<SystemTime> = None;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let entries = match std::fs::read_dir(&d) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            if meta.is_dir() {
+                stack.push(entry.path());
+                continue;
+            }
+            total += meta.len();
+            if let Ok(mtime) = meta.modified() {
+                newest = Some(newest.map_or(mtime, |n: SystemTime| n.max(mtime)));
+            }
+        }
+    }
+    (total, newest)
+}
+
+/// Every run id appearing as a subdirectory of `{home}/.claude/exo/{inboxes,status,papers}`.
+fn discover_run_ids(home: &Path) -> BTreeSet<String> {
+    let base = home.join(".claude/exo");
+    ["inboxes", "status", "papers"]
+        .iter()
+        .flat_map(|sub| std::fs::read_dir(base.join(sub)).into_iter().flatten())
+        .flatten()
+        .filter(|entry| entry.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .collect()
+}
+
+/// Gather one run id's footprint. Liveness is anchored to the `status/` dir's own mtimes when that
+/// dir exists (the sidecar's 5s heartbeat lives there); a run with no status dir at all (dead
+/// before ever heartbeating, or from a build that predates status publishing) falls back to the
+/// newest mtime anywhere under its `inboxes`/`papers` dirs — see the doctor.rs module boundary in
+/// the spec this implements.
+fn run_gc_info(home: &Path, run_id: &str) -> RunGcInfo {
+    let base = home.join(".claude/exo");
+    let status_dir = base.join("status").join(run_id);
+    let inbox_dir = base.join("inboxes").join(run_id);
+    let papers_dir = base.join("papers").join(run_id);
+    let has_status = status_dir.exists();
+
+    let mut dirs = Vec::new();
+    let mut newest_mtime: Option<SystemTime> = None;
+    for d in [&status_dir, &inbox_dir, &papers_dir] {
+        if !d.exists() {
+            continue;
+        }
+        let (size, mtime) = walk_dir_stats(d);
+        dirs.push((d.clone(), size));
+        if !has_status || d == &status_dir {
+            newest_mtime = match (newest_mtime, mtime) {
+                (Some(a), Some(b)) => Some(a.max(b)),
+                (a, None) => a,
+                (None, b) => b,
+            };
+        }
+    }
+
+    RunGcInfo {
+        id: run_id.to_string(),
+        dirs,
+        newest_mtime,
+    }
+}
+
+/// Every dead run under `home`, per [`run_is_dead`]. Live runs (including the current one) are
+/// omitted entirely — nothing about them is reported or touched.
+fn classify_dead_runs(
+    home: &Path,
+    current_run_id: Option<&str>,
+    now: SystemTime,
+) -> Vec<RunGcInfo> {
+    discover_run_ids(home)
+        .into_iter()
+        .map(|id| run_gc_info(home, &id))
+        .filter(|info| {
+            let is_current = current_run_id == Some(info.id.as_str());
+            run_is_dead(info.newest_mtime, now, is_current)
+        })
+        .collect()
+}
+
+/// One dead repo-local tmux-paste spill file.
+struct DeadSpillFile {
+    path: PathBuf,
+    size: u64,
+}
+
+/// Parse `pid` out of a spill filename of the form `inbox-{pid}-{id}.md` (written by
+/// `exo-node`'s `dispatch::prepare_tmux_payload`). Anything that doesn't match this exact shape —
+/// including a non-numeric pid — returns `None`, so a malformed or unrelated filename is left
+/// alone rather than guessed at.
+fn spill_pid_from_name(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix("inbox-")?.strip_suffix(".md")?;
+    let (pid_str, _id) = rest.split_once('-')?;
+    pid_str.parse().ok()
+}
+
+/// Is `pid` a live process? Linux-only (`/proc`), matching the rest of this codebase's process
+/// probing (e.g. `exo-scry`'s `/proc`-based process-tree walk).
+fn pid_alive(pid: u32) -> bool {
+    Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// Every dead spill file directly inside `tmp_dir` (non-recursive — spill files are written flat
+/// into `.exo/tmp/`). A missing `tmp_dir` yields no dead files, not an error.
+fn classify_dead_spill_files(tmp_dir: &Path) -> Vec<DeadSpillFile> {
+    let Ok(entries) = std::fs::read_dir(tmp_dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let pid = spill_pid_from_name(name.to_str()?)?;
+            if pid_alive(pid) {
+                return None;
+            }
+            let size = entry.metadata().ok()?.len();
+            Some(DeadSpillFile {
+                path: entry.path(),
+                size,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -594,5 +863,160 @@ mod tests {
         assert_eq!(records, vec![record]);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn secs_ago(now: SystemTime, secs: u64) -> SystemTime {
+        now - Duration::from_secs(secs)
+    }
+
+    #[test]
+    fn run_is_dead_current_run_never_dead() {
+        let now = SystemTime::now();
+        // Even wildly stale, the current run is exempt.
+        assert!(!run_is_dead(Some(secs_ago(now, 999_999)), now, true));
+        assert!(!run_is_dead(None, now, true));
+    }
+
+    #[test]
+    fn run_is_dead_threshold_boundary() {
+        let now = SystemTime::now();
+        assert!(!run_is_dead(
+            Some(secs_ago(now, STALE_RUN_THRESHOLD.as_secs() - 1)),
+            now,
+            false
+        ));
+        assert!(run_is_dead(
+            Some(secs_ago(now, STALE_RUN_THRESHOLD.as_secs() + 1)),
+            now,
+            false
+        ));
+    }
+
+    #[test]
+    fn run_is_dead_no_files_is_dead_unless_current() {
+        let now = SystemTime::now();
+        assert!(run_is_dead(None, now, false));
+        assert!(!run_is_dead(None, now, true));
+    }
+
+    #[test]
+    fn spill_pid_from_name_parses_well_formed() {
+        assert_eq!(spill_pid_from_name("inbox-1234-5.md"), Some(1234));
+        assert_eq!(spill_pid_from_name("inbox-1-0.md"), Some(1));
+    }
+
+    #[test]
+    fn spill_pid_from_name_rejects_malformed() {
+        assert_eq!(spill_pid_from_name("inbox-abc-5.md"), None);
+        assert_eq!(spill_pid_from_name("inbox-1234.md"), None);
+        assert_eq!(spill_pid_from_name("notes.md"), None);
+        assert_eq!(spill_pid_from_name("inbox-1234-5.txt"), None);
+        assert_eq!(spill_pid_from_name(""), None);
+    }
+
+    #[test]
+    fn pid_alive_true_for_self() {
+        assert!(pid_alive(std::process::id()));
+    }
+
+    #[test]
+    fn pid_alive_false_for_unlikely_pid() {
+        // PIDs are 32-bit on Linux but the kernel caps pid_max well below u32::MAX; this value
+        // will never be a real running process.
+        assert!(!pid_alive(u32::MAX));
+    }
+
+    /// Build a fake `~/.claude/exo` layout under a tempdir and assert `classify_dead_runs` finds
+    /// exactly the dead one — the current run and a fresh (recently-heartbeating) run both survive.
+    #[test]
+    fn classify_dead_runs_hermetic_tempdir() {
+        let home = std::env::temp_dir().join(format!(
+            "exo-doctor-test-runs-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::remove_dir_all(&home).ok();
+        let now = SystemTime::now();
+
+        let write_status = |run_id: &str, secs_old: u64| {
+            let dir = home.join(".claude/exo/status").join(run_id);
+            std::fs::create_dir_all(&dir).unwrap();
+            let file = dir.join("pane-1.json");
+            std::fs::write(&file, b"{}").unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(&file)
+                .unwrap()
+                .set_modified(secs_ago(now, secs_old))
+                .unwrap();
+        };
+
+        write_status("dead-run", STALE_RUN_THRESHOLD.as_secs() + 3600);
+        write_status("fresh-run", 30);
+        write_status("current-run", STALE_RUN_THRESHOLD.as_secs() + 3600);
+
+        let dead = classify_dead_runs(&home, Some("current-run"), now);
+        assert_eq!(dead.len(), 1);
+        assert_eq!(dead[0].id, "dead-run");
+        assert!(home.join(".claude/exo/status/fresh-run").exists());
+        assert!(home.join(".claude/exo/status/current-run").exists());
+
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn classify_dead_runs_no_status_dir_falls_back_to_inbox_papers_mtime() {
+        let home = std::env::temp_dir().join(format!(
+            "exo-doctor-test-runs-nostatus-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::remove_dir_all(&home).ok();
+        let now = SystemTime::now();
+
+        let inbox_dir = home.join(".claude/exo/inboxes/orphan-run");
+        std::fs::create_dir_all(&inbox_dir).unwrap();
+        let inbox_file = inbox_dir.join("pane-1.jsonl");
+        std::fs::write(&inbox_file, b"{}").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&inbox_file)
+            .unwrap()
+            .set_modified(secs_ago(now, STALE_RUN_THRESHOLD.as_secs() + 3600))
+            .unwrap();
+
+        let dead = classify_dead_runs(&home, None, now);
+        assert_eq!(dead.len(), 1);
+        assert_eq!(dead[0].id, "orphan-run");
+
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn classify_dead_spill_files_hermetic_tempdir() {
+        let tmp = std::env::temp_dir().join(format!(
+            "exo-doctor-test-spill-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::remove_dir_all(&tmp).ok();
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        // Dead: pid u32::MAX will never be alive.
+        std::fs::write(tmp.join("inbox-4294967295-0.md"), b"dead spill").unwrap();
+        // Alive: this test process's own pid.
+        std::fs::write(
+            tmp.join(format!("inbox-{}-1.md", std::process::id())),
+            b"live spill",
+        )
+        .unwrap();
+        // Not a spill file at all — must be skipped, never deleted.
+        std::fs::write(tmp.join("notes.md"), b"unrelated").unwrap();
+
+        let dead = classify_dead_spill_files(&tmp);
+        assert_eq!(dead.len(), 1);
+        assert!(dead[0].path.ends_with("inbox-4294967295-0.md"));
+
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }

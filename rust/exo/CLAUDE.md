@@ -150,6 +150,35 @@ conflict-free by resolving in the child's own context), and `pre_merge_checks` (
 `.exo/checks/pre-merge/*` scripts). Any check failing surfaces as a tool error the agent acts on,
 before either the review-spawn or the skip-forward path.
 
+### Run-artifact GC
+
+Two kinds of node-mode debris never get cleaned up by anything else, so doctor is the GC path for
+both, runs in the same dry-run/`--fix` pass as the acknowledgment pass above (dry-run reports, never
+touches; `--fix` deletes and prints freed totals):
+
+- **Home-dir run state** — `~/.claude/exo/{inboxes,status,papers}/{run_id}/`. `exo-node/src/inbound.rs`
+  documents this honestly: nothing deletes a run's directories once it ends. A run id is classified
+  **dead** iff it is not the current `EXOMONAD_SWARM_RUN_ID` AND its liveness mtime is older than
+  `STALE_RUN_THRESHOLD` (6 hours) — the sidecar's status publisher writes a fresh file under
+  `status/{run_id}/` every 5s while any node in the run is alive (`Runtime::status_snapshot`'s
+  periodic caller), so hours of silence means the run ended, not that it's idle between turns. The
+  liveness mtime is the newest mtime among the run's `status/` files when that dir exists; a run with
+  no `status/` dir at all (dead before ever heartbeating) falls back to the newest mtime anywhere
+  under its `inboxes`/`papers` dirs. The current run is **never** classified dead, regardless of
+  mtime. `--fix` removes every dir that exists for a dead run id (`std::fs::remove_dir_all`,
+  per-dir error ⇒ `eprintln!` + continue) and prints the freed byte total.
+- **Repo-local tmux-paste spill files** — `.exo/tmp/inbox-{pid}-*.md` (written by `exo-node`'s
+  `dispatch::prepare_tmux_payload` whenever a message is too large to paste inline). A spill file is
+  dead iff its `{pid}` is not a live process (`/proc/{pid}` absent). The pid is parsed defensively
+  from the exact `inbox-{pid}-{id}.md` shape — anything that doesn't match (including a non-numeric
+  pid) is skipped, never deleted. `/tmp`-style `exomonad_buf` scratch files are a separate mechanism
+  and out of scope here.
+
+Both passes are pure-classify-then-act: `run_is_dead`/`spill_pid_from_name` are unit-tested with no
+IO, and `classify_dead_runs`/`classify_dead_spill_files` are home-root-parameterized so the
+integration test builds a fake `~/.claude/exo` layout under a tempdir rather than touching the real
+home.
+
 ## Roles
 
 `role_def(kind)` returns a `RoleDef<R> { tools, pre_tool_use, session_start }`; `ExoDomain::role_def`
