@@ -76,6 +76,15 @@ struct RawInit {
     /// `[launch_profile.<role>]` profiles, keyed by role name. Each value is a named-brain
     /// shorthand string or a full table (see [`LaunchProfileEntry`]).
     launch_profile: Option<BTreeMap<String, LaunchProfileEntry>>,
+    /// Cgroup confinement: start the swarm's tmux SERVER on a dedicated socket under a wrapper
+    /// (`swarm-run`), so every pane the swarm ever creates structurally inherits the slice (panes
+    /// are forked by the tmux SERVER, not the client). Absent ⇒ `false` (today's behavior).
+    confine: Option<bool>,
+    /// The wrapper command that launches its argv inside the cgroup slice. Absent ⇒ `"swarm-run"`.
+    confine_wrapper: Option<String>,
+    /// The dedicated tmux socket name the confined server listens on. Absent ⇒ derived from the
+    /// resolved `tmux_session` (`"exo-{tmux_session}"`, lowercased).
+    confine_socket: Option<String>,
 }
 
 /// Resolved node-mode init config.
@@ -93,6 +102,15 @@ pub struct InitConfig {
     /// `exo init` to embed in the root launch. Empty ⇒ no profiled roles. A matching shell env var
     /// overrides a config value (so a secret key needn't live in the file).
     pub profile_env: Vec<(String, String)>,
+    /// Whether `exo init` should confine the swarm's tmux server to a cgroup slice. Defaults to
+    /// `false` when unset in config.
+    pub confine: bool,
+    /// The wrapper command used to launch the tmux server inside the slice. Defaults to
+    /// `"swarm-run"` when unset in config.
+    pub confine_wrapper: String,
+    /// The dedicated tmux socket name for the confined server. Defaults to
+    /// `"exo-{tmux_session}"` (lowercased) when unset in config.
+    pub confine_socket: String,
 }
 
 /// Discover the node-mode init config by merging `.exo/config.local.toml` over `.exo/config.toml`,
@@ -107,6 +125,10 @@ pub fn discover() -> anyhow::Result<InitConfig> {
     let local = load_raw(&project_root.join(".exo/config.local.toml"))?;
     let global = load_raw(&project_root.join(".exo/config.toml"))?;
 
+    // Pulled out before `local`/`global` are consumed field-by-field below.
+    let confine_local = confine_of(&local);
+    let confine_global = confine_of(&global);
+
     let tmux_session = local
         .tmux_session
         .or(global.tmux_session)
@@ -118,6 +140,9 @@ pub fn discover() -> anyhow::Result<InitConfig> {
                 .to_string()
         });
     let tmux_session = sanitize_session_name(tmux_session);
+
+    let (confine, confine_wrapper, confine_socket) =
+        resolve_confine(confine_local, confine_global, &tmux_session);
 
     let model = local.model.or(global.model);
     let yolo = local
@@ -146,7 +171,43 @@ pub fn discover() -> anyhow::Result<InitConfig> {
         wrap_nix,
         review_enabled,
         profile_env,
+        confine,
+        confine_wrapper,
+        confine_socket,
     })
+}
+
+/// Resolve `confine`/`confine_wrapper`/`confine_socket`, merging local over global (matching
+/// `yolo`/`wrap_nix`/`review_enabled`), with the socket defaulted from the already-resolved
+/// `tmux_session` when neither file sets it.
+type RawConfine = (Option<bool>, Option<String>, Option<String>);
+
+/// Pull the three confine-related fields out of a [`RawInit`] as a [`RawConfine`] tuple, cloning
+/// so the caller keeps ownership of the rest of `raw` (needed at the `discover()` call site, where
+/// `local`/`global` are consumed field-by-field afterward; harmless duplication for tests).
+fn confine_of(raw: &RawInit) -> RawConfine {
+    (
+        raw.confine,
+        raw.confine_wrapper.clone(),
+        raw.confine_socket.clone(),
+    )
+}
+
+fn resolve_confine(
+    local: RawConfine,
+    global: RawConfine,
+    tmux_session: &str,
+) -> (bool, String, String) {
+    let (l_confine, l_wrapper, l_socket) = local;
+    let (g_confine, g_wrapper, g_socket) = global;
+    let confine = l_confine.or(g_confine).unwrap_or(false);
+    let confine_wrapper = l_wrapper
+        .or(g_wrapper)
+        .unwrap_or_else(|| "swarm-run".to_string());
+    let confine_socket = l_socket
+        .or(g_socket)
+        .unwrap_or_else(|| format!("exo-{tmux_session}").to_lowercase());
+    (confine, confine_wrapper, confine_socket)
 }
 
 /// Flatten each `[launch_profile.<role>]` profile to `EXO_<ROLE_UPPER>_<FIELD>` env-var pairs (only
@@ -320,6 +381,50 @@ mod tests {
             "kimi-for-coding".to_string()
         )));
         assert!(env.contains(&("EXO_WORKER_MODEL".to_string(), "custom".to_string())));
+    }
+
+    #[test]
+    fn confine_absent_defaults_to_false_and_defaults() {
+        let raw = RawInit::default();
+        let (confine, wrapper, socket) =
+            resolve_confine(confine_of(&raw), confine_of(&raw), "myproj");
+        assert!(!confine);
+        assert_eq!(wrapper, "swarm-run");
+        assert_eq!(socket, "exo-myproj");
+    }
+
+    #[test]
+    fn confine_set_parses_from_toml() {
+        let toml = r#"
+            confine = true
+            confine_wrapper = "custom-wrap"
+            confine_socket = "MySocket"
+        "#;
+        let raw: RawInit = toml::from_str(toml).unwrap();
+        let empty = RawInit::default();
+        let (confine, wrapper, socket) =
+            resolve_confine(confine_of(&raw), confine_of(&empty), "myproj");
+        assert!(confine);
+        assert_eq!(wrapper, "custom-wrap");
+        assert_eq!(socket, "MySocket");
+    }
+
+    #[test]
+    fn confine_local_overrides_global() {
+        let global: RawInit =
+            toml::from_str("confine = false\nconfine_wrapper = \"global-wrap\"").unwrap();
+        let local: RawInit = toml::from_str("confine = true").unwrap();
+        let (confine, wrapper, socket) =
+            resolve_confine(confine_of(&local), confine_of(&global), "myproj");
+        assert!(
+            confine,
+            "local confine=true must win over global confine=false"
+        );
+        assert_eq!(
+            wrapper, "global-wrap",
+            "wrapper unset locally should fall through to global"
+        );
+        assert_eq!(socket, "exo-myproj");
     }
 
     #[test]

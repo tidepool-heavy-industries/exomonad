@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// Per-node runtime artifacts (`.mcp.json`, `.claude/settings.local.json`, and the whole `.exo/`
 /// runtime tree — `node.json`, `settings.json`, `children.jsonl`, `tmp/`, `worktrees/`, `logs/`)
@@ -71,6 +71,179 @@ fn ensure_git_excludes(cwd: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The user-level systemd slice `swarm-run` launches its argv inside. Hardcoded (not a config
+/// knob) — one shared slice for the whole swarm, no per-agent scopes; see `rust/CLAUDE.md` § the
+/// v2 UX campaign's cgroup-confinement design note.
+const CONFINE_SLICE: &str = "swarm.slice";
+
+/// Outcome of [`confine_server`]: the socket to boot the root session on (`None` ⇒ default tmux
+/// socket, today's behavior) and whether cgroup membership was actually confirmed.
+struct ConfineOutcome {
+    socket: Option<String>,
+    confirmed: bool,
+}
+
+fn wrapper_on_path(wrapper: &str) -> bool {
+    Command::new("which")
+        .arg(wrapper)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Whether a tmux server is already listening on `socket` — `has-session` (no `-t`) succeeds iff
+/// the server exists (regardless of session count), and fails (can't connect) iff it doesn't.
+fn tmux_socket_has_server(socket: &str) -> bool {
+    Command::new("tmux")
+        .args(["-L", socket, "has-session"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// The confined tmux server's own pid, via a plain (no `-t`) `display-message` — targeting no
+/// pane, tmux answers with the SERVER's own pid rather than a pane's.
+fn tmux_server_pid(socket: &str) -> Option<u32> {
+    let out = Command::new("tmux")
+        .args(["-L", socket, "display-message", "-p", "#{pid}"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
+/// Pure classification: does this `/proc/{pid}/cgroup` content place the process in `slice`?
+/// Split out for unit testing without touching `/proc`.
+fn cgroup_content_in_slice(cgroup_content: &str, slice: &str) -> bool {
+    cgroup_content.contains(slice)
+}
+
+fn cgroup_pid_in_slice(pid: u32, slice: &str) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+        .map(|content| cgroup_content_in_slice(&content, slice))
+        .unwrap_or(false)
+}
+
+/// Ensure the swarm's tmux SERVER for `socket` is running inside `wrapper`'s cgroup slice, so
+/// every pane it ever forks structurally inherits the slice — panes are forked by the tmux
+/// SERVER, not the client, so wrapping `exo init` itself or individual pane commands confines
+/// nothing. Fails OPEN on every precondition miss (missing wrapper, wrapped start failure,
+/// unconfirmable cgroup): loud warning on stderr + `tracing::warn!`, then proceeds exactly as
+/// `exo init` did before `confine` existed.
+fn confine_server(wrapper: &str, socket: &str) -> ConfineOutcome {
+    if !wrapper_on_path(wrapper) {
+        eprintln!(
+            "\n\
+             ⚠️  exo init: confine=true but `{wrapper}` was not found on PATH.\n\
+             ⚠️  Proceeding UNCONFINED — spawned panes will NOT be cgroup-isolated.\n\
+             ⚠️  Expose `{wrapper}` on PATH (the {CONFINE_SLICE} wrapper) to enable confinement.\n"
+        );
+        tracing::warn!(
+            wrapper,
+            "confine=true but wrapper not found on PATH; proceeding unconfined"
+        );
+        return ConfineOutcome {
+            socket: None,
+            confirmed: false,
+        };
+    }
+
+    let already_running = tmux_socket_has_server(socket);
+    if already_running {
+        tracing::info!(
+            socket,
+            "confine: reusing already-running tmux server on socket"
+        );
+    } else {
+        tracing::info!(
+            socket,
+            wrapper,
+            "confine: starting tmux server on dedicated socket via wrapper"
+        );
+        // `set-option -g exit-empty off` first: a session-less `start-server` alone exits
+        // immediately (tmux's default `exit-empty` tears down a server with zero sessions), so
+        // without this the wrapped server would die before the root session is ever created on
+        // it by the (unconfined) client call in `boot_root_session` below.
+        let started = Command::new(wrapper)
+            .args([
+                "tmux",
+                "-L",
+                socket,
+                "set-option",
+                "-g",
+                "exit-empty",
+                "off",
+                ";",
+                "start-server",
+            ])
+            .status();
+        match started {
+            Ok(s) if s.success() => {}
+            Ok(s) => {
+                eprintln!(
+                    "\n⚠️  exo init: `{wrapper} tmux -L {socket} start-server` exited {s}.\n\
+                     ⚠️  Proceeding UNCONFINED.\n"
+                );
+                tracing::warn!(
+                    ?s,
+                    "confine: wrapped start-server failed; proceeding unconfined"
+                );
+                return ConfineOutcome {
+                    socket: None,
+                    confirmed: false,
+                };
+            }
+            Err(e) => {
+                eprintln!("\n⚠️  exo init: failed to exec `{wrapper}`: {e}.\n⚠️  Proceeding UNCONFINED.\n");
+                tracing::warn!(error = %e, "confine: failed to exec wrapper; proceeding unconfined");
+                return ConfineOutcome {
+                    socket: None,
+                    confirmed: false,
+                };
+            }
+        }
+    }
+
+    let confirmed = tmux_server_pid(socket)
+        .map(|pid| cgroup_pid_in_slice(pid, CONFINE_SLICE))
+        .unwrap_or(false);
+
+    if confirmed {
+        println!("exo init: CONFINED — tmux server on socket {socket:?} is in {CONFINE_SLICE}.");
+    } else if already_running {
+        eprintln!(
+            "\n⚠️  exo init: a tmux server is already running on socket {socket:?} but it is NOT \
+             in {CONFINE_SLICE}.\n\
+             ⚠️  Proceeding UNCONFINED on the existing server (not killing it).\n"
+        );
+        tracing::warn!(
+            socket,
+            "confine: pre-existing server on socket not in slice; proceeding unconfined on it"
+        );
+    } else {
+        eprintln!(
+            "\n⚠️  exo init: started a tmux server on socket {socket:?} via {wrapper} but could \
+             not confirm it is in {CONFINE_SLICE}.\n\
+             ⚠️  Proceeding UNCONFINED.\n"
+        );
+        tracing::warn!(
+            socket,
+            "confine: could not verify slice membership after wrapped start; proceeding unconfined"
+        );
+    }
+
+    ConfineOutcome {
+        socket: Some(socket.to_string()),
+        confirmed,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     tmux_session: &str,
@@ -79,6 +252,9 @@ pub async fn run(
     wrap_nix: bool,
     review_enabled: bool,
     profile_env: &[(String, String)],
+    confine: bool,
+    confine_wrapper: &str,
+    confine_socket: &str,
     session: Option<String>,
     recreate: bool,
 ) -> Result<()> {
@@ -89,30 +265,46 @@ pub async fn run(
     // Keep per-node runtime artifacts from dirtying worktrees (root + all spawned children).
     ensure_git_excludes(&cwd)?;
 
-    let root_pane = exo_runtime::boot_root_session(&session, &cwd, recreate).await?;
+    let confine_outcome = if confine {
+        confine_server(confine_wrapper, confine_socket)
+    } else {
+        ConfineOutcome {
+            socket: None,
+            confirmed: false,
+        }
+    };
+    let socket = confine_outcome.socket.as_deref();
 
-    let set_run_id = Command::new("tmux")
-        .args([
-            "set-environment",
-            "-t",
-            &session,
-            "EXOMONAD_SWARM_RUN_ID",
-            &run_id,
-        ])
-        .status()?;
+    let root_pane = exo_runtime::boot_root_session(&session, &cwd, recreate, socket).await?;
+
+    let mut set_run_id_args: Vec<&str> = Vec::new();
+    if let Some(s) = socket {
+        set_run_id_args.extend(["-L", s]);
+    }
+    set_run_id_args.extend([
+        "set-environment",
+        "-t",
+        &session,
+        "EXOMONAD_SWARM_RUN_ID",
+        &run_id,
+    ]);
+    let set_run_id = Command::new("tmux").args(&set_run_id_args).status()?;
     if !set_run_id.success() {
         anyhow::bail!("Failed to set EXOMONAD_SWARM_RUN_ID in tmux session");
     }
 
-    let set_session = Command::new("tmux")
-        .args([
-            "set-environment",
-            "-t",
-            &session,
-            "EXOMONAD_TMUX_SESSION",
-            &session,
-        ])
-        .status()?;
+    let mut set_session_args: Vec<&str> = Vec::new();
+    if let Some(s) = socket {
+        set_session_args.extend(["-L", s]);
+    }
+    set_session_args.extend([
+        "set-environment",
+        "-t",
+        &session,
+        "EXOMONAD_TMUX_SESSION",
+        &session,
+    ]);
+    let set_session = Command::new("tmux").args(&set_session_args).status()?;
     if !set_session.success() {
         anyhow::bail!("Failed to set EXOMONAD_TMUX_SESSION in tmux session");
     }
@@ -162,6 +354,12 @@ pub async fn run(
     );
     env_vars.insert("EXOMONAD_SWARM_RUN_ID".into(), run_id.clone());
     env_vars.insert("EXOMONAD_TMUX_SESSION".into(), session.clone());
+    // Only stamped when confinement was actually verified — descendants inherit it (`birth_finish`
+    // re-copies the full launch env), and `tree` uses its presence to decide whether to self-check
+    // `/proc/self/cgroup` at all (absent ⇒ this host never asked for confinement ⇒ no noise).
+    if confine_outcome.confirmed {
+        env_vars.insert("EXO_CONFINED".into(), "1".into());
+    }
     // On `--recreate` (e.g. restarting after a binary update), continue the prior root
     // conversation so the restart doesn't discard the human's context — `claude --continue`
     // resumes the most recent conversation in this cwd. A fresh `init` has nothing to continue.
@@ -186,14 +384,23 @@ pub async fn run(
     }
     .render();
 
-    exomonad_shared::services::tmux_ipc::TmuxIpc::new(&session)
-        .inject_input(root_pane.as_str(), &launch)
-        .await?;
+    exomonad_shared::services::tmux_ipc::TmuxIpc::new_with_socket(
+        &session,
+        socket.map(str::to_string),
+    )
+    .inject_input(root_pane.as_str(), &launch)
+    .await?;
 
-    println!("Root node up in tmux session '{session}'. Attaching (detach: Ctrl-b d; reattach: tmux attach -t {session})...");
+    let attach_cmd = match socket {
+        Some(s) => format!("tmux -L {s} attach -t {session}"),
+        None => format!("tmux attach -t {session}"),
+    };
+    println!(
+        "Root node up in tmux session '{session}'. Attaching (detach: Ctrl-b d; reattach: {attach_cmd})..."
+    );
 
     // Attach the user into the root session, matching production `init`.
-    exomonad_shared::services::tmux_ipc::TmuxIpc::attach_session(&session, None).await
+    exomonad_shared::services::tmux_ipc::TmuxIpc::attach_session(&session, socket).await
 }
 
 /// Best-effort removal of stale exomonad-written cwd config from the pre-private-config era, so it
@@ -235,5 +442,28 @@ fn migrate_strip_legacy_cwd_config(cwd: &Path) {
         if let Err(e) = std::fs::remove_file(&mcp) {
             eprintln!("exo init: could not remove legacy {}: {e}", mcp.display());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cgroup_content_matches_slice_present() {
+        let content =
+            "0::/user.slice/user-1000.slice/user@1000.service/swarm.slice/run-p1-i2.scope\n";
+        assert!(cgroup_content_in_slice(content, "swarm.slice"));
+    }
+
+    #[test]
+    fn cgroup_content_no_match_when_slice_absent() {
+        let content = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/foo.scope\n";
+        assert!(!cgroup_content_in_slice(content, "swarm.slice"));
+    }
+
+    #[test]
+    fn cgroup_content_no_match_on_empty() {
+        assert!(!cgroup_content_in_slice("", "swarm.slice"));
     }
 }

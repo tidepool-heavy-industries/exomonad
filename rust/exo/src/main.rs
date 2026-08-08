@@ -94,6 +94,9 @@ async fn main() -> anyhow::Result<()> {
                 cfg.wrap_nix,
                 cfg.review_enabled,
                 &cfg.profile_env,
+                cfg.confine,
+                &cfg.confine_wrapper,
+                &cfg.confine_socket,
                 session,
                 recreate,
             )

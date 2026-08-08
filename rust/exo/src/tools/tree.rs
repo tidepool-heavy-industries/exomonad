@@ -33,6 +33,17 @@ pub struct TreeArgs {
 /// The `tree` tool.
 pub struct Tree;
 
+/// The cgroup slice `exo init`'s `confine=true` places the swarm's tmux server in — see
+/// `rust/exo/src/init.rs`'s `CONFINE_SLICE`. Duplicated as a literal (not shared via a common
+/// const) since `tree` and `init` don't otherwise depend on each other.
+const CONFINE_SLICE: &str = "swarm.slice";
+
+/// Pure classification: does this `/proc/self/cgroup` content place the process in `slice`?
+/// Split out for unit testing without touching `/proc`.
+fn cgroup_content_in_slice(cgroup_content: &str, slice: &str) -> bool {
+    cgroup_content.contains(slice)
+}
+
 impl Tree {
     /// Prune `Reaped` nodes (and their subtrees) out of the rendered tree unless `all` is set.
     /// Returns the pruned copy; `hidden` is incremented once per `Reaped` node dropped.
@@ -252,6 +263,21 @@ impl<R: Topology + Fs + Send + Sync> Tool<R> for Tree {
 
         let mut text = String::new();
         use std::fmt::Write;
+        // Self-check: this sidecar IS a session descendant, so its own cgroup is a valid proxy
+        // for the whole session's confinement. Only checked (and only ever prints anything) when
+        // `exo init` believed confinement was verified at boot — an unconfigured host stays silent.
+        if std::env::var("EXO_CONFINED").is_ok() {
+            let confined = std::fs::read_to_string("/proc/self/cgroup")
+                .map(|c| cgroup_content_in_slice(&c, CONFINE_SLICE))
+                .unwrap_or(false);
+            if !confined {
+                writeln!(
+                    &mut text,
+                    "⚠ UNCONFINED — confine=true was set but this process is not in {CONFINE_SLICE}"
+                )
+                .unwrap();
+            }
+        }
         if let Some(parent) = &view.parent {
             writeln!(&mut text, "parent: {parent}").unwrap();
         } else {
@@ -294,6 +320,19 @@ mod tests {
     use super::*;
     use crate::testing::MockRuntime;
     use exo_framework::Tool;
+
+    #[test]
+    fn cgroup_content_matches_slice_present() {
+        let content =
+            "0::/user.slice/user-1000.slice/user@1000.service/swarm.slice/run-p1-i2.scope\n";
+        assert!(cgroup_content_in_slice(content, "swarm.slice"));
+    }
+
+    #[test]
+    fn cgroup_content_no_match_when_slice_absent() {
+        let content = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/foo.scope\n";
+        assert!(!cgroup_content_in_slice(content, "swarm.slice"));
+    }
 
     #[tokio::test]
     async fn test_tree_returns_view() {

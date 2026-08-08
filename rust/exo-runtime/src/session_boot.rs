@@ -32,16 +32,35 @@ fn parse_pane_id(stdout: &str) -> Result<PaneId, TmuxError> {
     })
 }
 
+/// Prepend `-L {socket}` to a raw tmux arg list when a dedicated socket is given — the same
+/// cgroup-confinement threading `TmuxIpc::tmux_cmd` does, duplicated here on purpose: this
+/// function runs *before* any `Runtime`/`TmuxIpc` exists (it returns the pane a `Runtime` is
+/// then constructed with).
+fn socket_prefixed(socket: Option<&str>, rest: Vec<String>) -> Vec<String> {
+    match socket {
+        Some(s) => {
+            let mut args = vec!["-L".to_string(), s.to_string()];
+            args.extend(rest);
+            args
+        }
+        None => rest,
+    }
+}
+
 pub async fn boot_root_session(
     session: &str,
     cwd: &Path,
     recreate: bool,
+    socket: Option<&str>,
 ) -> Result<PaneId, TmuxError> {
     if recreate {
-        let args = ["kill-session", "-t", session];
+        let args = socket_prefixed(
+            socket,
+            vec!["kill-session".into(), "-t".into(), session.into()],
+        );
         tracing::info!("Executing: tmux {}", args.join(" "));
         let status = tokio::process::Command::new("tmux")
-            .args(args)
+            .args(&args)
             .status()
             .await;
         match status {
@@ -51,16 +70,19 @@ pub async fn boot_root_session(
     }
 
     let cwd_str = cwd.to_string_lossy().into_owned();
-    let mut args: Vec<String> = vec![
-        "new-session".into(),
-        "-d".into(),
-        "-s".into(),
-        session.into(),
-        "-c".into(),
-        cwd_str,
-        "-n".into(),
-        "🤖 root".into(),
-    ];
+    let mut args: Vec<String> = socket_prefixed(
+        socket,
+        vec![
+            "new-session".into(),
+            "-d".into(),
+            "-s".into(),
+            session.into(),
+            "-c".into(),
+            cwd_str,
+            "-n".into(),
+            "🤖 root".into(),
+        ],
+    );
     // Size the detached session to the controlling terminal so the root window (and the `claude`
     // TUI launched into it) starts full-size. Without this, a detached `new-session` defaults to
     // 80x24 and the TUI doesn't repaint on attach — child windows, created while a client is
