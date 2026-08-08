@@ -48,11 +48,11 @@ contract ([`exo-framework`](../exo-framework/CLAUDE.md)); this crate provides th
 
 | Tool | Caps | Roles | What it does |
 |------|------|-------|--------------|
-| `fork_wave` | `Spawner`+`Fs`+`Git` | root, tl | Fork N Claude TL children (own worktrees). Per-child opt-in `fork_session: bool` (default false) inherits the parent's context via `--resume --fork-session`; default-false launches fresh. Per-child `model` override (tier-capped, see below). Per-child `review: Option<bool>` override — `None` (default) inherits the spawner's own `review_enabled`, `Some(b)` stamps the child's papers with `b` and it inherits onward down that child's own subtree. **Refuses on a dirty worktree**, naming the offending `git status --porcelain` lines — children fork from the spawner's current commit, so uncommitted state would be invisible to them; a git error fails *closed*. `preview: true` renders every child's fully-assembled spec (directives injected, `birth_preamble` reproduced) and spawns **nothing** — no clean gate, no acceptance writes — so a wave can be checked while the tree is still dirty. |
-| `spawn_dev` | `Spawner`+`Fs`+`Git` | root, tl | Spawn a Sonnet Claude dev in its own worktree. Takes the same tier-capped `model` override, the same per-spawn `review: Option<bool>` override (see `fork_wave`), and the same dirty-worktree refusal as `fork_wave`. |
-| `spawn_worker` | `Spawner`+`Fs` | root, tl | Spawn an ephemeral Sonnet Claude worker (inline pane). Takes the `model` override, but is **not** clean-gated — an inline worker deliberately shares the parent's tree, and gets directives by text injection only (it already sees the parent's `.exo/directives/` on disk). |
+| `fork_wave` | `Spawner`+`Fs`+`Git` | root, tl | Fork N Claude TL children (own worktrees). Per-child opt-in `fork_session: bool` (default false) inherits the parent's context via `--resume --fork-session`; default-false launches fresh. Per-child `model` override (tier-capped, see below). Per-child `review: Option<bool>` override — `None` (default) inherits the spawner's own `review_enabled`, `Some(b)` stamps the child's papers with `b` and it inherits onward down that child's own subtree. Per-child `file_boundary: Vec<String>` (default empty = unrestricted) persists an allowed-paths list `merge` checks against that child's actual diff before folding — see [`boundary`](#fold-time-file-boundary) below. **Refuses on a dirty worktree**, naming the offending `git status --porcelain` lines — children fork from the spawner's current commit, so uncommitted state would be invisible to them; a git error fails *closed*. `preview: true` renders every child's fully-assembled spec (directives injected, `birth_preamble` reproduced) and spawns **nothing** — no clean gate, no acceptance writes, no boundary writes — so a wave can be checked while the tree is still dirty. |
+| `spawn_dev` | `Spawner`+`Fs`+`Git` | root, tl | Spawn a Sonnet Claude dev in its own worktree. Takes the same tier-capped `model` override, the same per-spawn `review: Option<bool>` override, and the same `file_boundary: Vec<String>` (see `fork_wave`), and the same dirty-worktree refusal as `fork_wave`. |
+| `spawn_worker` | `Spawner`+`Fs` | root, tl | Spawn an ephemeral Sonnet Claude worker (inline pane). Takes the `model` override, but is **not** clean-gated — an inline worker deliberately shares the parent's tree, and gets directives by text injection only (it already sees the parent's `.exo/directives/` on disk). No `file_boundary` — a worker never gets its own branch, so there's nothing for `merge` to check. |
 | `dismiss_worker` | `Spawner` | root, tl | Dismiss an inline worker by name: unconditional parent-side `kill_pane` resolved via the children ledger. Matched to `spawn_worker`; the reliable teardown primitive for workers that never registered as a teammate. |
-| `merge` | `Git`+`Spawner` | root, tl | **The local fold:** `git merge <child-branch>`, followed by best-effort teardown (`kill_pane` + `reclaim_worktree`) of the child. When **both** teardown calls return `SpawnError::UnknownChild`, the note becomes an explicit `merged non-child ref; no teardown performed (succession escape hatch: …)` instead of the generic best-effort string — `merge` accepts any local ref so a live ancestor can fold a dead TL's orphaned descendant, and on that path there simply is no ledger child of yours to reclaim. Every other outcome (both ok, partial, mixed) renders exactly as before. |
+| `merge` | `Git`+`Spawner`+`Fs` | root, tl | **The local fold:** if the child has a persisted [`FileBoundary`](#fold-time-file-boundary) (from `file_boundary` at spawn time), its actual diff (`Git::commits_between(merge_base, branch)`) is checked against it **before** `git merge` runs; a violation refuses with the offending files named (`boundary_override: true` merges anyway, noted in the output). A child with no persisted boundary merges unrestricted, byte-identical to before this mechanism existed. Then `git merge <child-branch>`, followed by best-effort teardown (`kill_pane` + `reclaim_worktree`) of the child. When **both** teardown calls return `SpawnError::UnknownChild`, the note becomes an explicit `merged non-child ref; no teardown performed (succession escape hatch: …)` instead of the generic best-effort string — `merge` accepts any local ref so a live ancestor can fold a dead TL's orphaned descendant, and on that path there simply is no ledger child of yours to reclaim (the boundary check is skipped the same way when `merge_base` resolves to `None` — unrelated histories). Every other outcome (both ok, partial, mixed) renders exactly as before. |
 | `submit_branch` | `Git`+`Process`+`Spawner`+`Fs`+`Bus` | tl, dev | **Request review** — if reviewers are enabled (`review_enabled` in `.exo/config.toml`, off by default; read from the node's own papers). Runs the ordered precondition checks (committed → **needs_rebase** → `.exo/checks/pre-merge/*` scripts); the rebase gate blocks + prompts `git rebase <parent>` when the branch is behind its parent's REAL git branch (`NodePapers.parent_branch`, birth-stamped by the spawner from ITS OWN current branch — not a dot-derived tree-address coordinate, so the gate fires at every depth, including a direct child of root; fails open only on the root itself, or unreadable/corrupt/pre-field papers). Then spawns a **reviewer** off this branch (fork-point `git diff` base via `Git::merge_base`) and returns "stop & wait". It does NOT deliver `[READY]` itself except via the skip path — only the sidecar does, on an approve-verdict (the structural gate). **Continuity:** reads the latest `ReviewLog` and appends unresolved Error findings from the prior round to the reviewer task. Explicit escape hatch regardless of config: `dangerously_skip_reviewer: true`. **Structured receipts:** an optional typed `receipts` block (`commit_tested`, `verify_commands_run`, `metrics: Vec<LabeledValue>`, `deviations`) rendered compactly into the parent-bound `[READY]` text and carried in full in the tool's `data`. `commit_tested` drives the **transfer proof** — see [Receipts and the transfer proof](#receipts-and-the-transfer-proof). |
 | `verdict` | `Bus`+`Kv` | reviewer | A reviewer's one output → a `System(Reviewed)` message to its parent: `summary` + structured `findings` {`file`, `line`, `severity`, `body`, `suggestion`?}. Triggers reviewer teardown (handled in `exo-node`). |
 | `notify_parent` | `Bus` | tl, dev, worker, reviewer | Status/failure update to `Addressee::Parent` (NOT the done-signal). Optional `reply_to` — see [Reply threading](#reply-threading). |
@@ -118,6 +118,46 @@ and actionably; a spuriously-uncapped one silently burns tokens on the wrong tie
 
 A role redirected by a **launch profile** ignores the override — that profile's proxy serves exactly
 one model, so overriding it would 404.
+
+## Fold-time file boundary
+
+A spawn spec's `boundary` field is prose the child reads — a `DO NOT` list injected into its task.
+Nothing ever checked it mechanically: today, verifying a child stayed inside its spec's file
+boundary is root-operator discipline (`git diff --name-only $(merge-base)..branch`, read by eye
+against the spec), and a `submit_branch` reviewer structurally *cannot* do it — it never sees the
+spawn-spec's boundary list at all, only the diff. `boundary.rs` (`FileBoundary`) makes the same
+check a mechanism instead: `fork_wave`/`spawn_dev` optionally persist an **allowed-paths list**
+parent-side at spawn time, and `merge` reads it back and verifies the child's actual diff against
+it — refusing the fold if it's violated — **before** `ctx.merge()` ever runs.
+
+- **Persisted, not injected.** `write_boundary` writes `FileBoundary { allowed: Vec<String> }` to
+  `.exo/boundaries/{child}.json`, **relative to the spawning node's own worktree** (the sidecar's
+  cwd) — not the child's. The same node is the one that later calls `merge` from that same cwd, so
+  this is parent-local bookkeeping, symmetric with the child ledger (`.exo/children.jsonl`), never
+  materialized into the child's own worktree. Best-effort on write (mirrors
+  [`write_acceptance`](#standing-directives) — a write failure only costs the fold-time check, never
+  blocks the spawn).
+- **Absence ≠ violation.** `read_boundary` returns `Ok(None)` when no file exists — the ordinary
+  case for a child spawned with `file_boundary` omitted/empty, or one predating this mechanism —
+  and `merge` treats `None` as "unrestricted, exactly as before". Only a file that exists but fails
+  to parse is a loud error; a missing file is never conflated with an empty (i.e. "touch nothing")
+  boundary.
+- **Matching is exact-or-directory-prefix, dep-free** (`boundary::matches` — no glob crate): an
+  entry matches a changed file if it equals it exactly, or is a directory prefix (the file path
+  starts with the entry **+ `/`**). The separator requirement is load-bearing — `"src/lib"` must
+  NOT match `"src/librs"`, only `"src/lib/…"` or `"src/lib"` itself.
+- **Checked against the real diff, not the spec's claim.** `merge` resolves `Git::merge_base` for
+  the branch, then unions the files touched across `Git::commits_between(base, branch)`. `merge_base
+  == None` (unrelated histories — the succession escape-hatch case, folding an orphaned
+  descendant's branch back into a live ancestor) skips the check with a note in the output, the same
+  fail-open posture teardown already has for that path.
+- **Override, don't silently allow.** A violation refuses the merge with a `CapError::invalid`
+  naming every offending file and pointing at `boundary_override: true` (a new `merge` arg,
+  default false) to fold anyway; the override still lands, but the output text says
+  `(boundary OVERRIDDEN: k violations)` and the tool's `data` carries the violation list, so an
+  override is never silent either.
+- **Success is visible too.** A clean check appends `(boundary ok: N files)` to `merge`'s output —
+  so a TL reading its own tool-call history can see the check ran, not just that it didn't fire.
 
 ## exo doctor
 

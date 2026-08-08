@@ -273,6 +273,12 @@ pub struct SpawnDevArgs {
     /// the typed unreviewed flag already carry the audit trail.
     #[serde(default)]
     pub review: Option<bool>,
+    /// Allowed file paths / directory prefixes for this child's diff, checked by `merge` before
+    /// folding. An entry matches a changed file if it equals it exactly or is a directory prefix
+    /// (the file path starts with the entry + `/`). Empty (default) = unrestricted, no check at
+    /// merge time.
+    #[serde(default)]
+    pub file_boundary: Vec<String>,
 }
 
 pub struct SpawnDev;
@@ -324,6 +330,12 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for SpawnDev {
         let spawned = ctx.spawn(spec).await?;
         // Persist the child's spec as its acceptance bar (relocated out of the runtime birth).
         write_acceptance(ctx, &spawned, &task).await;
+        if !args.file_boundary.is_empty() {
+            let boundary = crate::boundary::FileBoundary {
+                allowed: args.file_boundary,
+            };
+            crate::boundary::write_boundary(ctx, &spawned, &boundary).await;
+        }
         // Untracked files don't materialize through `git worktree add` — copy the directives into
         // the child's own worktree so it can pass them further down its own subtree.
         copy_directives(ctx, &spawned, &directives).await;
@@ -368,6 +380,12 @@ pub struct ForkChildArgs {
     /// the typed unreviewed flag already carry the audit trail.
     #[serde(default)]
     pub review: Option<bool>,
+    /// Allowed file paths / directory prefixes for this child's diff, checked by `merge` before
+    /// folding. An entry matches a changed file if it equals it exactly or is a directory prefix
+    /// (the file path starts with the entry + `/`). Empty (default) = unrestricted, no check at
+    /// merge time.
+    #[serde(default)]
+    pub file_boundary: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -418,11 +436,13 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
         // so preview can label each child before anything is spawned.
         let mut tasks = Vec::with_capacity(args.children.len());
         let mut display_names = Vec::with_capacity(args.children.len());
+        let mut file_boundaries = Vec::with_capacity(args.children.len());
         for child in args.children {
             let display_name = child
                 .name
                 .clone()
                 .unwrap_or_else(|| "tl-<auto>".to_string());
+            let file_boundary = child.file_boundary.clone();
             // The tool fixes the (role, kind): a Claude TL child in its own worktree.
             let spec = build_spawn(
                 ExoRole::Tl,
@@ -445,6 +465,7 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
             )?;
             tasks.push(spec.task.clone());
             display_names.push(display_name);
+            file_boundaries.push(file_boundary);
             specs.push(spec);
         }
 
@@ -471,10 +492,20 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
 
         let mut spawned = Vec::new();
         let mut errors = Vec::new();
-        for (res, task) in results.into_iter().zip(tasks.iter()) {
+        for ((res, task), file_boundary) in results
+            .into_iter()
+            .zip(tasks.iter())
+            .zip(file_boundaries.iter())
+        {
             match res {
                 Ok(name) => {
                     write_acceptance(ctx, &name, task).await;
+                    if !file_boundary.is_empty() {
+                        let boundary = crate::boundary::FileBoundary {
+                            allowed: file_boundary.clone(),
+                        };
+                        crate::boundary::write_boundary(ctx, &name, &boundary).await;
+                    }
                     copy_directives(ctx, &name, &directives).await;
                     spawned.push(name.as_str().to_string());
                 }
@@ -590,6 +621,7 @@ mod tests {
             read_first: vec![],
             model: None,
             review: None,
+            file_boundary: vec![],
         };
         let out = SpawnDev::run(&mock, args).await.unwrap();
         assert!(out.text.contains("Spawned dev"));
@@ -620,6 +652,7 @@ mod tests {
                     fork_session: false,
                     model: None,
                     review: None,
+                    file_boundary: vec![],
                 },
                 ForkChildArgs {
                     name: Some("child-2".to_string()),
@@ -633,6 +666,7 @@ mod tests {
                     fork_session: false,
                     model: None,
                     review: None,
+                    file_boundary: vec![],
                 },
             ],
             preview: false,
@@ -672,6 +706,7 @@ mod tests {
             read_first: vec![],
             model: Some("sonnet".to_string()),
             review: None,
+            file_boundary: vec![],
         };
         assert!(SpawnDev::run(&mock, args).await.is_ok());
         assert!(mock
@@ -698,6 +733,7 @@ mod tests {
             read_first: vec![],
             model: Some("fable".to_string()),
             review: None,
+            file_boundary: vec![],
         };
         let err = SpawnDev::run(&mock, args).await.unwrap_err();
         let msg = err.to_string();
@@ -728,6 +764,7 @@ mod tests {
             read_first: vec![],
             model: Some("fable".to_string()),
             review: None,
+            file_boundary: vec![],
         };
         assert!(SpawnDev::run(&mock, args).await.is_err());
     }
@@ -746,6 +783,7 @@ mod tests {
             read_first: vec![],
             model: Some("gpt-nonsense-4".to_string()),
             review: None,
+            file_boundary: vec![],
         };
         assert!(SpawnDev::run(&mock, args).await.is_ok());
     }
@@ -764,6 +802,7 @@ mod tests {
             read_first: vec![],
             model: Some("sonnet; rm -rf /".to_string()),
             review: None,
+            file_boundary: vec![],
         };
         assert!(SpawnDev::run(&mock, args).await.is_err());
     }
@@ -785,6 +824,7 @@ mod tests {
             read_first: vec![],
             model: None,
             review: None,
+            file_boundary: vec![],
         };
         let err = SpawnDev::run(&mock, args).await.unwrap_err();
         let msg = err.to_string();
@@ -815,6 +855,7 @@ mod tests {
                 fork_session: false,
                 model: None,
                 review: None,
+                file_boundary: vec![],
             }],
             preview: false,
         };
@@ -866,6 +907,7 @@ mod tests {
             read_first: vec![],
             model: None,
             review: None,
+            file_boundary: vec![],
         };
         assert!(SpawnDev::run(&mock, args).await.is_err());
     }
@@ -892,6 +934,7 @@ mod tests {
             read_first: vec![],
             model: None,
             review: None,
+            file_boundary: vec![],
         };
         SpawnDev::run(&mock, args).await.unwrap();
         let calls = mock.calls_made();
@@ -927,6 +970,7 @@ mod tests {
             read_first: vec![],
             model: None,
             review: None,
+            file_boundary: vec![],
         };
         SpawnDev::run(&mock, args).await.unwrap();
         assert!(mock
@@ -1021,6 +1065,7 @@ mod tests {
                 fork_session: false,
                 model: None,
                 review: None,
+                file_boundary: vec![],
             }],
             preview: true,
         };
@@ -1047,6 +1092,7 @@ mod tests {
             read_first: vec![],
             model: None,
             review: None,
+            file_boundary: vec![],
         };
         SpawnDev::run(&mock, args).await.unwrap();
         let calls = mock.calls_made();
@@ -1101,6 +1147,7 @@ mod tests {
             read_first: vec![],
             model: None,
             review: Some(true),
+            file_boundary: vec![],
         };
         SpawnDev::run(&mock, args).await.unwrap();
         // build_spawn threads `review` straight onto ExoSpawn.review_override — covered directly by
@@ -1157,5 +1204,119 @@ mod tests {
         )
         .unwrap();
         assert_eq!(spawn.review_override, None);
+    }
+
+    #[tokio::test]
+    async fn spawn_dev_writes_boundary_when_non_empty() {
+        let mock = MockRuntime::default();
+        let args = SpawnDevArgs {
+            name: Some("dev-1".to_string()),
+            task: "do work".to_string(),
+            steps: vec![],
+            verify: vec![],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec![],
+            read_first: vec![],
+            model: None,
+            review: None,
+            file_boundary: vec!["rust/exo/src/tools/spawn.rs".to_string()],
+        };
+        SpawnDev::run(&mock, args).await.unwrap();
+        let calls = mock.calls_made();
+        let path = crate::boundary::boundary_path("dev-1")
+            .display()
+            .to_string();
+        let write = calls
+            .iter()
+            .find(|c| matches!(c, Call::FsWrite { path: p } if p == &path))
+            .expect("boundary file written");
+        match write {
+            Call::FsWrite { path } => {
+                let bytes = mock.files.lock().unwrap().get(path).cloned().unwrap();
+                let boundary: crate::boundary::FileBoundary =
+                    serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(boundary.allowed, vec!["rust/exo/src/tools/spawn.rs"]);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn spawn_dev_omits_boundary_write_when_empty() {
+        let mock = MockRuntime::default();
+        let args = SpawnDevArgs {
+            name: Some("dev-1".to_string()),
+            task: "do work".to_string(),
+            steps: vec![],
+            verify: vec![],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec![],
+            read_first: vec![],
+            model: None,
+            review: None,
+            file_boundary: vec![],
+        };
+        SpawnDev::run(&mock, args).await.unwrap();
+        let path = crate::boundary::boundary_path("dev-1")
+            .display()
+            .to_string();
+        assert!(!mock
+            .calls_made()
+            .iter()
+            .any(|c| matches!(c, Call::FsWrite { path: p } if p == &path)));
+    }
+
+    #[tokio::test]
+    async fn fork_wave_writes_boundary_per_child_when_non_empty() {
+        let mock = MockRuntime::default();
+        let args = ForkWaveArgs {
+            children: vec![
+                ForkChildArgs {
+                    name: Some("child-1".to_string()),
+                    task: "task 1".to_string(),
+                    steps: vec![],
+                    verify: vec![],
+                    done_criteria: vec![],
+                    context: None,
+                    boundary: vec![],
+                    read_first: vec![],
+                    fork_session: false,
+                    model: None,
+                    review: None,
+                    file_boundary: vec!["rust/exo/src/tools".to_string()],
+                },
+                ForkChildArgs {
+                    name: Some("child-2".to_string()),
+                    task: "task 2".to_string(),
+                    steps: vec![],
+                    verify: vec![],
+                    done_criteria: vec![],
+                    context: None,
+                    boundary: vec![],
+                    read_first: vec![],
+                    fork_session: false,
+                    model: None,
+                    review: None,
+                    file_boundary: vec![],
+                },
+            ],
+            preview: false,
+        };
+        ForkWave::run(&mock, args).await.unwrap();
+        let calls = mock.calls_made();
+        let path1 = crate::boundary::boundary_path("child-1")
+            .display()
+            .to_string();
+        let path2 = crate::boundary::boundary_path("child-2")
+            .display()
+            .to_string();
+        assert!(calls
+            .iter()
+            .any(|c| matches!(c, Call::FsWrite { path: p } if p == &path1)));
+        assert!(!calls
+            .iter()
+            .any(|c| matches!(c, Call::FsWrite { path: p } if p == &path2)));
     }
 }
