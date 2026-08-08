@@ -114,6 +114,88 @@ pub enum TransferProof {
     },
 }
 
+/// Clip `s` to [`MAX_STRING_RENDER_BYTES`] bytes, on a char boundary, with a trailing `…` when
+/// truncated. Used for every rendered string so a truncation is never silent.
+fn clip(s: &str) -> String {
+    if s.len() <= MAX_STRING_RENDER_BYTES {
+        return s.to_string();
+    }
+    let mut end = MAX_STRING_RENDER_BYTES;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &s[..end])
+}
+
+/// Render a list of strings, each individually clipped ([`clip`]), joined by `sep`, capped at
+/// `max` shown items with a trailing `(+N more)` when the list overflows. Used for every rendered
+/// list (verify commands, metrics, deviations, file lists) so a truncated list is never silent.
+fn render_clipped_list(items: &[String], max: usize, sep: &str) -> String {
+    let shown: Vec<String> = items.iter().take(max).map(|s| clip(s)).collect();
+    let mut out = shown.join(sep);
+    if items.len() > max {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&format!("(+{} more)", items.len() - max));
+    }
+    out
+}
+
+/// The union of every commit's touched files, sorted and deduped.
+fn union_files(commits: &[CommitFiles]) -> Vec<String> {
+    let mut files: Vec<String> = commits
+        .iter()
+        .flat_map(|c| c.files.iter().cloned())
+        .collect();
+    files.sort();
+    files.dedup();
+    files
+}
+
+fn render_transfer_proof(p: &TransferProof) -> String {
+    match p {
+        TransferProof::AtHead { sha } => format!("tested@HEAD {}", clip(sha)),
+        TransferProof::Moved {
+            tested,
+            head,
+            commits,
+            overlap,
+        } => {
+            let files = union_files(commits);
+            let files_str = render_clipped_list(&files, MAX_FILES, ", ");
+            let overlap_str = match overlap {
+                None => "(no diff base resolved — overlap unknown)".to_string(),
+                Some(ov) if ov.is_empty() => "none overlap your diff".to_string(),
+                Some(ov) => format!(
+                    "{} overlap your diff: {}",
+                    ov.len(),
+                    render_clipped_list(ov, MAX_FILES, ", ")
+                ),
+            };
+            format!(
+                "tested at {}, submitting {} — {} commits between; files touched: {}; {}",
+                clip(tested),
+                clip(head),
+                commits.len(),
+                files_str,
+                overlap_str,
+            )
+        }
+        TransferProof::Unverifiable {
+            tested,
+            head,
+            reason,
+        } => format!(
+            "tested-at commit {} could not be verified against HEAD {} — treat as untested \
+             transfer ({})",
+            clip(tested),
+            clip(head),
+            clip(reason),
+        ),
+    }
+}
+
 /// Render the compact receipts block for the parent-bound message text.
 ///
 /// Pure and total: deliberately truncating, and every truncation leaves a visible marker (`…` for
@@ -123,6 +205,134 @@ pub enum TransferProof {
 ///
 /// The caller is responsible for rejecting oversized input *before* calling this
 /// ([`MAX_FIELD_BYTES`]) and for refusing a result over [`MAX_RENDERED_BYTES`].
-pub fn render_receipts_summary(_r: &Receipts, _proof: Option<&TransferProof>) -> String {
-    todo!("render the compact receipts block: verify commands, metrics, deviations, transfer proof")
+pub fn render_receipts_summary(r: &Receipts, proof: Option<&TransferProof>) -> String {
+    let mut sections: Vec<String> = Vec::new();
+
+    if !r.verify_commands_run.is_empty() {
+        sections.push(format!(
+            "  ran: {}",
+            render_clipped_list(&r.verify_commands_run, MAX_VERIFY_COMMANDS, " | ")
+        ));
+    }
+    if !r.metrics.is_empty() {
+        let metric_strs: Vec<String> = r
+            .metrics
+            .iter()
+            .map(|m| format!("{}={}", m.label, m.value))
+            .collect();
+        sections.push(format!(
+            "  metrics: {}",
+            render_clipped_list(&metric_strs, MAX_METRICS, " | ")
+        ));
+    }
+    if !r.deviations.is_empty() {
+        sections.push(format!(
+            "  deviations: {}",
+            render_clipped_list(&r.deviations, MAX_DEVIATIONS, " | ")
+        ));
+    }
+    if let Some(p) = proof {
+        sections.push(format!("  transfer proof: {}", render_transfer_proof(p)));
+    }
+
+    if sections.is_empty() {
+        return String::new();
+    }
+    format!("receipts:\n{}", sections.join("\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_receipts_no_proof_renders_empty() {
+        let r = Receipts::default();
+        assert_eq!(render_receipts_summary(&r, None), "");
+    }
+
+    #[test]
+    fn overlong_string_is_clipped_with_marker() {
+        let long = "x".repeat(500);
+        let r = Receipts {
+            deviations: vec![long.clone()],
+            ..Default::default()
+        };
+        let out = render_receipts_summary(&r, None);
+        assert!(out.contains('…'), "missing truncation marker: {out}");
+        assert!(!out.contains(&long), "long string was not clipped: {out}");
+    }
+
+    #[test]
+    fn verify_commands_over_cap_render_plus_n_more() {
+        let cmds: Vec<String> = (0..MAX_VERIFY_COMMANDS + 3)
+            .map(|i| format!("cmd{i}"))
+            .collect();
+        let r = Receipts {
+            verify_commands_run: cmds,
+            ..Default::default()
+        };
+        let out = render_receipts_summary(&r, None);
+        assert!(out.contains("(+3 more)"), "wrong overflow count: {out}");
+    }
+
+    #[test]
+    fn at_head_renders_marker() {
+        let p = TransferProof::AtHead {
+            sha: "deadbeef".into(),
+        };
+        let out = render_receipts_summary(&Receipts::default(), Some(&p));
+        assert!(out.contains("tested@HEAD"), "{out}");
+    }
+
+    #[test]
+    fn moved_renders_commits_between_marker() {
+        let p = TransferProof::Moved {
+            tested: "abc1234".into(),
+            head: "def5678".into(),
+            commits: vec![CommitFiles {
+                sha: "c1".into(),
+                files: vec!["a.rs".into()],
+            }],
+            overlap: Some(vec!["a.rs".into()]),
+        };
+        let out = render_receipts_summary(&Receipts::default(), Some(&p));
+        assert!(out.contains("commits between"), "{out}");
+    }
+
+    #[test]
+    fn unverifiable_renders_untested_transfer_marker() {
+        let p = TransferProof::Unverifiable {
+            tested: "abc".into(),
+            head: "def".into(),
+            reason: "bad sha".into(),
+        };
+        let out = render_receipts_summary(&Receipts::default(), Some(&p));
+        assert!(out.contains("treat as untested transfer"), "{out}");
+    }
+
+    #[test]
+    fn moved_overlap_empty_vs_unknown() {
+        let moved = |overlap| TransferProof::Moved {
+            tested: "abc".into(),
+            head: "def".into(),
+            commits: vec![],
+            overlap,
+        };
+        let out_empty = render_receipts_summary(&Receipts::default(), Some(&moved(Some(vec![]))));
+        assert!(out_empty.contains("none overlap your diff"), "{out_empty}");
+        let out_unknown = render_receipts_summary(&Receipts::default(), Some(&moved(None)));
+        assert!(out_unknown.contains("overlap unknown"), "{out_unknown}");
+    }
+
+    #[test]
+    fn multibyte_utf8_clips_without_panic() {
+        let long = "é".repeat(300);
+        let r = Receipts {
+            deviations: vec![long],
+            ..Default::default()
+        };
+        let out = render_receipts_summary(&r, None);
+        assert!(out.contains('…'), "{out}");
+    }
 }

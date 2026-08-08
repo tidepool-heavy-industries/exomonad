@@ -9,6 +9,7 @@
 //! merges the BRANCH off disk and uncommitted changes would be invisible to that merge.
 
 use crate::branching::{child_name, parent_branch};
+use crate::receipts::{self, render_receipts_summary, Receipts, TransferProof};
 use crate::roles::ExoRole;
 use crate::spawn::ExoSpawn;
 use exo_caps::{
@@ -39,6 +40,28 @@ pub struct SubmitBranchArgs {
     /// false (review required).
     #[serde(default)]
     pub dangerously_skip_reviewer: bool,
+    /// Structured receipts for your parent — what you actually did, checkable rather than taken on
+    /// faith. `commit_tested` is the sha you LAST RAN YOUR VERIFICATION AT (e.g. the commit your
+    /// `cargo test` was green on, not the commit you're submitting) — it is checked against HEAD to
+    /// surface any gap between what you tested and what you're handing up (a rebase, a follow-up
+    /// fix, "one more small thing"). Every string field has a size cap
+    /// (`receipts::MAX_FIELD_BYTES`); an oversized field is rejected loudly, never silently
+    /// trimmed. Entirely optional — omit for a plain, unreceipted submit.
+    #[serde(default)]
+    pub receipts: Option<Receipts>,
+}
+
+// Hand-written, not `#[derive(Default)]`: a derive would silently pick a wrong default for a
+// field added later without thought (e.g. an `Option` that should start `Some`).
+#[allow(clippy::derivable_impls)]
+impl Default for SubmitBranchArgs {
+    fn default() -> Self {
+        Self {
+            note: String::new(),
+            dangerously_skip_reviewer: false,
+            receipts: None,
+        }
+    }
 }
 
 /// One submit precondition. Ordered; the first failure blocks the submit with its reason. A
@@ -263,6 +286,157 @@ fn checks<C: Git + Process + Fs + Sync>() -> Vec<Check<C>> {
     ]
 }
 
+/// Reject any receipts field over [`receipts::MAX_FIELD_BYTES`], naming the offending field so the
+/// agent knows what to trim. Runs before any precondition check or delivery — an oversized receipt
+/// is rejected even on the skip path, where it wouldn't otherwise be rendered.
+fn validate_receipts_size(r: &Receipts) -> CapResult<()> {
+    let check = |field: String, s: &str| -> CapResult<()> {
+        if s.len() > receipts::MAX_FIELD_BYTES {
+            Err(CapError::invalid(
+                "submit_branch",
+                format!(
+                    "receipts.{field} is {} bytes, exceeds the {}-byte cap — trim it",
+                    s.len(),
+                    receipts::MAX_FIELD_BYTES
+                ),
+            ))
+        } else {
+            Ok(())
+        }
+    };
+    if let Some(t) = &r.commit_tested {
+        check("commit_tested".to_string(), t)?;
+    }
+    for (i, c) in r.verify_commands_run.iter().enumerate() {
+        check(format!("verify_commands_run[{i}]"), c)?;
+    }
+    for (i, m) in r.metrics.iter().enumerate() {
+        check(format!("metrics[{i}].label"), &m.label)?;
+        check(format!("metrics[{i}].value"), &m.value)?;
+    }
+    for (i, d) in r.deviations.iter().enumerate() {
+        check(format!("deviations[{i}]"), d)?;
+    }
+    Ok(())
+}
+
+/// The real `git diff` base for this branch: the fork point off its ancestry, falling back to a
+/// merge-base against the derived parent name, then `main`/`master`. A SHA always resolves in
+/// `git diff`, unlike a branch *name* that may not be a live ref (e.g. a direct child of root
+/// derives `root`, which the human session never checks out).
+async fn resolve_diff_base<C: Git + Sync>(
+    ctx: &C,
+    branch: &exo_caps::Branch,
+) -> CapResult<Option<String>> {
+    Ok(match ctx.fork_point().await? {
+        Some(fp) => Some(fp),
+        None => {
+            let derived_parent = parent_branch(branch);
+            let mut b = None;
+            for candidate in [derived_parent, "main", "master"] {
+                if let Some(found) = ctx.merge_base(candidate).await? {
+                    b = Some(found);
+                    break;
+                }
+            }
+            b
+        }
+    })
+}
+
+/// Build the [`TransferProof`] between the sha the submitter last tested at and the sha it is
+/// actually submitting. See [`receipts`] for why this is the load-bearing part of a receipt.
+async fn transfer_proof<C: Git + Sync>(
+    ctx: &C,
+    tested: &str,
+    head: &str,
+    branch: &exo_caps::Branch,
+) -> TransferProof {
+    let tested_lower = tested.to_lowercase();
+    let head_lower = head.to_lowercase();
+    let (shorter, longer) = if tested_lower.len() <= head_lower.len() {
+        (&tested_lower, &head_lower)
+    } else {
+        (&head_lower, &tested_lower)
+    };
+    if shorter.len() >= 7 && longer.starts_with(shorter.as_str()) {
+        return TransferProof::AtHead {
+            sha: head.to_string(),
+        };
+    }
+
+    let commits = match ctx.commits_between(tested, "HEAD").await {
+        Ok(c) => c,
+        Err(e) => {
+            return TransferProof::Unverifiable {
+                tested: tested.to_string(),
+                head: head.to_string(),
+                reason: e.to_string(),
+            }
+        }
+    };
+
+    let overlap = match resolve_diff_base(ctx, branch).await {
+        Ok(Some(base)) => match ctx.commits_between(&base, "HEAD").await {
+            Ok(diff_commits) => {
+                let diff_files: std::collections::BTreeSet<String> = diff_commits
+                    .iter()
+                    .flat_map(|c| c.files.iter().cloned())
+                    .collect();
+                let moved_files: std::collections::BTreeSet<String> = commits
+                    .iter()
+                    .flat_map(|c| c.files.iter().cloned())
+                    .collect();
+                Some(
+                    moved_files
+                        .intersection(&diff_files)
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )
+            }
+            Err(_) => None,
+        },
+        _ => None,
+    };
+
+    TransferProof::Moved {
+        tested: tested.to_string(),
+        head: head.to_string(),
+        commits,
+        overlap,
+    }
+}
+
+/// A small serde_json rendering of a [`TransferProof`] for `ToolOutput::data`. Built inline
+/// (rather than a `Serialize` derive on `TransferProof`) because it holds [`exo_caps::CommitFiles`],
+/// which is not `Serialize`.
+fn transfer_proof_json(proof: Option<&TransferProof>) -> serde_json::Value {
+    match proof {
+        None => serde_json::Value::Null,
+        Some(TransferProof::AtHead { sha }) => json!({ "kind": "at_head", "sha": sha }),
+        Some(TransferProof::Moved {
+            tested,
+            head,
+            commits,
+            overlap,
+        }) => json!({
+            "kind": "moved",
+            "tested": tested,
+            "head": head,
+            "commits": commits
+                .iter()
+                .map(|c| json!({ "sha": c.sha, "files": c.files }))
+                .collect::<Vec<_>>(),
+            "overlap": overlap,
+        }),
+        Some(TransferProof::Unverifiable {
+            tested,
+            head,
+            reason,
+        }) => json!({ "kind": "unverifiable", "tested": tested, "head": head, "reason": reason }),
+    }
+}
+
 /// The `submit_branch` tool.
 pub struct SubmitBranch;
 
@@ -283,6 +457,12 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
     type Args = SubmitBranchArgs;
 
     async fn run(ctx: &R, args: SubmitBranchArgs) -> CapResult<ToolOutput> {
+        // Oversized receipt fields are rejected loudly, before any precondition check or
+        // delivery — even on the skip path, where they wouldn't otherwise be rendered.
+        if let Some(receipts) = &args.receipts {
+            validate_receipts_size(receipts)?;
+        }
+
         // Run the ordered preconditions; first failure blocks (surfaced as a tool error so the
         // agent sees the reason and can fix it before retrying). These run regardless of whether
         // review is skipped — committed + pre-merge checks are non-negotiable.
@@ -298,6 +478,18 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
         let branch = ctx.current_branch().await?;
         let sha = ctx.head_sha().await?;
 
+        // The transfer proof: how far HEAD has moved past the sha the submitter last tested at.
+        // Computed unconditionally (used on the skip path below; the reviewer-spawn path owns its
+        // own rendering).
+        let proof = match args
+            .receipts
+            .as_ref()
+            .and_then(|r| r.commit_tested.as_deref())
+        {
+            Some(tested) => Some(transfer_proof(ctx, tested, &sha, &branch).await),
+            None => None,
+        };
+
         // Two ways to end up here: the agent explicitly opted out (loud, "dangerous"), or this
         // project simply doesn't have reviewers turned on (quiet, the normal off-by-default case —
         // reviewers aren't a fully-cooked feature yet; see `rust/exo/CLAUDE.md`). Either way the gate
@@ -306,26 +498,42 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
         // suspicion for something the project chose.
         let reviewer_configured = own_review_enabled(ctx).await;
         if args.dangerously_skip_reviewer || !reviewer_configured {
-            let text = if args.dangerously_skip_reviewer {
+            let flag_line = if args.dangerously_skip_reviewer {
                 format!(
-                    "[READY — REVIEWER SKIPPED] branch `{}` @ {} is committed and ready for you to \
-                     merge. The submitting node chose to skip review (dangerously_skip_reviewer): NO \
-                     reviewer vetted this. Inspect the diff yourself before merging — be more suspicious \
-                     than usual. Note from the submitter: {}",
+                    "[READY] branch `{}` @ {} — review: SKIPPED-BY-AGENT (dangerously_skip_reviewer; \
+                     inspect the diff yourself, be more suspicious than usual)",
                     branch.as_str(),
                     sha,
-                    args.note
                 )
             } else {
                 format!(
-                    "[READY] branch `{}` @ {} is committed and ready for you to merge. Reviewers are \
-                     disabled for this project (set `review_enabled = true` in `.exo/config.toml` to \
-                     turn them on) — this was not reviewed. Note from the submitter: {}",
+                    "[READY] branch `{}` @ {} — review: disabled (config)",
                     branch.as_str(),
                     sha,
-                    args.note
                 )
             };
+            let mut text = format!("{flag_line}\nnote: {}", args.note);
+            let receipts_block = args
+                .receipts
+                .as_ref()
+                .map(|r| render_receipts_summary(r, proof.as_ref()))
+                .unwrap_or_default();
+            if !receipts_block.is_empty() {
+                if receipts_block.len() > receipts::MAX_RENDERED_BYTES {
+                    return Err(CapError::invalid(
+                        "submit_branch",
+                        format!(
+                            "rendered receipts block is {} bytes, exceeds the {}-byte cap — trim \
+                             your receipts (fewer/shorter verify_commands_run, metrics, or \
+                             deviations)",
+                            receipts_block.len(),
+                            receipts::MAX_RENDERED_BYTES
+                        ),
+                    ));
+                }
+                text.push('\n');
+                text.push_str(&receipts_block);
+            }
             let summary = if args.dangerously_skip_reviewer {
                 format!("[READY skipped] {}", branch.as_str())
             } else {
@@ -348,7 +556,13 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
                      will decide whether to merge. STOP now and end your turn.",
                     branch.as_str()
                 ),
-                json!({ "branch": branch.as_str(), "sha": sha, "reviewer_skipped": true }),
+                json!({
+                    "branch": branch.as_str(),
+                    "sha": sha,
+                    "reviewer_skipped": true,
+                    "receipts": args.receipts,
+                    "transfer_proof": transfer_proof_json(proof.as_ref()),
+                }),
             ));
         }
 
@@ -356,20 +570,7 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
         // derived parent *name* may not be a live git ref (a direct child of root derives "root",
         // which the human session never checks out), so resolve to a merge-base SHA, trying the
         // derived parent then the repo's default branch. A SHA always resolves in `git diff`.
-        let base_sha = match ctx.fork_point().await? {
-            Some(fp) => Some(fp),
-            None => {
-                let derived_parent = parent_branch(&branch);
-                let mut b = None;
-                for candidate in [derived_parent, "main", "master"] {
-                    if let Some(found) = ctx.merge_base(candidate).await? {
-                        b = Some(found);
-                        break;
-                    }
-                }
-                b
-            }
-        };
+        let base_sha = resolve_diff_base(ctx, &branch).await?;
         let diff_instruction = match &base_sha {
             Some(b) => format!("Run `git diff {b}...HEAD` to see exactly what changed"),
             None => {
@@ -473,7 +674,9 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::receipts::LabeledValue;
     use crate::testing::{Call, MockRuntime};
+    use exo_caps::CommitFiles;
     use exo_framework::Tool;
 
     /// Minimal valid `NodePapers` JSON for seeding `mock.files` at `.exo/node.json` — the shape
@@ -510,7 +713,7 @@ mod tests {
             &mock,
             SubmitBranchArgs {
                 note: "did the thing".into(),
-                dangerously_skip_reviewer: false,
+                ..Default::default()
             },
         )
         .await
@@ -534,6 +737,7 @@ mod tests {
             SubmitBranchArgs {
                 note: "trivial typo fix".into(),
                 dangerously_skip_reviewer: true,
+                ..Default::default()
             },
         )
         .await
@@ -559,6 +763,7 @@ mod tests {
             SubmitBranchArgs {
                 note: "trivial typo fix".into(),
                 dangerously_skip_reviewer: true,
+                ..Default::default()
             },
         )
         .await
@@ -601,7 +806,7 @@ mod tests {
             &mock,
             SubmitBranchArgs {
                 note: "did the thing".into(),
-                dangerously_skip_reviewer: false,
+                ..Default::default()
             },
         )
         .await
@@ -618,12 +823,9 @@ mod tests {
             _ => None,
         });
         let msg = delivered.expect("should forward [READY] to parent");
-        // Plain wording — no "dangerously skipped" / "be more suspicious" scare language, since
+        // Plain flag wording — no "SKIPPED-BY-AGENT" / "be more suspicious" scare language, since
         // this wasn't the agent's choice.
-        assert!(msg
-            .text
-            .as_str()
-            .contains("Reviewers are disabled for this project"));
+        assert!(msg.text.as_str().contains("review: disabled (config)"));
         assert!(!msg.text.as_str().contains("dangerously_skip_reviewer"));
     }
 
@@ -638,7 +840,7 @@ mod tests {
             &mock,
             SubmitBranchArgs {
                 note: "did the thing".into(),
-                dangerously_skip_reviewer: false,
+                ..Default::default()
             },
         )
         .await
@@ -658,7 +860,7 @@ mod tests {
             &mock,
             SubmitBranchArgs {
                 note: "did the thing".into(),
-                dangerously_skip_reviewer: false,
+                ..Default::default()
             },
         )
         .await
@@ -697,7 +899,7 @@ mod tests {
             &mock,
             SubmitBranchArgs {
                 note: "did the thing".into(),
-                dangerously_skip_reviewer: false,
+                ..Default::default()
             },
         )
         .await
@@ -733,7 +935,7 @@ mod tests {
             &mock,
             SubmitBranchArgs {
                 note: "did the thing".into(),
-                dangerously_skip_reviewer: false,
+                ..Default::default()
             },
         )
         .await
@@ -765,7 +967,7 @@ mod tests {
             &mock,
             SubmitBranchArgs {
                 note: "x".into(),
-                dangerously_skip_reviewer: false,
+                ..Default::default()
             },
         )
         .await;
@@ -787,7 +989,7 @@ mod tests {
             &mock,
             SubmitBranchArgs {
                 note: "did the thing".into(),
-                dangerously_skip_reviewer: false,
+                ..Default::default()
             },
         )
         .await;
@@ -827,6 +1029,7 @@ mod tests {
             SubmitBranchArgs {
                 note: "trivial".into(),
                 dangerously_skip_reviewer: true,
+                ..Default::default()
             },
         )
         .await;
@@ -854,6 +1057,7 @@ mod tests {
             SubmitBranchArgs {
                 note: "trivial".into(),
                 dangerously_skip_reviewer: true,
+                ..Default::default()
             },
         )
         .await;
@@ -876,6 +1080,7 @@ mod tests {
             SubmitBranchArgs {
                 note: "trivial".into(),
                 dangerously_skip_reviewer: true,
+                ..Default::default()
             },
         )
         .await;
@@ -942,7 +1147,7 @@ mod tests {
             &mock,
             SubmitBranchArgs {
                 note: "retrying".into(),
-                dangerously_skip_reviewer: false,
+                ..Default::default()
             },
         )
         .await
@@ -964,5 +1169,200 @@ mod tests {
         assert!(spawn.contains("PRIOR ROUND"));
         assert!(spawn.contains("failed first round"));
         assert!(spawn.contains("broken.rs L5: fix me"));
+    }
+
+    /// Run `submit_branch` on the quiet no-reviewer-configured path (reviewers off by default,
+    /// no `.exo/node.json` seeded) with the given receipts, and return the `[READY]` message
+    /// delivered to the parent. Shared by the receipts tests below.
+    async fn submit_and_capture_ready(mock: &MockRuntime, receipts: Option<Receipts>) -> Message {
+        SubmitBranch::run(
+            mock,
+            SubmitBranchArgs {
+                note: "did the thing".into(),
+                receipts,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        mock.calls_made()
+            .into_iter()
+            .find_map(|c| match c {
+                Call::BusDeliver {
+                    to: exo_caps::Addressee::Parent,
+                    msg,
+                } => Some(msg),
+                _ => None,
+            })
+            .expect("should forward [READY] to parent")
+    }
+
+    #[tokio::test]
+    async fn receipts_commit_tested_matching_head_renders_at_head() {
+        let mock = MockRuntime::default(); // head_sha is all zeros
+        let receipts = Receipts {
+            commit_tested: Some("0000000".into()),
+            ..Default::default()
+        };
+        let msg = submit_and_capture_ready(&mock, Some(receipts)).await;
+        assert!(
+            msg.text.as_str().contains("tested@HEAD"),
+            "{}",
+            msg.text.as_str()
+        );
+    }
+
+    #[tokio::test]
+    async fn receipts_commit_tested_differing_renders_commits_between_and_overlap() {
+        let mock = MockRuntime {
+            commits_between: vec![CommitFiles {
+                sha: "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1".into(),
+                files: vec!["a.rs".into()],
+            }],
+            ..Default::default()
+        };
+        let receipts = Receipts {
+            commit_tested: Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef".into()),
+            ..Default::default()
+        };
+        let msg = submit_and_capture_ready(&mock, Some(receipts)).await;
+        let text = msg.text.as_str();
+        assert!(text.contains("commits between"), "{text}");
+        assert!(text.contains("overlap your diff"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn receipts_commit_tested_differing_with_no_overlap() {
+        // Commits with no touched files at all: the moved-file set and the diff-file set are both
+        // empty, so their intersection is the real, reassuring "none" answer, not "unknown".
+        let mock = MockRuntime {
+            commits_between: vec![CommitFiles {
+                sha: "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1".into(),
+                files: vec![],
+            }],
+            ..Default::default()
+        };
+        let receipts = Receipts {
+            commit_tested: Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef".into()),
+            ..Default::default()
+        };
+        let msg = submit_and_capture_ready(&mock, Some(receipts)).await;
+        assert!(
+            msg.text.as_str().contains("none overlap your diff"),
+            "{}",
+            msg.text.as_str()
+        );
+    }
+
+    #[tokio::test]
+    async fn receipts_commit_tested_unresolvable_renders_untested_transfer() {
+        let mock = MockRuntime::default();
+        *mock.fail.lock().unwrap() = Some("commits_between");
+        let receipts = Receipts {
+            commit_tested: Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef".into()),
+            ..Default::default()
+        };
+        let msg = submit_and_capture_ready(&mock, Some(receipts)).await;
+        assert!(
+            msg.text.as_str().contains("treat as untested transfer"),
+            "{}",
+            msg.text.as_str()
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_receipt_field_is_rejected_before_delivery() {
+        let mock = MockRuntime::default();
+        let receipts = Receipts {
+            commit_tested: Some("x".repeat(receipts::MAX_FIELD_BYTES + 1)),
+            ..Default::default()
+        };
+        let res = SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "did the thing".into(),
+                receipts: Some(receipts),
+                ..Default::default()
+            },
+        )
+        .await;
+        assert!(res.is_err());
+        assert!(!mock
+            .calls_made()
+            .iter()
+            .any(|c| matches!(c, Call::BusDeliver { .. })));
+    }
+
+    #[tokio::test]
+    async fn full_receipts_appear_untruncated_in_tool_output_data() {
+        let mock = MockRuntime::default();
+        let receipts = Receipts {
+            commit_tested: Some("0000000".into()),
+            verify_commands_run: vec!["cargo test -p exo".into()],
+            metrics: vec![LabeledValue {
+                label: "tests passed".into(),
+                value: "412".into(),
+            }],
+            deviations: vec!["used an enum for TransferProof".into()],
+        };
+        let out = SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "did the thing".into(),
+                receipts: Some(receipts.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let data = out.data.expect("skip path always carries data");
+        assert_eq!(data["receipts"], serde_json::to_value(&receipts).unwrap());
+    }
+
+    #[tokio::test]
+    async fn realistic_receipts_payload_stays_under_message_body_max_len() {
+        let mock = MockRuntime::default();
+        let receipts = Receipts {
+            commit_tested: Some("0000000".into()),
+            verify_commands_run: vec![
+                "cargo test -p exo".into(),
+                "cargo clippy --workspace --all-targets".into(),
+            ],
+            metrics: vec![
+                LabeledValue {
+                    label: "tests passed".into(),
+                    value: "412".into(),
+                },
+                LabeledValue {
+                    label: "wall".into(),
+                    value: "1m41s".into(),
+                },
+            ],
+            deviations: vec!["used an enum for TransferProof".into()],
+        };
+        let msg = submit_and_capture_ready(&mock, Some(receipts)).await;
+        assert!(msg.text.as_str().len() <= exo_caps::MessageBody::MAX_LEN);
+    }
+
+    #[tokio::test]
+    async fn lifecycle_submitted_unchanged_when_receipts_present() {
+        let mock = MockRuntime::default();
+        let receipts = Receipts {
+            commit_tested: Some("0000000".into()),
+            ..Default::default()
+        };
+        let msg = submit_and_capture_ready(&mock, Some(receipts)).await;
+        match &msg.kind {
+            exo_caps::MessageKind::Lifecycle(exo_caps::Lifecycle::Submitted {
+                branch,
+                sha,
+                reviewed,
+            }) => {
+                assert_eq!(branch.as_str(), "dev.policy-claude");
+                assert_eq!(sha, &mock.head_sha);
+                assert!(!reviewed);
+            }
+            other => panic!("expected Lifecycle::Submitted, got {other:?}"),
+        }
     }
 }

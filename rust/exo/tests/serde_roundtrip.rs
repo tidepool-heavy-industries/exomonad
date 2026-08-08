@@ -72,7 +72,7 @@ fn test_review_system_wire_pinning() {
 fn test_submit_branch_args_roundtrip() {
     let args = SubmitBranchArgs {
         note: "my work".into(),
-        dangerously_skip_reviewer: false,
+        ..Default::default()
     };
     let back = assert_roundtrip(&args);
     assert_eq!(args.note, back.note);
