@@ -1,0 +1,1 @@
+listen channel smoke test
