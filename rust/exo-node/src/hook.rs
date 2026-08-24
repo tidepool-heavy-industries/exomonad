@@ -44,7 +44,7 @@ pub async fn handle<D: Exomonad<Caps = Runtime>>(
     // 2. Resolve the role's hook fns through the domain.
     let rd = D::role_def(ctx.kind);
 
-    run_hook(ctx, rd, event, stdin_json).await
+    run_hook(ctx, rd, event, papers_path, stdin_json).await
 }
 
 fn identity_context<D: Exomonad>(ctx: &NodeContext<D>) -> String {
@@ -58,10 +58,10 @@ fn identity_context<D: Exomonad>(ctx: &NodeContext<D>) -> String {
         None => "none (root)".to_string(),
     };
 
-    // Messages from other agents arrive as a tmux-pasted `[from: X]` note delivered by this node's
-    // own sidecar off the bus — exo owns its delivery channel (CC Agent Teams native delivery was
-    // retired; a solo session-lead never drains its teammate inbox as of CC 2.1.178, GH#26426). A
-    // child reaches its parent via the `notify_parent` MCP tool; no team setup is needed.
+    // Messages from other agents arrive over the listen wake channel (see `listen_instruction`) —
+    // exo owns its delivery channel end to end (CC Agent Teams native delivery was retired; a solo
+    // session-lead never drains its teammate inbox as of CC 2.1.178, GH#26426). A child reaches
+    // its parent via the `notify_parent` MCP tool; no team setup is needed.
     format!(
         "You are exomonad node '{}' (role: {}) on branch '{}'. Parent: {}.",
         name.as_str(),
@@ -71,10 +71,42 @@ fn identity_context<D: Exomonad>(ctx: &NodeContext<D>) -> String {
     )
 }
 
+/// Single-quote shell escaping for the papers path interpolated into the Monitor command (the
+/// harness runs it in a shell). Local because `exo-node` links neither `exomonad-shared` nor the
+/// `shell_escape` crate.
+fn shell_escape_single(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// The wake-channel arming instruction, appended to every SessionStart `additionalContext` (every
+/// role including root — root gets no `--append-system-prompt`, so this is the one channel that
+/// reaches it — and re-fired on every resume/clear, which is exactly the re-arm reminder needed).
+///
+/// The papers path is canonicalized to absolute: Monitor runs the command in a shell whose cwd is
+/// the agent's worktree, and an inline worker's cwd is its *parent's* dir.
+fn listen_instruction(papers_path: &Path) -> String {
+    let papers = papers_path
+        .canonicalize()
+        .unwrap_or_else(|_| papers_path.to_path_buf());
+    let cmd = exo_caps::invocation::listen_command(&shell_escape_single(
+        papers.display().to_string().as_str(),
+    ));
+    format!(
+        "WAKE CHANNEL (required) — your FIRST action, before anything else: run \
+         ToolSearch(\"select:Monitor\") to load the Monitor tool, then arm it:\n\
+         Monitor {{ command: \"{cmd}\", description: \"exo swarm inbox\", persistent: true }}\n\
+         All swarm messages ([from: X, kind: Y] notes, sometimes a one-line @-file reference) \
+         arrive as notifications from this monitor and wake you between turns. Until it is armed, \
+         messages QUEUE durably and cannot reach you — and they drain the moment it connects. If \
+         the watch ever ends (it reports this), re-arm it the same way; queued messages then drain."
+    )
+}
+
 async fn run_hook<D: Exomonad>(
     ctx: NodeContext<D>,
     rd: exo_framework::RoleDef<Runtime>,
     event: HookEvent,
+    papers_path: &Path,
     stdin_json: &str,
 ) -> NodeResult<String> {
     match event {
@@ -111,6 +143,8 @@ async fn run_hook<D: Exomonad>(
                 Some(p_ctx) => format!("{}\n\n{}", id_ctx, p_ctx),
                 None => id_ctx,
             };
+            let combined_context =
+                format!("{}\n\n{}", combined_context, listen_instruction(papers_path));
 
             let output = json!({
                 "hookSpecificOutput": {
@@ -171,6 +205,8 @@ mod tests {
             parent_inbox,
             run_id: "run-123".into(),
             shutdown_pending: std::sync::Mutex::new(None),
+            listener: crate::listen::ListenerSlot::new(),
+            inbox_wake: std::sync::Arc::new(tokio::sync::Notify::new()),
         }
     }
 
@@ -209,7 +245,7 @@ mod tests {
         })
         .to_string();
 
-        let res = run_hook(ctx, rd, HookEvent::PreToolUse, &stdin)
+        let res = run_hook(ctx, rd, HookEvent::PreToolUse, Path::new("/tmp/papers.json"), &stdin)
             .await
             .unwrap();
         let val: Value = serde_json::from_str(&res).unwrap();
@@ -221,7 +257,7 @@ mod tests {
         let ctx = mock_ctx(TestRole::Dev, vec!["root", "dev-node"], "main", false);
         let rd = crate::test_support::test_role_def(TestRole::Dev);
 
-        let res = run_hook(ctx, rd, HookEvent::SessionStart, "")
+        let res = run_hook(ctx, rd, HookEvent::SessionStart, Path::new("/tmp/papers.json"), "")
             .await
             .unwrap();
         let val: Value = serde_json::from_str(&res).unwrap();
@@ -237,6 +273,18 @@ mod tests {
             !add_ctx.contains("TEST-DEV-PROTOCOL-MARKER"),
             "role protocol must not be appended to additionalContext: {add_ctx}"
         );
+        // The wake-channel arming instruction IS appended, carrying the exact Monitor command.
+        assert!(
+            add_ctx.contains("exo listen --papers '/tmp/papers.json'"),
+            "arm-Monitor instruction with the papers path expected: {add_ctx}"
+        );
+        assert!(add_ctx.contains("persistent: true"));
+    }
+
+    #[test]
+    fn test_listen_instruction_escapes_papers_path() {
+        let inst = listen_instruction(Path::new("/tmp/it's a dir/node.json"));
+        assert!(inst.contains(r"exo listen --papers '/tmp/it'\''s a dir/node.json'"));
     }
 
     #[tokio::test]
@@ -246,7 +294,7 @@ mod tests {
         let ctx = mock_ctx(TestRole::Tl, vec!["root", "tl-node"], "main", true);
         let rd = crate::test_support::test_role_def(TestRole::Tl);
 
-        let res = run_hook(ctx, rd, HookEvent::SessionStart, "")
+        let res = run_hook(ctx, rd, HookEvent::SessionStart, Path::new("/tmp/papers.json"), "")
             .await
             .unwrap();
         let val: Value = serde_json::from_str(&res).unwrap();
@@ -286,7 +334,7 @@ mod tests {
         })
         .to_string();
 
-        let res = run_hook(ctx, rd, HookEvent::PreToolUse, &stdin)
+        let res = run_hook(ctx, rd, HookEvent::PreToolUse, Path::new("/tmp/papers.json"), &stdin)
             .await
             .unwrap();
         let val: Value = serde_json::from_str(&res).unwrap();
@@ -319,7 +367,7 @@ mod tests {
         })
         .to_string();
 
-        let res = run_hook(ctx, rd, HookEvent::PreToolUse, &stdin)
+        let res = run_hook(ctx, rd, HookEvent::PreToolUse, Path::new("/tmp/papers.json"), &stdin)
             .await
             .unwrap();
         let val: Value = serde_json::from_str(&res).unwrap();

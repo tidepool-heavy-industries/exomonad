@@ -754,7 +754,7 @@ struct DeadSpillFile {
 }
 
 /// Parse `pid` out of a spill filename of the form `inbox-{pid}-{id}.md` (written by
-/// `exo-node`'s `dispatch::prepare_tmux_payload`). Anything that doesn't match this exact shape —
+/// `exo-node`'s `dispatch::prepare_listen_payload`). Anything that doesn't match this exact shape —
 /// including a non-numeric pid — returns `None`, so a malformed or unrelated filename is left
 /// alone rather than guessed at.
 fn spill_pid_from_name(name: &str) -> Option<u32> {

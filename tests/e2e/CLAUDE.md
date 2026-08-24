@@ -9,6 +9,7 @@ just e2e-hook-rewrite      # BeforeModel/AfterModel PII rewriting
 
 # v2 node-mode (offline, non-interactive, asserts and exits)
 bash tests/e2e/v2-loop/run.sh
+bash tests/e2e/listen-wake/run.sh
 ```
 
 ## Classic vs v2
@@ -104,3 +105,25 @@ the scratch `PATH`/`HOME`/status-dir. Root's own pane predates that call and is 
 **Running:** `bash tests/e2e/v2-loop/run.sh` — offline, non-interactive, exits 0 on pass. No
 `just` recipe yet (add `just e2e-v2-loop: bash tests/e2e/v2-loop/run.sh` to the `justfile` if
 adopting the `just e2e-*` convention for v2 scenarios).
+
+## `tests/e2e/listen-wake/` — the v2 delivery last hop
+
+Exercises the **listen wake channel** (see `rust/exo-node/CLAUDE.md` § Delivery) end to end
+against a real persistent root sidecar, with no Claude at all: messages are appended straight
+to root's inbox (the filesystem IS the bus — the same `IngestionEntry` line `Bus::deliver`
+writes), and delivery is observed on an `exo listen` client's captured stdout.
+
+Asserted, in order: (1) a message appended **before the sidecar boots** is replayed
+(cursor-init-at-0 — the spawn→boot window); (2) with no listener attached it stays queued,
+cursor pinned; (3) arming `exo listen` drains it immediately with its rendered
+`[from, kind, id]` header; (4) live delivery while armed; (5) the status snapshot flips
+`listener_connected: true`; (6) killing the listener re-queues, and a fresh listener receives
+the pending message with its **original id** (at-least-once redelivery).
+
+Two harness gotchas encoded in the script: the workdir template is deliberately short (the
+scratch `HOME` prefixes every UDS path, and a Unix socket path caps at **SUN_LEN, 108 bytes** —
+a long `mktemp` template made both socket binds fail with "path must be shorter than SUN_LEN");
+and the script prefers `target/debug/exo` over an installed `exo` (a stale `~/.cargo/bin`
+binary predating the feature under test fails confusingly).
+
+**Running:** `bash tests/e2e/listen-wake/run.sh` — offline, non-interactive, exits 0 on pass.

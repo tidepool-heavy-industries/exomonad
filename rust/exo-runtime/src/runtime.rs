@@ -192,13 +192,16 @@ impl Runtime {
             kind: role_str.to_string(),
             branch: self.branch.as_str().to_string(),
             shutdown_pending,
+            // Sidecar state, not runtime state: the status publisher overwrites this from its
+            // live ListenerSlot before writing the snapshot. The runtime never sees the socket.
+            listener_connected: false,
             children,
             ts: chrono::Utc::now(),
         }
     }
 }
 
-fn home() -> PathBuf {
+pub(crate) fn home() -> PathBuf {
     std::env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."))

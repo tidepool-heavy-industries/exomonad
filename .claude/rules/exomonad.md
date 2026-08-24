@@ -66,7 +66,7 @@ Spawn children for wave N. Zero dependencies between siblings in the same wave.
 
 ### 3. Converge (merge wave)
 
-Wait for children to complete (notifications arrive via tmux-paste into your pane). Merge their branches sequentially with `merge`. Then write an **integration commit**:
+Wait for children to complete (notifications arrive from your `exo listen` monitor and wake you between turns). Merge their branches sequentially with `merge`. Then write an **integration commit**:
 
 - Wire children's outputs together
 - Run integration tests
@@ -121,6 +121,6 @@ Review round-tripping is tracked via a durable `ReviewLog` (`ReviewRound`) persi
 
 - `notify_parent` for completion/failure/status updates to parent (not the convergence signal — that's `submit_branch` → `verdict` → `[READY]`)
 - `send_message` for peer-to-peer messaging to a named child (tree-edges only)
-- Messages arrive as a tmux-pasted `[from: X, kind: Y]` note in the recipient's own pane, delivered by its own sidecar off the durable bus. CC Agent Teams native delivery was retired — as of Claude Code 2.1.178, teammates run in-process and a solo session-lead (which every exo node is, since each is a separate `claude` process) never drains its own Teams inbox. `exo` owns its delivery channel end to end; no native CC team tools are used.
+- Messages arrive as `[from: X, kind: Y]` notifications from the recipient's Monitor-armed `exo listen` client, delivered by its own sidecar off the durable bus (large payloads arrive as a one-line `@`-file reference to read). Every node arms that monitor as its **first action** — the SessionStart hook injects the exact command. An unarmed node's messages **queue durably** (senders see a ⚠ "no active listener" note in their tool responses; `tree` shows `wake:-`) and drain the moment the monitor connects. CC Agent Teams native delivery was retired (as of Claude Code 2.1.178 a solo session-lead never drains its own Teams inbox), and its tmux-paste successor was cut as delivery too (fragile TUI typing, indistinguishable from user input) — tmux survives for spawning and human observability only. `exo` owns its delivery channel end to end; no native CC team tools are used.
 - The notification vocabulary is `[READY]` (converged, parent should merge), `[idle]`, `[FAILED: id]`, `[CHILD DIED: name]` (the watchdog observed a child's pane dead while un-reaped — its ledger state is `Died`; check `tree`, then merge what its branch holds or respawn), and `[CHILDREN DIED: N]` (the batched form — one message per watchdog tick when several deaths land in the same scan, e.g. a mass teardown or the first scan over a pre-lifecycle ledger). Acknowledge `Died` tombstones with `exo doctor --fix`, which records `Reaped` for reclaimed corpses and for dead children with no worktree left. There is no Copilot-era vocabulary (`[FIXES PUSHED]`, `[PR READY]`, `[REVIEW TIMEOUT]`) in v2.
 - TL idles between spawning and receiving notifications — no polling.

@@ -2,7 +2,7 @@
 //! the MCP sidecar args and the CC hook commands written into the child's worktree.
 //!
 //! These literals MUST match the clap command surface in `exo/src/main.rs`
-//! (`Commands::{Node, Hook}`) and the hook event names rendered by `HookEventType`'s
+//! (`Commands::{Node, Hook, Listen}`) and the hook event names rendered by `HookEventType`'s
 //! `value_enum`. Defined once here so the spawner and the binary can't drift: rename a
 //! subcommand in `main.rs` and this is the only place to update.
 
@@ -11,6 +11,7 @@ pub const BIN: &str = "exo";
 
 const NODE: &str = "node";
 const HOOK: &str = "hook";
+const LISTEN: &str = "listen";
 const PAPERS_FLAG: &str = "--papers";
 
 /// CC hook events the node wires, in the order the spawner emits them.
@@ -34,4 +35,14 @@ pub fn node_args(papers: &str) -> [String; 3] {
 /// papers path **already shell-escaped** by the caller (it is pasted into a shell).
 pub fn hook_command(event: &str, papers_escaped: &str) -> String {
     format!("{BIN} {HOOK} {event} {PAPERS_FLAG} {papers_escaped}")
+}
+
+/// The wake-channel command a node arms under Claude Code's `Monitor` tool:
+/// `exo listen --papers <papers>`.
+///
+/// `papers_escaped` is the papers path **already shell-escaped and absolute** by the caller —
+/// Monitor runs the command in a shell whose cwd is the agent's worktree, and an inline
+/// worker's cwd is its parent's dir, so a relative path would resolve wrong.
+pub fn listen_command(papers_escaped: &str) -> String {
+    format!("{BIN} {LISTEN} {PAPERS_FLAG} {papers_escaped}")
 }

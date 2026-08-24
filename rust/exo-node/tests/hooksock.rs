@@ -36,6 +36,8 @@ fn test_ctx(dir: &std::path::Path, run_id: &str) -> Arc<NodeContext<common::Test
         parent_inbox: None,
         run_id: run_id.to_string(),
         shutdown_pending: std::sync::Mutex::new(None),
+        listener: exo_node::listen::ListenerSlot::new(),
+        inbox_wake: std::sync::Arc::new(tokio::sync::Notify::new()),
     })
 }
 

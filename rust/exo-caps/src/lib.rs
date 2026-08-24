@@ -34,7 +34,7 @@ pub mod kv;
 pub mod process;
 pub mod tmux;
 
-pub use bus::{Addressee, Bus, BusError};
+pub use bus::{Addressee, Bus, BusError, WakeStatus};
 pub use domain::{deliver_domain, DomainSystem, RoleKind, SpawnSpec};
 pub use error::{CapError, CapResult};
 pub use fs::{Fs, FsError};

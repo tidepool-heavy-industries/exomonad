@@ -33,11 +33,16 @@ use async_trait::async_trait;
 use chrono::Utc;
 use exo_caps::{
     Addressee, Bus, BusError, ChildState, InboxPath, IngestionEntry, Message, MessageBody,
-    MessageKind, Persona, SpawnError,
+    MessageKind, NodeStatus, Persona, SpawnError, WakeStatus,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::AsyncWriteExt;
-use tracing::{error, info};
+use tracing::{debug, error, info};
+
+/// A status snapshot older than this is not evidence of anything: the publisher writes every 5s
+/// while a sidecar is alive, so a stale file means the recipient is booting, dead, or from a
+/// previous run — all `WakeStatus::Unknown` territory, never a confident `NotListening`.
+const WAKE_STATUS_FRESHNESS: chrono::Duration = chrono::Duration::seconds(30);
 
 /// Max bytes for one atomic inbox append. A `write(2)` of ≤ `PIPE_BUF` is atomic on a local fs, so
 /// concurrent writers never interleave/tear. An entry that would exceed this is **spilled** to a
@@ -121,23 +126,21 @@ impl Runtime {
         tokio::fs::rename(&tmp, &path).await?;
         Ok(path.to_string_lossy().into_owned())
     }
-}
 
-#[async_trait]
-impl Bus for Runtime {
-    async fn deliver(&self, to: Addressee, msg: Message) -> Result<(), BusError> {
-        let inbox = self.resolve_inbox(&to).await?;
-
-        let summary = msg.summary.as_str().to_string();
-        let entry = IngestionEntry {
-            v: 1,
-            ts: Utc::now(),
-            from: Persona::Agent(self.name()),
-            id: Some(uuid::Uuid::new_v4().to_string()),
-            spill: None,
-            msg,
-        };
-
+    /// Append a pre-built envelope to `inbox` — the one write discipline for every inbox line:
+    /// serialize to one line, **spill** to a `.spill/` side-file with a claim-check pointer when
+    /// the line would exceed `PIPE_BUF`, append atomically, flush.
+    ///
+    /// Engine-facing, like `append_child_record`: a plain inherent method, deliberately **not** a
+    /// cap — policy hands over `Message`s and the runtime stamps their envelopes (`Bus::deliver`);
+    /// only engine code (the sidecar's synthetic self-deliveries) may append a pre-stamped entry,
+    /// and those entries carry a `Persona::Synthetic` the bus cap could never produce.
+    pub async fn append_entry(
+        &self,
+        inbox: &InboxPath,
+        entry: IngestionEntry,
+    ) -> Result<(), BusError> {
+        let summary = entry.msg.summary.as_str().to_string();
         let mut line = serde_json::to_string(&entry).map_err(|e| BusError::Append {
             detail: e.to_string(),
         })?;
@@ -148,7 +151,7 @@ impl Bus for Runtime {
             // claim-check pointer instead (the reader resolves it transparently). The bus thus
             // delivers arbitrarily-large payloads — a rich review verdict, a long report — without
             // ever writing a non-atomic (>PIPE_BUF) inbox line.
-            let spill_path = self.write_spill(&inbox, &entry).await?;
+            let spill_path = self.write_spill(inbox, &entry).await?;
             let pointer = IngestionEntry {
                 v: 1,
                 ts: entry.ts,
@@ -180,7 +183,7 @@ impl Bus for Runtime {
                     ),
                 });
             }
-            info!(to = %to, summary = %summary, spill = %spill_path, "Bus::deliver: oversized entry spilled to side-file");
+            info!(summary = %summary, spill = %spill_path, "append_entry: oversized entry spilled to side-file");
         }
 
         let path = inbox.as_path();
@@ -194,16 +197,68 @@ impl Bus for Runtime {
             .open(path)
             .await?;
 
-        if let Err(e) = file.write_all(line.as_bytes()).await {
-            error!(to = %to, summary = %summary, "Bus::deliver FAILED: {e}");
-            return Err(e.into());
-        }
+        file.write_all(line.as_bytes()).await?;
         // tokio's File buffers and does NOT flush on drop — without this the line is lost.
         // This is a kernel-buffer flush, not fsync: the bytes reach the page cache (surviving
         // a process crash), matching the "no fsync" durability level.
         file.flush().await?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Bus for Runtime {
+    async fn deliver(&self, to: Addressee, msg: Message) -> Result<(), BusError> {
+        let inbox = self.resolve_inbox(&to).await?;
+
+        let summary = msg.summary.as_str().to_string();
+        let entry = IngestionEntry {
+            v: 1,
+            ts: Utc::now(),
+            from: Persona::Agent(self.name()),
+            id: Some(uuid::Uuid::new_v4().to_string()),
+            spill: None,
+            msg,
+        };
+
+        if let Err(e) = self.append_entry(&inbox, entry).await {
+            error!(to = %to, summary = %summary, "Bus::deliver FAILED: {e}");
+            return Err(e);
+        }
         info!(to = %to, summary = %summary, "Bus::deliver OK");
         Ok(())
+    }
+
+    /// Read the recipient's periodic status snapshot (pane-keyed beside its inbox) and report
+    /// whether its `exo listen` wake client is attached. Every failure — unresolvable addressee,
+    /// non-pane-shaped inbox path, absent/unreadable/unparseable status file, stale snapshot —
+    /// degrades to `Unknown`: this is advisory color on a durably-queued delivery, never a gate.
+    async fn wake_status(&self, to: &Addressee) -> WakeStatus {
+        let Ok(inbox) = self.resolve_inbox(to).await else {
+            return WakeStatus::Unknown;
+        };
+        let Some(pane) = exo_caps::paths::pane_from_inbox(&inbox) else {
+            return WakeStatus::Unknown;
+        };
+        let path = exo_caps::paths::status_path(&crate::runtime::home(), &self.run_id, &pane);
+        let status: NodeStatus = match tokio::fs::read(&path).await {
+            Ok(bytes) => match serde_json::from_slice(&bytes) {
+                Ok(s) => s,
+                Err(e) => {
+                    debug!(to = %to, "wake_status: unparseable status file ({e})");
+                    return WakeStatus::Unknown;
+                }
+            },
+            Err(_) => return WakeStatus::Unknown,
+        };
+        if Utc::now().signed_duration_since(status.ts) > WAKE_STATUS_FRESHNESS {
+            return WakeStatus::Unknown;
+        }
+        if status.listener_connected {
+            WakeStatus::Listening
+        } else {
+            WakeStatus::NotListening
+        }
     }
 }
 

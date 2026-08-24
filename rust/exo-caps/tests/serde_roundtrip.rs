@@ -288,6 +288,7 @@ fn test_node_status_roundtrip() {
         kind: "dev".into(),
         branch: "main".into(),
         shutdown_pending: false,
+        listener_connected: true,
         children: vec![ChildStatus {
             name: "c1".into(),
             busy: true,
@@ -302,10 +303,20 @@ fn test_node_status_roundtrip() {
     assert_eq!(s.kind, back.kind);
     assert_eq!(s.branch, back.branch);
     assert_eq!(s.shutdown_pending, back.shutdown_pending);
+    assert_eq!(s.listener_connected, back.listener_connected);
     assert_eq!(s.children.len(), back.children.len());
     assert_eq!(s.children[0].name, back.children[0].name);
     assert_eq!(s.children[0].busy, back.children[0].busy);
     assert_eq!(s.ts, back.ts);
+}
+
+#[test]
+fn test_node_status_pre_listener_field_parses() {
+    // A status file written by an older binary has no `listener_connected` — must parse as false.
+    let json = r#"{"node":["root"],"kind":"dev","branch":"main","shutdown_pending":false,
+        "children":[],"ts":"2026-01-01T00:00:00Z"}"#;
+    let back: NodeStatus = serde_json::from_str(json).expect("old status must parse");
+    assert!(!back.listener_connected);
 }
 
 #[test]

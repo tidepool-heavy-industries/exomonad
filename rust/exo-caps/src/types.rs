@@ -555,6 +555,11 @@ pub struct NodeStatus {
     pub kind: String,
     pub branch: String,
     pub shutdown_pending: bool,
+    /// Whether an `exo listen` wake-channel client is currently attached to this node's
+    /// listen socket. `false` means inbound messages are queuing (cursor-pinned) until the
+    /// agent arms/re-arms its Monitor — senders surface this as a ⚠ in their tool responses.
+    #[serde(default)]
+    pub listener_connected: bool,
     /// Direct children and their busy state.
     pub children: Vec<ChildStatus>,
     pub ts: DateTime<Utc>,

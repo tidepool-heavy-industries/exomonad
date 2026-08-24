@@ -44,6 +44,14 @@ pub struct NodeContext<D: Exomonad> {
     /// forced node); `Some(grace_ms)` once pending — the sidecar reaps itself when its subtree is
     /// clear (see `inbound::try_reap`). Read by the inbound loop and the watchdog tick.
     pub shutdown_pending: std::sync::Mutex<Option<u32>>,
+    /// The attached `exo listen` wake-channel client (the last hop). Empty until the agent arms
+    /// its Monitor; `dispatch` errs while empty, pinning the inbound cursor so messages queue.
+    pub listener: crate::listen::ListenerSlot,
+    /// Coalescing wake for the inbound loop. Fed by the inbox filesystem watcher, by the listen
+    /// server when a client attaches (drain the queued backlog immediately), and by
+    /// `deliver_synthetic`'s own-inbox append (its filesystem event would wake the watcher
+    /// anyway; the explicit ping just makes it prompt).
+    pub inbox_wake: Arc<tokio::sync::Notify>,
 }
 
 impl<D: Exomonad> NodeContext<D> {
@@ -190,6 +198,8 @@ pub fn bootstrap<D: Exomonad<Caps = Runtime>>(
         parent_inbox,
         run_id,
         shutdown_pending: std::sync::Mutex::new(None),
+        listener: crate::listen::ListenerSlot::new(),
+        inbox_wake: Arc::new(tokio::sync::Notify::new()),
     })
 }
 

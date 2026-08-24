@@ -106,7 +106,7 @@ The Haskell/WASM logging pattern is in [`haskell/wasm-guest/CLAUDE.md`](haskell/
 **v2 Node-Mode (active):**
 ```bash
 exomonad new                  # one-time: .exo/config.toml, .gitignore, rules templates
-exo init                      # decentralized swarm session (per-agent sidecars, tmux-paste delivery)
+exo init                      # decentralized swarm session (per-agent sidecars, Monitor wake-channel delivery)
 ```
 
 **Classic (deprecated):** `exomonad init` creates a central-server tmux session. Full classic getting-started, MCP registration, config, and companions → [`rust/exomonad/CLAUDE.md`](rust/exomonad/CLAUDE.md).
@@ -131,7 +131,7 @@ Spawn a recursive tree of heterogeneous agents:
 
 **Agent types:** v2 node-mode is all Claude 🤖 — Opus TLs (spawned `tl`; root inherits the human's own session model instead, since it's never spawned via `birth`) + Sonnet leaves (dev/worker/reviewer) — plus Shoal 🌊 (custom binary agents over rmcp + HTTP-over-UDS) as an external companion backend. (Gemini 💎 was the v2 leaf runtime before the cut and is now Classic-only.) **Identity** = birth-branch (immutable, deterministic); root = `root`. The filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/`.
 
-**Coordination is push-based** via the sidecar: a child calls `notify_parent` (or `send_message` for peer-to-peer), the message lands on the bus, and the recipient's sidecar tmux-pastes it into the agent's pane as a `[from: X]` note between turns. The TL idles — no polling, no blocking. (CC Agent Teams native delivery was retired — as of CC 2.1.178 a solo session-lead never drains its teammate inbox; exo owns its delivery channel.)
+**Coordination is push-based** via the sidecar: a child calls `notify_parent` (or `send_message` for peer-to-peer), the message lands on the bus, and the recipient's sidecar hands it to that agent's Monitor-armed `exo listen` client — each message becomes a harness notification (`[from: X]`) that wakes the agent between turns. Every node arms that monitor as its first action (the SessionStart hook injects the exact command); until it's armed, messages queue durably on the bus and drain the moment it connects. The TL idles — no polling, no blocking. (Delivery history: CC Agent Teams native delivery was retired at CC 2.1.178 — a solo session-lead never drains its teammate inbox; its tmux-paste successor was cut too — typing into the TUI was fragile and hit the human mid-keystroke. tmux survives for spawning + observability only; exo owns its delivery channel.)
 
 Tool/role matrix → [`.claude/rules/exomonad.md`](.claude/rules/exomonad.md). Root protocol → `.exo/roles/devswarm/context/root.md`.
 

@@ -585,10 +585,15 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
                 reply_to: None,
             };
             ctx.deliver(Addressee::Parent, msg).await?;
+            let wake_note = crate::tools::messaging::wake_note(
+                ctx.wake_status(&Addressee::Parent).await,
+            )
+            .map(|n| format!("\n{n}"))
+            .unwrap_or_default();
             return Ok(ToolOutput::with_data(
                 format!(
                     "Forwarded [READY] to your parent for branch {} WITHOUT review. Your parent \
-                     will decide whether to merge. STOP now and end your turn.",
+                     will decide whether to merge. STOP now and end your turn.{wake_note}",
                     branch.as_str()
                 ),
                 json!({

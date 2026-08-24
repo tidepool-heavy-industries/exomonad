@@ -8,8 +8,11 @@
 //!   OUTBOUND (N1):  serve the role's Tools (from the injected roster) over a hand-written MCP/JSON-RPC
 //!                   stdio server; send_message → Bus::deliver.
 //!   INBOUND  (N2):  watch own ingestion inbox (cursor + notify-watch, N2b) → per entry,
-//!                   last-hop dispatch (N2a) by agent_type: CC-in-team → Teams inbox; else tmux-paste.
-//!   HOOK (N4):      `exo hook` → the role's pre_tool_use / stop / session_start.
+//!                   last-hop dispatch (N2a) over the listen wake channel (N6) — no listener ⇒
+//!                   the cursor pins and the entry queues.
+//!   LISTEN   (N6):  serve the wake-channel socket; the agent's Monitor-armed `exo listen`
+//!                   client attaches here (latest-wins) and its stdout wakes the agent.
+//!   HOOK (N4):      `exo hook` → the role's pre_tool_use / session_start.
 //! ```
 //!
 //! Convergence is on-disk (v2): a TL folds a finished child by merging its branch locally
@@ -25,6 +28,7 @@ pub mod error;
 pub mod hook;
 pub mod hooksock;
 pub mod inbound;
+pub mod listen;
 pub mod outbound;
 pub mod watchdog;
 
@@ -74,6 +78,17 @@ pub async fn run_node<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> 
         }
     });
 
+    // N6 — the listen wake channel (the delivery last hop). Background like hooksock; an error
+    // is logged, not fatal — with no server, dispatch errs and messages queue on the bus.
+    let listen = tokio::spawn({
+        let ctx = ctx.clone();
+        async move {
+            if let Err(e) = listen::serve(ctx).await {
+                tracing::error!("listen loop exited with error: {e}");
+            }
+        }
+    });
+
     // Watchdog — periodic wall-clock self-check (domain abandonment timeouts + cooperative-shutdown
     // reap retry). Replaces Stop-hook-triggered decisions, which can't tell "done" from "paused".
     let watchdog = tokio::spawn({
@@ -99,10 +114,12 @@ pub async fn run_node<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> 
             loop {
                 interval.tick().await;
                 let shutdown_pending = ctx.shutdown_pending.lock().unwrap().is_some();
-                let snapshot = ctx
+                let mut snapshot = ctx
                     .runtime
                     .status_snapshot(ctx.kind.role_str(), shutdown_pending)
                     .await;
+                // Sidecar state the runtime can't see: is the wake-channel client attached?
+                snapshot.listener_connected = ctx.listener.is_connected();
                 if let Ok(bytes) = serde_json::to_vec(&snapshot) {
                     if let Err(e) =
                         exo_caps::Fs::write_atomic(&*ctx.runtime, &status_path, &bytes).await
@@ -120,6 +137,7 @@ pub async fn run_node<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> 
     // Agent stream closed (or serve errored) → reap the background loops.
     inbound.abort();
     hooksock.abort();
+    listen.abort();
     status.abort();
     watchdog.abort();
 

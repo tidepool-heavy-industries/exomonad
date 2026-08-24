@@ -7,6 +7,7 @@
 //!   exo init [--session <s>] [--recreate]   # bootstrap a node-mode ROOT (own tmux session, no server)
 //!   exo node --papers <path>                # run the node-mode sidecar for the node described by <path>
 //!   exo hook <event> --papers <path>        # handle a CC hook via the node's exo gates
+//!   exo listen --papers <path>              # wake-channel client (run under Claude Code's Monitor tool)
 //! ```
 
 mod config;
@@ -63,6 +64,16 @@ enum Commands {
         #[arg(long, default_value = "claude")]
         runtime: HookRuntime,
 
+        /// Path to this node's birth papers (`node.json`).
+        #[arg(long)]
+        papers: std::path::PathBuf,
+    },
+
+    /// Wake-channel client: stream this node's inbound swarm messages to stdout, acking each
+    /// over the sidecar's listen socket. Run under Claude Code's `Monitor` tool with
+    /// `persistent: true` — each printed message becomes a harness notification that wakes the
+    /// agent. Messages queue durably on the bus while no listener is attached.
+    Listen {
         /// Path to this node's birth papers (`node.json`).
         #[arg(long)]
         papers: std::path::PathBuf,
@@ -132,6 +143,13 @@ async fn main() -> anyhow::Result<()> {
                 hook::run(event, papers).await
             }
         }
+
+        // No logging init: stdout IS the wake channel (every line becomes a notification in the
+        // agent's session); diagnostics go to stderr inside the client.
+        Commands::Listen { papers } => exo_node::listen::client::run(&papers)
+            .await
+            .map_err(anyhow::Error::from)
+            .context("listen client"),
 
         Commands::Doctor {
             fix,

@@ -49,6 +49,23 @@ pub enum BusError {
     Io(#[from] std::io::Error),
 }
 
+/// Is a recipient's wake channel live? Read off the recipient's periodic status snapshot —
+/// an *observation for the sender's benefit*, never a delivery precondition: the bus queues
+/// durably either way, and the recipient's sidecar owns actual delivery. Senders surface a
+/// non-`Listening` status as a ⚠ note in their tool responses, putting the "your recipient
+/// can't hear yet" signal exactly where someone can act on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WakeStatus {
+    /// A fresh status snapshot says an `exo listen` client is attached.
+    Listening,
+    /// A fresh status snapshot says no client is attached — the recipient hasn't armed
+    /// (or re-armed) its Monitor; messages queue until it does.
+    NotListening,
+    /// No fresh snapshot to judge by (recipient still booting, status unreadable, or the
+    /// implementation doesn't track it). Not proof of anything — phrase softly.
+    Unknown,
+}
+
 /// **Composite cap** — resolution (`Addressee` → `InboxPath`) reads the child ledger and
 /// papers through the `Fs` supertrait. The inbox *append* itself is deliberately NOT an `Fs`
 /// op (there is no `Fs::append`): the multi-writer PIPE_BUF discipline lives inside the `Bus`
@@ -60,4 +77,11 @@ pub trait Bus: Fs {
     /// supplies only the [`Message`]. Resolution (`Addressee` → `InboxPath`) is internal, and
     /// refuses a tombstoned child with [`BusError::Tombstoned`].
     async fn deliver(&self, to: Addressee, msg: Message) -> Result<(), BusError>;
+
+    /// Best-effort read of the recipient's [`WakeStatus`] (see its doc). Never errs — any
+    /// failure to observe is `Unknown`, because this is advisory color on a delivery that has
+    /// already durably succeeded, and an error here must not fail the send.
+    async fn wake_status(&self, _to: &Addressee) -> WakeStatus {
+        WakeStatus::Unknown
+    }
 }

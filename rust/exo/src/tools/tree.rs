@@ -187,10 +187,17 @@ impl Tree {
             }
         }
 
-        // 2. Branch & Shutdown (from node's own view)
+        // 2. Branch, wake channel & Shutdown (from node's own view)
         let mut shutdown_flag = "";
         if let Some(s) = status_map.get(node.name.as_str()) {
             status_bits.push(s.branch.clone());
+            // Is the node's `exo listen` monitor armed? `wake:-` means messages to it are
+            // queuing (cursor-pinned) until it arms/re-arms.
+            status_bits.push(if s.listener_connected {
+                "wake:listen".to_string()
+            } else {
+                "wake:-".to_string()
+            });
             if s.shutdown_pending {
                 shutdown_flag = " [SHUTDOWN PENDING]";
             }

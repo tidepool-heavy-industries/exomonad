@@ -3,7 +3,7 @@
 This workspace contains two coexisting architectures for augmenting Claude Code sessions.
 
 1. **Classic Architecture** (`exomonad serve`): A central MCP server hosting Haskell WASM plugins. Designed for interactive, human-augmented sessions.
-2. **Node-mode V2** (the `exo` binary: `exo init` / `exo node` / `exo hook`): A headless, serverless swarm where each agent has its own Rust sidecar. Designed for autonomous, distributed orchestration.
+2. **Node-mode V2** (the `exo` binary: `exo init` / `exo node` / `exo hook` / `exo listen`): A headless, serverless swarm where each agent has its own Rust sidecar; message delivery is the Monitor-armed `exo listen` wake channel. Designed for autonomous, distributed orchestration.
 
 Both architectures share tmux isolation, git-worktree code isolation, the agent triad, and the scaffold-fork-converge lifecycle.
 

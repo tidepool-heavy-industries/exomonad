@@ -48,6 +48,8 @@ fn test_ctx(
         parent_inbox,
         run_id,
         shutdown_pending: std::sync::Mutex::new(None),
+        listener: exo_node::listen::ListenerSlot::new(),
+        inbox_wake: std::sync::Arc::new(tokio::sync::Notify::new()),
     })
 }
 

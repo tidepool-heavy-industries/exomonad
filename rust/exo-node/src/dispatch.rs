@@ -1,52 +1,77 @@
-//! **N2a — Last-hop dispatch.** Delivers an ingestion entry into this node's own agent by
-//! tmux-pasting it into the agent's pane (buffer pattern), rendered with a `[from: X, kind: Y]`
-//! header. This is the single last hop for every node kind (Claude, Shoal companion, inline worker).
+//! **N2a — Last-hop dispatch.** Delivers an ingestion entry into this node's own agent over the
+//! **listen wake channel**: the entry is rendered with a `[from: X, kind: Y]` header and handed
+//! to the attached `exo listen` Monitor client ([`crate::listen`]), whose stdout becomes a
+//! harness notification that wakes the agent. This is the single last hop for every node kind.
 //!
-//! CC Agent Teams native delivery was removed: as of Claude Code 2.1.178 a solo session-lead never
-//! drains its teammate inbox, so writing `~/.claude/teams/<team>/inboxes/team-lead.json` silently
-//! stranded every message (GH#26426). exo owns its delivery channel — the durable bus carries the
-//! message sidecar→sidecar, and this module injects it into the live `claude` via tmux.
-//!
-//! This is pure last-hop dispatch; it focuses on the agent-facing write for entries
-//! that have already been routed to this node.
+//! **No listener ⇒ the entry queues.** Dispatch errs, the inbound cursor stays pinned, and the
+//! bus retries until a client attaches and acks — so messages sent before the agent arms (or
+//! re-arms) its Monitor are delivered late, never dropped. There is no tmux-paste delivery:
+//! pasting into the pane typed over the human at the root and was indistinguishable from user
+//! input (tmux survives for spawning and observability only). CC Agent Teams native delivery
+//! was removed even earlier (a solo session-lead never drains its teammate inbox as of CC
+//! 2.1.178, GH#26426) — exo owns its delivery channel end to end.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use chrono::Utc;
 use exo_caps::{
-    Fs, IngestionEntry, Message, MessageBody, MessageKind, Persona, Summary, SyntheticName, Tmux,
+    Fs, IngestionEntry, Message, MessageBody, MessageKind, Persona, Summary, SyntheticName,
 };
 use exo_framework::Exomonad;
-use tracing::{error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::bootstrap::NodeContext;
 use crate::error::{NodeError, NodeResult};
+use crate::listen::ListenDeliverError;
 
 static SPILL_COUNTER: AtomicU64 = AtomicU64::new(0);
-const MAX_INLINE_PASTE_BYTES: usize = 480;
+
+/// A full render at most this big (and [`MAX_INLINE_LISTEN_LINES`] lines) goes over the wake
+/// channel inline; anything larger becomes a one-line `@`-ref to a spill file. The binding
+/// constraint is notification volume, not bytes — the harness batches one buffered write into
+/// one notification, but a monitor that floods lines gets auto-stopped, and an oversized body
+/// bloats the recipient's context where an `@`-ref lets it choose. Bodies cap at 4 KiB
+/// (`MessageBody`), so inline covers the common case (`[READY]`, status notes) outright.
+const MAX_INLINE_LISTEN_BYTES: usize = 2048;
+const MAX_INLINE_LISTEN_LINES: usize = 12;
 
 /// Deliver one ingestion entry into this node's own agent (the runtime-specific last hop).
+///
+/// `Ok` means the attached `exo listen` client flushed the payload to its stdout (acked) — the
+/// caller may advance the inbound cursor. `Err` leaves the cursor pinned: with no listener the
+/// entry is *queued, not failed* (the expected state before the agent's first-action Monitor
+/// arm), and the listen server pings the inbound wake on attach so the backlog drains at once.
 #[tracing::instrument(skip(ctx, entry), fields(node = %ctx.runtime.name().as_str(), from = %persona_label(&entry.from), kind = %kind_label(&entry.msg.kind)))]
 pub async fn dispatch<D: Exomonad>(
     ctx: &Arc<NodeContext<D>>,
     entry: &IngestionEntry,
 ) -> NodeResult<()> {
-    info!(outcome = "tmux_paste", "dispatching via tmux paste");
-    let rendered = prepare_tmux_payload(ctx, entry).await;
-    match Tmux::paste(&*ctx.runtime, &ctx.own_pane, &rendered).await {
-        // `outcome = "tmux_paste"` above already records the attempt; don't double-log OK.
-        Ok(()) => Ok(()),
+    let payload = prepare_listen_payload(ctx, entry).await;
+    match ctx.listener.try_deliver(&payload).await {
+        Ok(()) => {
+            info!(outcome = "listen", "dispatched via listen channel");
+            Ok(())
+        }
+        Err(ListenDeliverError::NoListener) => {
+            debug!(outcome = "queued", "no listener attached; entry stays queued");
+            Err(NodeError::NoListener)
+        }
         Err(e) => {
-            error!("FAILED to dispatch via tmux paste: {e}");
-            Err(NodeError::Delivery(format!("Tmux paste failed: {}", e)))
+            warn!("listen delivery failed ({e}); entry stays queued for retry");
+            Err(NodeError::Delivery(format!("listen delivery failed: {e}")))
         }
     }
 }
 
-/// Inject a synthetic (sidecar-authored) message into THIS node's own LLM via the last-hop
-/// dispatch — the shared path for engine-internal renders (shutdown prompts) and the domain's
+/// Inject a synthetic (sidecar-authored) message into THIS node's own LLM — the shared path for
+/// engine-internal renders (shutdown prompts, watchdog death notes) and the domain's
 /// `SystemCtx::deliver_to_self`. Attributed to a synthetic `from`.
+///
+/// This **appends to the node's own inbox** (same append+spill discipline as `Bus::deliver`,
+/// via `Runtime::append_entry`) rather than calling [`dispatch`] directly: everything the agent
+/// must see flows through one cursor-backed path, so a synthetic note that lands while no
+/// listener is attached queues and replays like any bus message instead of being warn-and-dropped.
 pub(crate) async fn deliver_synthetic<D: Exomonad>(
     ctx: &Arc<NodeContext<D>>,
     from: &str,
@@ -71,7 +96,14 @@ pub(crate) async fn deliver_synthetic<D: Exomonad>(
             reply_to: None,
         },
     };
-    dispatch(ctx, &entry).await
+    ctx.runtime
+        .append_entry(&ctx.own_inbox, entry)
+        .await
+        .map_err(|e| NodeError::Delivery(format!("self-append failed: {e}")))?;
+    // The inbox filesystem event would wake the inbound loop anyway; the explicit ping makes
+    // delivery prompt rather than watcher-latency-bound.
+    ctx.inbox_wake.notify_one();
+    Ok(())
 }
 
 /// Short, log-friendly label for a persona: the bare agent/synthetic name, no `Agent(AgentName(..))`
@@ -124,33 +156,13 @@ fn render_entry(entry: &IngestionEntry) -> String {
     )
 }
 
-/// What to actually push over a tmux paste for one entry.
-#[derive(Debug, PartialEq, Eq)]
-enum PastePlan {
-    /// Safe to paste directly: a single line, no shell-mode trigger.
-    Inline(String),
-    /// Body must be spilled to a file; this is the full text to write.
-    Spill { file_body: String },
+/// Does this full render go over the wake channel inline, or as an `@`-ref to a spill file?
+fn listen_inline(full_render: &str) -> bool {
+    full_render.len() <= MAX_INLINE_LISTEN_BYTES
+        && full_render.lines().count() <= MAX_INLINE_LISTEN_LINES
 }
 
-/// Decide inline-vs-spill. A message is safe to paste inline only if it is a single short line
-/// with no body. Everything else (any text body, multi-line, or oversized) spills to a file so we
-/// can deliver a one-line `@`-reference instead.
-fn plan_paste(persona: &str, summary: &str, text: &str, full_render: &str) -> PastePlan {
-    let oneline = format!("[from {}] {}", persona, summary);
-    let can_inline = text.trim().is_empty()
-        && !oneline.contains('\n')
-        && oneline.len() <= MAX_INLINE_PASTE_BYTES;
-    if can_inline {
-        PastePlan::Inline(oneline)
-    } else {
-        PastePlan::Spill {
-            file_body: full_render.to_string(),
-        }
-    }
-}
-
-/// Build the single-line `@`-reference paste that points at the spilled file. MUST be one line.
+/// Build the single-line `@`-reference that points at the spilled file. MUST be one line.
 fn render_atref(persona: &str, summary: &str, rel_path: &str) -> String {
     let snippet: String = summary.chars().filter(|c| *c != '\n').take(80).collect();
     format!(
@@ -159,28 +171,29 @@ fn render_atref(persona: &str, summary: &str, rel_path: &str) -> String {
     )
 }
 
-async fn prepare_tmux_payload<D: Exomonad>(
+/// Render an entry for the wake channel: the full `[from, kind, id]` render when small enough
+/// to sit in the agent's context outright, otherwise spilled to `.exo/tmp/` (GC'd by
+/// `exo doctor` once this pid is gone) behind a one-line `@`-ref. A spill-write failure
+/// degrades to sending the full render inline — delivery beats tidiness.
+async fn prepare_listen_payload<D: Exomonad>(
     ctx: &Arc<NodeContext<D>>,
     entry: &IngestionEntry,
 ) -> String {
     let full_render = render_entry(entry);
+    if listen_inline(&full_render) {
+        return full_render;
+    }
+
     let persona = render_persona(&entry.from);
     let summary = entry.msg.summary.as_str();
-    let text = entry.msg.text.as_str();
-
-    match plan_paste(&persona, summary, text, &full_render) {
-        PastePlan::Inline(s) => s,
-        PastePlan::Spill { file_body } => {
-            let id = SPILL_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let rel = format!(".exo/tmp/inbox-{}-{}.md", std::process::id(), id);
-            let path = ctx.runtime.working_dir().join(&rel);
-            match Fs::write_atomic(&*ctx.runtime, &path, file_body.as_bytes()).await {
-                Ok(()) => render_atref(&persona, summary, &rel),
-                Err(e) => {
-                    warn!(node = %ctx.runtime.name().as_str(), "failed to spill large paste to {rel}, pasting inline (degraded): {e}");
-                    file_body
-                }
-            }
+    let id = SPILL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let rel = format!(".exo/tmp/inbox-{}-{}.md", std::process::id(), id);
+    let path = ctx.runtime.working_dir().join(&rel);
+    match Fs::write_atomic(&*ctx.runtime, &path, full_render.as_bytes()).await {
+        Ok(()) => render_atref(&persona, summary, &rel),
+        Err(e) => {
+            warn!(node = %ctx.runtime.name().as_str(), "failed to spill large payload to {rel}, sending inline (degraded): {e}");
+            full_render
         }
     }
 }
@@ -297,37 +310,27 @@ mod tests {
     }
 
     #[test]
-    fn test_plan_paste_inline() {
-        let plan = plan_paste("alice", "hello", "", "full");
-        if let PastePlan::Inline(s) = plan {
-            assert_eq!(s, "[from alice] hello");
-            assert!(!s.contains('\n'));
-        } else {
-            panic!("expected inline");
-        }
+    fn test_listen_inline_small_render() {
+        // The common case — header + summary + short body — goes inline.
+        assert!(listen_inline(
+            "[from: alice, kind: chat]\n\n[READY]\nbranch root.dev-0 at abc123"
+        ));
     }
 
     #[test]
-    fn test_plan_paste_spill_on_body() {
-        let plan = plan_paste("alice", "hello", "body", "full");
-        assert_eq!(
-            plan,
-            PastePlan::Spill {
-                file_body: "full".to_string()
-            }
-        );
+    fn test_listen_inline_byte_edge() {
+        let at_cap = "a".repeat(MAX_INLINE_LISTEN_BYTES);
+        assert!(listen_inline(&at_cap));
+        let over_cap = "a".repeat(MAX_INLINE_LISTEN_BYTES + 1);
+        assert!(!listen_inline(&over_cap));
     }
 
     #[test]
-    fn test_plan_paste_oversized() {
-        let long_summary = "a".repeat(MAX_INLINE_PASTE_BYTES + 1);
-        let plan = plan_paste("alice", &long_summary, "", "full");
-        assert_eq!(
-            plan,
-            PastePlan::Spill {
-                file_body: "full".to_string()
-            }
-        );
+    fn test_listen_inline_line_edge() {
+        let at_cap = vec!["x"; MAX_INLINE_LISTEN_LINES].join("\n");
+        assert!(listen_inline(&at_cap));
+        let over_cap = vec!["x"; MAX_INLINE_LISTEN_LINES + 1].join("\n");
+        assert!(!listen_inline(&over_cap));
     }
 
     #[test]

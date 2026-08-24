@@ -100,6 +100,10 @@ pub struct MockRuntime {
     pub dirty_files: Vec<String>,
     /// What [`Git::commits_between`] returns for any `(base, head)`. Default empty.
     pub commits_between: Vec<CommitFiles>,
+    /// What [`Bus::wake_status`] reports for any addressee. Default `Listening` (the armed
+    /// happy path, so message-tool outputs stay clean); set `NotListening`/`Unknown` to
+    /// exercise the sender-side ⚠ note.
+    pub wake_status: exo_caps::WakeStatus,
     /// What [`ChildLiveness::any_child_busy`] returns — a canned stand-in for "does any direct
     /// child have a live pane" (the cap is a live tmux probe in production; this mock just returns
     /// the configured value). Default `true`; set `false` to model a quiescent subtree.
@@ -129,6 +133,7 @@ impl Default for MockRuntime {
             is_behind: false,
             dirty_files: Vec::new(),
             commits_between: Vec::new(),
+            wake_status: exo_caps::WakeStatus::Listening,
             child_busy: true,
             fail: Mutex::new(None),
             process_output: std::process::Output {
@@ -170,6 +175,10 @@ impl Bus for MockRuntime {
         }
         self.record(Call::BusDeliver { to, msg });
         Ok(())
+    }
+
+    async fn wake_status(&self, _to: &Addressee) -> exo_caps::WakeStatus {
+        self.wake_status
     }
 }
 

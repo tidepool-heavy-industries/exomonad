@@ -9,12 +9,14 @@
 //! - **Read only up to the last `\n`** — a torn trailing line is re-read once complete.
 //! - **Advance the cursor AFTER a successful last-hop delivery**, written **temp + rename**
 //!   (atomic replace — a "small" overwrite is NOT crash-atomic). At-least-once, never dropped/corrupted.
-//! - **Missing cursor** (fresh node) → start at current EOF; don't replay history.
+//! - **Missing cursor** (fresh node) → replay from 0: anything the parent sent between spawn and
+//!   sidecar boot is real backlog, never skipped history. The pinned cursor is also what queues
+//!   messages while no `exo listen` client is attached (see [`crate::dispatch`]).
 //! - Parse each line as [`IngestionEntry`] (tolerant: serde defaults, no `deny_unknown_fields`).
 //!
 //! Then route each new entry by `kind`:
-//! - `Chat` / `Event` → [`crate::dispatch::dispatch`] (N2a last-hop): deliver to the agent's
-//!   native interface (Teams inbox or tmux paste), rendered with a `[from: X, kind: Y]` header.
+//! - `Chat` / `Event` → [`crate::dispatch::dispatch`] (N2a last-hop): deliver over the listen
+//!   wake channel, rendered with a `[from: X, kind: Y]` header.
 //! - `Control(Shutdown { grace_ms, force })` → the cooperative/forced matrix (see `decide`): a
 //!   cooperative request to a node with live children bounces an "are you sure" back to the
 //!   requester; a leaf winds down and is reaped on the watchdog's next periodic tick; a forced
@@ -30,7 +32,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
-use tokio::sync::Notify;
 use tracing::{debug, error, info, warn};
 
 use chrono::Utc;
@@ -54,28 +55,27 @@ pub async fn watch<D: Exomonad>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
     // Append rather than `with_extension` so a multi-dot inbox name can't mis-target the cursor.
     let cursor_path = PathBuf::from(format!("{}.cursor", inbox_path.display()));
 
-    // Initialize cursor
+    // Initialize cursor. No cursor file (a fresh node) starts at **0**, replaying the whole
+    // inbox: anything the parent sent between spawn and this sidecar's boot is real backlog,
+    // not history — the boot-window messages must be delivered, never skipped. A malformed or
+    // unreadable cursor also restarts at 0: full replay produces benign duplicates under the
+    // at-least-once contract, while any guessed offset could silently drop a message.
     let mut offset = if cursor_path.exists() {
         match std::fs::read_to_string(&cursor_path) {
             Ok(s) => s.trim().parse::<u64>().unwrap_or_else(|_| {
-                warn!("malformed cursor at {:?}, starting at EOF", cursor_path);
-                get_eof(&inbox_path)
+                warn!("malformed cursor at {:?}, replaying from 0", cursor_path);
+                0
             }),
             Err(e) => {
                 warn!(
-                    "failed to read cursor at {:?}: {}, starting at EOF",
+                    "failed to read cursor at {:?}: {}, replaying from 0",
                     cursor_path, e
                 );
-                get_eof(&inbox_path)
+                0
             }
         }
     } else {
-        let eof = get_eof(&inbox_path);
-        // Non-fatal: failing to persist the initial cursor must not stop the node from receiving.
-        if let Err(e) = save_cursor(&cursor_path, eof) {
-            warn!("failed to persist initial cursor at {:?}: {e}", cursor_path);
-        }
-        eof
+        0
     };
 
     info!(
@@ -83,9 +83,12 @@ pub async fn watch<D: Exomonad>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
         inbox_path, offset
     );
 
-    // Setup notify watcher. `Notify` gives coalescing wakeup semantics (any number of filesystem
-    // events between loop iterations collapse into one wake) with no bounded channel to overflow.
-    let notify = Arc::new(Notify::new());
+    // Setup notify watcher feeding the context's shared wake. `Notify` gives coalescing wakeup
+    // semantics (any number of filesystem events between loop iterations collapse into one wake)
+    // with no bounded channel to overflow. The wake lives on `NodeContext` because it has other
+    // feeders: the listen server pings it when a client attaches (drain the queued backlog now,
+    // not at the next retry tick) and `deliver_synthetic` after an own-inbox append.
+    let notify = ctx.inbox_wake.clone();
     let notify_writer = notify.clone();
     let mut watcher = RecommendedWatcher::new(
         move |res: notify::Result<Event>| {
@@ -157,6 +160,7 @@ pub async fn watch<D: Exomonad>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn get_eof(path: &Path) -> u64 {
     File::open(path)
         .and_then(|f| f.metadata())
@@ -943,6 +947,13 @@ async fn process_inbox<H: InboundHandler>(
                 if let Err(e) = save_cursor(cursor_path, *offset) {
                     warn!(node = %node, "failed to persist cursor (will retry next wake): {e}");
                 }
+            }
+            Err(crate::error::NodeError::NoListener) => {
+                // Not a fault: the agent hasn't armed (or re-armed) its Monitor yet, so the
+                // entry queues here. The listen server pings the wake on attach; the 15s tick
+                // is the backstop. Quiet — this is the expected boot-window state.
+                debug!(node = %node, "no listener attached; entry queued (cursor pinned)");
+                return Ok(false);
             }
             Err(e) => {
                 error!(node = %node, "failed to route entry: {}. will retry on next wake", e);

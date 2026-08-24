@@ -6,10 +6,36 @@
 
 use exo_caps::{
     Addressee, AgentName, Bus, CapResult, ControlKind, Message, MessageBody, MessageKind, Summary,
+    WakeStatus,
 };
 use exo_framework::{Tool, ToolOutput};
 use schemars::JsonSchema;
 use serde::Deserialize;
+
+/// Sender-side wake-channel note appended to a message tool's response — the "your recipient
+/// can't hear yet" signal lands where someone can act on it, at the moment they act. `None`
+/// (a live listener) keeps the output clean.
+pub(crate) fn wake_note(status: WakeStatus) -> Option<&'static str> {
+    match status {
+        WakeStatus::Listening => None,
+        WakeStatus::NotListening => Some(
+            "⚠ recipient has no active listener — the message is queued durably and delivers \
+             when they arm (or re-arm) their wake monitor",
+        ),
+        WakeStatus::Unknown => Some(
+            "note: recipient wake status unknown (no fresh status snapshot — a just-spawned node \
+             may not have armed its monitor yet); the message is queued durably either way",
+        ),
+    }
+}
+
+/// `"delivered"`, plus the wake note when the recipient's listener isn't confirmed live.
+pub(crate) async fn delivered_output<C: Bus + Sync>(ctx: &C, to: &Addressee) -> ToolOutput {
+    match wake_note(ctx.wake_status(to).await) {
+        None => ToolOutput::text("delivered"),
+        Some(note) => ToolOutput::text(format!("delivered\n{note}")),
+    }
+}
 
 /// A tool to notify the parent agent.
 pub struct NotifyParent;
@@ -47,7 +73,7 @@ impl<R: Bus + Send + Sync> Tool<R> for NotifyParent {
             reply_to: args.reply_to,
         };
         ctx.deliver(Addressee::Parent, msg).await?;
-        Ok(ToolOutput::text("delivered"))
+        Ok(delivered_output(ctx, &Addressee::Parent).await)
     }
 }
 
@@ -119,8 +145,8 @@ impl<R: Bus + Send + Sync> Tool<R> for SendMessage {
             kind: args.kind.into(),
             reply_to: args.reply_to,
         };
-        ctx.deliver(to, msg).await?;
-        Ok(ToolOutput::text("delivered"))
+        ctx.deliver(to.clone(), msg).await?;
+        Ok(delivered_output(ctx, &to).await)
     }
 }
 
@@ -156,6 +182,46 @@ mod tests {
         } else {
             panic!("expected BusDeliver call, got {:?}", calls[0]);
         }
+    }
+
+    #[tokio::test]
+    async fn test_notify_parent_warns_when_recipient_not_listening() {
+        let mock = MockRuntime {
+            wake_status: WakeStatus::NotListening,
+            ..MockRuntime::default()
+        };
+        let args = json!({
+            "text": "Hello parent",
+            "summary": "Greeting"
+        });
+
+        let res = tool(NotifyParent)
+            .call(&mock, args)
+            .await
+            .expect("tool call failed");
+        let text = res["text"].as_str().unwrap();
+        assert!(text.starts_with("delivered"), "delivery still succeeds");
+        assert!(
+            text.contains("⚠ recipient has no active listener"),
+            "sender must see the wake warning: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_notify_parent_soft_note_when_status_unknown() {
+        let mock = MockRuntime {
+            wake_status: WakeStatus::Unknown,
+            ..MockRuntime::default()
+        };
+        let args = json!({ "text": "hi", "summary": "hi" });
+
+        let res = tool(NotifyParent)
+            .call(&mock, args)
+            .await
+            .expect("tool call failed");
+        let text = res["text"].as_str().unwrap();
+        assert!(text.contains("wake status unknown"), "{text}");
+        assert!(!text.contains('⚠'), "unknown is phrased softly: {text}");
     }
 
     #[tokio::test]

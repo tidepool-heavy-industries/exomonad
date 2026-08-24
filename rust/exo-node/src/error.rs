@@ -14,9 +14,15 @@ pub enum NodeError {
     #[error("missing required boot context: {0}")]
     MissingContext(&'static str),
 
-    /// Last-hop delivery into the agent (tmux paste) failed.
+    /// Last-hop delivery into the agent (the listen wake channel) failed.
     #[error("delivery failed: {0}")]
     Delivery(String),
+
+    /// No `exo listen` wake-channel client is attached — the *expected* state before the agent's
+    /// first-action Monitor arm, not a fault. The entry stays queued (cursor pinned) and the
+    /// inbound loop logs this quietly rather than as a routing error.
+    #[error("no listener attached; message queued until the agent arms its monitor")]
+    NoListener,
 
     /// The converge wiring isn't in place yet (Wave-2 scaffold placeholder).
     #[error("node loops not yet assembled")]

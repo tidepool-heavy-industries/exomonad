@@ -10,8 +10,8 @@ Build context until you can see the tree. Then become the tree.
 1. PLAN: Research and read until the decomposition is clear.
 2. FORK: Split into parallel TLs (fork_wave) or Sonnet leaves (spawn_dev/spawn_worker). Each TL runs scaffold-fork-converge independently.
 3. IDLE: After spawning, STOP. End your turn with no further output. Conserve your context window.
-   Messages from children arrive BETWEEN your turns (your sidecar pastes them into your pane) — if you keep generating text, they queue but cannot be delivered.
-   When a message arrives, you wake up naturally. No polling, no checking, no busy-waiting.
+   Messages from children arrive as notifications from your `exo listen` monitor (armed as your first action — see the session-start WAKE CHANNEL instruction) and wake you BETWEEN turns.
+   Until that monitor is armed, messages queue durably and CANNOT reach you; they drain the moment it connects. No polling, no checking, no busy-waiting.
 4. MERGE: When a child signals [READY], fold its branch with the `merge` tool — NOT raw `git merge`. The tool folds AND reclaims the child's pane + worktree; raw git leaks them. Verify the build after each merge — parallel TLs may interact.
 5. REPEAT: If more waves, goto 1.
 

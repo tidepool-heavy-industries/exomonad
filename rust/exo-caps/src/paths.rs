@@ -63,6 +63,29 @@ pub fn hook_sock(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
         .join(format!("pane-{n}.sock"))
 }
 
+/// Node's listen-channel socket: `{home}/.claude/exo/sockets/{run_id}/pane-{n}.listen.sock`.
+/// Streaming, newline-framed — NOT the one-shot EOF-framed hooksock protocol, hence a second
+/// socket beside [`hook_sock`]. The sidecar binds it; the `exo listen` Monitor client connects
+/// and receives every dispatched message as a frame, acking each after flushing it to stdout.
+pub fn listen_sock(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
+    let n = pane.as_str().trim_start_matches('%');
+    home.join(".claude/exo/sockets")
+        .join(run_id)
+        .join(format!("pane-{n}.listen.sock"))
+}
+
+/// Recover the pane id encoded in an inbox path (`…/pane-{n}.jsonl` → `%{n}`).
+///
+/// The bus keys every per-node file by pane, so an inbox path is enough to reach the sibling
+/// status/socket files of the node it belongs to — this is how a *sender* holding only a
+/// recipient's `InboxPath` (ledger row or `parent_inbox`) checks that recipient's
+/// [`status_path`] for listener liveness. `None` for a path that doesn't match the scheme.
+pub fn pane_from_inbox(inbox: &InboxPath) -> Option<PaneId> {
+    let name = inbox.as_path().file_name()?.to_str()?;
+    let n = name.strip_prefix("pane-")?.strip_suffix(".jsonl")?;
+    PaneId::new(format!("%{n}")).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +126,25 @@ mod tests {
             m,
             Path::new("/home/u/.claude/exo/papers/run-1/pane-3.mcp.json")
         );
+    }
+
+    #[test]
+    fn listen_sock_shape() {
+        let pane = PaneId::new("%317".into()).unwrap();
+        assert_eq!(
+            listen_sock(Path::new("/home/user"), "run-42", &pane),
+            Path::new("/home/user/.claude/exo/sockets/run-42/pane-317.listen.sock")
+        );
+    }
+
+    #[test]
+    fn pane_from_inbox_roundtrips() {
+        let pane = PaneId::new("%317".into()).unwrap();
+        let inbox = inbox_path(Path::new("/home/user"), "run-42", &pane);
+        assert_eq!(pane_from_inbox(&inbox), Some(pane));
+
+        let bogus = InboxPath::new("/tmp/not-an-inbox.txt".into());
+        assert_eq!(pane_from_inbox(&bogus), None);
     }
 
     #[test]
