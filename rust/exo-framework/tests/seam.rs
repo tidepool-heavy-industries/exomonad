@@ -88,6 +88,9 @@ impl Git for TestCaps {
     async fn is_behind(&self, _base: &str) -> Result<bool, GitError> {
         unimplemented!()
     }
+    async fn tracked_at_head(&self, _paths: &[String]) -> Result<Vec<String>, GitError> {
+        unimplemented!()
+    }
 }
 
 #[async_trait]

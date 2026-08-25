@@ -67,4 +67,10 @@ pub trait Git {
     /// ref is untouched, so committed work survives. Both callers (birth rollback, post-merge
     /// reclaim) want exactly that.
     async fn worktree_remove(&self, at: &Path) -> Result<(), GitError>;
+    /// The subset of `paths` that are NOT tracked at `HEAD` — empty means every path is tracked.
+    /// A path counts as tracked if it names a tracked file exactly, or is a directory prefix of
+    /// one (a `read_first` entry may be a directory). A worktree child forks from `HEAD`, so a
+    /// path that merely exists on disk but isn't committed is invisible to it; this is how a
+    /// spawner checks that BEFORE the child is born, not after it fails mid-flight.
+    async fn tracked_at_head(&self, paths: &[String]) -> Result<Vec<String>, GitError>;
 }

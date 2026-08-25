@@ -100,6 +100,9 @@ pub struct MockRuntime {
     pub dirty_files: Vec<String>,
     /// What [`Git::commits_between`] returns for any `(base, head)`. Default empty.
     pub commits_between: Vec<CommitFiles>,
+    /// What [`Git::tracked_at_head`] reports as NOT tracked — a canned stand-in for "these paths
+    /// aren't committed at HEAD". Default empty (everything a test passes is tracked).
+    pub untracked_paths: Vec<String>,
     /// What [`Bus::wake_status`] reports for any addressee. Default `Listening` (the armed
     /// happy path, so message-tool outputs stay clean); set `NotListening`/`Unknown` to
     /// exercise the sender-side ⚠ note.
@@ -133,6 +136,7 @@ impl Default for MockRuntime {
             is_behind: false,
             dirty_files: Vec::new(),
             commits_between: Vec::new(),
+            untracked_paths: Vec::new(),
             wake_status: exo_caps::WakeStatus::Listening,
             child_busy: true,
             fail: Mutex::new(None),
@@ -266,6 +270,19 @@ impl Git for MockRuntime {
     }
     async fn worktree_remove(&self, _at: &Path) -> Result<(), GitError> {
         Ok(())
+    }
+    async fn tracked_at_head(&self, paths: &[String]) -> Result<Vec<String>, GitError> {
+        if self.should_fail("tracked_at_head") {
+            return Err(GitError::Failed {
+                op: "tracked_at_head",
+                detail: "mock forced failure".into(),
+            });
+        }
+        Ok(paths
+            .iter()
+            .filter(|p| self.untracked_paths.contains(p))
+            .cloned()
+            .collect())
     }
 }
 
