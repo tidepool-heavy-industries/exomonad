@@ -298,10 +298,20 @@ the default. The `summary` line (`[READY] {branch}` / `[READY skipped] {branch}`
 
 When reviewers ARE enabled: a node commits, then calls `submit_branch`. It runs the checks, then
 spawns a **reviewer** (a full Sonnet Claude in its own worktree branched off the under-review code)
-handed the diff + `.exo/acceptance.md`. Its task prompt is explicit that review is **read-only** —
+handed the diff + `.exo/acceptance.md` + (when the submitter passed any) a **SUBMITTER RECEIPTS**
+section — the same `render_receipts_summary` block rendered on the parent-bound `[READY]`, so
+there is one renderer, not two. Its task prompt is explicit that review is **read-only** —
 judge the diff, don't re-run the build/test suite — because a reviewer has a 30-minute wall-clock
 abandonment timeout (`REVIEW_ABANDON_TIMEOUT`) and a cold build routinely blows well past that,
-burning the whole round for nothing (see the tidepool forensics in "The gates" below).
+burning the whole round for nothing (see the tidepool forensics in "The gates" below). The task
+also carries two prompt-level lenses beyond plain correctness — **SCOPE** (check the diff against
+any ALLOWED PATHS the acceptance criteria name; an undeclared out-of-scope file is an Error, a
+declared-and-justified one is at most a Warning) and **DUPLICATION** (read the CLAUDE.md of every
+touched top-level directory; an undeclared reimplementation of an existing mechanism is an Error)
+— and, when receipts were passed, an instruction to audit the `deviations` field against the diff
+(an undeclared deviation is a finding; a declared one is context). These are prompting only —
+no new mechanical scope/dup computation exists anywhere in this path; the recorded file boundary
+can be wrong, and judging that is the parent's call, not the reviewer's.
 **Cross-round continuity:** `submit_branch` reads the latest `.exo/reviews/{safe-branch}.json` and
 appends any unresolved Error findings from the prior round to the reviewer's task string.
 The reviewer calls `verdict`, which rides the bus as a `System` message to the submitter's
@@ -321,6 +331,13 @@ the pending-merge queue survives the parent's context window instead of living o
 When reviewers are enabled, `submit_branch` never delivers `[READY]` itself except through the
 skip path, so the gate is **structural** — the LLM has no other tool that fabricates approval. The
 reviewer is torn down (best-effort) as soon as the `verdict` (or the abandonment timeout) is processed.
+
+**Severity calibration.** The reviewer's own steering protocol (`protocol::REVIEWER`) frames
+`error` around one question: would the parent be right to REFUSE this fold? If the reviewer would
+merge it itself, it is not an error — and when unsure between `error` and `warning`, it picks
+`warning`. A false block costs the submitter a full round-trip; a missed nit costs nothing. This
+is a calibration change, not a new check: it exists because the reviewer's kill-condition is a
+false-positive Error block, not a missed nit.
 
 ## Receipts and the transfer proof
 

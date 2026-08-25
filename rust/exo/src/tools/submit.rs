@@ -654,6 +654,23 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
         // (see exo-node `handle_system`). That makes the gate structural: the LLM has no tool that
         // can skip review (the explicit opt-out above is the one exception, and it's loud).
         let directives = crate::directives::load_directives(ctx).await?;
+        // Self-reported receipts, rendered for the reviewer to audit against the diff — the same
+        // truncating renderer used for the parent-bound `[READY]`, so there is no second renderer
+        // to keep in sync. Empty string (and therefore no section at all) when the submitter passed
+        // no receipts, so the task is byte-identical to before receipts existed on this path.
+        let receipts_section = args
+            .receipts
+            .as_ref()
+            .map(|r| {
+                format!(
+                    "\n\nSUBMITTER RECEIPTS (self-reported — audit these against the diff)\n{}\n\
+                     Specifically audit the deviations field: the spec said X — does the diff do \
+                     X+Y with Y undeclared? An undeclared deviation is a finding; a declared one \
+                     is context.",
+                    render_receipts_summary(r, proof.as_ref())
+                )
+            })
+            .unwrap_or_default();
         let review_task = format!(
             "You are a code reviewer. Review branch `{branch}` (commit {sha}). {diff_instruction}. \
              READ ONLY: judge the diff by reading it, not by running it — do NOT run the build, the \
@@ -669,8 +686,17 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
              - warning / info / hint: non-blocking nits or suggestions.\n\
              Intent labels in code or commits (\"throwaway\", \"WIP\", \"probe\", \"experimental\") \
              do NOT lower the bar — review every diff as production code.\n\n\
+             SCOPE: If the ACCEPTANCE CRITERIA include an ALLOWED PATHS list, check `git diff \
+             --name-only <base>...HEAD` against it. An out-of-scope file that is undeclared is an \
+             Error; one that is declared and justified in the submitter's note or receipts \
+             deviations is at most a Warning with your reasoning — the recorded boundary itself \
+             may be wrong, and judging that is the parent's call, not yours.\n\n\
+             DUPLICATION: For each top-level directory the diff touches, read its CLAUDE.md (and \
+             the repo root's). Ask: does any new code in this diff reimplement a mechanism that \
+             already exists in this repo? An undeclared reimplementation is an Error — name the \
+             existing mechanism.\n\n\
              Note from the submitter: {note}\n\n\
-             ACCEPTANCE CRITERIA\n{acceptance}{prior}",
+             ACCEPTANCE CRITERIA\n{acceptance}{receipts_section}{prior}",
             branch = branch.as_str(),
             note = args.note,
             prior = prior_round_context,
@@ -1549,5 +1575,107 @@ mod tests {
             .expect("reviewer should be spawned");
 
         assert!(spawn.contains("reject any new unwrap() in library code"));
+    }
+
+    #[tokio::test]
+    async fn reviewer_task_carries_receipts_block_when_present() {
+        let mock = mock_with_reviews_enabled();
+        let receipts = Receipts {
+            commit_tested: Some("0000000".into()),
+            deviations: vec!["skipped the cache layer".into()],
+            ..Default::default()
+        };
+        SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "did the thing".into(),
+                receipts: Some(receipts),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let calls = mock.calls_made();
+        let spawn = calls
+            .iter()
+            .find_map(|c| {
+                if let Call::Spawn { role, task, .. } = c {
+                    if role == "reviewer" {
+                        return Some(task);
+                    }
+                }
+                None
+            })
+            .expect("reviewer should be spawned");
+
+        assert!(spawn.contains("SUBMITTER RECEIPTS"));
+        assert!(spawn.contains("skipped the cache layer"));
+        assert!(spawn.contains("Specifically audit the deviations field"));
+    }
+
+    #[tokio::test]
+    async fn reviewer_task_pinned_shape_when_receipts_absent() {
+        // Receipts absent must produce a byte-exact pinned shape: no receipts section wedged
+        // between ACCEPTANCE CRITERIA and the (empty, no prior round) tail.
+        let mock = mock_with_reviews_enabled();
+        SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "did the thing".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let calls = mock.calls_made();
+        let spawn = calls
+            .iter()
+            .find_map(|c| {
+                if let Call::Spawn { role, task, .. } = c {
+                    if role == "reviewer" {
+                        return Some(task);
+                    }
+                }
+                None
+            })
+            .expect("reviewer should be spawned");
+
+        assert!(!spawn.contains("SUBMITTER RECEIPTS"));
+        assert!(spawn
+            .ends_with("ACCEPTANCE CRITERIA\n(no acceptance criteria recorded for this branch)"));
+    }
+
+    #[tokio::test]
+    async fn reviewer_task_carries_scope_and_duplication_lenses() {
+        let mock = mock_with_reviews_enabled();
+        SubmitBranch::run(
+            &mock,
+            SubmitBranchArgs {
+                note: "did the thing".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let calls = mock.calls_made();
+        let spawn = calls
+            .iter()
+            .find_map(|c| {
+                if let Call::Spawn { role, task, .. } = c {
+                    if role == "reviewer" {
+                        return Some(task);
+                    }
+                }
+                None
+            })
+            .expect("reviewer should be spawned");
+
+        assert!(spawn.contains("SCOPE:"));
+        assert!(spawn.contains("ALLOWED PATHS"));
+        assert!(spawn.contains("DUPLICATION:"));
+        assert!(spawn.contains("reimplement a mechanism"));
     }
 }

@@ -146,12 +146,53 @@ You are a one-shot reviewer in your own worktree, branched off the code under re
 2. Judge the change against that bar — correctness first. Intent labels in code or commit
    messages ("throwaway", "WIP", "probe", "experimental") do NOT lower the bar: review every
    diff as production code.
-3. Emit structured findings via the `verdict` tool with a REQUIRED `summary`.
-   - Severity rubric:
-     - `error`: correctness, security, or missed spec. This BLOCKS the merge.
-     - `warning`/`info`/`hint`: non-blocking nits or suggestions.
-   - Reserve `error` for MUST-change items.
-4. NEVER commit, merge, or create branches. Put concrete fixes in a finding's `suggestion` field.
-5. Then exit.
+3. Apply three lenses beyond plain correctness:
+   - RECEIPTS: if the submitter attached receipts, audit them against the diff — an undeclared
+     deviation from the spec is a finding.
+   - SCOPE: if the acceptance criteria name an ALLOWED PATHS list, check the diff against it —
+     an undeclared out-of-scope file is a finding.
+   - DUPLICATION: read the CLAUDE.md of each directory the diff touches; an undeclared
+     reimplementation of a mechanism that already exists elsewhere in the repo is a finding.
+4. Emit structured findings via the `verdict` tool with a REQUIRED `summary`.
+   - `error`: the parent would be right to REFUSE this fold — correctness, security, missed
+     spec, undeclared out-of-scope or duplication. If you would merge it yourself, it is not an
+     error. When unsure between error and warning, choose warning: a false block costs a full
+     round-trip; a missed nit costs nothing.
+   - `warning`/`info`/`hint`: non-blocking nits or suggestions.
+5. NEVER commit, merge, or create branches. Put concrete fixes in a finding's `suggestion` field.
+6. Then exit.
 
 Invoke the `verdict` tool for real — do not print the call as text."#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reviewer_carries_the_three_lenses() {
+        assert!(REVIEWER.contains("RECEIPTS:"));
+        assert!(REVIEWER.contains("SCOPE:"));
+        assert!(REVIEWER.contains("DUPLICATION:"));
+    }
+
+    #[test]
+    fn reviewer_carries_the_calibration_sentence() {
+        assert!(REVIEWER.contains("the parent would be right to REFUSE this fold"));
+        assert!(REVIEWER.contains("If you would merge it yourself"));
+        assert!(REVIEWER.contains("it is not an"));
+        assert!(REVIEWER.contains("a false block costs a full"));
+        assert!(REVIEWER.contains("a missed nit costs nothing"));
+    }
+
+    #[test]
+    fn reviewer_no_longer_carries_the_old_rubric_line() {
+        assert!(!REVIEWER.contains("This BLOCKS the merge"));
+        assert!(!REVIEWER.contains("Reserve `error` for MUST-change items"));
+    }
+
+    #[test]
+    fn reviewer_keeps_intent_label_anchoring_and_never_commit_rules() {
+        assert!(REVIEWER.contains("do NOT lower the bar: review every"));
+        assert!(REVIEWER.contains("NEVER commit, merge, or create branches"));
+    }
+}
