@@ -7,10 +7,13 @@
 
 use crate::boundary::{matches as boundary_matches, read_boundary};
 use crate::branching::child_name;
-use exo_caps::{AgentName, Branch, CapError, CapResult, Fs, Git, Process, SpawnError, Spawner};
+use exo_caps::{
+    AgentName, Branch, CapError, CapResult, Fs, Git, Process, ProcessOutcome, SpawnError, Spawner,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::time::Duration;
 
 use exo_framework::{Tool, ToolOutput};
 
@@ -23,11 +26,20 @@ pub struct MergeArgs {
     pub child: Option<String>,
     /// Optional verification command run after a successful merge and before child teardown
     /// (e.g. `"cargo check -p exo"`). Split on whitespace only — no shell, no pipes/quoting/env
-    /// expansion; wrap anything more complex in a script. There is no timeout: a hung command
-    /// hangs this tool call. On failure the merge stays committed (NOT rolled back) and teardown
-    /// is skipped, so the failing child is left alive to fix its work.
+    /// expansion; wrap anything more complex in a script. On failure the merge stays committed
+    /// (NOT rolled back) and teardown is skipped, so the failing child is left alive to fix its
+    /// work. Bounded by `gate_timeout_ms` when set; otherwise there is no timeout — a hung
+    /// command hangs this tool call.
     #[serde(default)]
     pub gate: Option<String>,
+    /// Optional bound on `gate`'s runtime, in milliseconds. When set, `gate` is run under this
+    /// timeout and the runtime kills its whole process group on expiry (never leaked). A timeout
+    /// is rendered exactly like a gate failure — merge stays committed, teardown is skipped —
+    /// clearly labeled as a timeout rather than a failure. Ignored when `gate` is omitted.
+    /// Omitted (the default): `gate` runs with no timeout, byte-identical to before this field
+    /// existed.
+    #[serde(default)]
+    pub gate_timeout_ms: Option<u64>,
     /// Merge anyway when the child's recorded file boundary (`spawn_dev`/`fork_wave`'s
     /// `file_boundary`) is violated by its actual diff. Ignored when the child has no recorded
     /// boundary — there's nothing to override. Default false: a violation refuses the merge.
@@ -46,6 +58,55 @@ fn gate_output_tail(out: &std::process::Output) -> String {
     String::from_utf8_lossy(&combined[start..]).into_owned()
 }
 
+/// `(success, exit label, output tail)` for a completed gate run — shared by the timed and
+/// untimed paths so they render identically.
+fn gate_result_parts(out: &std::process::Output) -> (bool, String, String) {
+    let exit = match out.status.code() {
+        Some(c) => c.to_string(),
+        None => "signal".to_string(),
+    };
+    (out.status.success(), exit, gate_output_tail(out))
+}
+
+/// The rendered `ToolOutput` for a gate that ran but failed (non-zero exit or couldn't spawn).
+/// The merge is already committed; teardown is skipped.
+fn gate_failure_output(branch: &Branch, gate: &str, exit: &str, tail: &str) -> ToolOutput {
+    let text = format!(
+        "MERGED branch {} — but gate `{}` FAILED (exit {}): {}\nThe merge is already \
+         committed (NOT rolled back). Teardown was NOT performed — the child is left \
+         alive: fix and re-run, or tear down manually.",
+        branch.as_str(),
+        gate,
+        exit,
+        tail
+    );
+    let data = json!({
+        "branch": branch.as_str(),
+        "gate": { "cmd": gate, "exit": exit, "output_tail": tail },
+    });
+    ToolOutput::with_data(text, data)
+}
+
+/// The rendered `ToolOutput` for a gate that hit its `gate_timeout_ms` bound. Mirrors
+/// [`gate_failure_output`] — same "committed, teardown skipped" posture — but clearly labeled a
+/// timeout rather than a failure, and `data.gate.exit` is `"timeout"` (never a numeric/`"signal"`
+/// exit label) so a caller can branch on it without string-matching the prose.
+fn gate_timeout_output(branch: &Branch, gate: &str, timeout_ms: u64) -> ToolOutput {
+    let text = format!(
+        "MERGED branch {} — but gate `{}` TIMED OUT after {}ms. The merge is already \
+         committed (NOT rolled back). Teardown was NOT performed — the child is left \
+         alive: fix and re-run, or tear down manually.",
+        branch.as_str(),
+        gate,
+        timeout_ms
+    );
+    let data = json!({
+        "branch": branch.as_str(),
+        "gate": { "cmd": gate, "exit": "timeout", "timeout_ms": timeout_ms },
+    });
+    ToolOutput::with_data(text, data)
+}
+
 #[async_trait::async_trait]
 impl<R: Git + Spawner + Process + Fs + Send + Sync> Tool<R> for Merge {
     const NAME: &'static str = "merge";
@@ -60,10 +121,14 @@ impl<R: Git + Spawner + Process + Fs + Send + Sync> Tool<R> for Merge {
          `boundary_override: true` to merge anyway. A child with no recorded boundary merges \
          unrestricted, exactly as before. Optional `gate`: a whitespace-split verification command \
          run after the merge and before teardown — on failure the merge stays committed but \
-         teardown is skipped, leaving the child alive to fix its work. `branch` accepts ANY local \
-         ref, not just a tracked child's — this is the supported succession escape hatch for \
-         dead-TL recovery (folding an orphaned descendant's branch back in); pane/worktree reclaim \
-         only works for your own ledger children and is best-effort otherwise.";
+         teardown is skipped, leaving the child alive to fix its work; on success its output tail \
+         rides in `data.gate.output_tail` even though the text just says `(gate ok)`. Optional \
+         `gate_timeout_ms` bounds the gate's runtime and kills its whole process group on expiry \
+         — rendered exactly like a gate failure (committed, teardown skipped) but labeled TIMED \
+         OUT; omit it and `gate` runs with no timeout. `branch` accepts ANY local ref, not just a \
+         tracked child's — this is the supported succession escape hatch for dead-TL recovery \
+         (folding an orphaned descendant's branch back in); pane/worktree reclaim only works for \
+         your own ledger children and is best-effort otherwise.";
     type Args = MergeArgs;
 
     async fn run(ctx: &R, args: MergeArgs) -> CapResult<ToolOutput> {
@@ -141,37 +206,51 @@ impl<R: Git + Spawner + Process + Fs + Send + Sync> Tool<R> for Merge {
 
         ctx.merge(&branch).await?;
 
+        // `Some((cmd, exit, output_tail))` once a gate has run and succeeded — carried into the
+        // final `data.gate` block below so a parent can see gate warnings without re-running it.
+        let mut gate_success: Option<(String, String, String)> = None;
+
         if let Some(gate) = gate {
             let mut parts = gate.split_whitespace();
             let program = parts.next().expect("non-empty gate validated above");
             let gate_args: Vec<String> = parts.map(str::to_string).collect();
 
-            let (ok, exit, tail) = match ctx.run(program, &gate_args).await {
-                Ok(out) => {
-                    let exit = match out.status.code() {
-                        Some(c) => c.to_string(),
-                        None => "signal".to_string(),
-                    };
-                    (out.status.success(), exit, gate_output_tail(&out))
+            match args.gate_timeout_ms {
+                Some(ms) => {
+                    match ctx
+                        .run_with_timeout(program, &gate_args, Duration::from_millis(ms))
+                        .await
+                    {
+                        Ok(ProcessOutcome::TimedOut { .. }) => {
+                            return Ok(gate_timeout_output(&branch, &gate, ms));
+                        }
+                        Ok(ProcessOutcome::Completed(out)) => {
+                            let (ok, exit, tail) = gate_result_parts(&out);
+                            if !ok {
+                                return Ok(gate_failure_output(&branch, &gate, &exit, &tail));
+                            }
+                            gate_success = Some((gate, exit, tail));
+                        }
+                        Err(e) => {
+                            return Ok(gate_failure_output(
+                                &branch,
+                                &gate,
+                                &format!("spawn error: {e}"),
+                                "",
+                            ));
+                        }
+                    }
                 }
-                Err(e) => (false, format!("spawn error: {e}"), String::new()),
-            };
-
-            if !ok {
-                let text = format!(
-                    "MERGED branch {} — but gate `{}` FAILED (exit {}): {}\nThe merge is already \
-                     committed (NOT rolled back). Teardown was NOT performed — the child is left \
-                     alive: fix and re-run, or tear down manually.",
-                    branch.as_str(),
-                    gate,
-                    exit,
-                    tail
-                );
-                let data = json!({
-                    "branch": branch.as_str(),
-                    "gate": { "cmd": gate, "exit": exit, "output_tail": tail },
-                });
-                return Ok(ToolOutput::with_data(text, data));
+                None => {
+                    let (ok, exit, tail) = match ctx.run(program, &gate_args).await {
+                        Ok(out) => gate_result_parts(&out),
+                        Err(e) => (false, format!("spawn error: {e}"), String::new()),
+                    };
+                    if !ok {
+                        return Ok(gate_failure_output(&branch, &gate, &exit, &tail));
+                    }
+                    gate_success = Some((gate, exit, tail));
+                }
             }
         }
 
@@ -211,13 +290,21 @@ impl<R: Git + Spawner + Process + Fs + Send + Sync> Tool<R> for Merge {
             };
         }
 
-        let gate_suffix = if args.gate.is_some() {
+        let gate_suffix = if gate_success.is_some() {
             " (gate ok)"
         } else {
             ""
         };
 
         let mut data = json!({ "branch": branch.as_str() });
+        if let Some((cmd, exit, tail)) = &gate_success {
+            if let Some(obj) = data.as_object_mut() {
+                obj.insert(
+                    "gate".to_string(),
+                    json!({ "cmd": cmd, "exit": exit, "output_tail": tail }),
+                );
+            }
+        }
         if let Some(boundary_data) = boundary_data {
             if let (Some(obj), Some(boundary_obj)) =
                 (data.as_object_mut(), boundary_data.as_object())
@@ -405,6 +492,14 @@ mod tests {
         ) -> Result<std::process::Output, exo_caps::ProcessError> {
             unreachable!()
         }
+        async fn run_with_timeout(
+            &self,
+            _program: &str,
+            _args: &[String],
+            _timeout: std::time::Duration,
+        ) -> Result<exo_caps::ProcessOutcome, exo_caps::ProcessError> {
+            unreachable!()
+        }
     }
 
     #[async_trait::async_trait]
@@ -433,6 +528,7 @@ mod tests {
                 child: None,
                 gate: None,
                 boundary_override: false,
+                gate_timeout_ms: None,
             },
         )
         .await
@@ -456,6 +552,7 @@ mod tests {
                 child: None,
                 gate: None,
                 boundary_override: false,
+                gate_timeout_ms: None,
             },
         )
         .await
@@ -475,6 +572,7 @@ mod tests {
                 child: None,
                 gate: None,
                 boundary_override: false,
+                gate_timeout_ms: None,
             },
         )
         .await
@@ -509,6 +607,7 @@ mod tests {
                 child: Some("v1.2".into()),
                 gate: None,
                 boundary_override: false,
+                gate_timeout_ms: None,
             },
         )
         .await
@@ -531,6 +630,7 @@ mod tests {
                 child: None,
                 gate: None,
                 boundary_override: false,
+                gate_timeout_ms: None,
             },
         )
         .await
@@ -551,6 +651,7 @@ mod tests {
                 child: None,
                 gate: None,
                 boundary_override: false,
+                gate_timeout_ms: None,
             },
         )
         .await;
@@ -559,7 +660,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_gate_success() {
-        let mock = MockRuntime::default();
+        let mut mock = MockRuntime::default();
+        mock.process_output = std::process::Output {
+            status: std::process::ExitStatus::default(),
+            stdout: b"all checks passed\n".to_vec(),
+            stderr: Vec::new(),
+        };
         let out = Merge::run(
             &mock,
             MergeArgs {
@@ -567,15 +673,20 @@ mod tests {
                 child: None,
                 gate: Some("cargo check -p exo".into()),
                 boundary_override: false,
+                gate_timeout_ms: None,
             },
         )
         .await
         .unwrap();
 
+        // Text stays scannable — the gate's output rides in `data` only.
         assert_eq!(
             out.text,
             "merged branch main.root.feature (reclaimed feature) (gate ok)"
         );
+        let data = out.data.unwrap();
+        assert_eq!(data["gate"]["cmd"], "cargo check -p exo");
+        assert_eq!(data["gate"]["output_tail"], "all checks passed\n");
         let calls = mock.calls_made();
         assert!(calls.iter().any(|c| matches!(
             c,
@@ -588,6 +699,109 @@ mod tests {
         assert!(calls
             .iter()
             .any(|c| matches!(c, Call::ReclaimWorktree { child } if child.as_str() == "feature")));
+    }
+
+    #[tokio::test]
+    async fn test_merge_gate_timeout_ms_unset_uses_plain_run_byte_identical() {
+        // `gate_timeout_ms: None` must never touch `run_with_timeout` — this is the "behavior is
+        // byte-identical to today" guarantee for the timeout feature.
+        let mock = MockRuntime::default();
+        Merge::run(
+            &mock,
+            MergeArgs {
+                branch: "main.root.feature".into(),
+                child: None,
+                gate: Some("cargo check -p exo".into()),
+                boundary_override: false,
+                gate_timeout_ms: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let calls = mock.calls_made();
+        assert!(calls.iter().any(|c| matches!(c, Call::ProcessRun { .. })));
+        assert!(!calls
+            .iter()
+            .any(|c| matches!(c, Call::ProcessRunWithTimeout { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_merge_gate_timeout_renders_timeout_and_skips_teardown() {
+        let mut mock = MockRuntime::default();
+        mock.process_timeout = true;
+
+        let out = Merge::run(
+            &mock,
+            MergeArgs {
+                branch: "main.root.feature".into(),
+                child: None,
+                gate: Some("cargo check -p exo".into()),
+                boundary_override: false,
+                gate_timeout_ms: Some(5000),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(out.text.contains("TIMED OUT after 5000ms"));
+        assert!(out.text.contains("committed (NOT rolled back)"));
+        assert!(out.text.contains("Teardown was NOT performed"));
+        assert!(!out.text.contains("FAILED"));
+
+        let data = out.data.unwrap();
+        assert_eq!(data["gate"]["cmd"], "cargo check -p exo");
+        assert_eq!(data["gate"]["exit"], "timeout");
+        assert_eq!(data["gate"]["timeout_ms"], 5000);
+
+        let calls = mock.calls_made();
+        assert!(calls.iter().any(
+            |c| matches!(c, Call::ProcessRunWithTimeout { timeout_ms, .. } if *timeout_ms == 5000)
+        ));
+        assert!(calls.iter().any(
+            |c| matches!(c, Call::Merge { branch } if branch.as_str() == "main.root.feature")
+        ));
+        assert!(!calls.iter().any(|c| matches!(c, Call::KillPane { .. })));
+        assert!(!calls
+            .iter()
+            .any(|c| matches!(c, Call::ReclaimWorktree { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_merge_gate_success_with_timeout_set_still_carries_output_tail() {
+        let mut mock = MockRuntime::default();
+        mock.process_output = std::process::Output {
+            status: std::process::ExitStatus::default(),
+            stdout: b"ok\n".to_vec(),
+            stderr: Vec::new(),
+        };
+
+        let out = Merge::run(
+            &mock,
+            MergeArgs {
+                branch: "main.root.feature".into(),
+                child: None,
+                gate: Some("cargo check -p exo".into()),
+                boundary_override: false,
+                gate_timeout_ms: Some(60_000),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            out.text,
+            "merged branch main.root.feature (reclaimed feature) (gate ok)"
+        );
+        let data = out.data.unwrap();
+        assert_eq!(data["gate"]["output_tail"], "ok\n");
+        let calls = mock.calls_made();
+        assert!(calls.iter().any(
+            |c| matches!(c, Call::ProcessRunWithTimeout { timeout_ms, .. } if *timeout_ms == 60_000)
+        ));
+        assert!(calls
+            .iter()
+            .any(|c| matches!(c, Call::KillPane { child } if child.as_str() == "feature")));
     }
 
     #[tokio::test]
@@ -608,6 +822,7 @@ mod tests {
                 child: None,
                 gate: Some("cargo check -p exo".into()),
                 boundary_override: false,
+                gate_timeout_ms: None,
             },
         )
         .await
@@ -641,6 +856,7 @@ mod tests {
                 child: None,
                 gate: Some("   ".into()),
                 boundary_override: false,
+                gate_timeout_ms: None,
             },
         )
         .await;
@@ -660,6 +876,7 @@ mod tests {
                 child: None,
                 gate: None,
                 boundary_override: false,
+                gate_timeout_ms: None,
             },
         )
         .await
@@ -700,6 +917,7 @@ mod tests {
                 child: None,
                 gate: None,
                 boundary_override: false,
+                gate_timeout_ms: None,
             },
         )
         .await
@@ -730,6 +948,7 @@ mod tests {
                 child: None,
                 gate: None,
                 boundary_override: false,
+                gate_timeout_ms: None,
             },
         )
         .await
@@ -762,6 +981,7 @@ mod tests {
                 child: None,
                 gate: None,
                 boundary_override: true,
+                gate_timeout_ms: None,
             },
         )
         .await
@@ -789,6 +1009,7 @@ mod tests {
                 child: None,
                 gate: None,
                 boundary_override: false,
+                gate_timeout_ms: None,
             },
         )
         .await
@@ -816,6 +1037,7 @@ mod tests {
                 child: None,
                 gate: None,
                 boundary_override: false,
+                gate_timeout_ms: None,
             },
         )
         .await

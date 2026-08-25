@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use exo_caps::{
     Addressee, AgentName, AgentType, Branch, Bus, BusError, CapResult, ChildKind, ChildLiveness,
     CommitFiles, Fs, FsError, Git, GitError, Kv, KvError, Message, PaneId, Persona, Process,
-    ProcessError, RoleKind, SpawnError, SpawnSpec, Spawner, Tmux, TmuxError, ToolName, Topology,
-    TopologyError, TopologyView,
+    ProcessError, ProcessOutcome, RoleKind, SpawnError, SpawnSpec, Spawner, Tmux, TmuxError,
+    ToolName, Topology, TopologyError, TopologyView,
 };
 use exo_framework::{
     ok_json, parse, schema_json, BoxFuture, ErasedTool, Exomonad, HookDecision, HookInput, RoleDef,
@@ -162,6 +162,14 @@ impl Process for TestCaps {
         _program: &str,
         _args: &[String],
     ) -> Result<std::process::Output, ProcessError> {
+        unimplemented!()
+    }
+    async fn run_with_timeout(
+        &self,
+        _program: &str,
+        _args: &[String],
+        _timeout: std::time::Duration,
+    ) -> Result<ProcessOutcome, ProcessError> {
         unimplemented!()
     }
 }

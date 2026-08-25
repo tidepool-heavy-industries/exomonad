@@ -69,6 +69,11 @@ pub enum Call {
         program: String,
         args: Vec<String>,
     },
+    ProcessRunWithTimeout {
+        program: String,
+        args: Vec<String>,
+        timeout_ms: u128,
+    },
 }
 
 /// Canned return values + a recording log. Interior-mutable so the cap methods take `&self`
@@ -118,6 +123,11 @@ pub struct MockRuntime {
     /// status) to model a failing gate command. Defaults to a successful empty output. Spawn
     /// failure (the command couldn't even start) is still modeled via `fail("run")`.
     pub process_output: std::process::Output,
+    /// When `true`, [`Process::run_with_timeout`] returns `ProcessOutcome::TimedOut` instead of
+    /// running to completion — a test's stand-in for "the gate command outlived its bound".
+    /// Default `false` (behaves like a normal completed run, using `process_output`). Spawn
+    /// failure is still modeled via `fail("run")`, checked before this.
+    pub process_timeout: bool,
 }
 
 impl Default for MockRuntime {
@@ -145,6 +155,7 @@ impl Default for MockRuntime {
                 stdout: Vec::new(),
                 stderr: Vec::new(),
             },
+            process_timeout: false,
         }
     }
 }
@@ -451,6 +462,35 @@ impl Process for MockRuntime {
             stdout: self.process_output.stdout.clone(),
             stderr: self.process_output.stderr.clone(),
         })
+    }
+
+    async fn run_with_timeout(
+        &self,
+        program: &str,
+        args: &[String],
+        timeout: std::time::Duration,
+    ) -> Result<exo_caps::ProcessOutcome, ProcessError> {
+        if self.should_fail("run") {
+            return Err(ProcessError::Spawn {
+                program: program.to_string(),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, "mock: spawn failed"),
+            });
+        }
+        self.record(Call::ProcessRunWithTimeout {
+            program: program.to_string(),
+            args: args.to_vec(),
+            timeout_ms: timeout.as_millis(),
+        });
+        if self.process_timeout {
+            return Ok(exo_caps::ProcessOutcome::TimedOut {
+                partial_output: None,
+            });
+        }
+        Ok(exo_caps::ProcessOutcome::Completed(std::process::Output {
+            status: self.process_output.status,
+            stdout: self.process_output.stdout.clone(),
+            stderr: self.process_output.stderr.clone(),
+        }))
     }
 }
 

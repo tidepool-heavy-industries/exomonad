@@ -7,6 +7,7 @@
 //! The argument surface (cwd / env / timeout) firms up in Wave 1.
 
 use async_trait::async_trait;
+use std::time::Duration;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -21,6 +22,19 @@ pub enum ProcessError {
     Io(#[from] std::io::Error),
 }
 
+/// The result of a bounded-duration process run — see [`Process::run_with_timeout`].
+#[derive(Debug)]
+pub enum ProcessOutcome {
+    /// The process exited (successfully or not) before the timeout elapsed.
+    Completed(std::process::Output),
+    /// The timeout elapsed first; the process's whole process group was killed. Partial output is
+    /// `Some` only when cheaply available at the kill point — an impl that has none to offer
+    /// returns `None` rather than fabricating an empty `Output`.
+    TimedOut {
+        partial_output: Option<std::process::Output>,
+    },
+}
+
 #[async_trait]
 pub trait Process {
     async fn run(
@@ -28,4 +42,16 @@ pub trait Process {
         program: &str,
         args: &[String],
     ) -> Result<std::process::Output, ProcessError>;
+
+    /// Bounded-duration variant of [`run`](Process::run). On expiry the runtime kills the
+    /// process's entire **process group**, not just the direct child — a command that forks
+    /// grandchildren (a build wrapper, a shell pipeline) must not leak them. No default impl: a
+    /// naive `tokio::time::timeout` wrapped around `run` cannot kill anything it doesn't hold a
+    /// handle to, so every impl provides its own kill-capable body.
+    async fn run_with_timeout(
+        &self,
+        program: &str,
+        args: &[String],
+        timeout: Duration,
+    ) -> Result<ProcessOutcome, ProcessError>;
 }

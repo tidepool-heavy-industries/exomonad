@@ -31,7 +31,7 @@ Nine caps, each one trait per file, in **two tiers**: *primitive* caps own one e
 - **`Tmux`** — `new_pane`, `new_window`, `paste`, `kill_pane`, `list_panes` (the liveness probe: `Err` = probe *failure*, never "no panes" — each consumer applies its own default).
 - **`Fs`** — `read`, `write_atomic` (temp+rename, creates parent dirs), `read_dir` (a directory's immediate entry paths; errors on a missing/unreadable directory — no recursion, no metadata, filtering stays with the caller). Deliberately **no `append`**: the two append disciplines (single-writer ledger, multi-writer PIPE_BUF bus) live inside the `Spawner`/`Bus` impls, out of policy's reach.
 - **`Kv`** — `get`, `set`.
-- **`Process`** — `run`.
+- **`Process`** — `run` (no timeout, no kill) + `run_with_timeout` (returns `ProcessOutcome::Completed`/`TimedOut`; no default impl — a naive `tokio::time::timeout` wrapped around `run` can't kill anything it doesn't hold a handle to, so every impl provides its own kill-capable body). `exo-runtime`'s impl spawns the child in a **new process group** (`process_group(0)`) and, on expiry, `killpg`s that whole group rather than just the direct child — a gate command that forks grandchildren (a build wrapper, a shell pipeline) doesn't leak them. Backs `merge`'s optional `gate_timeout_ms`.
 
 **Composites:**
 
