@@ -75,8 +75,11 @@ ChildState::is_terminal() == matches!(self, Reaped | Died)
 A `Spawned` inserts a fresh `Live` child (newest-spawn-wins — a respawn under the same name *resets*
 its state); the other three mutate the existing entry, and a later record overwrites an earlier one,
 so the benign race "the watchdog wrote `Died` a moment before the runtime wrote `Reaped`" self-heals
-to `Reaped`. A state record naming an unknown child is skipped silently (this is a tolerant pure
-function — no tracing lives in `exo-caps`).
+to `Reaped` — **but only if the `Reaped` record actually gets appended.** The fold itself is pure and
+has no opinion on that; it's `exo-runtime`'s `record_reaped_if_active`/`detect_child_deaths` (the
+append side) that has to cooperate — see [`exo-runtime/CLAUDE.md`](../exo-runtime/CLAUDE.md)'s "The
+ledger writer seam". A state record naming an unknown child is skipped silently (this is a tolerant
+pure function — no tracing lives in `exo-caps`).
 
 **`Submitted` is not terminal** — a submitted child is still a running agent with a live pane,
 waiting on its parent.

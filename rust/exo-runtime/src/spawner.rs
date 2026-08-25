@@ -390,15 +390,22 @@ impl Runtime {
         Ok(fold_children(&records))
     }
 
-    /// Record `Reaped` for `child` if the ledger still shows it non-terminal. Called by the
+    /// Record `Reaped` for `child` unless the ledger already shows it `Reaped`. Called by the
     /// runtime's own teardown paths (`kill_pane` after a successful kill, `reclaim_worktree` after
     /// a successful reclaim) — never by a tool. Also callable from `exo doctor --fix`, a
     /// foreground CLI holding a `Runtime` directly (not policy behind the cap seam): after its own
     /// direct `reclaim_worktree_tree` call, and in its acknowledgment pass for a `Died` child whose
     /// worktree directory is already gone. Those are the only two callers outside this crate's own
-    /// teardown paths. Re-folding and checking [`ChildState::is_terminal`]
-    /// first is what makes the normal kill-then-reclaim sequence append exactly one `Reaped` record
-    /// (the second call finds the child already terminal and does nothing).
+    /// teardown paths. Re-folding and checking specifically for `ChildState::Reaped` (not
+    /// [`ChildState::is_terminal`] generally) is what makes the normal kill-then-reclaim sequence
+    /// append exactly one `Reaped` record (the second call finds the child already `Reaped` and
+    /// does nothing) **while still letting a genuine teardown's `Reaped` supersede a `Died`** —
+    /// the watchdog's death-scan (`detect_child_deaths`) can race this call and record `Died` for
+    /// the same child in the gap between the pane actually dying and this append landing; the
+    /// fold's later-record-wins rule already self-heals `Died` → `Reaped` in that ledger order
+    /// (see `died_then_reaped_self_heals_to_reaped` in `exo-caps`), but only if the `Reaped` record
+    /// actually gets written — skipping on `Died` too would silently swallow it and leave the
+    /// child mislabeled a corpse forever.
     ///
     /// A child's cooperative self-reap and the forced shutdown cascade never go through
     /// `Spawner::kill_pane` on the parent side, so those children are NOT recorded as `Reaped`
@@ -422,7 +429,7 @@ impl Runtime {
         let Some(entry) = fold_children(&records).get(child).cloned() else {
             return;
         };
-        if entry.state.is_terminal() {
+        if matches!(entry.state, exo_caps::ChildState::Reaped) {
             return;
         }
         if let Err(e) = self
@@ -479,6 +486,21 @@ impl Runtime {
 
         let mut died = Vec::new();
         for child in missing_from_alive(&candidates, alive.as_ref()) {
+            // Re-check freshness right before writing: the `Tmux::list_panes` probe above is the
+            // slow step, wide enough for a concurrent deliberate teardown (`kill_pane` /
+            // `reclaim_worktree`, itself racing this same scan) to land this child's `Reaped`
+            // record in the gap between our initial read and this append. Skip once the CURRENT
+            // ledger already shows a terminal state — otherwise a stale `Died` written on top of
+            // that `Reaped` would flip a correctly-reclaimed child back into a corpse label that
+            // never clears.
+            if !self.still_pending_death(&child.name).await {
+                tracing::info!(
+                    child = child.name.as_str(),
+                    "detect_child_deaths: child reached a terminal state since this scan began \
+                     (concurrent teardown won the race); skipping Died"
+                );
+                continue;
+            }
             if let Err(e) = self
                 .append_child_record(&ChildRecord::Died {
                     child: child.name.clone(),
@@ -497,6 +519,30 @@ impl Runtime {
             died.push(child.clone());
         }
         died
+    }
+
+    /// Whether `child` is still eligible for a `Died` record, re-read fresh right before writing
+    /// one — closes the TOCTOU window [`detect_child_deaths`](Self::detect_child_deaths)'s
+    /// `Tmux::list_panes` probe opens against a concurrent `record_reaped_if_active`. A read
+    /// failure fails OPEN (stays eligible) rather than silently swallowing a real death because of
+    /// a transient read hiccup — the read is retried fresh on next tick either way.
+    async fn still_pending_death(&self, child: &AgentName) -> bool {
+        match self.read_child_records().await {
+            Ok(records) => !matches!(
+                fold_children(&records)
+                    .get(child)
+                    .map(|c| c.state.is_terminal()),
+                Some(true)
+            ),
+            Err(e) => {
+                tracing::warn!(
+                    child = child.as_str(),
+                    error = %e,
+                    "detect_child_deaths: re-check read failed; proceeding as still-pending"
+                );
+                true
+            }
+        }
     }
 
     /// The child's OWN ingestion inbox, derived from its pane + the run-id namespace:
@@ -1849,6 +1895,160 @@ mod tests {
         assert!(died_again.is_empty());
         let records2 = rt.read_child_records().await.unwrap();
         assert_eq!(records2.len(), records.len(), "no new record appended");
+    }
+
+    /// Regression for the production bug this fix targets: a child a `merge`-time teardown
+    /// already reclaimed (`Spawned` → `Reaped`) must never be re-flagged `Died` by a later
+    /// watchdog scan, even though its pane really is gone by then. The scan's initial
+    /// terminal-state filter already excludes it before any pane probe runs — this pins that
+    /// contract so it can never silently regress.
+    #[tokio::test]
+    async fn death_scan_never_reflags_an_already_reaped_child() {
+        let tmp = tempdir().unwrap();
+        let rt = root_runtime_no_git(tmp.path());
+
+        let child = an("worker-2");
+        let pane = PaneId::new("%99999998".into()).unwrap();
+        rt.append_child_record(&ChildRecord::Spawned {
+            child: child.clone(),
+            kind: ChildKind::Inline,
+            pane: pane.clone(),
+            inbox: rt.child_inbox_path(&pane),
+            model_label: None,
+            model: None,
+            directives_hash: None,
+        })
+        .await
+        .unwrap();
+        rt.append_child_record(&ChildRecord::Reaped {
+            child: child.clone(),
+            at: None,
+        })
+        .await
+        .unwrap();
+
+        let died = rt.detect_child_deaths().await;
+        assert!(
+            died.is_empty(),
+            "an already-reaped child must never be re-flagged Died: {died:?}"
+        );
+
+        let children = rt.read_children().await.unwrap();
+        assert_eq!(
+            children.get(&child).unwrap().state,
+            exo_caps::ChildState::Reaped
+        );
+    }
+
+    /// `still_pending_death` (the re-check `detect_child_deaths` runs immediately before writing
+    /// each `Died`) must flip to `false` the moment a `Reaped` lands, closing the TOCTOU window a
+    /// concurrent `record_reaped_if_active` races it through.
+    #[tokio::test]
+    async fn still_pending_death_false_once_reaped() {
+        let tmp = tempdir().unwrap();
+        let rt = root_runtime_no_git(tmp.path());
+        let child = an("worker-3");
+        let pane = PaneId::new("%99999997".into()).unwrap();
+        rt.append_child_record(&ChildRecord::Spawned {
+            child: child.clone(),
+            kind: ChildKind::Inline,
+            pane: pane.clone(),
+            inbox: rt.child_inbox_path(&pane),
+            model_label: None,
+            model: None,
+            directives_hash: None,
+        })
+        .await
+        .unwrap();
+        assert!(rt.still_pending_death(&child).await);
+
+        rt.append_child_record(&ChildRecord::Reaped {
+            child: child.clone(),
+            at: None,
+        })
+        .await
+        .unwrap();
+        assert!(!rt.still_pending_death(&child).await);
+    }
+
+    /// Regression: the fold already treats `Died → Reaped` as a self-heal
+    /// (`exo_caps::lifecycle::died_then_reaped_self_heals_to_reaped`), but only if the `Reaped`
+    /// record actually gets written. This simulates a concurrent watchdog scan winning the race
+    /// and recording `Died` for a still-live child moments before this node's own teardown call
+    /// gets to record `Reaped` — `record_reaped_if_active` must still write it (superseding the
+    /// racing `Died`), not silently skip because the child already looks terminal.
+    #[tokio::test]
+    async fn kill_pane_reaps_over_a_racing_died_record() {
+        let tmp = tempdir().unwrap();
+        let repo = tmp.path();
+
+        let session = format!("exo-test-race-{}", std::process::id());
+        assert!(
+            std::process::Command::new("tmux")
+                .args(["new-session", "-d", "-s", &session, "-x", "80", "-y", "24"])
+                .status()
+                .unwrap()
+                .success(),
+            "failed to create throwaway tmux session for the test"
+        );
+        let _guard = TmuxSessionGuard(session.clone());
+
+        let rt = Runtime::new(
+            NodePath::new(vec![an("root")]).unwrap(),
+            Branch::new("main".into()).unwrap(),
+            repo.to_path_buf(),
+            None,
+            "run".into(),
+            session,
+            PaneId::new("%0".into()).unwrap(),
+            exo_caps::ChildKind::Worktree,
+        );
+
+        let child = an("leaf");
+        let pane = exo_caps::Tmux::new_pane(&rt, repo, "/bin/sh")
+            .await
+            .unwrap();
+        rt.append_child_record(&ChildRecord::Spawned {
+            child: child.clone(),
+            kind: ChildKind::Inline,
+            pane: pane.clone(),
+            inbox: rt.child_inbox_path(&pane),
+            model_label: None,
+            model: None,
+            directives_hash: None,
+        })
+        .await
+        .unwrap();
+
+        // Simulate the watchdog's death-scan winning the race: it observed the pane gone (or
+        // about to be) and recorded `Died` before this node's own teardown gets to record
+        // `Reaped`. The pane is still alive here — `kill_pane` below performs a real kill.
+        rt.append_child_record(&ChildRecord::Died {
+            child: child.clone(),
+            pane: pane.clone(),
+            at: None,
+        })
+        .await
+        .unwrap();
+
+        exo_caps::Spawner::kill_pane(&rt, &child).await.unwrap();
+
+        let children = rt.read_children().await.unwrap();
+        assert_eq!(
+            children.get(&child).unwrap().state,
+            exo_caps::ChildState::Reaped,
+            "a legitimate teardown must supersede a racing Died, not get silently skipped"
+        );
+
+        let records = rt.read_child_records().await.unwrap();
+        let reaped = records
+            .iter()
+            .filter(|r| matches!(r, ChildRecord::Reaped { child: c, .. } if c == &child))
+            .count();
+        assert_eq!(
+            reaped, 1,
+            "exactly one Reaped record must land: {records:?}"
+        );
     }
 
     fn root_runtime_no_git(dir: &std::path::Path) -> Runtime {

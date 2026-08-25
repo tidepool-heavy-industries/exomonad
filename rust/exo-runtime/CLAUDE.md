@@ -67,15 +67,24 @@ so the sidecar can record a child's submission, but it is deliberately a plain *
 the trait surface means a tool can never reach it. The vocabulary itself lives in `exo-caps`
 (see its CLAUDE.md § "The child lifecycle ledger").
 
-- **`record_reaped_if_active(&self, child)`** — read + fold the ledger, and append `Reaped` only if
-  the child exists and is not already terminal. Called after the *successful* kill in
-  `Spawner::kill_pane` and after the *successful* reclaim in `Spawner::reclaim_worktree`; the
-  fold-then-check is what makes the normal kill-then-reclaim sequence append exactly **one** record.
-  Any failure is a `warn!` and nothing more — a teardown must never break because a ledger write did.
+- **`record_reaped_if_active(&self, child)`** — read + fold the ledger, and append `Reaped` unless
+  the child is already `Reaped`. Called after the *successful* kill in `Spawner::kill_pane` and
+  after the *successful* reclaim in `Spawner::reclaim_worktree`; checking specifically for `Reaped`
+  (not [`ChildState::is_terminal`] generally) is what makes the normal kill-then-reclaim sequence
+  append exactly **one** record (the second call finds the child already `Reaped` and does nothing)
+  **while still letting a genuine teardown's `Reaped` supersede a racing `Died`** — the watchdog's
+  `detect_child_deaths` can observe the pane gone and record `Died` for the same child in the gap
+  between the kill actually landing and this append, and the fold's later-record-wins rule only
+  self-heals `Died → Reaped` if the `Reaped` record actually gets written. Any failure is a `warn!`
+  and nothing more — a teardown must never break because a ledger write did.
 - **`detect_child_deaths(&self) -> Vec<Child>`** — fold, keep the non-terminal children, probe
-  `Tmux::list_panes`, append `Died` for each kept child whose pane is gone, and return them for the
-  caller to announce. A probe `Err` returns an **empty** vec and records nothing: `Err` means "I
-  could not tell", never "no panes exist", and a death recorded on a transient tmux hiccup is
+  `Tmux::list_panes`, then for each pane found missing **re-check the ledger's current folded state
+  right before appending** (`still_pending_death`) and skip if it has since gone terminal — the
+  `list_panes` probe is the slow step, wide enough for a concurrent `record_reaped_if_active` to land
+  a `Reaped` in that gap, and a stale `Died` written on top would flip a correctly-reclaimed child
+  back into a corpse label that never clears. Returns the children it actually recorded `Died` for,
+  for the caller to announce. A probe `Err` returns an **empty** vec and records nothing: `Err` means
+  "I could not tell", never "no panes exist", and a death recorded on a transient tmux hiccup is
   unrecoverable. Once-only is **structural** — a child recorded `Died` folds terminal and is excluded
   from every later scan, so there is no separate "already reported" set to keep in sync. The pure
   decision (`missing_from_alive`) is split out and unit-tested including the probe-failed case.

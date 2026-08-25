@@ -44,6 +44,23 @@ fn cgroup_content_in_slice(cgroup_content: &str, slice: &str) -> bool {
     cgroup_content.contains(slice)
 }
 
+/// Render a status snapshot's age as `seen {N}{unit} ago`, so a parent can tell "thinking" from
+/// "wedged for an hour" without attaching to the pane. `now < ts` (clock skew, or a snapshot
+/// written between our read and this render) clamps to `0s ago` rather than a negative duration.
+fn format_seen(now: chrono::DateTime<chrono::Utc>, ts: chrono::DateTime<chrono::Utc>) -> String {
+    let secs = (now - ts).num_seconds().max(0);
+    let age = if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h", secs / 3600)
+    } else {
+        format!("{}d", secs / 86400)
+    };
+    format!("seen {age} ago")
+}
+
 /// The caller's own directives bundle, as needed to judge a child's `directives_hash` against it.
 /// A load failure degrades to `Unknown` (never an error) — see module docs.
 enum CallerDirectives {
@@ -120,9 +137,11 @@ impl Tree {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn format_node(
         node: &TreeNode,
         depth: usize,
+        now: chrono::DateTime<chrono::Utc>,
         status_map: &HashMap<String, NodeStatus>,
         parent_status: Option<&NodeStatus>,
         caller_directives: &CallerDirectives,
@@ -134,7 +153,8 @@ impl Tree {
 
         if is_terminal {
             // Tombstones get NO liveness bracket, NO busy bit, NO status-file lookup, NO
-            // directives bit — the pane id may have been recycled onto a different, live agent.
+            // directives bit, NO seen-age — the pane id may have been recycled onto a different,
+            // live agent.
             let state_word = match &node.state {
                 Some(ChildState::Died) => "died",
                 Some(ChildState::Reaped) => "reaped",
@@ -148,7 +168,15 @@ impl Tree {
             )
             .unwrap();
             for child in &node.children {
-                Self::format_node(child, depth + 1, status_map, None, caller_directives, out);
+                Self::format_node(
+                    child,
+                    depth + 1,
+                    now,
+                    status_map,
+                    None,
+                    caller_directives,
+                    out,
+                );
             }
             return;
         }
@@ -198,9 +226,14 @@ impl Tree {
             } else {
                 "wake:-".to_string()
             });
+            // How fresh is this node's status snapshot? Distinguishes "thinking" from "wedged
+            // for an hour" without attaching to the pane.
+            status_bits.push(format_seen(now, s.ts));
             if s.shutdown_pending {
                 shutdown_flag = " [SHUTDOWN PENDING]";
             }
+        } else {
+            status_bits.push("seen: -".to_string());
         }
 
         let extra = if status_bits.is_empty() {
@@ -222,6 +255,7 @@ impl Tree {
             Self::format_node(
                 child,
                 depth + 1,
+                now,
                 status_map,
                 my_status,
                 caller_directives,
@@ -354,6 +388,7 @@ impl<R: Topology + Fs + Send + Sync> Tool<R> for Tree {
         Tree::format_node(
             &pruned_node,
             0,
+            chrono::Utc::now(),
             &status_map,
             None,
             &caller_directives,
@@ -663,5 +698,90 @@ mod tests {
             let line = out.text.lines().find(|l| l.contains(name)).unwrap();
             assert!(!line.contains("directives:"), "line: {line}");
         }
+    }
+
+    #[test]
+    fn format_seen_buckets_by_magnitude() {
+        let now = chrono::Utc::now();
+        assert_eq!(format_seen(now, now), "seen 0s ago");
+        assert_eq!(
+            format_seen(now, now - chrono::Duration::seconds(45)),
+            "seen 45s ago"
+        );
+        assert_eq!(
+            format_seen(now, now - chrono::Duration::seconds(150)),
+            "seen 2m ago"
+        );
+        assert_eq!(
+            format_seen(now, now - chrono::Duration::hours(2)),
+            "seen 2h ago"
+        );
+        assert_eq!(
+            format_seen(now, now - chrono::Duration::days(3)),
+            "seen 3d ago"
+        );
+    }
+
+    #[test]
+    fn format_seen_clamps_future_ts_to_zero() {
+        let now = chrono::Utc::now();
+        // A snapshot written a moment after our `now` was captured (clock skew, or a race
+        // between the read and the render) must never render a negative age.
+        assert_eq!(
+            format_seen(now, now + chrono::Duration::seconds(5)),
+            "seen 0s ago"
+        );
+    }
+
+    /// A live node with a fresh status snapshot renders its age — lets a parent tell "thinking"
+    /// from "wedged for an hour" without attaching to the pane.
+    #[tokio::test]
+    async fn seen_age_rendered_for_live_node_with_status() {
+        let mock = MockRuntime::default();
+        let home = std::env::var("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("."));
+        let run_id = std::env::var("EXOMONAD_SWARM_RUN_ID").unwrap_or_default();
+        let path = status_path(&home, &run_id, &exo_caps::PaneId::new("%1".into()).unwrap());
+        let ts = chrono::Utc::now() - chrono::Duration::seconds(90);
+        let status = serde_json::json!({
+            "node": ["mock-parent", "mock", "child-a"],
+            "kind": "dev",
+            "branch": "child-a-branch",
+            "shutdown_pending": false,
+            "listener_connected": true,
+            "children": [],
+            "ts": ts.to_rfc3339(),
+        });
+        mock.files.lock().unwrap().insert(
+            path.display().to_string(),
+            serde_json::to_vec(&status).unwrap(),
+        );
+
+        let out = Tree::run(&mock, TreeArgs::default()).await.unwrap();
+        let line = out.text.lines().find(|l| l.contains("child-a (")).unwrap();
+        assert!(line.contains("seen 1m ago"), "line: {line}");
+    }
+
+    /// A live node with no status snapshot on disk renders `seen: -`, not a fabricated age.
+    #[tokio::test]
+    async fn seen_dash_when_no_status_snapshot() {
+        let mock = MockRuntime::default();
+        let out = Tree::run(&mock, TreeArgs::default()).await.unwrap();
+        let line = out.text.lines().find(|l| l.contains("child-a (")).unwrap();
+        assert!(line.contains("seen: -"), "line: {line}");
+    }
+
+    /// A tombstoned node never gets a `seen` bit — no status-file lookup for it at all.
+    #[tokio::test]
+    async fn tombstoned_node_has_no_seen_bit() {
+        let mock = MockRuntime::default();
+        let out = Tree::run(&mock, TreeArgs { all: true }).await.unwrap();
+        let line = out
+            .text
+            .lines()
+            .find(|l| l.contains("child-reaped"))
+            .unwrap();
+        assert!(!line.contains("seen"), "line: {line}");
     }
 }

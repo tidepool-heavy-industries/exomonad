@@ -65,6 +65,17 @@ not retried into a duplicate. Once appended, the note itself has cursor-backed a
 a bookkeeping set: a child recorded `Died` folds to a terminal state and is excluded from every later
 scan.
 
+**A child a `merge`-time teardown just reclaimed must never be re-flagged `Died`.** The initial
+candidate filter (fold, keep non-terminal) already excludes a child once its `Reaped` record has
+landed — but `detect_child_deaths`'s `Tmux::list_panes` probe is slow enough for a concurrent
+`Spawner::kill_pane`/`reclaim_worktree` (on the SAME node, a different tokio task) to land that
+`Reaped` *after* the initial filter ran and *before* this tick's `Died` append. `detect_child_deaths`
+re-checks the ledger's current folded state (`still_pending_death`) immediately before each `Died`
+write and skips once the child has since gone terminal — closing that TOCTOU window. See
+`exo-runtime/CLAUDE.md`'s "The ledger writer seam" for the append-side fix (both here and in
+`record_reaped_if_active`, which must still let a legitimate `Reaped` supersede a `Died` that won
+the race the other way).
+
 ## Message ids: reference-only, never dedup
 
 Every bus-delivered entry carries a UUID `id` (stamped by `Bus::deliver`; the two entries this crate
