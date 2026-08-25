@@ -330,6 +330,12 @@ mod tests {
         async fn worktree_remove(&self, _at: &std::path::Path) -> Result<(), exo_caps::GitError> {
             unreachable!()
         }
+        async fn tracked_at_head(
+            &self,
+            _paths: &[String],
+        ) -> Result<Vec<String>, exo_caps::GitError> {
+            unreachable!()
+        }
     }
 
     #[async_trait::async_trait]

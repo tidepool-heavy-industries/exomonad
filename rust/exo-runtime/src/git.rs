@@ -197,6 +197,28 @@ impl Git for Runtime {
             .await?;
         Ok(())
     }
+
+    async fn tracked_at_head(&self, paths: &[String]) -> Result<Vec<String>, GitError> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let output = self.git(&["ls-tree", "-r", "--name-only", "HEAD"]).await?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let tracked: Vec<&str> = stdout
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        let tracked_set: std::collections::HashSet<&str> = tracked.iter().copied().collect();
+        Ok(paths
+            .iter()
+            .filter(|p| {
+                let prefix = format!("{p}/");
+                !tracked_set.contains(p.as_str()) && !tracked.iter().any(|f| f.starts_with(&prefix))
+            })
+            .cloned()
+            .collect())
+    }
 }
 
 impl Runtime {
@@ -491,5 +513,47 @@ mod tests {
 
     async fn rt_head(p: &std::path::Path) -> String {
         runtime_at(p).head_sha().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn tracked_at_head_empty_for_committed_file_and_dir() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        std::fs::create_dir(p.join("sub")).unwrap();
+        std::fs::write(p.join("sub/inner.txt"), "x\n").unwrap();
+        run_git(p, &["add", "sub/inner.txt"]);
+        run_git(p, &["commit", "-q", "-m", "add sub"]);
+
+        let rt = runtime_at(p);
+        let missing = rt
+            .tracked_at_head(&["f.txt".to_string(), "sub".to_string()])
+            .await
+            .unwrap();
+        assert!(missing.is_empty(), "both should be tracked: {missing:?}");
+    }
+
+    #[tokio::test]
+    async fn tracked_at_head_names_untracked_paths() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        std::fs::write(p.join("untracked.txt"), "x\n").unwrap();
+
+        let rt = runtime_at(p);
+        let missing = rt
+            .tracked_at_head(&["f.txt".to_string(), "untracked.txt".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(missing, vec!["untracked.txt".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn tracked_at_head_empty_input_returns_empty() {
+        let dir = tempdir().unwrap();
+        let p = dir.path();
+        init_repo(p);
+        let rt = runtime_at(p);
+        assert!(rt.tracked_at_head(&[]).await.unwrap().is_empty());
     }
 }

@@ -100,6 +100,69 @@ async fn own_role<C: Fs + Sync>(ctx: &C) -> ExoRole {
     }
 }
 
+/// Refuse to spawn a worktree child whose `read_first` names a path that isn't tracked at HEAD.
+/// A worktree child forks from the spawner's current COMMIT, not its working directory — a file
+/// that merely exists on disk but was never `git add`ed/committed is invisible to the child, and
+/// today that's discovered mid-flight, at the cost of a full spawn round-trip. Empty `read_first`
+/// skips the check entirely (nothing to validate).
+async fn require_tracked_read_first<C: Git + Sync>(
+    ctx: &C,
+    read_first: &[String],
+) -> CapResult<()> {
+    let missing = untracked_read_first(ctx, read_first).await?;
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(missing_read_first_error(&missing))
+    }
+}
+
+/// The subset of `read_first` that isn't tracked at HEAD. Empty input short-circuits to empty
+/// output without a git call.
+async fn untracked_read_first<C: Git + Sync>(
+    ctx: &C,
+    read_first: &[String],
+) -> CapResult<Vec<String>> {
+    if read_first.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(ctx.tracked_at_head(read_first).await?)
+}
+
+fn missing_read_first_error(missing: &[String]) -> CapError {
+    CapError::invalid(
+        "read_first",
+        format!(
+            "not tracked at HEAD — children fork from your COMMIT, so an untracked or \
+             uncommitted file is invisible to them even though it exists on disk; commit the \
+             file first: {}",
+            missing.join(", ")
+        ),
+    )
+}
+
+/// `read_first` entries that fall outside `file_boundary` — a WARNING for the parent, never a
+/// refusal: reading outside your own edit scope is legitimate (context), so this only flags a
+/// possible authoring slip. Empty either input skips the check.
+fn read_first_outside_boundary(read_first: &[String], file_boundary: &[String]) -> Vec<String> {
+    if read_first.is_empty() || file_boundary.is_empty() {
+        return Vec::new();
+    }
+    read_first
+        .iter()
+        .filter(|rf| !crate::boundary::matches(file_boundary, rf))
+        .cloned()
+        .collect()
+}
+
+fn boundary_warning_line(outside: &[String]) -> String {
+    format!(
+        "note: read_first outside file_boundary (fine for read-only context, check it isn't an \
+         authoring slip): {}",
+        outside.join(", ")
+    )
+}
+
 /// Refuse to spawn a worktree child from a dirty tree. Children fork from the spawner's CURRENT
 /// COMMIT — uncommitted state is invisible to them and they'll build against a foundation the TL
 /// won't find missing until integration. Fails CLOSED on a git error.
@@ -316,8 +379,10 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for SpawnDev {
         if let Some(m) = args.model.as_deref() {
             validate_model(own_role(ctx).await, m)?;
         }
+        require_tracked_read_first(ctx, &args.read_first).await?;
         require_clean_worktree(ctx).await?;
         let directives = load_directives(ctx).await?;
+        let boundary_warning = read_first_outside_boundary(&args.read_first, &args.file_boundary);
         // The tool fixes the (role, kind): a Sonnet dev leaf in its own worktree.
         let spec = build_spawn(
             ExoRole::Dev,
@@ -352,8 +417,13 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for SpawnDev {
         // Untracked files don't materialize through `git worktree add` — copy the directives into
         // the child's own worktree so it can pass them further down its own subtree.
         copy_directives(ctx, &spawned, &directives).await;
+        let mut text = format!("Spawned dev {}", spawned.as_str());
+        if !boundary_warning.is_empty() {
+            text.push('\n');
+            text.push_str(&boundary_warning_line(&boundary_warning));
+        }
         Ok(ToolOutput::with_data(
-            format!("Spawned dev {}", spawned.as_str()),
+            text,
             serde_json::json!({ "spawned": spawned.as_str(), "spec": task }),
         ))
     }
@@ -449,6 +519,42 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
             }
         }
 
+        // Validate ALL children's read_first before spawning ANY — consistent with the existing
+        // clean-gate's all-or-nothing posture. One batched `tracked_at_head` call over the union
+        // of every child's read_first, then attributed back per child.
+        let all_read_first: Vec<String> = args
+            .children
+            .iter()
+            .flat_map(|c| c.read_first.iter().cloned())
+            .collect();
+        let missing: std::collections::HashSet<String> = untracked_read_first(ctx, &all_read_first)
+            .await?
+            .into_iter()
+            .collect();
+        let missing_by_child: Vec<(String, Vec<String>)> = args
+            .children
+            .iter()
+            .filter_map(|c| {
+                let name = c.name.clone().unwrap_or_else(|| "tl-<auto>".to_string());
+                let child_missing: Vec<String> = c
+                    .read_first
+                    .iter()
+                    .filter(|p| missing.contains(*p))
+                    .cloned()
+                    .collect();
+                (!child_missing.is_empty()).then_some((name, child_missing))
+            })
+            .collect();
+
+        if !args.preview && !missing_by_child.is_empty() {
+            let detail = missing_by_child
+                .iter()
+                .map(|(name, paths)| format!("{name}: {}", paths.join(", ")))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(missing_read_first_error(&[detail]));
+        }
+
         let mut specs = Vec::with_capacity(args.children.len());
         // Keep the rendered tasks and display names parallel to `specs` so we can persist each
         // spawned child's acceptance bar after the wave returns (the results are positional), and
@@ -456,12 +562,17 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
         let mut tasks = Vec::with_capacity(args.children.len());
         let mut display_names = Vec::with_capacity(args.children.len());
         let mut file_boundaries = Vec::with_capacity(args.children.len());
+        let mut boundary_warnings = Vec::new();
         for child in args.children {
             let display_name = child
                 .name
                 .clone()
                 .unwrap_or_else(|| "tl-<auto>".to_string());
             let file_boundary = child.file_boundary.clone();
+            let outside = read_first_outside_boundary(&child.read_first, &file_boundary);
+            if !outside.is_empty() {
+                boundary_warnings.push(format!("{display_name}: {}", outside.join(", ")));
+            }
             // The tool fixes the (role, kind): a Claude TL child in its own worktree.
             let spec = build_spawn(
                 ExoRole::Tl,
@@ -494,6 +605,17 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
             // reproduced preamble path is PREDICTED — the real one is absolute and resolved at
             // birth — but the content matches what the child will actually see.
             let mut out = String::new();
+            if !missing_by_child.is_empty() {
+                out.push_str(
+                    "WOULD REFUSE: read_first not tracked at HEAD — children fork from your \
+                     COMMIT, so an untracked or uncommitted file is invisible to them even \
+                     though it exists on disk; commit the file first:\n",
+                );
+                for (name, paths) in &missing_by_child {
+                    out.push_str(&format!("  {name}: {}\n", paths.join(", ")));
+                }
+                out.push('\n');
+            }
             for (spec, name) in specs.iter().zip(display_names.iter()) {
                 out.push_str(&format!("=== {name} ===\n"));
                 out.push_str(&exo_caps::birth_preamble(
@@ -502,6 +624,10 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
                 ));
                 out.push_str(&spec.task);
                 out.push('\n');
+            }
+            if !boundary_warnings.is_empty() {
+                out.push('\n');
+                out.push_str(&boundary_warning_line(&boundary_warnings));
             }
             return Ok(ToolOutput::text(out));
         }
@@ -534,12 +660,16 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
         }
 
         let total = spawned.len() + errors.len();
-        let text = format!(
+        let mut text = format!(
             "Forked {} children ({} succeeded, {} failed)",
             total,
             spawned.len(),
             errors.len()
         );
+        if !boundary_warnings.is_empty() {
+            text.push('\n');
+            text.push_str(&boundary_warning_line(&boundary_warnings));
+        }
         Ok(ToolOutput::with_data(
             text,
             serde_json::json!({
@@ -1435,5 +1565,239 @@ mod tests {
         assert!(!calls
             .iter()
             .any(|c| matches!(c, Call::FsWrite { path: p } if p == &path2)));
+    }
+
+    #[tokio::test]
+    async fn spawn_dev_refuses_untracked_read_first() {
+        let mock = MockRuntime {
+            untracked_paths: vec!["docs/missing.md".to_string()],
+            ..Default::default()
+        };
+        let args = SpawnDevArgs {
+            name: Some("dev-1".to_string()),
+            task: "do work".to_string(),
+            steps: vec![],
+            verify: vec![],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec![],
+            read_first: vec!["docs/missing.md".to_string()],
+            model: None,
+            review: None,
+            file_boundary: vec![],
+        };
+        let err = SpawnDev::run(&mock, args).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("docs/missing.md"),
+            "err should name the missing path: {msg}"
+        );
+        assert!(!mock
+            .calls_made()
+            .iter()
+            .any(|c| matches!(c, Call::Spawn { .. })));
+    }
+
+    #[tokio::test]
+    async fn spawn_dev_all_tracked_read_first_passes() {
+        let mock = MockRuntime::default();
+        let args = SpawnDevArgs {
+            name: Some("dev-1".to_string()),
+            task: "do work".to_string(),
+            steps: vec![],
+            verify: vec![],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec![],
+            read_first: vec!["README.md".to_string()],
+            model: None,
+            review: None,
+            file_boundary: vec![],
+        };
+        assert!(SpawnDev::run(&mock, args).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn spawn_dev_empty_read_first_skips_tracked_check_even_when_paths_would_be_missing() {
+        // untracked_paths is populated, but read_first is empty — nothing to check.
+        let mock = MockRuntime {
+            untracked_paths: vec!["docs/missing.md".to_string()],
+            ..Default::default()
+        };
+        let args = SpawnDevArgs {
+            name: Some("dev-1".to_string()),
+            task: "do work".to_string(),
+            steps: vec![],
+            verify: vec![],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec![],
+            read_first: vec![],
+            model: None,
+            review: None,
+            file_boundary: vec![],
+        };
+        assert!(SpawnDev::run(&mock, args).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn spawn_dev_read_first_outside_boundary_warns_but_does_not_block() {
+        let mock = MockRuntime::default();
+        let args = SpawnDevArgs {
+            name: Some("dev-1".to_string()),
+            task: "do work".to_string(),
+            steps: vec![],
+            verify: vec![],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec![],
+            read_first: vec!["docs/other.md".to_string()],
+            model: None,
+            review: None,
+            file_boundary: vec!["rust/exo/src".to_string()],
+        };
+        let out = SpawnDev::run(&mock, args).await.unwrap();
+        assert!(out.text.contains("note: read_first outside file_boundary"));
+        assert!(out.text.contains("docs/other.md"));
+        assert!(mock
+            .calls_made()
+            .iter()
+            .any(|c| matches!(c, Call::Spawn { .. })));
+    }
+
+    #[tokio::test]
+    async fn spawn_dev_read_first_inside_boundary_has_no_warning() {
+        let mock = MockRuntime::default();
+        let args = SpawnDevArgs {
+            name: Some("dev-1".to_string()),
+            task: "do work".to_string(),
+            steps: vec![],
+            verify: vec![],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec![],
+            read_first: vec!["rust/exo/src/tools/spawn.rs".to_string()],
+            model: None,
+            review: None,
+            file_boundary: vec!["rust/exo/src".to_string()],
+        };
+        let out = SpawnDev::run(&mock, args).await.unwrap();
+        assert!(!out.text.contains("note: read_first outside file_boundary"));
+    }
+
+    #[tokio::test]
+    async fn fork_wave_refuses_all_or_nothing_on_untracked_read_first() {
+        let mock = MockRuntime {
+            untracked_paths: vec!["docs/missing.md".to_string()],
+            ..Default::default()
+        };
+        let args = ForkWaveArgs {
+            children: vec![
+                ForkChildArgs {
+                    name: Some("child-1".to_string()),
+                    task: "task 1".to_string(),
+                    steps: vec![],
+                    verify: vec![],
+                    done_criteria: vec![],
+                    context: None,
+                    boundary: vec![],
+                    read_first: vec!["docs/missing.md".to_string()],
+                    fork_session: false,
+                    model: None,
+                    review: None,
+                    file_boundary: vec![],
+                },
+                ForkChildArgs {
+                    name: Some("child-2".to_string()),
+                    task: "task 2".to_string(),
+                    steps: vec![],
+                    verify: vec![],
+                    done_criteria: vec![],
+                    context: None,
+                    boundary: vec![],
+                    read_first: vec![],
+                    fork_session: false,
+                    model: None,
+                    review: None,
+                    file_boundary: vec![],
+                },
+            ],
+            preview: false,
+        };
+        let err = ForkWave::run(&mock, args).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("docs/missing.md"),
+            "err should name the missing path: {msg}"
+        );
+        assert!(
+            msg.contains("child-1"),
+            "err should name the offending child: {msg}"
+        );
+        // All-or-nothing: neither child was spawned, even though child-2 had no read_first issue.
+        assert!(!mock
+            .calls_made()
+            .iter()
+            .any(|c| matches!(c, Call::ForkWave { .. } | Call::Spawn { .. })));
+    }
+
+    #[tokio::test]
+    async fn fork_wave_preview_reports_would_refuse_without_spawning() {
+        let mock = MockRuntime {
+            untracked_paths: vec!["docs/missing.md".to_string()],
+            ..Default::default()
+        };
+        let args = ForkWaveArgs {
+            children: vec![ForkChildArgs {
+                name: Some("child-1".to_string()),
+                task: "task 1".to_string(),
+                steps: vec![],
+                verify: vec![],
+                done_criteria: vec![],
+                context: None,
+                boundary: vec![],
+                read_first: vec!["docs/missing.md".to_string()],
+                fork_session: false,
+                model: None,
+                review: None,
+                file_boundary: vec![],
+            }],
+            preview: true,
+        };
+        let out = ForkWave::run(&mock, args).await.unwrap();
+        assert!(out.text.contains("WOULD REFUSE"));
+        assert!(out.text.contains("docs/missing.md"));
+        let calls = mock.calls_made();
+        assert!(!calls.iter().any(|c| matches!(c, Call::ForkWave { .. })));
+        assert!(!calls.iter().any(|c| matches!(c, Call::Spawn { .. })));
+    }
+
+    #[tokio::test]
+    async fn fork_wave_read_first_outside_boundary_warns_in_result_text() {
+        let mock = MockRuntime::default();
+        let args = ForkWaveArgs {
+            children: vec![ForkChildArgs {
+                name: Some("child-1".to_string()),
+                task: "task 1".to_string(),
+                steps: vec![],
+                verify: vec![],
+                done_criteria: vec![],
+                context: None,
+                boundary: vec![],
+                read_first: vec!["docs/other.md".to_string()],
+                fork_session: false,
+                model: None,
+                review: None,
+                file_boundary: vec!["rust/exo/src".to_string()],
+            }],
+            preview: false,
+        };
+        let out = ForkWave::run(&mock, args).await.unwrap();
+        assert!(out.text.contains("note: read_first outside file_boundary"));
+        assert!(out.text.contains("docs/other.md"));
+        assert!(mock
+            .calls_made()
+            .iter()
+            .any(|c| matches!(c, Call::ForkWave { .. })));
     }
 }
