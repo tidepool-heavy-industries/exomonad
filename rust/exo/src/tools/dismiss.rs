@@ -30,7 +30,10 @@ impl<R: Spawner + Send + Sync> Tool<R> for DismissWorker {
         // UFCS: `Spawner::kill_pane` (by child name) — `Tmux::kill_pane` (by pane id)
         // is also in scope via the supertrait, so the bare method call is ambiguous.
         Spawner::kill_pane(ctx, &name).await?;
-        Ok(ToolOutput::text(format!("dismissed worker {}", name.as_str())))
+        Ok(ToolOutput::text(format!(
+            "dismissed worker {}",
+            name.as_str()
+        )))
     }
 }
 

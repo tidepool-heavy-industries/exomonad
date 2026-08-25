@@ -71,6 +71,13 @@ impl SpawnSpec for ExoSpawn {
 /// Render a structured spec (task + the optional sections) into the single prompt body an
 /// [`ExoSpawn`] carries. Domain-owned (moved out of the runtime with the Spawner collapse) — the
 /// engine births a child from an already-rendered task, so the formatting is the domain's concern.
+///
+/// `boundary` is the prose forbidden-actions list — rendered under "ANTI-PATTERNS (DO NOT):".
+/// `file_boundary` is the distinct, mechanically-checked allowed-paths list — rendered under
+/// "ALLOWED PATHS" right after it. The two answer different questions ("what must you not do" vs
+/// "where may your diff land") and must never be conflated: `file_boundary` is also persisted
+/// parent-side and checked against the child's actual diff at merge time (see `boundary.rs`),
+/// while `boundary` is pure prose the child reads and nothing else ever checks.
 #[allow(clippy::too_many_arguments)]
 pub fn render_spec_prompt(
     task: &str,
@@ -78,15 +85,25 @@ pub fn render_spec_prompt(
     steps: &[String],
     verify: &[String],
     boundary: &[String],
+    file_boundary: &[String],
     context: Option<&String>,
     done_criteria: &[String],
 ) -> String {
     let mut prompt = task.to_string();
 
     if !boundary.is_empty() {
-        prompt.push_str("\n\nBOUNDARY (DO NOT):");
+        prompt.push_str("\n\nANTI-PATTERNS (DO NOT):");
         for b in boundary {
             prompt.push_str(&format!("\n- {b}"));
+        }
+    }
+    if !file_boundary.is_empty() {
+        prompt.push_str(
+            "\n\nALLOWED PATHS (your diff must stay inside these; mechanically checked when your \
+             branch is merged):",
+        );
+        for p in file_boundary {
+            prompt.push_str(&format!("\n- {p}"));
         }
     }
     if !read_first.is_empty() {
@@ -152,26 +169,53 @@ mod tests {
             &["step 1".into(), "step 2".into()],
             &["cargo test".into()],
             &["no delete".into()],
+            &[],
             Some(&"some context".to_string()),
             &["all green".into()],
         );
         assert!(p.contains("do work"));
-        assert!(p.contains("BOUNDARY (DO NOT):\n- no delete"));
+        assert!(p.contains("ANTI-PATTERNS (DO NOT):\n- no delete"));
         assert!(p.contains("READ FIRST:\n- README.md"));
         assert!(p.contains("STEPS:\n1. step 1\n2. step 2"));
         assert!(p.contains("VERIFY:\n- cargo test"));
         assert!(p.contains("CONTEXT:\nsome context"));
         assert!(p.contains("DONE CRITERIA:\n- all green"));
         assert_eq!(
-            render_spec_prompt("task", &[], &[], &[], &[], None, &[]),
+            render_spec_prompt("task", &[], &[], &[], &[], &[], None, &[]),
             "task"
         );
     }
 
     #[test]
     fn render_spec_prompt_empty_context_omitted() {
-        let p = render_spec_prompt("task", &[], &[], &[], &[], Some(&"".to_string()), &[]);
+        let p = render_spec_prompt("task", &[], &[], &[], &[], &[], Some(&"".to_string()), &[]);
         assert!(!p.contains("CONTEXT:"));
+    }
+
+    #[test]
+    fn render_spec_prompt_file_boundary_renders_as_allowed_paths() {
+        let p = render_spec_prompt(
+            "do work",
+            &[],
+            &[],
+            &[],
+            &["no delete".into()],
+            &["src/lib.rs".into(), "src/tools".into()],
+            None,
+            &[],
+        );
+        assert!(p.contains("ALLOWED PATHS"));
+        assert!(p.contains("- src/lib.rs"));
+        assert!(p.contains("- src/tools"));
+        // The two sections stay distinct: `boundary` entries never appear under ALLOWED PATHS and
+        // vice versa.
+        assert!(p.contains("ANTI-PATTERNS (DO NOT):\n- no delete"));
+        let anti_idx = p.find("ANTI-PATTERNS").unwrap();
+        let allowed_idx = p.find("ALLOWED PATHS").unwrap();
+        assert!(
+            anti_idx < allowed_idx,
+            "ALLOWED PATHS must follow ANTI-PATTERNS"
+        );
     }
 
     #[test]

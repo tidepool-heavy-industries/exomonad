@@ -807,7 +807,10 @@ mod tests {
             classify(wt_root, root, false, false),
             WorktreeStatus::Current
         );
-        assert_eq!(classify(wt_root, root, true, false), WorktreeStatus::Current);
+        assert_eq!(
+            classify(wt_root, root, true, false),
+            WorktreeStatus::Current
+        );
         assert_eq!(
             classify(wt_merged, root, true, false),
             WorktreeStatus::Merged

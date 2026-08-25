@@ -48,8 +48,8 @@ contract ([`exo-framework`](../exo-framework/CLAUDE.md)); this crate provides th
 
 | Tool | Caps | Roles | What it does |
 |------|------|-------|--------------|
-| `fork_wave` | `Spawner`+`Fs`+`Git` | root, tl | Fork N Claude TL children (own worktrees). Per-child opt-in `fork_session: bool` (default false) inherits the parent's context via `--resume --fork-session`; default-false launches fresh. Per-child `model` override (tier-capped, see below). Per-child `review: Option<bool>` override — `None` (default) inherits the spawner's own `review_enabled`, `Some(b)` stamps the child's papers with `b` and it inherits onward down that child's own subtree. Per-child `file_boundary: Vec<String>` (default empty = unrestricted) persists an allowed-paths list `merge` checks against that child's actual diff before folding — see [`boundary`](#fold-time-file-boundary) below. **Refuses on a dirty worktree**, naming the offending `git status --porcelain` lines — children fork from the spawner's current commit, so uncommitted state would be invisible to them; a git error fails *closed*. `preview: true` renders every child's fully-assembled spec (directives injected, `birth_preamble` reproduced) and spawns **nothing** — no clean gate, no acceptance writes, no boundary writes — so a wave can be checked while the tree is still dirty. |
-| `spawn_dev` | `Spawner`+`Fs`+`Git` | root, tl | Spawn a Sonnet Claude dev in its own worktree. Takes the same tier-capped `model` override, the same per-spawn `review: Option<bool>` override, and the same `file_boundary: Vec<String>` (see `fork_wave`), and the same dirty-worktree refusal as `fork_wave`. |
+| `fork_wave` | `Spawner`+`Fs`+`Git` | root, tl | Fork N Claude TL children (own worktrees). Per-child opt-in `fork_session: bool` (default false) inherits the parent's context via `--resume --fork-session`; default-false launches fresh. Per-child `model` override (tier-capped, see below). Per-child `review: Option<bool>` override — `None` (default) inherits the spawner's own `review_enabled`, `Some(b)` stamps the child's papers with `b` and it inherits onward down that child's own subtree. Per-child `file_boundary: Vec<String>` (default empty = unrestricted) is **rendered into the child's own spec** under an `ALLOWED PATHS` section (distinct from the prose `boundary`/`ANTI-PATTERNS (DO NOT)` list — see [`boundary`](#fold-time-file-boundary) below) AND persisted parent-side so `merge` checks it against that child's actual diff before folding. **Refuses on a dirty worktree**, naming the offending `git status --porcelain` lines — children fork from the spawner's current commit, so uncommitted state would be invisible to them; a git error fails *closed*. `preview: true` renders every child's fully-assembled spec (directives injected, `birth_preamble` reproduced, `ALLOWED PATHS` included) and spawns **nothing** — no clean gate, no acceptance writes, no boundary writes — so a wave can be checked while the tree is still dirty. The tool's `data` also carries every spawned child's byte-exact rendered spec (`spawned: [{name, spec}, ...]`) — the spawner never composes a spec blind. |
+| `spawn_dev` | `Spawner`+`Fs`+`Git` | root, tl | Spawn a Sonnet Claude dev in its own worktree. Takes the same tier-capped `model` override, the same per-spawn `review: Option<bool>` override, and the same `file_boundary: Vec<String>` (see `fork_wave`, including the rendered `ALLOWED PATHS` section), and the same dirty-worktree refusal as `fork_wave`. The tool's `data` carries the child's byte-exact rendered spec (`data.spec`). |
 | `spawn_worker` | `Spawner`+`Fs` | root, tl | Spawn an ephemeral Sonnet Claude worker (inline pane). Takes the `model` override, but is **not** clean-gated — an inline worker deliberately shares the parent's tree, and gets directives by text injection only (it already sees the parent's `.exo/directives/` on disk). No `file_boundary` — a worker never gets its own branch, so there's nothing for `merge` to check. |
 | `dismiss_worker` | `Spawner` | root, tl | Dismiss an inline worker by name: unconditional parent-side `kill_pane` resolved via the children ledger. Matched to `spawn_worker`; the reliable teardown primitive for workers that never registered as a teammate. |
 | `merge` | `Git`+`Spawner`+`Fs` | root, tl | **The local fold:** if the child has a persisted [`FileBoundary`](#fold-time-file-boundary) (from `file_boundary` at spawn time), its actual diff (`Git::commits_between(merge_base, branch)`) is checked against it **before** `git merge` runs; a violation refuses with the offending files named (`boundary_override: true` merges anyway, noted in the output). A child with no persisted boundary merges unrestricted, byte-identical to before this mechanism existed. Then `git merge <child-branch>`, followed by best-effort teardown (`kill_pane` + `reclaim_worktree`) of the child. When **both** teardown calls return `SpawnError::UnknownChild`, the note becomes an explicit `merged non-child ref; no teardown performed (succession escape hatch: …)` instead of the generic best-effort string — `merge` accepts any local ref so a live ancestor can fold a dead TL's orphaned descendant, and on that path there simply is no ledger child of yours to reclaim (the boundary check is skipped the same way when `merge_base` resolves to `None` — unrelated histories). Every other outcome (both ok, partial, mixed) renders exactly as before. |
@@ -121,14 +121,23 @@ one model, so overriding it would 404.
 
 ## Fold-time file boundary
 
-A spawn spec's `boundary` field is prose the child reads — a `DO NOT` list injected into its task.
-Nothing ever checked it mechanically: today, verifying a child stayed inside its spec's file
-boundary is root-operator discipline (`git diff --name-only $(merge-base)..branch`, read by eye
-against the spec), and a `submit_branch` reviewer structurally *cannot* do it — it never sees the
-spawn-spec's boundary list at all, only the diff. `boundary.rs` (`FileBoundary`) makes the same
-check a mechanism instead: `fork_wave`/`spawn_dev` optionally persist an **allowed-paths list**
-parent-side at spawn time, and `merge` reads it back and verifies the child's actual diff against
-it — refusing the fold if it's violated — **before** `ctx.merge()` ever runs.
+A spawn spec has two distinct fields, rendered as two distinct sections, and they must never be
+confused: `boundary` is prose the child reads — a `DO NOT` list rendered under `ANTI-PATTERNS (DO
+NOT):` — while `file_boundary` is the allowed-paths list, rendered under a separate `ALLOWED PATHS`
+section right after it. Spec authors used to put allowed paths into `boundary` (there was nowhere
+else to put them — a child never saw its own `file_boundary` at all, only the parent that spawned
+it did), which renders as a forbidden list and reads backwards: children halted, reading their own
+work-paths as things they must NOT touch. `render_spec_prompt` now renders both, so the child sees
+exactly where it's allowed to write.
+
+`file_boundary` isn't just prose, though — `boundary.rs` (`FileBoundary`) makes it a mechanism
+too: `fork_wave`/`spawn_dev` optionally persist the **same allowed-paths list** parent-side at
+spawn time, and `merge` reads it back and verifies the child's actual diff against it — refusing
+the fold if it's violated — **before** `ctx.merge()` ever runs. A `submit_branch` reviewer still
+structurally *cannot* check this — it never sees the spawn-spec's boundary list at all, only the
+diff — so the mechanical check at `merge` time is the only enforcement, and the rendered `ALLOWED
+PATHS` section in the child's own spec is what lets the child avoid violating it in the first
+place.
 
 - **Persisted, not injected.** `write_boundary` writes `FileBoundary { allowed: Vec<String> }` to
   `.exo/boundaries/{child}.json`, **relative to the spawning node's own worktree** (the sidecar's
@@ -273,14 +282,17 @@ back to back, so the state has to be scannable in one line:
 
 ```
 [READY] branch `X` @ {sha} — review: SKIPPED-BY-AGENT (dangerously_skip_reviewer; inspect the diff yourself, be more suspicious than usual)
-[READY] branch `X` @ {sha} — review: disabled (config)
+[READY] branch `X` @ {sha}
 note: {the submitter's note}
 {the receipts block, when receipts were passed}
 ```
 
 The two cases still read differently by *why* — the loud "be more suspicious" framing appears only
-when the agent itself opted out of a normally-on gate, never for a project that simply hasn't turned
-reviewers on. The `summary` line (`[READY] {branch}` / `[READY skipped] {branch}`) and the typed
+when the agent itself opted out of a normally-on gate. The plain config-off case carries **no
+`— review: …` suffix at all**: reviewers are off by default, so that's the common case, and a
+"disabled (config)" tag on every single `[READY]` a project ever produces is pure noise, not
+signal — a parent reading a wave back to back gains nothing from being told the default is still
+the default. The `summary` line (`[READY] {branch}` / `[READY skipped] {branch}`) and the typed
 `Lifecycle::Submitted { branch, sha, reviewed }` kind are unchanged.
 
 When reviewers ARE enabled: a node commits, then calls `submit_branch`. It runs the checks, then

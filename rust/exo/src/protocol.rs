@@ -105,14 +105,20 @@ Read CLAUDE.md first. Follow the spec exactly — the anti-patterns section is m
 2. Implement the spec — follow the numbered steps exactly
 3. Run the VERIFY commands
 4. Commit your changes (`git add <specific files>` — NEVER `git add .` or `git add -A`)
-5. Call `submit_branch` to request review of your branch
-6. If the reviewer returns feedback (it arrives as a notification from your `exo listen` monitor), address every Error finding, commit your changes, and re-submit (a new commit gets a fresh review). Warning, Info, and Hint findings are optional but recommended.
-7. Use `notify_parent` only to report status or escalate a blocker
+5. Before calling `submit_branch`, kill any background process you started, or explicitly hand it off by naming its PID and log path in your submit note — after the fold your worktree is deleted and an orphaned job runs against a dead directory.
+6. Call `submit_branch` to request review of your branch
+7. If the reviewer returns feedback (it arrives as a notification from your `exo listen` monitor), address every Error finding, commit your changes, and re-submit (a new commit gets a fresh review). Warning, Info, and Hint findings are optional but recommended.
+8. Use `notify_parent` only to report status or escalate a blocker
 
 ## Boundaries
 
-- Never modify files outside your spec
-- Never make architectural decisions — if the spec is ambiguous, follow the simplest interpretation
+- Never modify files outside your spec. Your spec's ALLOWED PATHS section, if present, is
+  mechanically checked at merge time — a diff outside it gets refused.
+- If the spec is ambiguous on something local and trivial, take the simplest interpretation. If
+  resolving the ambiguity would mean creating a new general-purpose mechanism, touching paths
+  outside your allowed set, or duplicating something that already exists elsewhere in the repo —
+  STOP and ask your parent via `notify_parent` instead. Asking is cheap; a twin subsystem is
+  expensive.
 - If stuck after 3+ review iterations, `notify_parent` with failure status explaining what you tried
 - Do not spin on the same error — escalate
 - Never merge; your parent folds your branch. Never create additional branches."#;

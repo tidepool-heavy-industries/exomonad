@@ -534,11 +534,7 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
                     sha,
                 )
             } else {
-                format!(
-                    "[READY] branch `{}` @ {} — review: disabled (config)",
-                    branch.as_str(),
-                    sha,
-                )
+                format!("[READY] branch `{}` @ {}", branch.as_str(), sha)
             };
             let mut text = format!("{flag_line}\nnote: {}", args.note);
             let receipts_block = args
@@ -585,11 +581,10 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
                 reply_to: None,
             };
             ctx.deliver(Addressee::Parent, msg).await?;
-            let wake_note = crate::tools::messaging::wake_note(
-                ctx.wake_status(&Addressee::Parent).await,
-            )
-            .map(|n| format!("\n{n}"))
-            .unwrap_or_default();
+            let wake_note =
+                crate::tools::messaging::wake_note(ctx.wake_status(&Addressee::Parent).await)
+                    .map(|n| format!("\n{n}"))
+                    .unwrap_or_default();
             return Ok(ToolOutput::with_data(
                 format!(
                     "Forwarded [READY] to your parent for branch {} WITHOUT review. Your parent \
@@ -866,9 +861,14 @@ mod tests {
             _ => None,
         });
         let msg = delivered.expect("should forward [READY] to parent");
-        // Plain flag wording — no "SKIPPED-BY-AGENT" / "be more suspicious" scare language, since
-        // this wasn't the agent's choice.
-        assert!(msg.text.as_str().contains("review: disabled (config)"));
+        // Plain flag line — no "review: disabled (config)" noise (pure noise when review is off
+        // by default, the common case) and no "SKIPPED-BY-AGENT" / "be more suspicious" scare
+        // language, since this wasn't the agent's choice.
+        assert!(msg
+            .text
+            .as_str()
+            .contains("[READY] branch `dev.policy-claude`"));
+        assert!(!msg.text.as_str().contains("review: disabled"));
         assert!(!msg.text.as_str().contains("dangerously_skip_reviewer"));
     }
 

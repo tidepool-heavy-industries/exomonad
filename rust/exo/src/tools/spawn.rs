@@ -130,6 +130,7 @@ struct SpawnArgs {
     done_criteria: Vec<String>,
     context: Option<String>,
     boundary: Vec<String>,
+    file_boundary: Vec<String>,
     read_first: Vec<String>,
     fork_session: bool,
     model: Option<String>,
@@ -161,6 +162,7 @@ fn build_spawn(
             &args.steps,
             &args.verify,
             &args.boundary,
+            &args.file_boundary,
             args.context.as_ref(),
             &args.done_criteria,
         )),
@@ -183,6 +185,9 @@ pub struct SpawnWorkerArgs {
     pub done_criteria: Vec<String>,
     #[serde(default)]
     pub context: Option<String>,
+    /// Prose DO-NOT rules injected into the child's task under "ANTI-PATTERNS (DO NOT):" — known
+    /// failure modes to avoid. This is NOT an allowed-paths list and nothing checks it
+    /// mechanically; for that, worktree tools take `file_boundary` instead.
     #[serde(default)]
     pub boundary: Vec<String>,
     #[serde(default)]
@@ -230,6 +235,7 @@ impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnWorker {
                 done_criteria: args.done_criteria,
                 context: args.context,
                 boundary: args.boundary,
+                file_boundary: Vec::new(),
                 read_first: args.read_first,
                 fork_session: false,
                 model: args.model,
@@ -257,6 +263,10 @@ pub struct SpawnDevArgs {
     pub done_criteria: Vec<String>,
     #[serde(default)]
     pub context: Option<String>,
+    /// Prose DO-NOT rules injected into the child's task under "ANTI-PATTERNS (DO NOT):" — known
+    /// failure modes to avoid. This is NOT an allowed-paths list — for that, use `file_boundary`,
+    /// which the child also sees (under "ALLOWED PATHS") and which is additionally checked
+    /// mechanically at merge time.
     #[serde(default)]
     pub boundary: Vec<String>,
     #[serde(default)]
@@ -273,10 +283,12 @@ pub struct SpawnDevArgs {
     /// the typed unreviewed flag already carry the audit trail.
     #[serde(default)]
     pub review: Option<bool>,
-    /// Allowed file paths / directory prefixes for this child's diff, checked by `merge` before
-    /// folding. An entry matches a changed file if it equals it exactly or is a directory prefix
-    /// (the file path starts with the entry + `/`). Empty (default) = unrestricted, no check at
-    /// merge time.
+    /// Allowed file paths / directory prefixes for this child's diff. Rendered into the child's
+    /// spec under "ALLOWED PATHS" so it actually knows where it may write, AND checked
+    /// mechanically by `merge` against the child's real diff before folding. An entry matches a
+    /// changed file if it equals it exactly or is a directory prefix (the file path starts with
+    /// the entry + `/`). Empty (default) = unrestricted, no section rendered, no check at merge
+    /// time.
     #[serde(default)]
     pub file_boundary: Vec<String>,
 }
@@ -319,6 +331,7 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for SpawnDev {
                 done_criteria: args.done_criteria,
                 context: args.context,
                 boundary: args.boundary,
+                file_boundary: args.file_boundary.clone(),
                 read_first: args.read_first,
                 fork_session: false,
                 model: args.model,
@@ -341,7 +354,7 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for SpawnDev {
         copy_directives(ctx, &spawned, &directives).await;
         Ok(ToolOutput::with_data(
             format!("Spawned dev {}", spawned.as_str()),
-            serde_json::json!({ "spawned": spawned.as_str() }),
+            serde_json::json!({ "spawned": spawned.as_str(), "spec": task }),
         ))
     }
 }
@@ -358,6 +371,10 @@ pub struct ForkChildArgs {
     pub done_criteria: Vec<String>,
     #[serde(default)]
     pub context: Option<String>,
+    /// Prose DO-NOT rules injected into the child's task under "ANTI-PATTERNS (DO NOT):" — known
+    /// failure modes to avoid. This is NOT an allowed-paths list — for that, use `file_boundary`,
+    /// which the child also sees (under "ALLOWED PATHS") and which is additionally checked
+    /// mechanically at merge time.
     #[serde(default)]
     pub boundary: Vec<String>,
     #[serde(default)]
@@ -380,10 +397,12 @@ pub struct ForkChildArgs {
     /// the typed unreviewed flag already carry the audit trail.
     #[serde(default)]
     pub review: Option<bool>,
-    /// Allowed file paths / directory prefixes for this child's diff, checked by `merge` before
-    /// folding. An entry matches a changed file if it equals it exactly or is a directory prefix
-    /// (the file path starts with the entry + `/`). Empty (default) = unrestricted, no check at
-    /// merge time.
+    /// Allowed file paths / directory prefixes for this child's diff. Rendered into the child's
+    /// spec under "ALLOWED PATHS" so it actually knows where it may write, AND checked
+    /// mechanically by `merge` against the child's real diff before folding. An entry matches a
+    /// changed file if it equals it exactly or is a directory prefix (the file path starts with
+    /// the entry + `/`). Empty (default) = unrestricted, no section rendered, no check at merge
+    /// time.
     #[serde(default)]
     pub file_boundary: Vec<String>,
 }
@@ -456,6 +475,7 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
                     done_criteria: child.done_criteria,
                     context: child.context,
                     boundary: child.boundary,
+                    file_boundary: child.file_boundary,
                     read_first: child.read_first,
                     fork_session: child.fork_session,
                     model: child.model,
@@ -507,7 +527,7 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
                         crate::boundary::write_boundary(ctx, &name, &boundary).await;
                     }
                     copy_directives(ctx, &name, &directives).await;
-                    spawned.push(name.as_str().to_string());
+                    spawned.push(serde_json::json!({ "name": name.as_str(), "spec": task }));
                 }
                 Err(e) => errors.push(e.to_string()),
             }
@@ -601,7 +621,7 @@ mod tests {
             Call::Spawn { task, .. } => {
                 // The structured fields are rendered into the single task body by the domain.
                 assert!(task.contains("STEPS:\n1. step 1"));
-                assert!(task.contains("BOUNDARY (DO NOT):\n- boundary 1"));
+                assert!(task.contains("ANTI-PATTERNS (DO NOT):\n- boundary 1"));
             }
             _ => panic!("wrong call"),
         }
@@ -633,6 +653,70 @@ mod tests {
             if role == "dev" && task.contains("do something else"))));
         assert!(calls.iter().any(|c| matches!(c, Call::FsWrite { path }
             if path.contains("dev-1") && path.ends_with(".exo/acceptance.md"))));
+    }
+
+    #[tokio::test]
+    async fn spawn_dev_output_data_carries_the_rendered_spec() {
+        let mock = MockRuntime::default();
+        let args = SpawnDevArgs {
+            name: Some("dev-1".to_string()),
+            task: "distinctive dev task".to_string(),
+            steps: vec!["step 1".into()],
+            verify: vec![],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec![],
+            read_first: vec![],
+            model: None,
+            review: None,
+            file_boundary: vec![],
+        };
+        let out = SpawnDev::run(&mock, args).await.unwrap();
+        let data = out.data.expect("spawn_dev always carries data");
+        let spec = data["spec"].as_str().expect("data.spec is a string");
+        // Byte-exact: the same rendered task the child was actually spawned with.
+        let spawned_task = mock
+            .calls_made()
+            .iter()
+            .find_map(|c| match c {
+                Call::Spawn { task, .. } => Some(task.clone()),
+                _ => None,
+            })
+            .expect("spawn recorded");
+        assert_eq!(spec, spawned_task);
+        assert!(spec.contains("distinctive dev task"));
+        assert!(spec.contains("STEPS:\n1. step 1"));
+    }
+
+    #[tokio::test]
+    async fn fork_wave_output_data_carries_per_child_spec() {
+        let mock = MockRuntime::default();
+        let args = ForkWaveArgs {
+            children: vec![ForkChildArgs {
+                name: Some("child-1".to_string()),
+                task: "distinctive tl task".to_string(),
+                steps: vec![],
+                verify: vec![],
+                done_criteria: vec![],
+                context: None,
+                boundary: vec![],
+                read_first: vec![],
+                fork_session: false,
+                model: None,
+                review: None,
+                file_boundary: vec![],
+            }],
+            preview: false,
+        };
+        let out = ForkWave::run(&mock, args).await.unwrap();
+        let data = out.data.expect("fork_wave always carries data");
+        let spawned = data["spawned"].as_array().expect("spawned is an array");
+        assert_eq!(spawned.len(), 1);
+        assert_eq!(spawned[0]["name"], "child-1");
+        assert!(spawned[0]["spec"]
+            .as_str()
+            .expect("spec is a string")
+            .contains("distinctive tl task"));
     }
 
     #[tokio::test]
@@ -990,6 +1074,7 @@ mod tests {
             done_criteria: vec![],
             context: None,
             boundary: vec![],
+            file_boundary: vec![],
             read_first: vec![],
             fork_session: false,
             model: None,
@@ -1035,6 +1120,7 @@ mod tests {
                 done_criteria: vec![],
                 context: None,
                 boundary: vec![],
+                file_boundary: vec![],
                 read_first: vec![],
                 fork_session: false,
                 model: Some("opus".to_string()),
@@ -1107,7 +1193,7 @@ mod tests {
         // spec prompt, with no directives section appended.
         assert_eq!(
             task,
-            render_spec_prompt("do something else", &[], &[], &[], &[], None, &[])
+            render_spec_prompt("do something else", &[], &[], &[], &[], &[], None, &[])
         );
     }
 
@@ -1169,6 +1255,7 @@ mod tests {
             done_criteria: vec![],
             context: None,
             boundary: vec![],
+            file_boundary: vec![],
             read_first: vec![],
             fork_session: false,
             model: None,
@@ -1204,6 +1291,36 @@ mod tests {
         )
         .unwrap();
         assert_eq!(spawn.review_override, None);
+    }
+
+    #[tokio::test]
+    async fn spawn_dev_file_boundary_renders_as_allowed_paths_in_child_task() {
+        let mock = MockRuntime::default();
+        let args = SpawnDevArgs {
+            name: Some("dev-1".to_string()),
+            task: "do work".to_string(),
+            steps: vec![],
+            verify: vec![],
+            done_criteria: vec![],
+            context: None,
+            boundary: vec!["do not touch prod config".to_string()],
+            read_first: vec![],
+            model: None,
+            review: None,
+            file_boundary: vec!["rust/exo/src/tools/spawn.rs".to_string()],
+        };
+        SpawnDev::run(&mock, args).await.unwrap();
+        let task = mock
+            .calls_made()
+            .iter()
+            .find_map(|c| match c {
+                Call::Spawn { task, .. } => Some(task.clone()),
+                _ => None,
+            })
+            .expect("spawn recorded");
+        assert!(task.contains("ALLOWED PATHS"));
+        assert!(task.contains("- rust/exo/src/tools/spawn.rs"));
+        assert!(task.contains("ANTI-PATTERNS (DO NOT):\n- do not touch prod config"));
     }
 
     #[tokio::test]
