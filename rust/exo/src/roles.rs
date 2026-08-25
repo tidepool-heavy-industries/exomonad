@@ -8,6 +8,7 @@
 //! and the fn-pointer aliases are the framework contract ([`exo_framework::roles`]).
 
 use crate::gates::{pre_tool_use, session_start};
+use crate::tools::broadcast::Broadcast;
 use crate::tools::dismiss::DismissWorker;
 use crate::tools::merge::Merge;
 use crate::tools::messaging::{NotifyParent, SendMessage};
@@ -104,6 +105,7 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
         // and folds them by merging their branches locally; that's it.
         ExoRole::Root => RoleDef {
             tools: vec![
+                tool(Broadcast),
                 tool(DismissWorker),
                 tool(ForkWave),
                 tool(SpawnDev),
@@ -119,6 +121,7 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
         // parent when done (and notifies for status/failure).
         ExoRole::Tl => RoleDef {
             tools: vec![
+                tool(Broadcast),
                 tool(DismissWorker),
                 tool(ForkWave),
                 tool(SpawnDev),
@@ -215,6 +218,7 @@ mod tests {
             names.sort();
             let expected = match kind {
                 ExoRole::Root => vec![
+                    "broadcast",
                     "dismiss_worker",
                     "fork_wave",
                     "merge",
@@ -224,6 +228,7 @@ mod tests {
                     "tree",
                 ],
                 ExoRole::Tl => vec![
+                    "broadcast",
                     "dismiss_worker",
                     "fork_wave",
                     "merge",

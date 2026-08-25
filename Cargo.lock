@@ -1058,6 +1058,7 @@ dependencies = [
  "exo-caps",
  "exo-scry",
  "exomonad-shared",
+ "nix",
  "serde",
  "serde_json",
  "shell-escape",

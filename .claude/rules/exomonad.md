@@ -22,11 +22,12 @@ Use exomonad MCP tools for orchestration. Git operations use the `git` CLI direc
 | `spawn_dev` | root, tl | Spawn a Sonnet Claude dev in its own worktree+branch |
 | `spawn_worker` | root, tl | Spawn an ephemeral Sonnet Claude worker in a tmux pane (no branch) |
 | `dismiss_worker` | root, tl | Tear down an inline worker by name (parent-side `kill_pane`) |
-| `merge` | root, tl | The local fold: `git merge <child-branch>` + best-effort child teardown. Optional `gate` command runs post-merge, pre-teardown |
+| `merge` | root, tl | The local fold: `git merge <child-branch>` + best-effort child teardown. Optional `gate` command runs post-merge, pre-teardown — on success its output tail rides in `data.gate.output_tail`. Optional `gate_timeout_ms` bounds the gate and kills its whole process group on expiry, rendered like a gate failure but labeled TIMED OUT |
 | `submit_branch` | tl, dev | Request review/convergence — see "Convergence Protocol" below |
 | `verdict` | reviewer | A reviewer's one output: `summary` + structured `findings` → a message to its parent |
 | `notify_parent` | tl, dev, worker, reviewer | Status/failure update to the parent (NOT the done-signal) |
 | `send_message` | root, tl | Deliver to a named child (tree-edges only) |
+| `broadcast` | root, tl | Flat fan-out: the same `text` to every LIVE direct child (no role filtering) — same delivery path as `send_message`, one call per child |
 | `tree` | root, tl | Read-only: the caller's subtree + parent + per-node pane-liveness |
 
 `file_pr` and `merge_pr` do not exist in v2 — they are Classic-only.
