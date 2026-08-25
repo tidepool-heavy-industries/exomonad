@@ -22,6 +22,8 @@ Use exomonad MCP tools for orchestration. Git operations use the `git` CLI direc
 | `spawn_dev` | root, tl | Spawn a Sonnet Claude dev in its own worktree+branch |
 | `spawn_worker` | root, tl | Spawn an ephemeral Sonnet Claude worker in a tmux pane (no branch) |
 | `dismiss_worker` | root, tl | Tear down an inline worker by name (parent-side `kill_pane`) |
+| `request_review` | root, tl | Mid-flight flip of a named child's review gate to ON (for its next `submit_branch`); one-way, no un-flip. Refuses on an unknown or terminal (reaped/died) child. Idempotent |
+| `amend_boundary` | root, tl | Fix a wrong recorded file boundary (see [`rust/exo/CLAUDE.md`](../../rust/exo/CLAUDE.md) § Fold-time file boundary) — full-replace `allowed` list for a child, parent-side only (`.exo/boundaries/{child}.json` in YOUR OWN worktree). Amends an existing boundary only — refuses if the child was never spawned with `file_boundary` |
 | `merge` | root, tl | The local fold: `git merge <child-branch>` + best-effort child teardown. Optional `gate` command runs post-merge, pre-teardown — on success its output tail rides in `data.gate.output_tail`. Optional `gate_timeout_ms` bounds the gate and kills its whole process group on expiry, rendered like a gate failure but labeled TIMED OUT |
 | `submit_branch` | tl, dev | Request review/convergence — see "Convergence Protocol" below |
 | `verdict` | reviewer | A reviewer's one output: `summary` + structured `findings` → a message to its parent |

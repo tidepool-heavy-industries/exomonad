@@ -35,7 +35,9 @@ struct DeliveryResult {
 /// Read + tolerantly parse this node's own `.exo/children.jsonl` directly via the `Fs` cap —
 /// mirrors `doctor::read_root_child_records`'s discipline (a malformed line is skipped and
 /// warned about, never fatal to the rest of the ledger). A missing ledger means no children yet.
-async fn read_own_children<C: Fs>(ctx: &C) -> Vec<ChildRecord> {
+/// `pub(crate)`: shared with `request_review`/`amend_boundary`, which resolve a single named
+/// child against this same fold rather than fanning out to all of them.
+pub(crate) async fn read_own_children<C: Fs>(ctx: &C) -> Vec<ChildRecord> {
     let path = Path::new(".exo/children.jsonl");
     let bytes = match ctx.read(path).await {
         Ok(b) => b,

@@ -394,6 +394,13 @@ impl Fs for MockRuntime {
     }
     async fn write_atomic(&self, path: &Path, bytes: &[u8]) -> Result<(), FsError> {
         let key = path.display().to_string();
+        if self.should_fail("write_atomic") {
+            return Err(FsError::At {
+                op: "write_atomic",
+                path: key,
+                source: std::io::Error::new(std::io::ErrorKind::Other, "mock forced failure"),
+            });
+        }
         self.record(Call::FsWrite { path: key.clone() });
         self.files.lock().unwrap().insert(key, bytes.to_vec());
         Ok(())

@@ -372,6 +372,8 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for SpawnDev {
          worktree — the child forks from your current commit, so uncommitted state would be \
          invisible to it. Set `model` to override this child's model tier for this one spawn, \
          capped at your own role's tier; ignored if this role is redirected by a launch profile. \
+         Duplicate `name` (including a previously reaped one) is refused before any resource is \
+         created — on an ambiguous spawn error, check `tree` before retrying; never blind-respawn. \
          After spawning, return immediately — idle and wait for [READY], do not poll.";
     type Args = SpawnDevArgs;
 
@@ -501,8 +503,11 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
          uncommitted state would be invisible to them. Set `model` per child to override that \
          child's model tier for this one spawn, capped at your own role's tier; ignored for a \
          role redirected by a launch profile. Set `preview: true` to render every child's final \
-         assembled spec and spawn nothing — works even on a dirty tree. After spawning, return \
-         immediately — idle and wait, do not poll; children's messages arrive between your turns.";
+         assembled spec and spawn nothing — works even on a dirty tree. Duplicate `name` \
+         (including a previously reaped one) is refused before any resource is created — on an \
+         ambiguous spawn error, check `tree` before retrying; never blind-respawn. After \
+         spawning, return immediately — idle and wait, do not poll; children's messages arrive \
+         between your turns.";
     type Args = ForkWaveArgs;
 
     async fn run(ctx: &R, args: ForkWaveArgs) -> CapResult<ToolOutput> {

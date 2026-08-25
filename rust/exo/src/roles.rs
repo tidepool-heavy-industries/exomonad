@@ -8,10 +8,12 @@
 //! and the fn-pointer aliases are the framework contract ([`exo_framework::roles`]).
 
 use crate::gates::{pre_tool_use, session_start};
+use crate::tools::amend_boundary::AmendBoundary;
 use crate::tools::broadcast::Broadcast;
 use crate::tools::dismiss::DismissWorker;
 use crate::tools::merge::Merge;
 use crate::tools::messaging::{NotifyParent, SendMessage};
+use crate::tools::request_review::RequestReview;
 use crate::tools::spawn::{ForkWave, SpawnDev, SpawnWorker};
 use crate::tools::submit::SubmitBranch;
 use crate::tools::tree::Tree;
@@ -105,12 +107,14 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
         // and folds them by merging their branches locally; that's it.
         ExoRole::Root => RoleDef {
             tools: vec![
+                tool(AmendBoundary),
                 tool(Broadcast),
                 tool(DismissWorker),
                 tool(ForkWave),
                 tool(SpawnDev),
                 tool(SpawnWorker),
                 tool(Merge),
+                tool(RequestReview),
                 tool(SendMessage),
                 tool(Tree),
             ],
@@ -121,6 +125,7 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
         // parent when done (and notifies for status/failure).
         ExoRole::Tl => RoleDef {
             tools: vec![
+                tool(AmendBoundary),
                 tool(Broadcast),
                 tool(DismissWorker),
                 tool(ForkWave),
@@ -128,6 +133,7 @@ pub fn role_def<R: PolicyCaps>(kind: ExoRole) -> RoleDef<R> {
                 tool(SpawnWorker),
                 tool(Merge),
                 tool(NotifyParent),
+                tool(RequestReview),
                 tool(SendMessage),
                 tool(SubmitBranch),
                 tool(Tree),
@@ -218,21 +224,25 @@ mod tests {
             names.sort();
             let expected = match kind {
                 ExoRole::Root => vec![
+                    "amend_boundary",
                     "broadcast",
                     "dismiss_worker",
                     "fork_wave",
                     "merge",
+                    "request_review",
                     "send_message",
                     "spawn_dev",
                     "spawn_worker",
                     "tree",
                 ],
                 ExoRole::Tl => vec![
+                    "amend_boundary",
                     "broadcast",
                     "dismiss_worker",
                     "fork_wave",
                     "merge",
                     "notify_parent",
+                    "request_review",
                     "send_message",
                     "spawn_dev",
                     "spawn_worker",
