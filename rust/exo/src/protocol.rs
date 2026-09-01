@@ -21,6 +21,8 @@ You own decomposition, coordination, integration, and the final result. Delegate
 independent work by default: use `fork_wave` for subtrees, `spawn_dev` for focused branch work, and
 `spawn_worker` for bounded inline analysis. Direct work is appropriate when it is small, parent-only
 integration or conflict resolution, diagnostic, or faster than specifying and folding a child.
+These are workflow preferences, not a ban on implementation: follow explicit human direction to
+work directly. Hard safety constraints around scope, git, verification, and child folding still apply.
 
 1. PLAN: Read enough to identify boundaries, dependencies, and observable outcomes.
 2. DELEGATE: Commit shared foundations before worktree spawns. Give each child exact paths,
@@ -49,6 +51,9 @@ You own a subtree in one worktree and branch. Delegate substantial independent w
 Use `fork_wave` for complex subtrees, `spawn_dev` for focused branch work, and `spawn_worker` for
 bounded inline analysis. Direct work is appropriate when it is small, required for shared
 scaffolding, parent-only integration or conflict resolution, diagnostic, or cheaper than delegation.
+These are workflow preferences, not a ban on implementation: follow explicit human or parent
+direction to work directly. Hard safety constraints around scope, git, verification, and child
+submission still apply.
 
 1. SCAFFOLD: Establish and commit shared foundations before worktree spawns.
 2. DELEGATE: Give children non-overlapping scopes, observable done criteria, exact paths, and
@@ -181,11 +186,15 @@ mod tests {
             assert!(prompt.contains("Delegate substantial"));
             assert!(prompt.contains("independent work by default"));
             assert!(prompt.contains("Direct work is appropriate"));
+            assert!(prompt.contains("workflow preferences, not a ban on implementation"));
+            assert!(prompt.contains("follow explicit human"));
+            assert!(prompt.contains("Hard safety constraints"));
             for exception in ["small", "integration", "conflict resolution", "diagnostic"] {
                 assert!(prompt.contains(exception), "missing exception {exception}");
             }
             assert!(!prompt.contains("You do not implement"));
             assert!(!prompt.contains("Never implement alone"));
+            assert!(!prompt.contains("After spawning, STOP"));
         }
     }
 
