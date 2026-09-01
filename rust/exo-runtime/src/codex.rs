@@ -16,6 +16,21 @@ pub enum LaunchMode<'a> {
     Fork(&'a str),
 }
 
+/// Codex-only routing guidance for Exomonad's deferred MCP inventory.
+///
+/// Codex also exposes a native `collaboration` namespace whose spawn vocabulary overlaps with
+/// Exomonad's protocol. Keep this at the launch boundary so root and every spawned Codex role see
+/// the distinction, while Claude's role prompts remain unchanged.
+const EXOMONAD_TOOL_ROUTING: &str = r#"## Exomonad Tool Routing (Codex)
+
+Exomonad orchestration uses the `mcp__exomonad__*` MCP tools, not Codex's native `collaboration.*` tools. Native `collaboration.spawn_agent` creates a Codex subagent but does not create an Exomonad node, worktree, branch, ledger entry, review, or fold; never use it for the Exomonad workflow described below.
+
+The Exomonad MCP tools are lazy-loaded. Before an Exomonad operation, discover them in code mode through `functions.exec`: inspect/filter `ALL_TOOLS` for names beginning with `mcp__exomonad__`, then invoke the matching nested function on `tools` (for example `tools.mcp__exomonad__fork_wave(...)`). Use `mcp__exomonad__fork_wave`, `mcp__exomonad__spawn_dev`, and `mcp__exomonad__spawn_worker` to spawn; `mcp__exomonad__tree` to inspect the node tree; `mcp__exomonad__send_message` and `mcp__exomonad__notify_parent` for messages; `mcp__exomonad__submit_branch` for child submission; and `mcp__exomonad__merge` for the parent fold. If a tool is absent from your role's discovered inventory, that operation is not available to this node."#;
+
+fn developer_instructions_with_tool_routing(instructions: &str) -> String {
+    format!("{instructions}\n\n{EXOMONAD_TOOL_ROUTING}")
+}
+
 /// Build a shell command for a normal interactive Codex TUI.
 ///
 /// The node identity is passed through `EXOMONAD_PAPERS`; the MCP server itself is supplied as
@@ -82,10 +97,11 @@ pub fn tui_command(
     );
     push_config_value(&mut command, "mcp_servers.exomonad.enabled", "true".into());
     push_config_value(&mut command, "mcp_servers.exomonad.required", "true".into());
+    let developer_instructions = developer_instructions_with_tool_routing(developer_instructions);
     push_config_string(
         &mut command,
         "developer_instructions",
-        developer_instructions,
+        &developer_instructions,
     );
     if let Some(effort) = reasoning_effort {
         push_config_string(&mut command, "model_reasoning_effort", effort);
@@ -345,6 +361,9 @@ mod tests {
         assert!(command.contains("EXOMONAD_PAPERS=/tmp/node.json"));
         assert!(command.contains("mcp_servers.exomonad.command"));
         assert!(command.contains("developer_instructions"));
+        assert!(command.contains("collaboration.spawn_agent"));
+        assert!(command.contains("mcp__exomonad__fork_wave"));
+        assert!(command.contains("mcp__exomonad__merge"));
         assert!(!command.contains("--remote"));
         assert!(!command.contains("app-server"));
     }
@@ -363,6 +382,28 @@ mod tests {
         );
         assert!(command.contains("codex --ask-for-approval"));
         assert!(command.contains("$(cat -- '/tmp/prompt with spaces.md')"));
+    }
+
+    #[test]
+    fn codex_instructions_route_exomonad_operations_to_lazy_mcp_tools() {
+        let instructions = developer_instructions_with_tool_routing("role protocol");
+
+        assert!(instructions.starts_with("role protocol\n\n"));
+        assert!(instructions.contains("not Codex's native `collaboration.*` tools"));
+        assert!(instructions.contains("never use it for the Exomonad workflow"));
+        assert!(instructions.contains("inspect/filter `ALL_TOOLS`"));
+        assert!(instructions.contains("tools.mcp__exomonad__fork_wave"));
+        for operation in [
+            "mcp__exomonad__spawn_dev",
+            "mcp__exomonad__spawn_worker",
+            "mcp__exomonad__tree",
+            "mcp__exomonad__send_message",
+            "mcp__exomonad__notify_parent",
+            "mcp__exomonad__submit_branch",
+            "mcp__exomonad__merge",
+        ] {
+            assert!(instructions.contains(operation), "missing {operation}");
+        }
     }
 
     #[tokio::test]
