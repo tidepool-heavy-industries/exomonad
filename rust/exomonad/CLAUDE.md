@@ -291,7 +291,7 @@ For custom roles, copy `.exo/roles/` and `.exo/lib/` from exomonad and `exomonad
 
 ### Configuration
 
-**Bootstrap:** `exomonad new` auto-creates `.exo/config.toml` (empty, all defaults) and `.gitignore` entries if missing. Works in any project directory. All fields are optional — auto-detection handles the common case. **Claude rules:** `exomonad new` copies `.exo/rules/exomonad.md` → `.claude/rules/exomonad.md` (if the template exists and the destination doesn't). Template resolution: project-local `.exo/rules/` → global `~/.exo/rules/`. This gives fresh Claude instances automatic knowledge of exomonad MCP tools.
+**Bootstrap:** `exomonad new` auto-creates `.exo/config.toml` (empty, all defaults) and `.gitignore` entries if missing. Works in any project directory. All fields are optional — auto-detection handles the common case. **Claude rules:** `exomonad new` creates `.claude/rules/exomonad.md` when absent. Template resolution is project-local `.exo/rules/` → global `~/.exo/rules/` → the canonical template baked into the binary; `just install-all` also publishes the global copy. The distributed template is standalone, project-portable v2 guidance: it must not point back to its destination or rely on ExoMonad source-tree paths.
 
 ```toml
 # All fields below are optional — shown with their auto-detected defaults

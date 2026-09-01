@@ -73,33 +73,23 @@ pub async fn run(_name: Option<String>) -> Result<()> {
         .context("Failed to write hook configuration")?;
     info!("Hook configuration written to .claude/settings.local.json");
 
-    // Copy Claude rules template if available and not already present (same logic as init.rs)
-    {
-        let rules_dest = cwd.join(".claude/rules/exomonad.md");
-        if !rules_dest.exists() {
-            // Resolution: project-local .exo/rules/ → global ~/.exo/rules/
-            let local_template = cwd.join(".exo/rules/exomonad.md");
-            let global_template = std::env::var("HOME")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".exo/rules/exomonad.md"));
-
-            let source = if local_template.exists() {
-                Some(local_template)
-            } else {
-                global_template.filter(|p| p.exists())
-            };
-
-            if let Some(src) = source {
-                std::fs::create_dir_all(cwd.join(".claude/rules"))?;
-                std::fs::copy(&src, &rules_dest)?;
-                info!(
-                    src = %src.display(),
-                    "Copied Claude rules to .claude/rules/exomonad.md"
-                );
-            }
-        }
-    }
+    crate::init::ensure_claude_rules(&cwd)?;
 
     info!("Project initialized. Run `exomonad init` to start a session.");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    const DISTRIBUTED_RULES_TEMPLATE: &str = include_str!("../../../.exo/rules/exomonad.md");
+
+    #[test]
+    fn distributed_rules_are_portable_v2_guidance() {
+        assert!(DISTRIBUTED_RULES_TEMPLATE.contains("# ExoMonad Agent Rules"));
+        assert!(DISTRIBUTED_RULES_TEMPLATE.contains("Explicit instructions"));
+        assert!(DISTRIBUTED_RULES_TEMPLATE.contains("submit_branch"));
+        assert!(!DISTRIBUTED_RULES_TEMPLATE.contains("rust/"));
+        assert!(!DISTRIBUTED_RULES_TEMPLATE
+            .contains("active mechanics and role matrix live in `.claude/rules/exomonad.md`"));
+    }
 }

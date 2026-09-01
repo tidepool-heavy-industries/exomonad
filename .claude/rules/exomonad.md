@@ -18,9 +18,9 @@ Use exomonad MCP tools for orchestration. Git operations use the `git` CLI direc
 
 | Tool | Role | What it does |
 |------|------|-------------|
-| `fork_wave` | root, tl | Fork N parallel Claude TL children, each in its own worktree. Per-child `fork_session` (default **false**) opts into inheriting the parent's context |
-| `spawn_dev` | root, tl | Spawn a Sonnet Claude dev in its own worktree+branch |
-| `spawn_worker` | root, tl | Spawn an ephemeral Sonnet Claude worker in a tmux pane (no branch) |
+| `fork_wave` | root, tl | Fork N subtree-manager children, each in its own worktree. Per-child `fork_session` (default **false**) opts into inheriting the parent's context |
+| `spawn_dev` | root, tl | Spawn a dev leaf in its own worktree+branch |
+| `spawn_worker` | root, tl | Spawn an ephemeral worker in a tmux pane (no branch) |
 | `dismiss_worker` | root, tl | Tear down an inline worker by name (parent-side `kill_pane`) |
 | `request_review` | root, tl | Mid-flight flip of a named child's review gate to ON (for its next `submit_branch`); one-way, no un-flip. Refuses on an unknown or terminal (reaped/died) child. Idempotent |
 | `amend_boundary` | root, tl | Fix a wrong recorded file boundary (see [`rust/exo/CLAUDE.md`](../../rust/exo/CLAUDE.md) § Fold-time file boundary) — full-replace `allowed` list for a child, parent-side only (`.exo/boundaries/{child}.json` in YOUR OWN worktree). Amends an existing boundary only — refuses if the child was never spawned with `file_boundary` |
@@ -36,13 +36,14 @@ Use exomonad MCP tools for orchestration. Git operations use the `git` CLI direc
 
 ## Agent Hierarchy
 
-Every role runs as a Claude instance; the **model** varies per role (`RoleKind::model`):
+- **Root** owns the user's intent, overall vision, and final result.
+- **Tl** owns a subtree, its children, integration on its branch, and a complete submission upward.
+- **Dev** owns a focused branch slice, commits it, and calls `submit_branch` when merge-ready.
+- **Worker** performs a bounded task in its parent's worktree and reports with `notify_parent`.
+- **Reviewer**, when enabled, independently judges a submitted slice and calls `verdict`.
 
-- **Root**: inherits the launcher's default (the human's own top-level `exo init` session — never spawned via `birth`, so this is the human's own model choice).
-- **Tl (spawned Tech Lead)**: Opus. Decomposes, specs, scaffolds, spawns, and merges. Delegates substantial independent work by default; may directly handle small work, integration, conflicts, diagnostics, or work where delegation costs more than execution.
-- **Dev (leaf)**: Sonnet. Implements a focused spec, commits, `submit_branch`. No spawning.
-- **Worker**: Sonnet. Ephemeral pane, no branch. Research or in-place edits. May run on an alternate launch-profile brain (e.g. Kimi) if configured.
-- **Reviewer**: Sonnet (or a launch-profile brain). Short-lived, spawned by `submit_branch` when reviewers are enabled; reads the diff read-only and calls `verdict`.
+Backend and model defaults are deployment configuration, not role doctrine; see
+`rust/exo/CLAUDE.md` for the current mappings.
 
 ## The TL Protocol: Scaffold-Fork-Converge
 
@@ -50,22 +51,25 @@ Every TL at every level of the tree follows this protocol:
 
 ### 1. Scaffold
 
-Before spawning any children, commit the shared foundation they'll build against:
+When it improves the handoff, commit the shared foundation children will build against:
 
 - **Types and interfaces** that children implement
 - **Test harness and fixtures** children will use
 - **Stub files** showing where children put their code
 - **CLAUDE.md additions** scoping this TL's domain
+- **Inline TODO prompts** that state the next action near the relevant interface
 
-Commit. Children fork from this commit.
+This scaffold is a decomposition artifact. It may contain explicit placeholders or failing tests and
+need not compile or be globally green; its purpose and current lifecycle stage must be legible.
+Children fork from the commit, so uncommitted files are invisible to worktree children.
 
 ### 2. Fork (spawn wave)
 
 Spawn children for wave N. Zero dependencies between siblings in the same wave.
 
-- **Sub-TLs**: `fork_wave` (Claude, Opus). `fork_session` defaults to **false** — context inheritance is opt-in per child, not automatic.
-- **Devs**: `spawn_dev` (Sonnet Claude, worktree). They get a self-contained spec. The CLAUDE.md from the scaffolding commit gives them project context.
-- **Workers**: `spawn_worker` (Sonnet Claude, ephemeral pane). Research, boilerplate, or non-conflicting edits.
+- **Sub-TLs**: `fork_wave`. `fork_session` defaults to **false** — context inheritance is opt-in per child, not automatic.
+- **Devs**: `spawn_dev` (worktree). They receive compact task information; the scaffold and repository guidance provide the richest context.
+- **Workers**: `spawn_worker` (ephemeral pane). Use for bounded research or explicitly authorized in-place edits.
 
 ### 3. Converge (merge wave)
 
@@ -85,23 +89,21 @@ After all waves are merged and integrated, call `submit_branch` against the pare
 
 ## Spec Quality
 
-Specs are self-contained — the leaf has no context from previous attempts. Every spec must include:
-
-1. **Anti-patterns** (FIRST) — known failure modes as explicit DO NOT rules
-2. **Read first** — exact files to read (CLAUDE.md, source files)
-3. **Steps** — numbered, each step = one concrete action with code snippets
-4. **Verify** — exact build/test commands
-5. **Done criteria** — what "done" looks like
-
-Include complete code snippets. Name every file by full path. Include exact commands, not "run the tests."
+Spawn prompts carry task information, not a second persona or generic lifecycle ritual. Start with
+the objective and observable done criteria. Add only useful context not already legible from the
+scaffold, mechanically checked scope, a small read-first list, task-specific constraints, optional
+step hints, and relevant verification. Empty sections disappear. Prefer repository-relative paths
+and concrete commands; do not demand line-by-line implementation when the child can exercise
+judgment within its scope.
 
 ## Convergence Protocol
 
-The TL does NOT iterate on children's work. Convergence is **leaf + reviewer**, not TL:
+Submission has a strong meaning: the child offers a complete, merge-ready assigned subtree. The
+parent owns review at fold time; an independent reviewer is an optional additional gate:
 
 1. Leaf commits, calls `submit_branch`.
 2. `submit_branch` runs its precondition checks in order: working tree clean → **rebase gate** (blocks with a `git rebase <parent>` prompt if the branch is behind its parent's current commit; fails open when the parent isn't a live ref, e.g. root) → project `.exo/checks/pre-merge/*` scripts.
-3. **If `review_enabled` is set** in `.exo/config.toml` (inherited down the tree; **off by default**), `submit_branch` spawns a one-shot Sonnet reviewer in its own worktree off the under-review diff. The reviewer reads the diff + `.exo/acceptance.md` + (when passed) the submitter's receipts, read-only (no build/test), and calls `verdict` with structured findings. Its task carries three prompt-level lenses beyond plain correctness — RECEIPTS (audit `deviations` against the diff), SCOPE (an undeclared out-of-scope file vs. any ALLOWED PATHS list is an Error), and DUPLICATION (an undeclared reimplementation of an existing mechanism, checked via the touched directories' CLAUDE.md, is an Error) — prompting only, no new mechanical scope/dup check. Severity is calibrated to the parent's actual fold decision: `error` means the parent would be right to REFUSE the fold; when unsure, the reviewer picks `warning` — a false block costs a full round-trip, a missed nit costs nothing.
+3. **If `review_enabled` is set** in `.exo/config.toml` (inherited down the tree; **off by default**), `submit_branch` spawns a one-shot reviewer in its own worktree off the under-review diff. The reviewer reads the diff + `.exo/acceptance.md` + (when passed) the submitter's receipts, read-only (no build/test), and calls `verdict` with structured findings. Its task carries three prompt-level lenses beyond plain correctness — RECEIPTS (audit `deviations` against the diff), SCOPE (an undeclared out-of-scope file vs. any ALLOWED PATHS list is an Error), and DUPLICATION (an undeclared reimplementation of an existing mechanism, checked via the touched directories' CLAUDE.md, is an Error) — prompting only, no new mechanical scope/dup check. Severity is calibrated to the parent's actual fold decision: `error` means the parent would be right to REFUSE the fold; when unsure, the reviewer picks `warning`.
    - No Error-severity findings, sha matches HEAD → the sidecar escalates `[READY]` to the parent directly — no LLM turn.
    - Error-severity findings → rendered into the submitter's context to address, then re-submit.
    - Reviewer abandoned (30-min wall-clock timeout via the watchdog tick, not a hook) → submitter is told to re-submit with `dangerously_skip_reviewer: true` instead of spawning another reviewer.
@@ -124,6 +126,6 @@ Review round-tripping is tracked via a durable `ReviewLog` (`ReviewRound`) persi
 
 - `notify_parent` for completion/failure/status updates to parent (not the convergence signal — that's `submit_branch` → `verdict` → `[READY]`)
 - `send_message` for peer-to-peer messaging to a named child (tree-edges only)
-- Messages arrive as `[from: X, kind: Y]` notifications from the recipient's Monitor-armed `exo listen` client, delivered by its own sidecar off the durable bus (large payloads arrive as a one-line `@`-file reference to read). Every node arms that monitor as its **first action** — the SessionStart hook injects the exact command. An unarmed node's messages **queue durably** (senders see a ⚠ "no active listener" note in their tool responses; `tree` shows `wake:-`) and drain the moment the monitor connects. CC Agent Teams native delivery was retired (as of Claude Code 2.1.178 a solo session-lead never drains its own Teams inbox), and its tmux-paste successor was cut as delivery too (fragile TUI typing, indistinguishable from user input) — tmux survives for spawning and human observability only. `exo` owns its delivery channel end to end; no native CC team tools are used.
+- Messages arrive as `[from: X, kind: Y]` notifications from the recipient's sidecar over the durable bus (large payloads may arrive as a one-line `@`-file reference to read). Codex delivery uses `codex queue`; Claude delivery uses the Monitor-armed `exo listen` client. If the harness delivery path is unavailable, messages remain queued and drain when it reconnects. tmux remains for spawning and observability, not message delivery.
 - The notification vocabulary is `[READY]` (converged, parent should merge), `[idle]`, `[FAILED: id]`, `[CHILD DIED: name]` (the watchdog observed a child's pane dead while un-reaped — its ledger state is `Died`; check `tree`, then merge what its branch holds or respawn), and `[CHILDREN DIED: N]` (the batched form — one message per watchdog tick when several deaths land in the same scan, e.g. a mass teardown or the first scan over a pre-lifecycle ledger). Acknowledge `Died` tombstones with `exo doctor --fix`, which records `Reaped` for reclaimed corpses and for dead children with no worktree left. There is no Copilot-era vocabulary (`[FIXES PUSHED]`, `[PR READY]`, `[REVIEW TIMEOUT]`) in v2.
-- Child events are pushed. A TL never polls; it continues useful non-overlapping work and yields only when nothing useful remains.
+- Child events are pushed, so repeated status polling is unnecessary. A manager may continue useful coordination, integration, investigation, or direct work while children run.

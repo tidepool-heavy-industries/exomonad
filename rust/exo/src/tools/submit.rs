@@ -444,8 +444,8 @@ pub struct SubmitBranch;
 impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for SubmitBranch {
     const NAME: &'static str = "submit_branch";
     const DESCRIPTION: &'static str =
-        "Request review of your branch (if reviewers are enabled for this project — see \
-         `review_enabled` in `.exo/config.toml`; off by default). Commit everything first: it \
+        "Submit your completed, merge-ready branch upward. Review runs only if enabled for this \
+         project (`review_enabled` in `.exo/config.toml`; off by default). Commit everything first: it \
          refuses on uncommitted changes, on a branch that's behind its parent (it'll tell you to \
          `git rebase` onto the parent first, so the parent's merge stays clean), or on failing \
          `.exo/checks/pre-merge` scripts. When reviewers are enabled, it spawns a reviewer of your \
@@ -457,8 +457,9 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
          instead of taking it on faith: the commands you actually ran, any counts worth handing up, \
          and anywhere you knowingly departed from your spec. Set `receipts.commit_tested` to the sha \
          you last verified at — it is checked against HEAD, and any commits you added since are \
-         named to your parent along with whether they touch the diff it's about to merge. \
-         After calling it, STOP and end your turn.";
+         named to your parent along with whether they touch the diff it's about to merge. Once \
+         submitted, wait for pushed review feedback or the parent's coordination before changing \
+         the offered branch.";
     type Args = SubmitBranchArgs;
 
     async fn run(ctx: &R, args: SubmitBranchArgs) -> CapResult<ToolOutput> {
@@ -588,7 +589,8 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
             return Ok(ToolOutput::with_data(
                 format!(
                     "Forwarded [READY] to your parent for branch {} WITHOUT review. Your parent \
-                     will decide whether to merge. STOP now and end your turn.{wake_note}",
+                     will decide whether to merge; keep the offered branch stable while it is \
+                     awaiting that decision.{wake_note}",
                     branch.as_str()
                 ),
                 json!({
@@ -723,10 +725,10 @@ impl<R: Git + Process + Spawner + Fs + Bus + Kv + Send + Sync> Tool<R> for Submi
 
         Ok(ToolOutput::with_data(
             format!(
-                "Review requested for branch {branch}: reviewer `{reviewer}` spawned. STOP now — do \
-                 nothing further and end your turn. You will be woken automatically: on approval \
-                 your `[READY]` is escalated to your parent with no action from you; on deny / \
-                 changes you'll receive the reviewer's feedback to address.",
+                "Review requested for branch {branch}: reviewer `{reviewer}` spawned. Feedback or \
+                 approval will be pushed. Keep the offered branch stable until then: on approval \
+                 your `[READY]` is escalated to your parent with no action from you; on denial or \
+                 requested changes you'll receive the reviewer's findings to address.",
                 branch = branch.as_str(),
                 reviewer = reviewer.as_str(),
             ),

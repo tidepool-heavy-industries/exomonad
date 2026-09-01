@@ -199,10 +199,10 @@ mod tests {
     #[test]
     fn test_role_protocol_maps_per_variant() {
         // Each ExoRole returns its own protocol const (the override of the empty RoleKind default).
-        assert!(ExoRole::Root.protocol().contains("Root TL Protocol"));
-        assert!(ExoRole::Tl.protocol().contains("Spawned TL Protocol"));
-        assert!(ExoRole::Dev.protocol().contains("Dev Agent Protocol"));
-        assert!(ExoRole::Worker.protocol().contains("Worker Agent Protocol"));
+        assert!(ExoRole::Root.protocol().contains("Root Manager Charter"));
+        assert!(ExoRole::Tl.protocol().contains("Subtree Manager Charter"));
+        assert!(ExoRole::Dev.protocol().contains("Dev Charter"));
+        assert!(ExoRole::Worker.protocol().contains("Worker Charter"));
         assert!(ExoRole::Reviewer.protocol().contains("Reviewer Protocol"));
         // T1.3: intent-cue anchoring lives in the protocol too, not just the spawn task.
         assert!(ExoRole::Reviewer

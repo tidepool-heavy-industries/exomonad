@@ -1,104 +1,67 @@
 ---
-description: "ExoMonad agent orchestration rules — loaded into every agent's context in projects using exomonad"
+description: "ExoMonad v2 agent orchestration rules for projects using exo"
 ---
 
 # ExoMonad Agent Rules
 
-## MCP Tools
+This project uses ExoMonad v2 Node-Mode through the `exo` binary. Treat the role charter injected
+at launch as the authoritative description of your responsibilities and available orchestration
+tools. Explicit instructions from the human or a parent agent take precedence over defaults.
 
-Use exomonad MCP tools for orchestration. Git and GitHub operations use `git` and `gh` CLI commands, NOT MCP tools.
+## Operating model
 
-| Tool | Role | What it does |
-|------|------|-------------|
-| `fork_wave` | root, tl | Fork N parallel Claude agents (own worktrees, context inherited by default via `fork_session`) |
-| `spawn_gemini` | root, tl | Spawn Gemini agent: `worktree` (branch+PR), `inline` (ephemeral pane), `standalone` (own repo) |
-| `file_pr` | tl, dev | Create/update PR (base branch auto-detected from branch naming) |
-| `merge_pr` | root, tl | Merge a child's PR |
-| `notify_parent` | tl, dev, worker | Send message to parent agent |
-| `send_message` | all | Send message to any exomonad-spawned agent |
-| `task_list` | dev, worker | List tasks from the shared task list |
-| `task_get` | dev, worker | Get a task by ID |
-| `task_update` | dev, worker | Update task status, owner, or activeForm |
+ExoMonad unfolds work into scoped child contexts and folds completed branches back into their
+parents. Root and TL agents are managers, but management is a perspective rather than a ban on
+direct work: use judgment to plan, scaffold, coordinate, investigate, integrate, or implement when
+that best advances the assigned outcome.
 
-## Agent Hierarchy
+- Root owns the user's intent and final result.
+- TL owns a subtree, its children, integration, and a complete submission upward.
+- Dev owns a focused branch slice and submits it when merge-ready.
+- Worker performs a bounded task in its parent's worktree and reports upward.
+- Reviewer, when enabled, independently judges a submitted slice.
 
-- **TL (Tech Lead)**: Claude (Opus). Decomposes, specs, scaffolds, spawns, merges. Never implements directly.
-- **Dev (Leaf)**: Gemini. Implements a focused spec, files PR. No spawning.
-- **Worker**: Gemini. Ephemeral pane, no branch. Research or in-place edits.
+Discover and use the ExoMonad tools actually exposed to your role. Tool descriptions define
+mechanics; they do not override the role charter or task-specific instructions. Git operations use
+the `git` CLI directly.
 
-## The TL Protocol: Scaffold-Fork-Converge
+## Scaffold, fork, converge
 
-Every TL at every level of the tree follows this protocol:
+When delegation helps:
 
-### 1. Scaffold
+1. Create and commit any shared scaffold children need: interfaces, fixtures, stubs, tests, local
+   guidance, or actionable `todo!()` markers. A scaffold is a decomposition artifact and may be
+   temporarily incomplete or fail compilation when its state and intended next actions are clear.
+2. Spawn independent siblings in the same wave. Give each child an object-level objective,
+   observable done criteria, useful local context, mechanically checked scope, relevant constraints,
+   and verification. Avoid duplicating generic role ritual in the task prompt.
+3. Continue useful work while children run. Child events are pushed; mandatory polling and idle
+   turns are unnecessary.
+4. Merge completed child branches sequentially, integrate their outputs, and run proportionate
+   verification.
+5. Submit the complete subtree to the parent when it is merge-ready.
 
-Before spawning any children, commit the shared foundation they'll build against:
+Fresh child contexts are the default. Inherit a parent session only when the task genuinely needs
+that context. Reviewers are optional and controlled by project configuration or an explicit
+mid-flight review request.
 
-- **Types and interfaces** that children implement
-- **Test harness and fixtures** children will use
-- **Stub files** showing where children put their code
-- **CLAUDE.md additions** scoping this TL's domain
+## Submission boundary
 
-Commit and push. Children fork from this commit.
+`submit_branch` means the assigned slice is complete, committed, verified as appropriate, and ready
+for the parent to merge. It is not a status update. Use the role's messaging tool for progress,
+questions, failures, and bounded worker results.
 
-### 2. Fork (spawn wave)
+Before submission:
 
-Spawn children for wave N. Zero dependencies between siblings in the same wave.
+- keep changes inside the assigned boundary, or report and justify deviations;
+- incorporate the current parent branch when required by the submission gate;
+- run the relevant checks and preserve useful receipts;
+- leave the worktree clean and commit the result.
 
-- **Sub-TLs**: `fork_wave` (Claude). They inherit full conversation context — they already know the plan and the scaffolding.
-- **Devs**: `spawn_gemini` with `isolation: "worktree"` (Gemini). They get a self-contained spec. The CLAUDE.md from the scaffolding commit gives them project context.
+The parent owns the fold decision and post-merge integration. An independent reviewer, when
+enabled, is an additional gate rather than a substitute for parent judgment.
 
-### 3. Converge (merge wave)
+## Architecture boundary
 
-Wait for children to complete (notifications arrive via Teams inbox). Merge their PRs sequentially. Then write an **integration commit**:
-
-- Wire children's outputs together
-- Run integration tests
-- Fix integration bugs
-
-### 4. Next wave (if any)
-
-Wave N+1 depends on merged wave N. Repeat from step 2.
-
-### 5. PR to parent
-
-After all waves are merged and integrated, file a PR to the parent TL's branch.
-
-## Spec Quality
-
-Specs are self-contained — the leaf has no context from previous attempts. Every spec must include:
-
-1. **Anti-patterns** (FIRST) — known failure modes as explicit DO NOT rules
-2. **Read first** — exact files to read (CLAUDE.md, source files)
-3. **Steps** — numbered, each step = one concrete action with code snippets
-4. **Verify** — exact build/test commands
-5. **Done criteria** — what "done" looks like
-
-Include complete code snippets. Name every file by full path. Include exact commands, not "run the tests."
-
-## Convergence Protocol
-
-The TL does NOT iterate on children's work. Convergence is **leaf + Copilot**, not TL:
-
-1. Leaf implements spec, commits, files PR
-2. Copilot reviews automatically on PR creation
-3. If Copilot requests changes → injected into leaf's pane → leaf fixes → pushes
-4. System notifies parent: `[FIXES PUSHED]`, `[PR READY]`, or `[REVIEW TIMEOUT]`
-5. TL merges when notified
-
-The TL never manually reviews code, never fixes a leaf's implementation.
-
-## Branch Naming
-
-`{parent_branch}.{slug}` (dot separator). PRs target the parent branch, not main. Merged via recursive fold up the tree.
-
-## State Machines
-
-Agent lifecycle is tracked via `StateMachine` typeclass instances. Phase types live in role code (`.exo/roles/`). The framework handles persistence (KV), logging, and stop hook integration. Agents cannot exit during critical phases (e.g., `ChangesRequested`).
-
-## Communication
-
-- `notify_parent` for completion/failure/status updates to parent
-- `send_message` for peer-to-peer messaging between any agents
-- Messages arrive as native `<teammate-message>` via Teams inbox
-- TL idles between spawning and receiving notifications — no polling
+These rules describe v2 Node-Mode. Classic `exomonad` workflows may still exist for compatibility,
+but their PR-based tools, polling loops, and lifecycle language do not define the v2 experience.

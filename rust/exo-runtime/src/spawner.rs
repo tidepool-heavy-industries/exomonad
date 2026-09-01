@@ -636,31 +636,6 @@ impl Runtime {
         )
     }
 
-    /// Resolve a role's steering protocol: the optional on-disk override
-    /// (`{working_dir}/.exo/roles/devswarm/context/{role}.md`) if it exists, else the domain's
-    /// baked-in const (`RoleKind::protocol`). The compiled const is the source of truth; the file
-    /// just overrides it during prompt-tuning. Mirrors the same resolution `exo-node`'s
-    /// SessionStart hook applies — the resolved protocol is passed to the child Claude via
-    /// `--append-system-prompt`.
-    async fn resolve_protocol(&self, role_str: &str, baked: &str) -> String {
-        let path = self
-            .working_dir
-            .join(format!(".exo/roles/devswarm/context/{role_str}.md"));
-        match exo_caps::Fs::read(self, &path).await {
-            Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::warn!(
-                        "protocol override {} is not UTF-8 ({e}); using the baked-in const",
-                        path.display()
-                    );
-                    baked.to_string()
-                }
-            },
-            Err(_) => baked.to_string(),
-        }
-    }
-
     pub(crate) async fn resolve_child_name(
         &self,
         given: Option<AgentName>,
@@ -1380,9 +1355,14 @@ impl Spawner for Runtime {
             });
         // Resolve the child's role-steering protocol (override-or-const) while the role is still
         // typed. Threaded onto `BirthCore` and passed to Claude via `--append-system-prompt`.
-        let protocol = self
-            .resolve_protocol(role.role_str(), role.protocol())
-            .await;
+        let resolved_protocol = crate::protocol::resolve_role_protocol(
+            &self.working_dir,
+            role.role_str(),
+            role.protocol(),
+        )
+        .await;
+        crate::protocol::log_launch_provenance(role.role_str(), &resolved_protocol);
+        let protocol = resolved_protocol.text;
         let role = RoleRecord::new(&role).map_err(|e| SpawnError::Failed {
             op: "role_record",
             child: Some(name.clone()),

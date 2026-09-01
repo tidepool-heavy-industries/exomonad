@@ -1062,6 +1062,7 @@ dependencies = [
  "nix",
  "serde",
  "serde_json",
+ "sha2",
  "shell-escape",
  "tempfile",
  "thiserror 2.0.18",

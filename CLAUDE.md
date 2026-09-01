@@ -25,7 +25,11 @@ These are 1:1:1. You cannot have a worktree without a context window to operate 
 
 ### The Hylomorphism
 
-**Unfold — the scaffold commit.** A TL plans one level down, commits the shared foundation (types, interfaces, stubs, CLAUDE.md), and spawns children. The scaffold commit defines the shape of the decomposition — the most important thing a TL does. Children fork from it and cannot see each other.
+**Unfold — the scaffold commit.** A manager plans one level down and, when it improves the handoff,
+commits a shared foundation of types, interfaces, fixtures, tests, local guidance, and explicit TODO
+prompts before spawning children. It is a decomposition artifact, so it need not be finished,
+globally green, or even compilable when a clear placeholder communicates the boundary better.
+Children fork from it and cannot see each other.
 
 **Fold — merge + integrate.** As children complete, the TL merges their branches, wires outputs together, and writes an integration commit — accumulating understanding from what children produced to sharpen the next wave's specs. After all waves fold, the TL surfaces its result to its parent, which folds it in turn.
 
@@ -153,7 +157,9 @@ Per-architecture detail: classic components + data flows → [`rust/exomonad/CLA
 The TL drives the recursion at each node: unfold (scaffold + spawn), continue useful non-overlapping work while pushed child events are pending, then fold (merge + integrate + surface up). It delegates substantial independent work by default, while directly handling small work, shared scaffolding, integration, conflict resolution, and diagnostics when delegation adds more overhead than value.
 
 - **Depth over breadth** — more than ~4 independent leaves ⇒ interpose a sub-TL. Root reasons about decomposition + integration points, not implementation detail.
-- **Intelligence gradient** — expensive context decomposes; cheap leaves implement; review converges. Every line the TL writes is expensive code, every review cycle it runs is an expensive cycle.
+- **Context preservation** — managers retain vision and coordination context when a task can be
+  serialized into a useful handoff; they may inspect or work directly when judgment, discovery, or
+  integration requires it.
 - **Push-aware coordination** — decompose → spec → spawn; never poll. Continue useful coordination or local work, and yield only when nothing useful remains because child events are pushed.
 - **Spec quality (one shot)** — objective and observable done criteria first, then mechanical paths, small read-first context, concise constraints, optional steps, exact verification, and handoff. Use repository-relative paths and concrete commands.
 - **Calibrated escalation** — a leaf that fails repeatedly reports what it tried; the TL re-decomposes, resolves integration or conflict issues in its own worktree, or escalates when authority or scope is missing.

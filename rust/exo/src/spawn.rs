@@ -22,7 +22,7 @@ pub struct ExoSpawn {
     pub name_prefix: String,
     /// The fully-rendered prompt/task body delivered to the child.
     pub task: String,
-    /// Opt-in Claude context inheritance (`--resume --fork-session`).
+    /// Opt-in context inheritance for backends that support session forking.
     pub fork_session: bool,
     /// An explicit `--model` for this child, overriding the role's default. `None` ⇒ the role
     /// default (`ExoRole::model`). A launch profile still wins over both.
@@ -73,8 +73,8 @@ impl SpawnSpec for ExoSpawn {
 /// engine births a child from an already-rendered task, so the formatting is the domain's concern.
 ///
 /// `boundary` is the prose forbidden-actions list — rendered under "CONSTRAINTS".
-/// `file_boundary` is the distinct, mechanically-checked allowed-paths list — rendered earlier
-/// under "ALLOWED PATHS". The two answer different questions ("what must you not do" vs
+/// `file_boundary` is the distinct, mechanically-checked allowed-paths list — rendered under
+/// "SCOPE (ALLOWED PATHS)". The two answer different questions ("what must you not do" vs
 /// "where may your diff land") and must never be conflated: `file_boundary` is also persisted
 /// parent-side and checked against the child's actual diff at merge time (see `boundary.rs`),
 /// while `boundary` is pure prose the child reads and nothing else ever checks.
@@ -89,59 +89,52 @@ pub fn render_spec_prompt(
     context: Option<&String>,
     done_criteria: &[String],
 ) -> String {
-    let mut prompt = String::from(
-        "EXECUTION CONTRACT:\nWork autonomously in your assigned scope. Follow your role protocol for git, verification, escalation, and handoff.\n\nOBJECTIVE:\n",
-    );
+    let mut prompt = String::from("OBJECTIVE\n");
     prompt.push_str(task);
 
+    if let Some(ctx) = context {
+        if !ctx.is_empty() {
+            prompt.push_str("\n\nCONTEXT\n");
+            prompt.push_str(ctx);
+        }
+    }
     if !done_criteria.is_empty() {
-        prompt.push_str("\n\nDONE WHEN:");
+        prompt.push_str("\n\nDONE WHEN");
         for d in done_criteria {
             prompt.push_str(&format!("\n- {d}"));
         }
     }
     if !file_boundary.is_empty() {
-        prompt.push_str(
-            "\n\nALLOWED PATHS (your diff must stay inside these; mechanically checked when your \
-             branch is merged):",
-        );
+        prompt
+            .push_str("\n\nSCOPE (ALLOWED PATHS; mechanically checked when this branch is folded)");
         for p in file_boundary {
             prompt.push_str(&format!("\n- {p}"));
         }
     }
     if !read_first.is_empty() {
-        prompt.push_str("\n\nREAD FIRST (only the context needed to begin):");
+        prompt.push_str("\n\nREAD FIRST");
         for rf in read_first {
             prompt.push_str(&format!("\n- {rf}"));
         }
     }
     if !boundary.is_empty() {
-        prompt.push_str("\n\nCONSTRAINTS:");
+        prompt.push_str("\n\nCONSTRAINTS");
         for b in boundary {
             prompt.push_str(&format!("\n- {b}"));
         }
     }
-    if let Some(ctx) = context {
-        if !ctx.is_empty() {
-            prompt.push_str("\n\nCONTEXT:\n");
-            prompt.push_str(ctx);
-        }
-    }
     if !steps.is_empty() {
-        prompt.push_str("\n\nSTEPS (if useful):");
+        prompt.push_str("\n\nSTEPS (OPTIONAL HINTS)");
         for (i, step) in steps.iter().enumerate() {
             prompt.push_str(&format!("\n{}. {}", i + 1, step));
         }
     }
     if !verify.is_empty() {
-        prompt.push_str("\n\nVERIFY:");
+        prompt.push_str("\n\nVERIFY");
         for v in verify {
             prompt.push_str(&format!("\n- {v}"));
         }
     }
-    prompt.push_str(
-        "\n\nHANDOFF:\nReturn a concise outcome and verification receipt through the completion path required by your role protocol.",
-    );
     prompt
 }
 
@@ -175,27 +168,26 @@ mod tests {
             &["step 1".into(), "step 2".into()],
             &["cargo test".into()],
             &["no delete".into()],
-            &[],
+            &["src".into()],
             Some(&"some context".to_string()),
             &["all green".into()],
         );
-        assert!(p.contains("OBJECTIVE:\ndo work"));
-        assert!(p.contains("CONSTRAINTS:\n- no delete"));
-        assert!(p.contains("READ FIRST (only the context needed to begin):\n- README.md"));
-        assert!(p.contains("STEPS (if useful):\n1. step 1\n2. step 2"));
-        assert!(p.contains("VERIFY:\n- cargo test"));
-        assert!(p.contains("CONTEXT:\nsome context"));
-        assert!(p.contains("DONE WHEN:\n- all green"));
+        assert!(p.contains("OBJECTIVE\ndo work"));
+        assert!(p.contains("CONSTRAINTS\n- no delete"));
+        assert!(p.contains("READ FIRST\n- README.md"));
+        assert!(p.contains("STEPS (OPTIONAL HINTS)\n1. step 1\n2. step 2"));
+        assert!(p.contains("VERIFY\n- cargo test"));
+        assert!(p.contains("CONTEXT\nsome context"));
+        assert!(p.contains("DONE WHEN\n- all green"));
         let positions = [
-            "EXECUTION CONTRACT:",
-            "OBJECTIVE:",
-            "DONE WHEN:",
+            "OBJECTIVE",
+            "CONTEXT",
+            "DONE WHEN",
+            "SCOPE (ALLOWED PATHS",
             "READ FIRST",
-            "CONSTRAINTS:",
-            "CONTEXT:",
-            "STEPS (if useful):",
-            "VERIFY:",
-            "HANDOFF:",
+            "CONSTRAINTS",
+            "STEPS (OPTIONAL HINTS)",
+            "VERIFY",
         ]
         .map(|heading| p.find(heading).unwrap());
         assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
@@ -204,12 +196,15 @@ mod tests {
     #[test]
     fn render_spec_prompt_empty_context_omitted() {
         let p = render_spec_prompt("task", &[], &[], &[], &[], &[], Some(&"".to_string()), &[]);
-        assert!(!p.contains("CONTEXT:"));
-        assert!(!p.contains("DONE WHEN:"));
+        assert_eq!(p, "OBJECTIVE\ntask");
+        assert!(!p.contains("CONTEXT\n"));
+        assert!(!p.contains("DONE WHEN\n"));
         assert!(!p.contains("READ FIRST"));
-        assert!(!p.contains("CONSTRAINTS:"));
-        assert!(!p.contains("STEPS (if useful):"));
-        assert!(!p.contains("VERIFY:"));
+        assert!(!p.contains("CONSTRAINTS\n"));
+        assert!(!p.contains("STEPS (OPTIONAL HINTS)"));
+        assert!(!p.contains("VERIFY\n"));
+        assert!(!p.contains("EXECUTION CONTRACT"));
+        assert!(!p.contains("HANDOFF"));
     }
 
     #[test]
@@ -229,8 +224,8 @@ mod tests {
         assert!(p.contains("- src/tools"));
         // The two sections stay distinct: `boundary` entries never appear under ALLOWED PATHS and
         // vice versa.
-        assert!(p.contains("CONSTRAINTS:\n- no delete"));
-        let constraints_idx = p.find("CONSTRAINTS:").unwrap();
+        assert!(p.contains("CONSTRAINTS\n- no delete"));
+        let constraints_idx = p.find("CONSTRAINTS\n").unwrap();
         let allowed_idx = p.find("ALLOWED PATHS").unwrap();
         assert!(
             allowed_idx < constraints_idx,

@@ -1,4 +1,8 @@
-# Test Runner Protocol
+# Classic Test Runner Protocol (Legacy Fixture)
+
+> **Classic-only test fixture.** This is not a v2 role charter and is never resolved by the `exo`
+> role-protocol loader. Its Gemini/Copilot/PR vocabulary intentionally documents the deprecated
+> Classic E2E scenario; do not use it as Node-Mode operating guidance.
 
 You are an E2E test runner companion. You test the root TL by sending it instructions via the `instruct` MCP tool, observing system state via read-only bash, and simulating Copilot reviews via the `post_review` MCP tool.
 

@@ -422,6 +422,16 @@ pub async fn run(
     // resumes the most recent conversation in this cwd. A fresh `init` has nothing to continue.
     // The root has no positional prompt (interactive launch), so --mcp-config never abuts a
     // prompt argument — but we use ClaudeInvocation for uniformity and structural safety.
+    let root_protocol =
+        exo_runtime::protocol::resolve_role_protocol(&cwd, "root", exo::protocol::ROOT).await;
+    exo_runtime::protocol::log_launch_provenance("root", &root_protocol);
+    println!(
+        "exo init: binary {} ({}) root protocol {} from {}",
+        exo_runtime::protocol::BUILD_VERSION,
+        exo_runtime::protocol::BUILD_REVISION,
+        root_protocol.short_hash(),
+        root_protocol.source
+    );
     let launch = if backend == crate::config::Backend::Codex {
         let codex = papers.codex.as_ref().expect("Codex papers set");
         // Root is the top-level TL for Codex model policy. An explicit legacy `model` setting
@@ -438,7 +448,7 @@ pub async fn run(
             .map(|(_, value)| value.clone());
         let identity = format!(
             "You are exomonad node 'root' (role: root) on the current branch. Parent: none.\n\n{}",
-            exo::protocol::ROOT
+            root_protocol.text
         );
 
         // Only bindings captured by the stock-TUI integration are resume-safe. Older app-server
@@ -494,7 +504,7 @@ pub async fn run(
             disallowed_tools: vec![],
             settings_path: Some(settings_path.to_string_lossy().into_owned()),
             mcp_config_path: Some(mcp_config_path.to_string_lossy().into_owned()),
-            append_system_prompt: None, // root has no role-steering prompt
+            append_system_prompt: Some(root_protocol.text.clone()),
             model: model.map(|m| m.to_string()),
             prompt_file: None, // interactive launch — no positional prompt
             fork_session_id: None,
@@ -586,5 +596,25 @@ mod tests {
     #[test]
     fn cgroup_content_no_match_on_empty() {
         assert!(!cgroup_content_in_slice("", "swarm.slice"));
+    }
+
+    #[test]
+    fn codex_root_and_spawned_dev_render_role_charters_without_task_sections() {
+        for charter in [exo::protocol::ROOT, exo::protocol::DEV] {
+            let rendered = exo_runtime::codex::render_developer_instructions(charter);
+            assert!(rendered.starts_with(charter));
+            assert!(rendered.contains("## Exomonad Tool Routing (Codex)"));
+            assert!(!rendered.contains("OBJECTIVE\n"));
+            assert!(!rendered.contains("DONE WHEN\n"));
+            assert!(!rendered.contains("EXECUTION CONTRACT"));
+        }
+        assert!(exo::protocol::ROOT.contains("Root Manager Charter"));
+        assert!(exo::protocol::DEV.contains("Dev Charter"));
+    }
+
+    #[test]
+    fn checked_in_root_override_matches_the_baked_charter() {
+        let override_text = include_str!("../../../.exo/roles/devswarm/context/root.md");
+        assert_eq!(override_text.trim(), exo::protocol::ROOT.trim());
     }
 }

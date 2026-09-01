@@ -28,6 +28,7 @@ mod kv;
 mod liveness;
 pub mod node_config;
 mod process;
+pub mod protocol;
 pub mod session_boot;
 mod spawner;
 mod tmux;

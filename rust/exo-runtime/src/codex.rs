@@ -23,11 +23,11 @@ pub enum LaunchMode<'a> {
 /// the distinction, while Claude's role prompts remain unchanged.
 const EXOMONAD_TOOL_ROUTING: &str = r#"## Exomonad Tool Routing (Codex)
 
-Exomonad orchestration uses the `mcp__exomonad__*` MCP tools, not Codex's native `collaboration.*` tools. Native `collaboration.spawn_agent` creates a Codex subagent but does not create an Exomonad node, worktree, branch, ledger entry, review, or fold; never use it for the Exomonad workflow described below.
+Exomonad orchestration uses the `mcp__exomonad__*` MCP tools, not Codex's native `collaboration.*` tools. Native collaboration operations do not participate in Exomonad's worktree, ledger, messaging, submission, or fold lifecycle, so they cannot substitute for an Exomonad operation.
 
-The Exomonad MCP tools are lazy-loaded. Before an Exomonad operation, discover them in code mode through `functions.exec`: inspect/filter `ALL_TOOLS` for names beginning with `mcp__exomonad__`, then invoke the matching nested function on `tools` (for example `tools.mcp__exomonad__fork_wave(...)`). Use `mcp__exomonad__fork_wave`, `mcp__exomonad__spawn_dev`, and `mcp__exomonad__spawn_worker` to spawn; `mcp__exomonad__tree` to inspect the node tree; `mcp__exomonad__send_message` and `mcp__exomonad__notify_parent` for messages; `mcp__exomonad__submit_branch` for child submission; and `mcp__exomonad__merge` for the parent fold. If a tool is absent from your role's discovered inventory, that operation is not available to this node."#;
+The Exomonad MCP tools are lazy-loaded. Before an Exomonad operation, discover this role's actual roster in code mode through `functions.exec`: filter `ALL_TOOLS` for names beginning with `mcp__exomonad__`, then invoke the matching nested function on `tools`. The discovered roster is authoritative; if an operation is absent, it is not available to this node."#;
 
-fn developer_instructions_with_tool_routing(instructions: &str) -> String {
+pub fn render_developer_instructions(instructions: &str) -> String {
     format!("{instructions}\n\n{EXOMONAD_TOOL_ROUTING}")
 }
 
@@ -97,7 +97,7 @@ pub fn tui_command(
     );
     push_config_value(&mut command, "mcp_servers.exomonad.enabled", "true".into());
     push_config_value(&mut command, "mcp_servers.exomonad.required", "true".into());
-    let developer_instructions = developer_instructions_with_tool_routing(developer_instructions);
+    let developer_instructions = render_developer_instructions(developer_instructions);
     push_config_string(
         &mut command,
         "developer_instructions",
@@ -361,9 +361,8 @@ mod tests {
         assert!(command.contains("EXOMONAD_PAPERS=/tmp/node.json"));
         assert!(command.contains("mcp_servers.exomonad.command"));
         assert!(command.contains("developer_instructions"));
-        assert!(command.contains("collaboration.spawn_agent"));
-        assert!(command.contains("mcp__exomonad__fork_wave"));
-        assert!(command.contains("mcp__exomonad__merge"));
+        assert!(command.contains("native `collaboration.*` tools"));
+        assert!(command.contains("mcp__exomonad__"));
         assert!(!command.contains("--remote"));
         assert!(!command.contains("app-server"));
     }
@@ -386,23 +385,26 @@ mod tests {
 
     #[test]
     fn codex_instructions_route_exomonad_operations_to_lazy_mcp_tools() {
-        let instructions = developer_instructions_with_tool_routing("role protocol");
+        let instructions = render_developer_instructions("role protocol");
 
         assert!(instructions.starts_with("role protocol\n\n"));
         assert!(instructions.contains("not Codex's native `collaboration.*` tools"));
-        assert!(instructions.contains("never use it for the Exomonad workflow"));
-        assert!(instructions.contains("inspect/filter `ALL_TOOLS`"));
-        assert!(instructions.contains("tools.mcp__exomonad__fork_wave"));
-        for operation in [
-            "mcp__exomonad__spawn_dev",
-            "mcp__exomonad__spawn_worker",
-            "mcp__exomonad__tree",
-            "mcp__exomonad__send_message",
-            "mcp__exomonad__notify_parent",
-            "mcp__exomonad__submit_branch",
-            "mcp__exomonad__merge",
-        ] {
-            assert!(instructions.contains(operation), "missing {operation}");
+        assert!(instructions.contains("do not participate in Exomonad's worktree"));
+        assert!(instructions.contains("filter `ALL_TOOLS`"));
+        assert!(instructions.contains("this role's actual roster"));
+        assert!(instructions.contains("The discovered roster is authoritative"));
+        assert!(!instructions.contains("mcp__exomonad__fork_wave"));
+        assert!(!instructions.contains("mcp__exomonad__submit_branch"));
+    }
+
+    #[test]
+    fn rendered_root_and_leaf_developer_instructions_keep_role_authority_separate_from_routing() {
+        for charter in ["root manager charter", "dev leaf charter"] {
+            let instructions = render_developer_instructions(charter);
+            assert!(instructions.starts_with(charter));
+            assert_eq!(instructions.matches("## Exomonad Tool Routing").count(), 1);
+            assert!(!instructions.contains("OBJECTIVE\n"));
+            assert!(!instructions.contains("DONE WHEN\n"));
         }
     }
 

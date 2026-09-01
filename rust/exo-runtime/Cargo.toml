@@ -27,5 +27,6 @@ tempfile = { workspace = true }
 uuid = { workspace = true }
 # Quote values interpolated into the agent launch command pasted into a tmux pane.
 shell-escape = "0.1"
+sha2 = "0.10"
 # killpg for the gate-timeout process-group kill (Process::run_with_timeout).
 nix = { workspace = true }

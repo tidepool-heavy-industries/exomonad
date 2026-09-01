@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
+const DISTRIBUTED_RULES_TEMPLATE: &str = include_str!("../../../.exo/rules/exomonad.md");
+
 /// Run the init command: create or attach to tmux session.
 pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()> {
     use exomonad_core::services::tmux_ipc::TmuxIpc;
@@ -168,32 +170,7 @@ pub async fn run(session_override: Option<String>, recreate: bool) -> Result<()>
         .context("Failed to write hook configuration")?;
     info!("Hook configuration written to .claude/settings.local.json");
 
-    // Copy Claude rules template if available and not already present
-    {
-        let rules_dest = cwd.join(".claude/rules/exomonad.md");
-        if !rules_dest.exists() {
-            // Resolution: project-local .exo/rules/ → global ~/.exo/rules/
-            let local_template = cwd.join(".exo/rules/exomonad.md");
-            let global_template = std::env::var("HOME")
-                .ok()
-                .map(|h| PathBuf::from(h).join(".exo/rules/exomonad.md"));
-
-            let source = if local_template.exists() {
-                Some(local_template)
-            } else {
-                global_template.filter(|p| p.exists())
-            };
-
-            if let Some(src) = source {
-                std::fs::create_dir_all(cwd.join(".claude/rules"))?;
-                std::fs::copy(&src, &rules_dest)?;
-                info!(
-                    src = %src.display(),
-                    "Copied Claude rules to .claude/rules/exomonad.md"
-                );
-            }
-        }
-    }
+    ensure_claude_rules(&cwd)?;
 
     // Symlink role context for root agent
     {
@@ -752,6 +729,61 @@ pub fn ensure_gitignore(project_dir: &Path) -> Result<()> {
         writeln!(file, "{}", line)?;
     }
     Ok(())
+}
+
+/// Install project guidance without overwriting a repository-owned destination.
+/// Resolution is project-local override, global install, then the template baked into this binary.
+pub fn ensure_claude_rules(project_dir: &Path) -> Result<()> {
+    let global_template = std::env::var("HOME")
+        .ok()
+        .map(|home| PathBuf::from(home).join(".exo/rules/exomonad.md"));
+    ensure_claude_rules_with_global(project_dir, global_template.as_deref())
+}
+
+fn ensure_claude_rules_with_global(
+    project_dir: &Path,
+    global_template: Option<&Path>,
+) -> Result<()> {
+    let rules_dest = project_dir.join(".claude/rules/exomonad.md");
+    if rules_dest.exists() {
+        return Ok(());
+    }
+
+    let local_template = project_dir.join(".exo/rules/exomonad.md");
+    let source = if local_template.exists() {
+        Some(local_template)
+    } else {
+        global_template
+            .filter(|path| path.exists())
+            .map(Path::to_owned)
+    };
+
+    std::fs::create_dir_all(project_dir.join(".claude/rules"))?;
+    if let Some(src) = source {
+        std::fs::copy(&src, &rules_dest)?;
+        info!(src = %src.display(), "Copied Claude rules to .claude/rules/exomonad.md");
+    } else {
+        std::fs::write(&rules_dest, DISTRIBUTED_RULES_TEMPLATE)?;
+        info!("Installed baked Claude rules at .claude/rules/exomonad.md");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod rules_tests {
+    use super::{ensure_claude_rules_with_global, DISTRIBUTED_RULES_TEMPLATE};
+
+    #[test]
+    fn missing_external_template_falls_back_to_portable_baked_guidance() {
+        let project = tempfile::tempdir().unwrap();
+        ensure_claude_rules_with_global(project.path(), None).unwrap();
+
+        let installed =
+            std::fs::read_to_string(project.path().join(".claude/rules/exomonad.md")).unwrap();
+        assert_eq!(installed, DISTRIBUTED_RULES_TEMPLATE);
+        assert!(installed.contains("Explicit instructions"));
+        assert!(!installed.contains("rust/"));
+    }
 }
 
 pub async fn wait_for_server_socket(project_dir: &Path) -> Result<()> {

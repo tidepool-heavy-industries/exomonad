@@ -20,14 +20,18 @@ Children fork from this commit. The type stubs define module boundaries — each
 
 ### Session Forking Interaction
 
-With `--resume --fork-session`, children inherit the parent's full conversation context. The spec commit is the *code* artifact; the forked session is the *reasoning* artifact. Together:
-- **What** to implement (spec commit — types, tests)
-- **Why** it's structured this way (forked session — parent's decomposition reasoning)
-- **Where** boundaries are (spawn prompt — explicit file ownership)
+The scaffold commit plus a compact task prompt is the primary handoff. The repository artifact
+carries interfaces, executable acceptance context, and nearby intent; the prompt adds decisions that
+are not legible there and names any mechanical scope. A fresh child context independently re-derives
+the implementation from those artifacts, which is part of the review architecture.
+
+Session forking is opt-in. When a task truly benefits from the parent's conversational context,
+`fork_session` may add it, but full transcript inheritance is not the default reasoning channel.
 
 ## Consequences
 
 - Compiler catches interface mismatches between children
 - Children can't accidentally overlap if modules are clearly partitioned
 - Parent invests tokens upfront in the spec commit (prevents rework downstream)
+- Fresh child contexts receive distilled intent instead of accumulated conversation by default
 - If a child needs to change a shared type, it sends a question to the parent

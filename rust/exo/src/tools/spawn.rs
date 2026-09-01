@@ -260,7 +260,7 @@ pub struct SpawnWorkerArgs {
     #[serde(default)]
     pub read_first: Vec<String>,
     /// Per-spawn model override for this child, replacing the role's default. Capped at the
-    /// spawning node's own tier. IGNORED for a role redirected by a launch profile — that
+    /// spawning node's own tier. Ignored for a role redirected by a launch profile — that
     /// profile's proxy serves exactly one model, so overriding it would 404.
     #[serde(default)]
     pub model: Option<String>,
@@ -272,16 +272,12 @@ pub struct SpawnWorker;
 impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnWorker {
     const NAME: &'static str = "spawn_worker";
     const DESCRIPTION: &'static str =
-        "Spawn an ephemeral Sonnet worker in a pane inside YOUR worktree (no own branch, no \
-         review). PREFER DELEGATING OVER DOING WORK YOURSELF — a Sonnet leaf costs far less than \
-         your own tokens, so every line you implement yourself is wasted budget. Give it \
-         acceptance criteria, key file paths, and anti-patterns — not line-by-line code. For \
-         research or non-conflicting in-place edits; it reports back with `notify_parent`. There \
-         is nothing to merge — for work that should land on its own branch, use `spawn_dev`. \
-         Set `model` to override this child's model tier for this one spawn, capped at your own \
-         role's tier; ignored if this role is redirected by a launch profile, since that \
-         profile's proxy serves exactly one model. Never poll after spawning: events are pushed. \
-         Continue useful non-overlapping work, or yield when none remains.";
+        "Spawn an ephemeral worker in a pane inside the caller's worktree. The worker has no \
+         branch or review lifecycle, may edit only when its task authorizes edits, and reports \
+         through `notify_parent`; there is nothing to merge. Use `spawn_dev` when work should land \
+         on an isolated branch. `model` overrides this spawn's role default subject to the caller's \
+         tier and any launch profile. Child events are pushed, so repeated status polling is \
+         unnecessary.";
     type Args = SpawnWorkerArgs;
 
     async fn run(ctx: &R, args: SpawnWorkerArgs) -> CapResult<ToolOutput> {
@@ -340,7 +336,7 @@ pub struct SpawnDevArgs {
     #[serde(default)]
     pub read_first: Vec<String>,
     /// Per-spawn model override for this child, replacing the role's default. Capped at the
-    /// spawning node's own tier. IGNORED for a role redirected by a launch profile — that
+    /// spawning node's own tier. Ignored for a role redirected by a launch profile — that
     /// profile's proxy serves exactly one model, so overriding it would 404.
     #[serde(default)]
     pub model: Option<String>,
@@ -367,20 +363,14 @@ pub struct SpawnDev;
 impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for SpawnDev {
     const NAME: &'static str = "spawn_dev";
     const DESCRIPTION: &'static str =
-        "Spawn a Sonnet dev leaf in its OWN worktree + branch with a self-contained spec. PREFER \
-         DELEGATING OVER DOING WORK YOURSELF — a Sonnet leaf costs far less than your own tokens; \
-         every line you implement yourself is wasted budget. Use the structured fields \
-         (steps, verify, boundary, read_first) for precise specs — give it acceptance criteria \
-         and file paths, not line-by-line code. It commits to that branch and calls \
-         `submit_branch` when ready; a one-shot reviewer checks it, then you `merge` the branch \
-         locally. No PRs, no remote — convergence is on-disk. Refuses to run on a dirty \
-         worktree — the child forks from your current commit, so uncommitted state would be \
-         invisible to it. Set `model` to override this child's model tier for this one spawn, \
-         capped at your own role's tier; ignored if this role is redirected by a launch profile. \
-         Duplicate `name` (including a previously reaped one) is refused before any resource is \
-         created — on an ambiguous spawn error, check `tree` before retrying; never blind-respawn. \
-         Never poll after spawning: [READY] is pushed. Continue useful non-overlapping work, or \
-         yield when none remains.";
+        "Spawn a dev leaf in its own worktree and branch with structured task information. The \
+         child commits and calls `submit_branch` only when its slice is merge-ready; review occurs \
+         only when enabled, and the parent folds it with `merge`. Refuses a dirty caller worktree \
+         because the child forks from the current commit. `file_boundary` is checked against the \
+         child's diff at fold time. `model` overrides this spawn's role default subject to the \
+         caller's tier and any launch profile. Duplicate names are refused before resources are \
+         created; after an ambiguous error, inspect `tree` before retrying. Child events are pushed, \
+         so repeated status polling is unnecessary.";
     type Args = SpawnDevArgs;
 
     async fn run(ctx: &R, args: SpawnDevArgs) -> CapResult<ToolOutput> {
@@ -458,14 +448,12 @@ pub struct ForkChildArgs {
     pub boundary: Vec<String>,
     #[serde(default)]
     pub read_first: Vec<String>,
-    /// Opt-in (default false): inherit this TL session's context by launching the child
-    /// Claude with `--resume --fork-session <this-session-uuid>`. Default false — the
-    /// scaffold commit + spec is the primary context channel, and forking a stale/compacted
-    /// parent context often hurts.
+    /// Opt-in (default false): inherit the parent session's context when the selected backend
+    /// supports forking. The scaffold commit plus task information is the primary context channel.
     #[serde(default)]
     pub fork_session: bool,
     /// Per-spawn model override for this child, replacing the role's default. Capped at the
-    /// spawning node's own tier. IGNORED for a role redirected by a launch profile — that
+    /// spawning node's own tier. Ignored for a role redirected by a launch profile — that
     /// profile's proxy serves exactly one model, so overriding it would 404.
     #[serde(default)]
     pub model: Option<String>,
@@ -502,19 +490,14 @@ pub struct ForkWave;
 impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
     const NAME: &'static str = "fork_wave";
     const DESCRIPTION: &'static str =
-        "Fork a wave of parallel Claude TL children, each in its own worktree + branch. Each runs \
-         scaffold-fork-converge on its subtree and calls `submit_branch` when its branch is \
-         ready; you then `merge` it locally — no PRs, no remote, convergence is on-disk. \
-         Decompose and delegate aggressively: every token you spend on work a child could do is \
-         wasted. Requires a clean worktree — children fork from your current commit, so \
-         uncommitted state would be invisible to them. Set `model` per child to override that \
-         child's model tier for this one spawn, capped at your own role's tier; ignored for a \
-         role redirected by a launch profile. Set `preview: true` to render every child's final \
-         assembled spec and spawn nothing — works even on a dirty tree. Duplicate `name` \
-         (including a previously reaped one) is refused before any resource is created — on an \
-         ambiguous spawn error, check `tree` before retrying; never blind-respawn. Never poll \
-         after spawning: child events are pushed. Continue useful non-overlapping work, or yield \
-         when none remains.";
+        "Fork a wave of subtree-manager children, each in its own worktree and branch. Each owns \
+         its subtree and calls `submit_branch` only when merge-ready; the parent folds it with \
+         `merge`. Requires a clean caller worktree because children fork from the current commit. \
+         Context inheritance is opt-in per child. `model` overrides a child's role default subject \
+         to the caller's tier and any launch profile. `preview: true` renders assembled task prompts \
+         without spawning and works on a dirty tree. Duplicate names are refused before resources \
+         are created; after an ambiguous error, inspect `tree` before retrying. Child events are \
+         pushed, so repeated status polling is unnecessary.";
     type Args = ForkWaveArgs;
 
     async fn run(ctx: &R, args: ForkWaveArgs) -> CapResult<ToolOutput> {
@@ -697,6 +680,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn spawn_tool_descriptions_are_mechanical_and_backend_neutral() {
+        let descriptions = [
+            <SpawnWorker as Tool<crate::testing::MockRuntime>>::DESCRIPTION,
+            <SpawnDev as Tool<crate::testing::MockRuntime>>::DESCRIPTION,
+            <ForkWave as Tool<crate::testing::MockRuntime>>::DESCRIPTION,
+        ];
+        for description in descriptions {
+            for forbidden in [
+                "claude",
+                "sonnet",
+                "opus",
+                "gemini",
+                "prefer delegating",
+                "wasted",
+                concat!("return imme", "diately"),
+                concat!("idle and", " wait"),
+                "never poll",
+            ] {
+                assert!(
+                    !description.to_lowercase().contains(forbidden),
+                    "spawn description contains policy/backend language {forbidden:?}: {description}"
+                );
+            }
+            assert!(description.contains("events are pushed"));
+            assert!(description.contains("repeated status polling is unnecessary"));
+        }
+        assert!(<SpawnDev as Tool<crate::testing::MockRuntime>>::DESCRIPTION
+            .contains("review occurs only when enabled"));
+    }
+
+    #[test]
     fn codex_model_ids_are_shape_checked_not_claude_tier_capped() {
         assert!(validate_model(ExoRole::Tl, AgentType::Codex, "gpt-5.6-sol").is_ok());
         assert!(validate_model(ExoRole::Tl, AgentType::Codex, "bad model").is_err());
@@ -768,8 +782,8 @@ mod tests {
         match spawn {
             Call::Spawn { task, .. } => {
                 // The structured fields are rendered into the single task body by the domain.
-                assert!(task.contains("STEPS (if useful):\n1. step 1"));
-                assert!(task.contains("CONSTRAINTS:\n- boundary 1"));
+                assert!(task.contains("STEPS (OPTIONAL HINTS)\n1. step 1"));
+                assert!(task.contains("CONSTRAINTS\n- boundary 1"));
             }
             _ => panic!("wrong call"),
         }
@@ -833,7 +847,7 @@ mod tests {
             .expect("spawn recorded");
         assert_eq!(spec, spawned_task);
         assert!(spec.contains("distinctive dev task"));
-        assert!(spec.contains("STEPS (if useful):\n1. step 1"));
+        assert!(spec.contains("STEPS (OPTIONAL HINTS)\n1. step 1"));
     }
 
     #[tokio::test]
@@ -1468,7 +1482,7 @@ mod tests {
             .expect("spawn recorded");
         assert!(task.contains("ALLOWED PATHS"));
         assert!(task.contains("- rust/exo/src/tools/spawn.rs"));
-        assert!(task.contains("CONSTRAINTS:\n- do not touch prod config"));
+        assert!(task.contains("CONSTRAINTS\n- do not touch prod config"));
     }
 
     #[tokio::test]
