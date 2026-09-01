@@ -42,8 +42,8 @@ c6514f5af16fa1cc610389eaada619cec0d3fa94|toast|inanna@recursion.wtf|1767520058|d
 | `%h` | Short commit hash |
 | `%an` | Author name |
 | `%ae` | Author email |
-| `%at` | Author timestamp (unix) |
-| `%ct` | Committer timestamp (unix) |
+| `%at` | Author timestamp (Unix) |
+| `%ct` | Committer timestamp (Unix) |
 | `%s` | Subject (first line) |
 | `%b` | Body (remaining lines) |
 
