@@ -124,7 +124,7 @@ Since `--resume` preserves internal memory, use `--inject-context` for **externa
 
 **Example usage:**
 
-```bash
+````bash
 # Context builder script
 build_context() {
   cat <<EOF
@@ -133,9 +133,9 @@ build_context() {
 - Issue: $(gh issue view --json number,title --template '#{{.number}}: {{.title}}' 2>/dev/null || echo "none")
 
 ## Recent Changes (since last session)
-````diff
+```diff
 $(git diff HEAD~1 --stat)
-````
+```
 
 ## CI Status
 $(gh run list --limit 1 --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "unknown")
@@ -150,7 +150,7 @@ exomonad run \
   --resume $SESSION_ID \
   --inject-context "$(build_context)" \
   --prompt "Continue with the task"
-```
+````
 
 **Key insight:** The agent remembers *what it did*, but not *what happened externally*. Context injection bridges that gap.
 
