@@ -42,6 +42,9 @@ pub use hook::{handle as handle_hook, HookEvent};
 use exo_caps::RoleKind;
 use exo_framework::Exomonad;
 use exo_runtime::Runtime;
+use std::fs::{File, OpenOptions};
+use std::os::fd::AsRawFd;
+use std::path::Path;
 use std::sync::Arc;
 
 /// Run the node's concurrent stimuli in one process (outbound serve + inbound watch + hooksock):
@@ -59,93 +62,155 @@ use std::sync::Arc;
 /// `R: Send + Sync + 'static` dispatch boundary. A background loop erroring is logged but does
 /// not tear down the node — only the outbound anchor closing (or a shutdown) ends it.
 pub async fn run_node<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
-    let inbound = tokio::spawn({
-        let ctx = ctx.clone();
-        async move {
-            if let Err(e) = inbound::watch(ctx).await {
-                tracing::error!("inbound loop exited with error: {e}");
-            }
-        }
-    });
+    let lock_path = exo_caps::paths::sidecar_owner_lock(&home(), &ctx.run_id, &ctx.own_pane);
+    let owner_lock = try_acquire_sidecar_owner(&lock_path)?;
+    let mut background = Vec::new();
 
-    // N5 — per-agent hook-RPC socket. Background like inbound; an error is logged, not fatal.
-    let hooksock = tokio::spawn({
-        let ctx = ctx.clone();
-        async move {
-            if let Err(e) = hooksock::serve(ctx).await {
-                tracing::error!("hooksock loop exited with error: {e}");
+    if owner_lock.is_some() {
+        tracing::info!(path = %lock_path.display(), "this MCP connection owns node background loops");
+        background.push(tokio::spawn({
+            let ctx = ctx.clone();
+            async move {
+                if let Err(e) = inbound::watch(ctx).await {
+                    tracing::error!("inbound loop exited with error: {e}");
+                }
             }
-        }
-    });
+        }));
 
-    // N6 — the listen wake channel (the delivery last hop). Background like hooksock; an error
-    // is logged, not fatal — with no server, dispatch errs and messages queue on the bus.
-    let listen = tokio::spawn({
-        let ctx = ctx.clone();
-        async move {
-            if let Err(e) = listen::serve(ctx).await {
-                tracing::error!("listen loop exited with error: {e}");
+        // N5 — per-agent hook-RPC socket. Background like inbound; an error is logged, not fatal.
+        background.push(tokio::spawn({
+            let ctx = ctx.clone();
+            async move {
+                if let Err(e) = hooksock::serve(ctx).await {
+                    tracing::error!("hooksock loop exited with error: {e}");
+                }
             }
-        }
-    });
+        }));
 
-    // Watchdog — periodic wall-clock self-check (domain abandonment timeouts + cooperative-shutdown
-    // reap retry). Replaces Stop-hook-triggered decisions, which can't tell "done" from "paused".
-    let watchdog = tokio::spawn({
-        let ctx = ctx.clone();
-        async move {
-            if let Err(e) = watchdog::watch(ctx).await {
-                tracing::error!("watchdog loop exited with error: {e}");
+        // N6 — the listen wake channel (the delivery last hop). Background like hooksock; an error
+        // is logged, not fatal — with no server, dispatch errs and messages queue on the bus.
+        background.push(tokio::spawn({
+            let ctx = ctx.clone();
+            async move {
+                if let Err(e) = listen::serve(ctx).await {
+                    tracing::error!("listen loop exited with error: {e}");
+                }
             }
-        }
-    });
+        }));
 
-    // Periodic status publisher — writes the node's status snapshot to disk for visibility.
-    let status = tokio::spawn({
-        let ctx = ctx.clone();
-        async move {
-            let status_path = exo_caps::paths::status_path(&home(), &ctx.run_id, &ctx.own_pane);
-            // Ensure status directory exists
-            if let Some(parent) = status_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+        // Watchdog — periodic wall-clock self-check (domain abandonment timeouts + cooperative-shutdown
+        // reap retry). Replaces Stop-hook-triggered decisions, which can't tell "done" from "paused".
+        background.push(tokio::spawn({
+            let ctx = ctx.clone();
+            async move {
+                if let Err(e) = watchdog::watch(ctx).await {
+                    tracing::error!("watchdog loop exited with error: {e}");
+                }
             }
+        }));
 
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
-            loop {
-                interval.tick().await;
-                let shutdown_pending = ctx.shutdown_pending.lock().unwrap().is_some();
-                let mut snapshot = ctx
-                    .runtime
-                    .status_snapshot(ctx.kind.role_str(), shutdown_pending)
-                    .await;
-                // Sidecar state the runtime can't see: is the wake-channel client attached?
-                snapshot.listener_connected = ctx.listener.is_connected();
-                if let Ok(bytes) = serde_json::to_vec(&snapshot) {
-                    if let Err(e) =
-                        exo_caps::Fs::write_atomic(&*ctx.runtime, &status_path, &bytes).await
-                    {
-                        tracing::error!("failed to write status snapshot: {e}");
+        // Periodic status publisher — writes the node's status snapshot to disk for visibility.
+        background.push(tokio::spawn({
+            let ctx = ctx.clone();
+            async move {
+                let status_path = exo_caps::paths::status_path(&home(), &ctx.run_id, &ctx.own_pane);
+                // Ensure status directory exists
+                if let Some(parent) = status_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+                loop {
+                    interval.tick().await;
+                    let shutdown_pending = ctx.shutdown_pending.lock().unwrap().is_some();
+                    let mut snapshot = ctx
+                        .runtime
+                        .status_snapshot(ctx.kind.role_str(), shutdown_pending)
+                        .await;
+                    // Sidecar state the runtime can't see: is the wake-channel client attached?
+                    snapshot.listener_connected = match ctx.runtime.agent_type() {
+                        exo_caps::AgentType::Codex => {
+                            if let Some(codex) = ctx.runtime.codex_node() {
+                                exo_runtime::codex::read_binding(&codex.binding)
+                                    .await
+                                    .is_ok()
+                            } else {
+                                false
+                            }
+                        }
+                        _ => ctx.listener.is_connected(),
+                    };
+                    if let Ok(bytes) = serde_json::to_vec(&snapshot) {
+                        if let Err(e) =
+                            exo_caps::Fs::write_atomic(&*ctx.runtime, &status_path, &bytes).await
+                        {
+                            tracing::error!("failed to write status snapshot: {e}");
+                        }
                     }
                 }
             }
-        }
-    });
+        }));
+    } else {
+        tracing::info!(path = %lock_path.display(), "another MCP connection owns node background loops; serving outbound tools only");
+    }
 
     // The outbound serve owns stdio and runs for the node's lifetime.
     let result = outbound::serve(ctx).await;
 
     // Agent stream closed (or serve errored) → reap the background loops.
-    inbound.abort();
-    hooksock.abort();
-    listen.abort();
-    status.abort();
-    watchdog.abort();
+    for task in &background {
+        task.abort();
+    }
+    for task in background {
+        let _ = task.await;
+    }
+
+    // Keep the advisory lock alive until outbound closes and all owner tasks have been aborted.
+    drop(owner_lock);
 
     result
+}
+
+fn try_acquire_sidecar_owner(path: &Path) -> std::io::Result<Option<File>> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(path)?;
+    // SAFETY: flock only inspects the valid file descriptor owned by `file`.
+    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if result == 0 {
+        return Ok(Some(file));
+    }
+    let error = std::io::Error::last_os_error();
+    if error.kind() == std::io::ErrorKind::WouldBlock {
+        Ok(None)
+    } else {
+        Err(error)
+    }
 }
 
 fn home() -> std::path::PathBuf {
     std::env::var("HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::*;
+
+    #[test]
+    fn owner_lock_is_exclusive_and_reacquirable() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("node.owner.lock");
+        let first = try_acquire_sidecar_owner(&path).unwrap();
+        assert!(first.is_some());
+        assert!(try_acquire_sidecar_owner(&path).unwrap().is_none());
+        drop(first);
+        assert!(try_acquire_sidecar_owner(&path).unwrap().is_some());
+    }
 }

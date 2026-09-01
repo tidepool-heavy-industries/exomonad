@@ -74,6 +74,22 @@ pub fn listen_sock(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
         .join(format!("pane-{n}.listen.sock"))
 }
 
+/// Advisory lock held by the one MCP connection that owns this node's background loops.
+/// Codex may open multiple stdio connections to the same configured MCP server; all of them
+/// serve tools, but only the lock holder may consume the inbox or bind the node's sockets.
+pub fn sidecar_owner_lock(home: &Path, run_id: &str, pane: &PaneId) -> PathBuf {
+    let n = pane.as_str().trim_start_matches('%');
+    home.join(".claude/exo/sockets")
+        .join(run_id)
+        .join(format!("pane-{n}.owner.lock"))
+}
+
+/// A sibling of the inbox used solely to generate a cross-process filesystem wake event after
+/// a Codex connection learns the thread binding.
+pub fn binding_wake_path(inbox: &InboxPath) -> PathBuf {
+    inbox.as_path().with_extension("binding-wake")
+}
+
 /// Recover the pane id encoded in an inbox path (`…/pane-{n}.jsonl` → `%{n}`).
 ///
 /// The bus keys every per-node file by pane, so an inbox path is enough to reach the sibling
@@ -134,6 +150,20 @@ mod tests {
         assert_eq!(
             listen_sock(Path::new("/home/user"), "run-42", &pane),
             Path::new("/home/user/.claude/exo/sockets/run-42/pane-317.listen.sock")
+        );
+    }
+
+    #[test]
+    fn codex_coordination_paths_have_stable_shapes() {
+        let pane = PaneId::new("%317".into()).unwrap();
+        assert_eq!(
+            sidecar_owner_lock(Path::new("/home/user"), "run-42", &pane),
+            Path::new("/home/user/.claude/exo/sockets/run-42/pane-317.owner.lock")
+        );
+        let inbox = inbox_path(Path::new("/home/user"), "run-42", &pane);
+        assert_eq!(
+            binding_wake_path(&inbox),
+            Path::new("/home/user/.claude/exo/inboxes/run-42/pane-317.binding-wake")
         );
     }
 
