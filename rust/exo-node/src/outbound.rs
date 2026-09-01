@@ -11,7 +11,6 @@
 //! parent's ingestion inbox), maintaining runtime-agnostic communication where the
 //! policy layer doesn't need to know about Teams or tmux.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use exo_framework::{ErasedTool, Exomonad};
@@ -129,8 +128,8 @@ async fn handle_rpc(
 async fn call_tool(
     tools: &[Box<dyn ErasedTool<Runtime>>],
     runtime: &Runtime,
-    own_inbox: &exo_caps::InboxPath,
-    inbox_wake: &tokio::sync::Notify,
+    _own_inbox: &exo_caps::InboxPath,
+    _inbox_wake: &tokio::sync::Notify,
     params: Option<&Value>,
 ) -> Result<Value, (i32, String)> {
     let name = params.and_then(|p| p.get("name")).and_then(|n| n.as_str());
@@ -146,8 +145,6 @@ async fn call_tool(
     let Some(tool) = tools.iter().find(|t| t.name() == name) else {
         return Err((-32601, format!("Tool not found: {name}")));
     };
-
-    capture_codex_binding(runtime, own_inbox, inbox_wake, params).await?;
 
     match tool.call(runtime, arguments).await {
         Ok(output) => {
@@ -170,67 +167,6 @@ async fn call_tool(
         }
         Err(e) => Err((-32603, e.to_string())),
     }
-}
-
-/// Learn the real Codex thread identity from metadata attached to every Codex MCP tool call.
-///
-/// Recording it before executing the tool is important: a node's first Exomonad action may be a
-/// spawn or send, and those operations must already be able to fork or queue against the caller's
-/// actual thread. Claude does not provide this metadata and does not need a Codex binding.
-async fn capture_codex_binding(
-    runtime: &Runtime,
-    own_inbox: &exo_caps::InboxPath,
-    inbox_wake: &tokio::sync::Notify,
-    params: Option<&Value>,
-) -> Result<(), (i32, String)> {
-    if runtime.agent_type() != exo_caps::AgentType::Codex {
-        return Ok(());
-    }
-
-    let thread_id = params
-        .and_then(|params| params.get("_meta"))
-        .and_then(|meta| meta.get("threadId"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            (
-                -32602,
-                "Codex tools/call metadata is missing _meta.threadId".to_string(),
-            )
-        })?;
-    let codex = runtime
-        .codex_node()
-        .ok_or_else(|| (-32603, "Codex node is missing its binding path".to_string()))?;
-
-    if exo_runtime::codex::read_binding(&codex.binding)
-        .await
-        .is_ok_and(|binding| binding.thread_id == thread_id)
-    {
-        return Ok(());
-    }
-
-    exo_runtime::codex::write_binding(&codex.binding, thread_id)
-        .await
-        .map_err(|e| {
-            (
-                -32603,
-                format!("failed to persist Codex thread binding: {e}"),
-            )
-        })?;
-    tracing::info!(thread_id, "bound Exomonad node to Codex thread");
-    write_binding_wake_marker(own_inbox.as_path(), thread_id)
-        .await
-        .map_err(|e| (-32603, format!("failed to wake Codex inbox owner: {e}")))?;
-    inbox_wake.notify_one();
-    Ok(())
-}
-
-async fn write_binding_wake_marker(inbox_path: &Path, thread_id: &str) -> std::io::Result<()> {
-    let inbox = exo_caps::InboxPath::new(inbox_path.to_path_buf());
-    let marker = exo_caps::paths::binding_wake_path(&inbox);
-    if let Some(parent) = marker.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    tokio::fs::write(marker, thread_id.as_bytes()).await
 }
 
 struct Request<'a> {
@@ -268,9 +204,7 @@ fn error_response(id: Value, code: i32, message: String) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use exo_caps::{AgentName, AgentType, Branch, CodexNode, NodePath, PaneId};
-
-    const THREAD: &str = "01a05a16-97f5-7722-aa8d-467e01e2e5b4";
+    use exo_caps::{AgentName, Branch, NodePath, PaneId};
 
     fn test_runtime(temp_path: std::path::PathBuf) -> Runtime {
         Runtime::new(
@@ -475,125 +409,5 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("Method not found"));
-    }
-
-    #[tokio::test]
-    async fn codex_tool_call_persists_real_thread_id_before_execution() {
-        use exo_caps::CapResult;
-
-        let temp = tempfile::tempdir().unwrap();
-        let binding = temp.path().join("codex-binding.json");
-        let runtime = test_runtime(temp.path().to_path_buf()).with_agent_backend(
-            AgentType::Codex,
-            Some(CodexNode {
-                binding: binding.clone(),
-            }),
-        );
-
-        struct TestTool;
-        #[async_trait::async_trait]
-        impl ErasedTool<Runtime> for TestTool {
-            fn name(&self) -> &str {
-                "test_tool"
-            }
-            fn description(&self) -> &str {
-                "desc"
-            }
-            fn schema(&self) -> Value {
-                json!({})
-            }
-            async fn call(&self, runtime: &Runtime, _args: Value) -> CapResult<Value> {
-                let codex = runtime.codex_node().unwrap();
-                let persisted = exo_runtime::codex::read_binding(&codex.binding)
-                    .await
-                    .unwrap();
-                assert_eq!(persisted.thread_id, THREAD);
-                Ok(json!({ "text": "bound" }))
-            }
-        }
-
-        let request = json!({
-            "jsonrpc": "2.0",
-            "id": "call-1",
-            "method": "tools/call",
-            "params": {
-                "name": "test_tool",
-                "arguments": {},
-                "_meta": { "threadId": THREAD }
-            }
-        });
-        let response = handle_rpc(
-            &[Box::new(TestTool)],
-            &runtime,
-            &test_inbox(&temp),
-            &tokio::sync::Notify::new(),
-            request,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(response["result"]["content"][0]["text"], "bound");
-        assert_eq!(
-            exo_runtime::codex::read_binding(&binding)
-                .await
-                .unwrap()
-                .thread_id,
-            THREAD
-        );
-        assert_eq!(
-            tokio::fs::read_to_string(exo_caps::paths::binding_wake_path(&test_inbox(&temp)))
-                .await
-                .unwrap(),
-            THREAD
-        );
-    }
-
-    #[tokio::test]
-    async fn codex_tool_call_rejects_missing_thread_metadata() {
-        let temp = tempfile::tempdir().unwrap();
-        let runtime = test_runtime(temp.path().to_path_buf()).with_agent_backend(
-            AgentType::Codex,
-            Some(CodexNode {
-                binding: temp.path().join("codex-binding.json"),
-            }),
-        );
-
-        struct TestTool;
-        #[async_trait::async_trait]
-        impl ErasedTool<Runtime> for TestTool {
-            fn name(&self) -> &str {
-                "test_tool"
-            }
-            fn description(&self) -> &str {
-                "desc"
-            }
-            fn schema(&self) -> Value {
-                json!({})
-            }
-            async fn call(&self, _runtime: &Runtime, _args: Value) -> exo_caps::CapResult<Value> {
-                panic!("tool must not run without a Codex thread binding")
-            }
-        }
-
-        let response = handle_rpc(
-            &[Box::new(TestTool)],
-            &runtime,
-            &test_inbox(&temp),
-            &tokio::sync::Notify::new(),
-            json!({
-                "jsonrpc": "2.0",
-                "id": "call-1",
-                "method": "tools/call",
-                "params": { "name": "test_tool", "arguments": {} }
-            }),
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(response["error"]["code"], -32602);
-        assert!(response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("_meta.threadId"));
     }
 }

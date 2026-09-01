@@ -7,7 +7,8 @@
 //! file owns **only** the struct + its accessors, so cap leaves never collide here.
 
 use exo_caps::{
-    Addressee, AgentName, Branch, ChildKind, ChildStatus, InboxPath, NodePath, NodeStatus, PaneId,
+    Addressee, AgentName, AgentType, Branch, ChildKind, ChildStatus, CodexNode, InboxPath,
+    NodePath, NodeStatus, PaneId,
 };
 use std::path::{Path, PathBuf};
 
@@ -39,6 +40,10 @@ pub struct Runtime {
     /// Whether this node is `Inline` (shares the parent's worktree) or `Worktree` (own dir).
     /// Drives children-ledger access — see `is_inline()`.
     pub(crate) own_kind: ChildKind,
+    /// Harness inherited by every child spawned from this node.
+    pub(crate) agent_type: AgentType,
+    /// Path of this node's persisted Codex thread binding, when Codex-backed.
+    pub(crate) codex: Option<CodexNode>,
 }
 
 impl Runtime {
@@ -63,7 +68,23 @@ impl Runtime {
             tmux_session,
             own_pane,
             own_kind,
+            agent_type: AgentType::Claude,
+            codex: None,
         }
+    }
+
+    pub fn with_agent_backend(mut self, agent_type: AgentType, codex: Option<CodexNode>) -> Self {
+        self.agent_type = agent_type;
+        self.codex = codex;
+        self
+    }
+
+    pub fn agent_type(&self) -> AgentType {
+        self.agent_type
+    }
+
+    pub fn codex_node(&self) -> Option<&CodexNode> {
+        self.codex.as_ref()
     }
 
     /// `true` when this node shares its parent's worktree (an inline worker). Inline nodes

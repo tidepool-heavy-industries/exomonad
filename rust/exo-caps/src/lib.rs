@@ -43,7 +43,7 @@ pub use hook_rpc::{HookEvent, HookRequest, HookVerdict};
 pub use kv::{Kv, KvError};
 pub use lifecycle::{fold_children, Child, ChildRecord, ChildState};
 pub use liveness::ChildLiveness;
-pub use papers::{NodePapers, RoleRecord};
+pub use papers::{CodexNode, NodePapers, RoleRecord};
 pub use process::{Process, ProcessError, ProcessOutcome};
 pub use spawner::{birth_preamble, SpawnError, Spawner};
 pub use tmux::{Tmux, TmuxError};

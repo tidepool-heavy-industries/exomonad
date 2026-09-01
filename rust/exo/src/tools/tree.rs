@@ -219,10 +219,10 @@ impl Tree {
         let mut shutdown_flag = "";
         if let Some(s) = status_map.get(node.name.as_str()) {
             status_bits.push(s.branch.clone());
-            // Is the node's `exo listen` monitor armed? `wake:-` means messages to it are
-            // queuing (cursor-pinned) until it arms/re-arms.
+            // Is the node's harness-native wake path ready? For Claude this is the attached
+            // `exo listen` monitor; for Codex it is a captured thread binding for `codex queue`.
             status_bits.push(if s.listener_connected {
-                "wake:listen".to_string()
+                "wake:ready".to_string()
             } else {
                 "wake:-".to_string()
             });

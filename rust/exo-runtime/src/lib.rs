@@ -21,6 +21,7 @@ mod runtime;
 mod util;
 
 mod bus;
+pub mod codex;
 mod fs;
 mod git;
 mod kv;

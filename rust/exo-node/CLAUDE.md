@@ -19,10 +19,10 @@ Assembles `exo-runtime` (all caps) + a domain `D: Exomonad` (the domain's tools/
 | `listen` (N6) | serve | The **wake channel** socket (`paths::listen_sock`, streaming newline-JSON — a second UDS beside the hooksock). Accepts the agent's `exo listen` Monitor client **latest-wins** into `NodeContext.listener` (`ListenerSlot`), pings `inbox_wake` on attach so queued backlog drains at once. |
 | `dispatch` (N2a) | — | The **last hop**: render one entry with a `[from: X, kind: Y, id: Z]` header (`, re: W` appended when the message carries a `reply_to`) and deliver it over the listen channel (`ListenerSlot::try_deliver` — write frame, await the client's flushed-to-stdout ack). Full render inline ≤2048 B and ≤12 lines; larger spills to `.exo/tmp/inbox-{pid}-{n}.md` behind a one-line `@`-ref. **No listener / failed ack ⇒ `Err`** (`NodeError::NoListener` logged quietly) — the cursor pins and the entry queues until a client attaches. There is no tmux-paste delivery. |
 | `hook` (N4) | one-shot | `exo hook <event>` → bootstrap from papers → run the role's `pre_tool_use`/`session_start` → print the verdict. No server. On SessionStart it appends the node identity **and the WAKE CHANNEL arming instruction** (`listen_instruction` — the exact `Monitor { command: "exo listen --papers <abs>" }` call, papers path shell-escaped) to the `additionalContext`, for every role including root, re-fired on every resume/clear; the role protocol is delivered via the launch-time `--append-system-prompt` instead. |
-| `bootstrap` | — | Self-ID: read `--papers` → `NodePapers`, enrich with ambient env (`$TMUX_PANE`, `EXOMONAD_SWARM_RUN_ID`, `EXOMONAD_TMUX_SESSION`, `$HOME`), build `NodeContext<D> { runtime, kind, own_inbox, parent_inbox, ... }`. Arms `PR_SET_PDEATHSIG` (Linux) as its first act so the sidecar self-terminates if its parent `claude` process dies — stdin-EOF alone is not a reliable lifetime anchor. |
+| `bootstrap` | — | Self-ID: read `--papers` (or `$EXOMONAD_PAPERS`) → `NodePapers`, enrich with ambient env (`$TMUX_PANE`, `EXOMONAD_SWARM_RUN_ID`, `EXOMONAD_TMUX_SESSION`, `$HOME`), build `NodeContext<D> { runtime, kind, own_inbox, parent_inbox, ... }`. For Claude only, arms `PR_SET_PDEATHSIG` (Linux) so the sidecar self-terminates if its parent process dies; Codex uses MCP stdin EOF because the client may supervise/re-parent stdio children internally. |
 | `error` | — | `NodeError`. |
 
-`run_node` spawns `inbound`, `hooksock`, `listen`, `watchdog`, and a periodic status publisher (which stamps `NodeStatus.listener_connected` off the live `ListenerSlot`) as background tasks and awaits `outbound::serve`; when serve returns (agent gone) it aborts all of them. A background loop erroring is logged, not fatal.
+`run_node` spawns `inbound`, `hooksock`, `listen`, `watchdog`, and a periodic status publisher (which stamps `NodeStatus.listener_connected` from the live `ListenerSlot` for Claude or a valid thread binding for Codex) as background tasks and awaits `outbound::serve`; when serve returns (agent gone) it aborts all of them. A background loop erroring is logged, not fatal.
 
 ## Persistent Logging
 
@@ -61,7 +61,7 @@ the TL to run `tree`, then merge what the branch holds or respawn the work.
 The order is **record-then-enqueue**: the `Died` record is durable *before* the note is appended, so
 an append failure is a `warn!` and the tick continues — the fact is not lost, and the announcement is
 not retried into a duplicate. Once appended, the note itself has cursor-backed at-least-once delivery
-(it queues if the agent hasn't armed its monitor). Re-announcement is prevented structurally, not by
+(it queues if the agent's harness wake path is not ready). Re-announcement is prevented structurally, not by
 a bookkeeping set: a child recorded `Died` folds to a terminal state and is excluded from every later
 scan.
 
@@ -91,6 +91,12 @@ the retry the protocol exists to guarantee. The comment at the cursor-advance si
 
 ## Delivery: the listen wake channel (exo owns its channel, harness-native)
 
+This section describes the Claude backend. A Codex-backed node bypasses `ListenerSlot`: during MCP
+startup it captures the controlled TUI's local rollout UUID into the binding path named by its
+papers; `dispatch` reads that binding and calls `codex queue --thread … --message …`. A missing
+binding or failed queue leaves the durable inbox cursor pinned for retry. Status reports the Codex
+wake path ready once a valid binding exists. There is deliberately no tmux-paste fallback.
+
 `dispatch` has a single last hop for every node kind: hand the rendered `[from: X, kind: Y]`
 entry to the agent's attached **`exo listen` client** over the node's listen socket
 (`~/.claude/exo/sockets/{run_id}/pane-{n}.listen.sock`). The agent arms that client under Claude
@@ -105,7 +111,7 @@ listen server pings `inbox_wake` when a client attaches so it drains immediately
 whole boot-window story: a message sent between spawn and Monitor-arm (or after a monitor died
 and before a re-arm) is delivered late, never dropped. Senders see the state in their tool
 responses (`Bus::wake_status` → a ⚠ note from `notify_parent`/`send_message`/`submit_branch`),
-in `tree` (`wake:listen` / `wake:-`), and in the status snapshot (`listener_connected`).
+in `tree` (`wake:ready` / `wake:-`), and in the status snapshot (`listener_connected`).
 
 Protocol (`listen/mod.rs`): newline-delimited JSON both ways — `ListenFrame { seq, text }` down,
 `ListenAck { seq }` up. Ack correlation is by connection-local `seq`, never message id (ids are
@@ -151,5 +157,5 @@ worktree child is reclaimed by `merge` / verdict-side teardown.
 
 - **Shutdown has structured response.** A structured `shutdown_response` is written back to the requester (status accepted/deferred + live_children + busy), and the requester's `handle_system` renders it to chat.
 - **Forced teardown is a hard kill.** `force:true` cascades pane-kills through the subtree with no per-node commit/wrap-up — a busy descendant loses uncommitted work. Deliberate (force = "tear it down"); revisit if it bites in dogfooding. **It also never reclaims worktrees — by design**: the cascade only kills panes; the subtree's worktree directories (and branches) are left on disk for post-mortem inspection and are cleaned up later by `exo doctor --fix` (or the next `merge` of an ancestor). Force-kill is an abnormal path — preserving the filesystem state it leaves behind is a feature, not a leak.
-- **`outbound` is a hand-written minimal MCP/JSON-RPC stdio server** — `initialize`/`tools/list`/`tools/call`; no capability negotiation beyond that.
+- **`outbound` is a hand-written minimal MCP/JSON-RPC stdio server** — `initialize`/`tools/list`/`tools/call`; initialization negotiates MCP `2025-06-18` (and retains `2024-11-05` compatibility), with no capability negotiation beyond that. Codex launch config explicitly forwards the papers/run/session variables plus `TMUX`/`TMUX_PANE`, because its MCP stdio environment is allowlisted.
 - **Convergence teardown is wired, best-effort, now retried.** `merge` (the `exo` domain tool) reclaims the folded child (`kill_pane` + `reclaim_worktree`), and a one-shot reviewer is torn down verdict-side in `handle_system`. The reclaim path is now **bounded-retried** (3 attempts, linear backoff) inside the `Spawner` impls (`exo_runtime::retry_teardown`), so the reviewer teardown and the `merge` tool both inherit it for free; `try_reap`'s own-pane self-kill uses the same helper. A final failure logs a **loud structured error** (`op` + `child` + `attempts`) and the error is surfaced — but teardown stays **best-effort**: it never aborts the merge/teardown flow, and a child whose worktree is dirty or holds a nested worktree (e.g. a still-live reviewer) can still fail to reclaim after retries and linger (self-heals via the liveness reap).

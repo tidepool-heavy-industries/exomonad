@@ -1,6 +1,6 @@
 # Future Work
 
-Ideas worth not forgetting. Each file is a self-contained sketch.
+Ideas worth preserving. Each file is a self-contained sketch.
 
 | Idea | File | Summary |
 |------|------|---------|

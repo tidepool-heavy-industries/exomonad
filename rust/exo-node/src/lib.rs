@@ -62,6 +62,10 @@ use std::sync::Arc;
 /// `R: Send + Sync + 'static` dispatch boundary. A background loop erroring is logged but does
 /// not tear down the node — only the outbound anchor closing (or a shutdown) ends it.
 pub async fn run_node<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> NodeResult<()> {
+    // Codex creates its rollout concurrently with MCP startup. Discovery must therefore run
+    // behind the stdio server: delaying or failing here prevents the initialize reply and causes
+    // Codex to tear the MCP child down before its rollout can ever become discoverable.
+    let binding_discovery = spawn_codex_binding_discovery(&ctx).await;
     let lock_path = exo_caps::paths::sidecar_owner_lock(&home(), &ctx.run_id, &ctx.own_pane);
     let owner_lock = try_acquire_sidecar_owner(&lock_path)?;
     let mut background = Vec::new();
@@ -164,11 +168,61 @@ pub async fn run_node<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> 
     for task in background {
         let _ = task.await;
     }
+    if let Some(task) = binding_discovery {
+        task.abort();
+        let _ = task.await;
+    }
 
     // Keep the advisory lock alive until outbound closes and all owner tasks have been aborted.
     drop(owner_lock);
 
     result
+}
+
+async fn spawn_codex_binding_discovery<D: Exomonad<Caps = Runtime>>(
+    ctx: &Arc<NodeContext<D>>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if ctx.runtime.agent_type() != exo_caps::AgentType::Codex {
+        return None;
+    }
+    let codex = ctx.runtime.codex_node()?;
+    if exo_runtime::codex::read_binding(&codex.binding)
+        .await
+        .is_ok_and(|binding| binding.v == exo_runtime::codex::CodexBinding::VERSION)
+    {
+        return None;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let parent_pid = unsafe { libc::getppid() } as u32;
+        let cwd = ctx.runtime.working_dir().to_owned();
+        let binding = codex.binding.clone();
+        Some(tokio::spawn(async move {
+            discover_and_bind_rollout(parent_pid, &cwd, &binding).await;
+        }))
+    }
+    #[cfg(not(target_os = "linux"))]
+    None
+}
+
+#[cfg(target_os = "linux")]
+async fn discover_and_bind_rollout(parent_pid: u32, cwd: &Path, binding: &Path) {
+    loop {
+        match exo_runtime::codex::discover_parent_rollout(parent_pid, cwd) {
+            Ok(thread_id) => match exo_runtime::codex::write_binding(binding, &thread_id).await {
+                Ok(()) => {
+                    tracing::info!(thread_id, "bound Exomonad node to local Codex rollout");
+                    return;
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "failed to persist Codex rollout binding; retrying")
+                }
+            },
+            Err(error) => tracing::debug!(%error, "Codex rollout not discoverable yet; retrying"),
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }
 
 fn try_acquire_sidecar_owner(path: &Path) -> std::io::Result<Option<File>> {
@@ -212,5 +266,26 @@ mod owner_tests {
         assert!(try_acquire_sidecar_owner(&path).unwrap().is_none());
         drop(first);
         assert!(try_acquire_sidecar_owner(&path).unwrap().is_some());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn missing_rollout_remains_a_background_retry_not_a_startup_error() {
+        let temp = tempfile::tempdir().unwrap();
+        let binding = temp.path().join("binding.json");
+        let task = tokio::spawn({
+            let binding = binding.clone();
+            async move {
+                discover_and_bind_rollout(u32::MAX, Path::new("/not-yet-created"), &binding).await
+            }
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        assert!(
+            !task.is_finished(),
+            "missing rollout must be retried, not returned as fatal"
+        );
+        assert!(!binding.exists());
+        task.abort();
     }
 }

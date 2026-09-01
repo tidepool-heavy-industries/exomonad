@@ -88,7 +88,10 @@ impl ListenerSlot {
     /// previous client's read side sees EOF and it exits cleanly — and its writer being dropped
     /// means no frame can ever reach it after the swap). Returns the connection's generation and
     /// the ack sender its reader task feeds.
-    pub(super) async fn install(&self, writer: OwnedWriteHalf) -> (u64, mpsc::UnboundedSender<u64>) {
+    pub(super) async fn install(
+        &self,
+        writer: OwnedWriteHalf,
+    ) -> (u64, mpsc::UnboundedSender<u64>) {
         let gen = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let (ack_tx, acks) = mpsc::unbounded_channel();
         let handle = ListenerHandle {
@@ -202,7 +205,10 @@ pub async fn serve<D: Exomonad<Caps = Runtime>>(ctx: Arc<NodeContext<D>>) -> Nod
         let (stream, _addr) = listener.accept().await?;
         let (read_half, write_half) = stream.into_split();
         let (gen, ack_tx) = ctx.listener.install(write_half).await;
-        info!(gen, "listen: client attached; waking inbound to drain any backlog");
+        info!(
+            gen,
+            "listen: client attached; waking inbound to drain any backlog"
+        );
         ctx.inbox_wake.notify_one();
 
         let ctx = ctx.clone();

@@ -14,6 +14,35 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, clap::ValueEnum, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Backend {
+    #[default]
+    Codex,
+    Claude,
+}
+
+impl Backend {
+    pub fn agent_type(self) -> exo_caps::AgentType {
+        match self {
+            Self::Codex => exo_caps::AgentType::Codex,
+            Self::Claude => exo_caps::AgentType::Claude,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct CodexRoleRaw {
+    model: Option<String>,
+    reasoning_effort: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct CodexRaw {
+    #[serde(default)]
+    roles: BTreeMap<String, CodexRoleRaw>,
+}
+
 /// A per-role launch profile from config — the convenient, file-based way to set a role's
 /// proxy-backed brain (e.g. the reviewer → Kimi via `claude-code-proxy`) instead of exporting
 /// `EXO_<ROLE>_*` env vars by hand. `discover` translates each profile →
@@ -63,6 +92,7 @@ const KNOWN_BRAINS: &[&str] = &["kimi"];
 /// ignores every other field, so this stays in sync with classic config files without naming them.)
 #[derive(Deserialize, Default)]
 struct RawInit {
+    backend: Option<Backend>,
     tmux_session: Option<String>,
     model: Option<String>,
     /// Child-launch policy stamped onto the root's papers and inherited down the whole tree
@@ -85,10 +115,13 @@ struct RawInit {
     /// The dedicated tmux socket name the confined server listens on. Absent ⇒ derived from the
     /// resolved `tmux_session` (`"exo-{tmux_session}"`, lowercased).
     confine_socket: Option<String>,
+    #[serde(default)]
+    codex: CodexRaw,
 }
 
 /// Resolved node-mode init config.
 pub struct InitConfig {
+    pub backend: Backend,
     pub tmux_session: String,
     pub model: Option<String>,
     /// Child-launch policy for the root node's papers (inherited down the tree). Defaulted to the
@@ -111,6 +144,7 @@ pub struct InitConfig {
     /// The dedicated tmux socket name for the confined server. Defaults to
     /// `"exo-{tmux_session}"` (lowercased) when unset in config.
     pub confine_socket: String,
+    pub codex_env: Vec<(String, String)>,
 }
 
 /// Discover the node-mode init config by merging `.exo/config.local.toml` over `.exo/config.toml`,
@@ -128,6 +162,8 @@ pub fn discover() -> anyhow::Result<InitConfig> {
     // Pulled out before `local`/`global` are consumed field-by-field below.
     let confine_local = confine_of(&local);
     let confine_global = confine_of(&global);
+    let backend = local.backend.or(global.backend).unwrap_or_default();
+    let codex_env = resolve_codex_roles(&local.codex.roles, &global.codex.roles);
 
     let tmux_session = local
         .tmux_session
@@ -165,6 +201,7 @@ pub fn discover() -> anyhow::Result<InitConfig> {
     let profile_env = flatten_profiles(profiles);
 
     Ok(InitConfig {
+        backend,
         tmux_session,
         model,
         yolo,
@@ -174,7 +211,37 @@ pub fn discover() -> anyhow::Result<InitConfig> {
         confine,
         confine_wrapper,
         confine_socket,
+        codex_env,
     })
+}
+
+fn resolve_codex_roles(
+    local: &BTreeMap<String, CodexRoleRaw>,
+    global: &BTreeMap<String, CodexRoleRaw>,
+) -> Vec<(String, String)> {
+    let defaults = [
+        ("tl", "gpt-5.6-sol", "high"),
+        ("dev", "gpt-5.6-sol", "low"),
+        ("worker", "gpt-5.6-sol", "low"),
+        ("reviewer", "gpt-5.6-sol", "low"),
+    ];
+    let mut out = Vec::new();
+    for (role, default_model, default_effort) in defaults {
+        let l = local.get(role);
+        let g = global.get(role);
+        let model = l
+            .and_then(|r| r.model.clone())
+            .or_else(|| g.and_then(|r| r.model.clone()))
+            .unwrap_or_else(|| default_model.into());
+        let effort = l
+            .and_then(|r| r.reasoning_effort.clone())
+            .or_else(|| g.and_then(|r| r.reasoning_effort.clone()))
+            .unwrap_or_else(|| default_effort.into());
+        let prefix = format!("EXO_CODEX_{}", role.to_uppercase());
+        out.push((format!("{prefix}_MODEL"), model));
+        out.push((format!("{prefix}_REASONING_EFFORT"), effort));
+    }
+    out
 }
 
 /// Resolve `confine`/`confine_wrapper`/`confine_socket`, merging local over global (matching
@@ -282,6 +349,30 @@ fn sanitize_session_name(name: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backend_defaults_to_codex_and_parses_claude() {
+        assert_eq!(
+            RawInit::default().backend.unwrap_or_default(),
+            Backend::Codex
+        );
+        let raw: RawInit = toml::from_str("backend = \"claude\"").unwrap();
+        assert_eq!(raw.backend, Some(Backend::Claude));
+    }
+
+    #[test]
+    fn codex_role_config_merges_fields_over_defaults() {
+        let global: RawInit = toml::from_str(
+            "[codex.roles.tl]\nmodel = \"global-model\"\nreasoning_effort = \"medium\"",
+        )
+        .unwrap();
+        let local: RawInit = toml::from_str("[codex.roles.tl]\nmodel = \"local-model\"").unwrap();
+        let env = resolve_codex_roles(&local.codex.roles, &global.codex.roles);
+        assert!(env.contains(&("EXO_CODEX_TL_MODEL".into(), "local-model".into())));
+        assert!(env.contains(&("EXO_CODEX_TL_REASONING_EFFORT".into(), "medium".into())));
+        assert!(env.contains(&("EXO_CODEX_DEV_MODEL".into(), "gpt-5.6-sol".into())));
+        assert_eq!(env.len(), 8, "four roles emit model + effort exactly once");
+    }
 
     #[test]
     fn reviewer_profile_flattens_to_exo_reviewer_env() {

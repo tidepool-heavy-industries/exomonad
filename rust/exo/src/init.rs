@@ -250,10 +250,31 @@ pub async fn run(
     confine_socket: &str,
     session: Option<String>,
     recreate: bool,
+    backend: crate::config::Backend,
+    codex_env: &[(String, String)],
 ) -> Result<()> {
     let session = session.unwrap_or_else(|| format!("{tmux_session}-exp"));
     let run_id = uuid::Uuid::new_v4().to_string();
     let cwd = std::env::current_dir()?;
+
+    if backend == crate::config::Backend::Codex {
+        let queue_help = Command::new("codex")
+            .args(["queue", "--help"])
+            .output()
+            .map_err(|e| {
+                anyhow::anyhow!("Codex backend requires `codex` on PATH with queue support: {e}")
+            })?;
+        let queue_text = String::from_utf8_lossy(&queue_help.stdout);
+        if !queue_help.status.success()
+            || !queue_text.contains("--thread")
+            || !queue_text.contains("--message")
+        {
+            anyhow::bail!(
+                "installed Codex CLI lacks the required `codex queue --thread --message` \
+                 surface (Codex 0.149+); update Codex or run `exo init --backend claude`"
+            );
+        }
+    }
 
     // Keep per-node runtime artifacts from dirtying worktrees (root + all spawned children).
     ensure_git_excludes(&cwd)?;
@@ -302,6 +323,18 @@ pub async fn run(
         anyhow::bail!("Failed to set EXOMONAD_TMUX_SESSION in tmux session");
     }
 
+    for (key, value) in codex_env {
+        let mut args: Vec<&str> = Vec::new();
+        if let Some(s) = socket {
+            args.extend(["-L", s]);
+        }
+        args.extend(["set-environment", "-t", &session, key, value]);
+        let status = Command::new("tmux").args(args).status()?;
+        if !status.success() {
+            anyhow::bail!("failed to set {key} in tmux session");
+        }
+    }
+
     // Only stamped when confinement was actually verified. Set on the SESSION (not just the root's
     // own launch env below) so it reaches every descendant pane too — `boot_root_session`'s holding
     // shell predates this call and needs it embedded directly (see `env_vars` below), but every
@@ -328,10 +361,16 @@ pub async fn run(
     // root flows it down the whole tree. Defaults (config unset) keep launches byte-identical.
     // The root's role is the domain's `ExoRole::Root` (recorded erased in papers).
     let mut papers = exo_caps::NodePapers::root(root_pane.clone(), exo::ExoRole::Root)?;
+    papers.agent_type = backend.agent_type();
     papers.yolo = yolo;
     papers.wrap_nix = wrap_nix;
     papers.review_enabled = review_enabled;
     let papers_path = cwd.join(format!(".exo/node/{run_id}/root.json"));
+    if backend == crate::config::Backend::Codex {
+        papers.codex = Some(exo_caps::CodexNode {
+            binding: cwd.join(".exo/codex-root-thread.json"),
+        });
+    }
     if let Some(parent) = papers_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -340,7 +379,10 @@ pub async fn run(
     // Root config goes to private files (siblings of root.json under `.exo/node/{run}/`), pointed at
     // via `--settings`/`--mcp-config` below — never the cwd's `.mcp.json`/`.claude/settings.local.json`.
     let (settings_path, mcp_config_path) = exo_caps::paths::node_config_paths(&papers_path);
-    exo_runtime::write_node_agent_config(&settings_path, &mcp_config_path, &papers_path).await?;
+    if backend == crate::config::Backend::Claude {
+        exo_runtime::write_node_agent_config(&settings_path, &mcp_config_path, &papers_path)
+            .await?;
+    }
 
     // Migration: remove stale exomonad-written cwd config from the pre-private-config era. CC still
     // MERGES the cwd's `.claude/settings.local.json` over our `--settings`, so a leftover (e.g. a
@@ -366,6 +408,7 @@ pub async fn run(
             k.starts_with("EXO_") && PROFILE_SUFFIXES.iter().any(|s| k.ends_with(s))
         }),
     );
+    env_vars.extend(codex_env.iter().cloned());
     env_vars.insert("EXOMONAD_SWARM_RUN_ID".into(), run_id.clone());
     env_vars.insert("EXOMONAD_TMUX_SESSION".into(), session.clone());
     // Only stamped when confinement was actually verified — descendants inherit it (`birth_finish`
@@ -379,24 +422,89 @@ pub async fn run(
     // resumes the most recent conversation in this cwd. A fresh `init` has nothing to continue.
     // The root has no positional prompt (interactive launch), so --mcp-config never abuts a
     // prompt argument — but we use ClaudeInvocation for uniformity and structural safety.
-    let launch = exomonad_shared::services::agent_control::launch::ClaudeInvocation {
-        agent_type: exomonad_shared::services::agent_control::AgentType::Claude,
-        cwd: cwd.clone(),
-        permission_mode: None, // root always uses --dangerously-skip-permissions
-        allowed_tools: vec![],
-        disallowed_tools: vec![],
-        settings_path: Some(settings_path.to_string_lossy().into_owned()),
-        mcp_config_path: Some(mcp_config_path.to_string_lossy().into_owned()),
-        append_system_prompt: None, // root has no role-steering prompt
-        model: model.map(|m| m.to_string()),
-        prompt_file: None, // interactive launch — no positional prompt
-        fork_session_id: None,
-        env_vars,
-        yolo: false,
-        wrap_nix,
-        resume: recreate,
-    }
-    .render();
+    let launch = if backend == crate::config::Backend::Codex {
+        let codex = papers.codex.as_ref().expect("Codex papers set");
+        // Root is the top-level TL for Codex model policy. An explicit legacy `model` setting
+        // still wins; otherwise use the same configured/default model and effort as spawned TLs.
+        let codex_model = model.map(str::to_owned).or_else(|| {
+            codex_env
+                .iter()
+                .find(|(key, _)| key == "EXO_CODEX_TL_MODEL")
+                .map(|(_, value)| value.clone())
+        });
+        let effort = codex_env
+            .iter()
+            .find(|(key, _)| key == "EXO_CODEX_TL_REASONING_EFFORT")
+            .map(|(_, value)| value.clone());
+        let identity = format!(
+            "You are exomonad node 'root' (role: root) on the current branch. Parent: none.\n\n{}",
+            exo::protocol::ROOT
+        );
+
+        // Only bindings captured by the stock-TUI integration are resume-safe. Older app-server
+        // bindings name server-side threads that may have no local rollout, which is exactly the
+        // `no rollout found` failure this path replaces.
+        let resume_thread = if recreate {
+            match exo_runtime::codex::read_binding(&codex.binding).await {
+                Ok(binding) if binding.v == exo_runtime::codex::CodexBinding::VERSION => {
+                    Some(binding.thread_id)
+                }
+                Ok(binding) => {
+                    tracing::info!(
+                        version = binding.v,
+                        "ignoring legacy Codex app-server binding; starting a stock TUI"
+                    );
+                    None
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "Codex root binding unavailable; starting a fresh TUI");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        if resume_thread.is_none() {
+            match tokio::fs::remove_file(&codex.binding).await {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let mode = match resume_thread.as_deref() {
+            Some(thread_id) => exo_runtime::codex::LaunchMode::Resume(thread_id),
+            None => exo_runtime::codex::LaunchMode::Fresh,
+        };
+        exo_runtime::codex::tui_command(
+            mode,
+            &cwd,
+            &papers_path,
+            codex_model.as_deref(),
+            effort.as_deref(),
+            &identity,
+            None,
+            &env_vars,
+        )
+    } else {
+        exomonad_shared::services::agent_control::launch::ClaudeInvocation {
+            agent_type: exomonad_shared::services::agent_control::AgentType::Claude,
+            cwd: cwd.clone(),
+            permission_mode: None, // root always uses --dangerously-skip-permissions
+            allowed_tools: vec![],
+            disallowed_tools: vec![],
+            settings_path: Some(settings_path.to_string_lossy().into_owned()),
+            mcp_config_path: Some(mcp_config_path.to_string_lossy().into_owned()),
+            append_system_prompt: None, // root has no role-steering prompt
+            model: model.map(|m| m.to_string()),
+            prompt_file: None, // interactive launch — no positional prompt
+            fork_session_id: None,
+            env_vars,
+            yolo: false,
+            wrap_nix,
+            resume: recreate,
+        }
+        .render()
+    };
 
     exomonad_shared::services::tmux_ipc::TmuxIpc::new_with_socket(
         &session,
@@ -413,7 +521,6 @@ pub async fn run(
         "Root node up in tmux session '{session}'. Attaching (detach: Ctrl-b d; reattach: {attach_cmd})..."
     );
 
-    // Attach the user into the root session, matching production `init`.
     exomonad_shared::services::tmux_ipc::TmuxIpc::attach_session(&session, socket).await
 }
 

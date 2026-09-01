@@ -251,7 +251,7 @@ mod tests {
         .unwrap();
 
         assert!(out.text.contains("a: delivered ("));
-        assert!(out.text.contains("no active listener"));
+        assert!(out.text.contains("no active wake channel"));
     }
 
     #[tokio::test]

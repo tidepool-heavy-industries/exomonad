@@ -143,8 +143,11 @@ async fn run_hook<D: Exomonad>(
                 Some(p_ctx) => format!("{}\n\n{}", id_ctx, p_ctx),
                 None => id_ctx,
             };
-            let combined_context =
-                format!("{}\n\n{}", combined_context, listen_instruction(papers_path));
+            let combined_context = format!(
+                "{}\n\n{}",
+                combined_context,
+                listen_instruction(papers_path)
+            );
 
             let output = json!({
                 "hookSpecificOutput": {
@@ -245,9 +248,15 @@ mod tests {
         })
         .to_string();
 
-        let res = run_hook(ctx, rd, HookEvent::PreToolUse, Path::new("/tmp/papers.json"), &stdin)
-            .await
-            .unwrap();
+        let res = run_hook(
+            ctx,
+            rd,
+            HookEvent::PreToolUse,
+            Path::new("/tmp/papers.json"),
+            &stdin,
+        )
+        .await
+        .unwrap();
         let val: Value = serde_json::from_str(&res).unwrap();
         assert_eq!(val, json!({"continue": true}));
     }
@@ -257,9 +266,15 @@ mod tests {
         let ctx = mock_ctx(TestRole::Dev, vec!["root", "dev-node"], "main", false);
         let rd = crate::test_support::test_role_def(TestRole::Dev);
 
-        let res = run_hook(ctx, rd, HookEvent::SessionStart, Path::new("/tmp/papers.json"), "")
-            .await
-            .unwrap();
+        let res = run_hook(
+            ctx,
+            rd,
+            HookEvent::SessionStart,
+            Path::new("/tmp/papers.json"),
+            "",
+        )
+        .await
+        .unwrap();
         let val: Value = serde_json::from_str(&res).unwrap();
 
         let add_ctx = val["hookSpecificOutput"]["additionalContext"]
@@ -294,9 +309,15 @@ mod tests {
         let ctx = mock_ctx(TestRole::Tl, vec!["root", "tl-node"], "main", true);
         let rd = crate::test_support::test_role_def(TestRole::Tl);
 
-        let res = run_hook(ctx, rd, HookEvent::SessionStart, Path::new("/tmp/papers.json"), "")
-            .await
-            .unwrap();
+        let res = run_hook(
+            ctx,
+            rd,
+            HookEvent::SessionStart,
+            Path::new("/tmp/papers.json"),
+            "",
+        )
+        .await
+        .unwrap();
         let val: Value = serde_json::from_str(&res).unwrap();
         let add_ctx = val["hookSpecificOutput"]["additionalContext"]
             .as_str()
@@ -334,9 +355,15 @@ mod tests {
         })
         .to_string();
 
-        let res = run_hook(ctx, rd, HookEvent::PreToolUse, Path::new("/tmp/papers.json"), &stdin)
-            .await
-            .unwrap();
+        let res = run_hook(
+            ctx,
+            rd,
+            HookEvent::PreToolUse,
+            Path::new("/tmp/papers.json"),
+            &stdin,
+        )
+        .await
+        .unwrap();
         let val: Value = serde_json::from_str(&res).unwrap();
         assert_eq!(val["continue"], true);
         assert_eq!(val["systemMessage"], "test deny");
@@ -367,9 +394,15 @@ mod tests {
         })
         .to_string();
 
-        let res = run_hook(ctx, rd, HookEvent::PreToolUse, Path::new("/tmp/papers.json"), &stdin)
-            .await
-            .unwrap();
+        let res = run_hook(
+            ctx,
+            rd,
+            HookEvent::PreToolUse,
+            Path::new("/tmp/papers.json"),
+            &stdin,
+        )
+        .await
+        .unwrap();
         let val: Value = serde_json::from_str(&res).unwrap();
         assert_eq!(val["continue"], true);
         assert_eq!(

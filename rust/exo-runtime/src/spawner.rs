@@ -259,6 +259,40 @@ pub(crate) struct BirthCore {
 // `exo_caps::paths::inbox_path` (see `child_inbox_path`); `Bus` resolution reads stored
 // `InboxPath`s off the ledger/papers, so the derivation lives in exactly one place.
 impl Runtime {
+    async fn archive_codex_child(&self, child: &Child) {
+        if self.agent_type != AgentType::Codex {
+            return;
+        }
+        let binding_path = match child.kind {
+            ChildKind::Worktree => self
+                .working_dir
+                .join(".exo/worktrees")
+                .join(child.name.as_str())
+                .join(".exo/codex-binding.json"),
+            ChildKind::Inline => {
+                let home = home_or_warn("archive_codex_child");
+                let papers =
+                    exo_caps::paths::papers_path(Path::new(&home), &self.run_id, &child.pane);
+                papers_path_for_inline_binding(&papers)
+            }
+        };
+        let result = async {
+            let binding = crate::codex::read_binding(&binding_path).await?;
+            crate::codex::archive_thread(&self.working_dir, &binding.thread_id).await
+        }
+        .await;
+        if let Err(error) = result {
+            // Pane teardown remains authoritative. Archival is hygiene and must not make an
+            // otherwise recoverable kill fail when the Codex thread is already unavailable.
+            tracing::warn!(
+                child = child.name.as_str(),
+                path = %binding_path.display(),
+                %error,
+                "could not archive Codex thread during child teardown"
+            );
+        }
+    }
+
     /// This node's parent-local child ledger (`{working_dir}/.exo/children.jsonl`).
     pub(crate) fn children_log_path(&self) -> PathBuf {
         self.working_dir.join(".exo/children.jsonl")
@@ -694,7 +728,7 @@ impl Runtime {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
         // Name the window after the agent (emoji + slug), not the bare `claude`/shell process.
         let emoji = match core.agent_type {
-            AgentType::Claude => "🤖",
+            AgentType::Claude | AgentType::Codex => "🤖",
             AgentType::Shoal => "🌊",
         };
         // A launch-profiled child (e.g. a Kimi reviewer) is still a 🤖 Claude process; tag the
@@ -821,6 +855,14 @@ impl Runtime {
             }
         };
 
+        let papers_path = match core.kind {
+            ChildKind::Worktree => child_dir.join(".exo/node.json"),
+            ChildKind::Inline => {
+                let home = home_or_warn("inline_papers_path");
+                exo_caps::paths::papers_path(Path::new(&home), &self.run_id, pane)
+            }
+        };
+
         // Struct literal (not `NodePapers::new`, which takes a *typed* role): the role is already
         // erased into a `RoleRecord` on `BirthCore`, so birth stays non-generic over the domain role.
         let papers = NodePapers {
@@ -828,6 +870,13 @@ impl Runtime {
             path: self.node_path().child(&core.name),
             branch: core.branch.clone(),
             role: core.role.clone(),
+            agent_type: core.agent_type,
+            codex: self.codex.as_ref().map(|_| exo_caps::CodexNode {
+                binding: match core.kind {
+                    ChildKind::Worktree => child_dir.join(".exo/codex-binding.json"),
+                    ChildKind::Inline => papers_path_for_inline_binding(&papers_path),
+                },
+            }),
             pane: pane.clone(),
             parent_inbox,
             yolo,
@@ -835,14 +884,6 @@ impl Runtime {
             kind: core.kind,
             review_enabled,
             parent_branch,
-        };
-
-        let papers_path = match core.kind {
-            ChildKind::Worktree => child_dir.join(".exo/node.json"),
-            ChildKind::Inline => {
-                let home = home_or_warn("inline_papers_path");
-                exo_caps::paths::papers_path(Path::new(&home), &self.run_id, pane)
-            }
         };
 
         // The node's private CC config files (siblings of its papers). `claude` is pointed at them
@@ -866,6 +907,23 @@ impl Runtime {
                 detail: e.to_string(),
             })?;
 
+        // A newly-created child has not called Exomonad yet, so it has no trustworthy Codex
+        // thread binding. Remove a stale artifact if a worktree/pane identity was recycled; the
+        // first MCP tool call from the new TUI will atomically write the real UUID.
+        if let Some(codex) = &papers.codex {
+            match tokio::fs::remove_file(&codex.binding).await {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(SpawnError::Failed {
+                        op: "clear_codex_binding",
+                        child: Some(core.name.clone()),
+                        detail: error.to_string(),
+                    })
+                }
+            }
+        }
+
         // The node's spec (the reviewer's acceptance bar) is persisted to `.exo/acceptance.md` by
         // the spawning DOMAIN tool via the `Fs` cap, NOT here — the runtime no longer knows the
         // review-gate's filename (that domain concept moved out with the Spawner collapse).
@@ -886,7 +944,13 @@ impl Runtime {
         // profiled child (e.g. a dev calling `submit_branch` → reviewer) still carries it. Opaque
         // `EXO_*_{BASE_URL,MODEL,AUTH_TOKEN,LABEL}` — NEVER `ANTHROPIC_*` — so a non-profiled child
         // is never redirected. Pattern-matched, so a new role/backend needs no edit here.
-        const PROFILE_SUFFIXES: [&str; 4] = ["_BASE_URL", "_MODEL", "_AUTH_TOKEN", "_LABEL"];
+        const PROFILE_SUFFIXES: [&str; 5] = [
+            "_BASE_URL",
+            "_MODEL",
+            "_AUTH_TOKEN",
+            "_LABEL",
+            "_REASONING_EFFORT",
+        ];
         for (k, v) in std::env::vars() {
             if k.starts_with("EXO_") && PROFILE_SUFFIXES.iter().any(|s| k.ends_with(s)) {
                 env_vars.insert(k, v);
@@ -927,6 +991,86 @@ impl Runtime {
                     }
                 }
                 exomonad_shared::services::agent_control::AgentType::Claude
+            }
+
+            AgentType::Codex => {
+                papers.codex.as_ref().ok_or_else(|| SpawnError::Failed {
+                    op: "codex_config",
+                    child: Some(core.name.clone()),
+                    detail: "Codex child missing binding papers".into(),
+                })?;
+                let role = papers.role.0.get().trim_matches('"');
+                let env_prefix = format!("EXO_CODEX_{}", role.to_uppercase());
+                let model = core
+                    .model
+                    .clone()
+                    .or_else(|| std::env::var(format!("{env_prefix}_MODEL")).ok());
+                let effort = std::env::var(format!("{env_prefix}_REASONING_EFFORT")).ok();
+                let identity = format!(
+                    "You are exomonad node '{}' (role: {}) on branch '{}'. Parent: {}.\n\n{}",
+                    core.name.as_str(),
+                    role,
+                    core.branch.as_str(),
+                    self.name().as_str(),
+                    core.protocol
+                );
+                let fork_thread = if core.fork_session && core.kind == ChildKind::Worktree {
+                    let parent = self.codex.as_ref().ok_or_else(|| SpawnError::Failed {
+                        op: "codex_fork",
+                        child: Some(core.name.clone()),
+                        detail: "parent has no Codex binding".into(),
+                    })?;
+                    let parent_binding = crate::codex::read_binding(&parent.binding)
+                        .await
+                        .map_err(|e| SpawnError::Failed {
+                            op: "codex_fork",
+                            child: Some(core.name.clone()),
+                            detail: e.to_string(),
+                        })?;
+                    Some(parent_binding.thread_id)
+                } else {
+                    None
+                };
+
+                let prompt_path =
+                    exomonad_shared::services::agent_control::launch::write_prompt_file(
+                        child_dir,
+                        core.name.as_str(),
+                        &format!(
+                            "{}{}",
+                            exo_caps::birth_preamble(core.kind, child_dir),
+                            core.task
+                        ),
+                    )
+                    .await
+                    .map_err(|e| SpawnError::Failed {
+                        op: "write_prompt_file",
+                        child: Some(core.name.clone()),
+                        detail: e.to_string(),
+                    })?;
+                let mode = match fork_thread.as_deref() {
+                    Some(thread_id) => crate::codex::LaunchMode::Fork(thread_id),
+                    None => crate::codex::LaunchMode::Fresh,
+                };
+                let mut launch_cmd = crate::codex::tui_command(
+                    mode,
+                    child_dir,
+                    &papers_path,
+                    model.as_deref(),
+                    effort.as_deref(),
+                    &identity,
+                    Some(&prompt_path),
+                    &env_vars,
+                );
+                launch_cmd.push('\n');
+                exo_caps::Tmux::paste(self, pane, &launch_cmd)
+                    .await
+                    .map_err(|e| SpawnError::Failed {
+                        op: "launch",
+                        child: Some(core.name.clone()),
+                        detail: e.to_string(),
+                    })?;
+                return Ok(());
             }
 
             AgentType::Shoal => {
@@ -1209,12 +1353,23 @@ impl Spawner for Runtime {
             ChildKind::Worktree => Branch::from_path(&self.node_path().child(&name)),
             ChildKind::Inline => self.branch().clone(),
         };
-        let agent_type = RoleKind::agent_type(&role);
+        let agent_type = match self.agent_type {
+            AgentType::Codex => AgentType::Codex,
+            _ => RoleKind::agent_type(&role),
+        };
         // The role's launch model (`exo` pins leaves to sonnet), unless the spec names an explicit
         // override — resolved while the role is typed AND before `spec.into_task()` consumes it.
-        let model = spec
-            .model_override()
-            .or_else(|| RoleKind::model(&role).map(String::from));
+        let model_override = spec.model_override();
+        let model = match agent_type {
+            AgentType::Codex => model_override.or_else(|| {
+                std::env::var(format!(
+                    "EXO_CODEX_{}_MODEL",
+                    role.role_str().to_uppercase()
+                ))
+                .ok()
+            }),
+            _ => model_override.or_else(|| RoleKind::model(&role).map(String::from)),
+        };
         let directives_hash = spec.directives_hash();
         let review_override = spec.review_override();
         // The role's optional launch profile: resolve `{prefix}_*` from this node's own env while
@@ -1283,6 +1438,8 @@ impl Spawner for Runtime {
             detail: "unknown child".into(),
         })?;
 
+        self.archive_codex_child(record).await;
+
         retry_teardown("kill_pane", child.as_str(), || {
             exo_caps::Tmux::kill_pane(self, &record.pane)
         })
@@ -1296,6 +1453,10 @@ impl Spawner for Runtime {
         self.record_reaped_if_active(child).await;
         Ok(())
     }
+}
+
+fn papers_path_for_inline_binding(papers_path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.codex-binding.json", papers_path.display()))
 }
 
 #[cfg(test)]

@@ -9,7 +9,9 @@
 use crate::directives::{copy_directives, load_directives, Directives};
 use crate::roles::ExoRole;
 use crate::spawn::{render_spec_prompt, write_acceptance, ExoSpawn};
-use exo_caps::{AgentName, CapError, CapResult, ChildKind, Fs, Git, NodePapers, Spawner};
+use exo_caps::{
+    AgentName, AgentType, CapError, CapResult, ChildKind, Fs, Git, NodePapers, Spawner,
+};
 use exo_framework::{Tool, ToolOutput};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -24,25 +26,27 @@ const TL_MODEL_ALLOWLIST: &[&str] = &["opus", "sonnet", "haiku"];
 /// tier or a name the launcher doesn't understand (which fails late, at pane-launch time, not at
 /// the tool call). Root is the human's own interactive session and is trusted to name any tier —
 /// only its shape is checked, to catch shell injection and typos, not to restrict choice.
-fn validate_model(spawner: ExoRole, model: &str) -> CapResult<()> {
+fn validate_model(spawner: ExoRole, backend: AgentType, model: &str) -> CapResult<()> {
+    let shape_ok = !model.is_empty()
+        && model
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if !shape_ok {
+        return Err(CapError::invalid(
+            "model",
+            format!(
+                "`{model}` must be a single bare token (letters, digits, `.`, `_`, `-` only) and \
+                 must NOT contain shell metacharacters or whitespace"
+            ),
+        ));
+    }
+    // Codex model ids are not a small fixed tier vocabulary and are already passed structurally
+    // to the harness. Keep the injection guard, but let the harness validate availability.
+    if backend == AgentType::Codex {
+        return Ok(());
+    }
     match spawner {
-        ExoRole::Root => {
-            let shape_ok = !model.is_empty()
-                && model
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
-            if shape_ok {
-                Ok(())
-            } else {
-                Err(CapError::invalid(
-                    "model",
-                    format!(
-                        "`{model}` must be a single bare token (letters, digits, `.`, `_`, `-` \
-                         only) and must NOT contain shell metacharacters or whitespace"
-                    ),
-                ))
-            }
-        }
+        ExoRole::Root => Ok(()),
         ExoRole::Tl => {
             if TL_MODEL_ALLOWLIST.contains(&model) {
                 Ok(())
@@ -75,18 +79,18 @@ fn validate_model(spawner: ExoRole, model: &str) -> CapResult<()> {
 ///   actionably ("use opus/sonnet/haiku"); a spuriously-uncapped one would silently burn tokens on
 ///   the wrong tier — the conservative guess is the safe one.
 /// - Papers present and readable → the recorded role.
-async fn own_role<C: Fs + Sync>(ctx: &C) -> ExoRole {
+async fn own_identity<C: Fs + Sync>(ctx: &C) -> (ExoRole, AgentType) {
     let conservative = |context: &str, detail: &dyn std::fmt::Display| {
         tracing::warn!(
             "own_role: {context} ({detail}); capping as Tl — a spuriously-capped TL fails loud \
              and actionably, a spuriously-uncapped one silently burns tokens on the wrong tier"
         );
-        ExoRole::Tl
+        (ExoRole::Tl, AgentType::Claude)
     };
     match ctx.read(std::path::Path::new(".exo/node.json")).await {
         Ok(bytes) => match serde_json::from_slice::<NodePapers>(&bytes) {
             Ok(papers) => match papers.role.typed::<ExoRole>() {
-                Ok(role) => role,
+                Ok(role) => (role, papers.agent_type),
                 Err(e) => conservative("role field failed to type as ExoRole", &e),
             },
             Err(e) => conservative(".exo/node.json failed to parse", &e),
@@ -94,7 +98,7 @@ async fn own_role<C: Fs + Sync>(ctx: &C) -> ExoRole {
         Err(exo_caps::FsError::At { source, .. } | exo_caps::FsError::Io(source))
             if source.kind() == std::io::ErrorKind::NotFound =>
         {
-            ExoRole::Root
+            (ExoRole::Root, AgentType::Codex)
         }
         Err(e) => conservative("could not read .exo/node.json", &e),
     }
@@ -282,7 +286,8 @@ impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnWorker {
 
     async fn run(ctx: &R, args: SpawnWorkerArgs) -> CapResult<ToolOutput> {
         if let Some(m) = args.model.as_deref() {
-            validate_model(own_role(ctx).await, m)?;
+            let (role, backend) = own_identity(ctx).await;
+            validate_model(role, backend, m)?;
         }
         let directives = load_directives(ctx).await?;
         // The tool fixes the (role, kind): an ephemeral inline worker (Sonnet Claude).
@@ -379,7 +384,8 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for SpawnDev {
 
     async fn run(ctx: &R, args: SpawnDevArgs) -> CapResult<ToolOutput> {
         if let Some(m) = args.model.as_deref() {
-            validate_model(own_role(ctx).await, m)?;
+            let (role, backend) = own_identity(ctx).await;
+            validate_model(role, backend, m)?;
         }
         require_tracked_read_first(ctx, &args.read_first).await?;
         require_clean_worktree(ctx).await?;
@@ -516,10 +522,10 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
         // Resolve the spawner's own role ONCE for the whole wave, not per child.
         let needs_role = args.children.iter().any(|c| c.model.is_some());
         if needs_role {
-            let spawner_role = own_role(ctx).await;
+            let (spawner_role, backend) = own_identity(ctx).await;
             for child in &args.children {
                 if let Some(m) = child.model.as_deref() {
-                    validate_model(spawner_role, m)?;
+                    validate_model(spawner_role, backend, m)?;
                 }
             }
         }
@@ -688,6 +694,12 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_model_ids_are_shape_checked_not_claude_tier_capped() {
+        assert!(validate_model(ExoRole::Tl, AgentType::Codex, "gpt-5.6-sol").is_ok());
+        assert!(validate_model(ExoRole::Tl, AgentType::Codex, "bad model").is_err());
+    }
     use crate::testing::{Call, MockRuntime};
     use exo_framework::Tool;
 

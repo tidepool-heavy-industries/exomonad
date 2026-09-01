@@ -3,8 +3,8 @@
 //! birth → self-ID seam (Spawner writes it; node bootstrap reads it).
 //!
 //! Assigned-at-birth, never derived: `role`/`parent`/tree-position exist in no runtime's
-//! live state, so they are *recorded* once. `agent_type` is **not** stored — a domain derives
-//! it from `role` ([`RoleKind::agent_type`](crate::RoleKind)). The `pane` is the universal key;
+//! live state, so they are *recorded* once. `agent_type` is stored because a role can now run on
+//! either the Claude or Codex harness. The `pane` is the universal key;
 //! `parent_inbox` is the direct up-edge for `Bus::deliver(Parent, …)` (`None` only for the root).
 //!
 //! The role is stored **erased** as a [`RoleRecord`] (raw JSON) so `NodePapers` stays
@@ -15,7 +15,7 @@
 //! resolver, …) that only needs the non-role fields.
 
 use crate::error::{CapError, CapResult};
-use crate::types::{AgentName, Branch, ChildKind, NodePath, PaneId};
+use crate::types::{AgentName, AgentType, Branch, ChildKind, NodePath, PaneId};
 use crate::{InboxPath, RoleKind};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -68,8 +68,13 @@ pub struct NodePapers {
     /// corrupt it).
     pub branch: Branch,
     /// The node's role, erased ([`RoleRecord`]); bootstrap types it back to `D::Role`.
-    /// `agent_type` derives from this (domain-side).
     pub role: RoleRecord,
+    /// Interactive agent harness backing this node. Older papers are Claude.
+    #[serde(default)]
+    pub agent_type: AgentType,
+    /// The atomically-created binding to Codex's resumable local rollout UUID.
+    #[serde(default)]
+    pub codex: Option<CodexNode>,
     /// tmux pane — delivery target + inbox-key derivation.
     pub pane: PaneId,
     /// Path to the parent's ingestion inbox (the up-edge). `None` for the root.
@@ -110,6 +115,11 @@ pub struct NodePapers {
     pub parent_branch: Option<Branch>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodexNode {
+    pub binding: std::path::PathBuf,
+}
+
 fn default_papers_version() -> u32 {
     1
 }
@@ -131,7 +141,7 @@ fn default_review_enabled() -> bool {
 }
 
 impl NodePapers {
-    pub const VERSION: u32 = 1;
+    pub const VERSION: u32 = 2;
     /// Behavior-preserving launch defaults: node children launch yolo + non-nix-wrapped,
     /// matching the root. Single source of truth for both papers defaulting and the
     /// spawner's fallback when a node has no readable papers.
@@ -160,6 +170,8 @@ impl NodePapers {
             path,
             branch,
             role: RoleRecord::new(&role)?,
+            agent_type: AgentType::Claude,
+            codex: None,
             pane,
             parent_inbox,
             yolo,
@@ -258,6 +270,8 @@ mod tests {
         // The launch-policy fields, absent from older papers, default to today's behavior.
         assert_eq!(papers.yolo, NodePapers::DEFAULT_YOLO);
         assert_eq!(papers.wrap_nix, NodePapers::DEFAULT_WRAP_NIX);
+        assert_eq!(papers.agent_type, AgentType::Claude);
+        assert!(papers.codex.is_none());
         assert_eq!(papers.role.typed::<TestRole>().unwrap(), TestRole::Root);
         // `kind` is absent from older papers — defaults to Worktree (back-compat).
         assert_eq!(papers.kind, ChildKind::Worktree);

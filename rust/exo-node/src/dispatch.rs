@@ -1,7 +1,6 @@
-//! **N2a — Last-hop dispatch.** Delivers an ingestion entry into this node's own agent over the
-//! **listen wake channel**: the entry is rendered with a `[from: X, kind: Y]` header and handed
-//! to the attached `exo listen` Monitor client ([`crate::listen`]), whose stdout becomes a
-//! harness notification that wakes the agent. This is the single last hop for every node kind.
+//! **N2a — Last-hop dispatch.** Renders an ingestion entry with a `[from: X, kind: Y]` header and
+//! pushes it through the node's harness-native channel: stock `codex queue`, or the attached
+//! Claude `exo listen` Monitor client ([`crate::listen`]).
 //!
 //! **No listener ⇒ the entry queues.** Dispatch errs, the inbound cursor stays pinned, and the
 //! bus retries until a client attaches and acks — so messages sent before the agent arms (or
@@ -16,7 +15,8 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use exo_caps::{
-    Fs, IngestionEntry, Message, MessageBody, MessageKind, Persona, Summary, SyntheticName,
+    AgentType, Fs, IngestionEntry, Message, MessageBody, MessageKind, Persona, Summary,
+    SyntheticName,
 };
 use exo_framework::Exomonad;
 use tracing::{debug, info, warn};
@@ -48,13 +48,30 @@ pub async fn dispatch<D: Exomonad>(
     entry: &IngestionEntry,
 ) -> NodeResult<()> {
     let payload = prepare_listen_payload(ctx, entry).await;
+    if ctx.runtime.agent_type() == AgentType::Codex {
+        let codex = ctx
+            .runtime
+            .codex_node()
+            .ok_or_else(|| NodeError::Delivery("Codex node missing binding papers".into()))?;
+        let binding = exo_runtime::codex::read_binding(&codex.binding)
+            .await
+            .map_err(|e| NodeError::Delivery(format!("Codex binding unavailable: {e}")))?;
+        exo_runtime::codex::queue_message(ctx.runtime.working_dir(), &binding.thread_id, &payload)
+            .await
+            .map_err(|e| NodeError::Delivery(format!("Codex delivery failed: {e}")))?;
+        info!(outcome = "codex_queue", "queued into Codex thread");
+        return Ok(());
+    }
     match ctx.listener.try_deliver(&payload).await {
         Ok(()) => {
             info!(outcome = "listen", "dispatched via listen channel");
             Ok(())
         }
         Err(ListenDeliverError::NoListener) => {
-            debug!(outcome = "queued", "no listener attached; entry stays queued");
+            debug!(
+                outcome = "queued",
+                "no listener attached; entry stays queued"
+            );
             Err(NodeError::NoListener)
         }
         Err(e) => {
@@ -327,7 +344,7 @@ mod tests {
 
     #[test]
     fn test_listen_inline_line_edge() {
-        let at_cap = vec!["x"; MAX_INLINE_LISTEN_LINES].join("\n");
+        let at_cap = ["x"; MAX_INLINE_LISTEN_LINES].join("\n");
         assert!(listen_inline(&at_cap));
         let over_cap = vec!["x"; MAX_INLINE_LISTEN_LINES + 1].join("\n");
         assert!(!listen_inline(&over_cap));

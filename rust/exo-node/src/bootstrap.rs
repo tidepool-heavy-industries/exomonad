@@ -67,7 +67,7 @@ impl<D: Exomonad> NodeContext<D> {
     }
 }
 
-/// Arm a Linux parent-death signal so this sidecar dies if its parent `claude` exits — the
+/// Arm a Linux parent-death signal so a Claude-owned sidecar dies if its parent exits — the
 /// stdin-EOF lifetime anchor is not always reliable (a killed pane can orphan the sidecar).
 /// Best-effort: a prctl failure logs a warning and is non-fatal.
 ///
@@ -132,8 +132,13 @@ pub fn bootstrap<D: Exomonad<Caps = Runtime>>(
     papers_path: &Path,
     working_dir: PathBuf,
 ) -> NodeResult<NodeContext<D>> {
-    install_parent_death_signal();
     let papers = load_papers(papers_path)?;
+    // Claude owns its MCP child directly for the whole session, so parent death is a reliable
+    // lifecycle signal. Codex may supervise or re-parent an MCP stdio child internally, so its
+    // sidecar lifetime is anchored by MCP stdin EOF instead.
+    if papers.agent_type == exo_caps::AgentType::Claude {
+        install_parent_death_signal();
+    }
 
     let run_id = std::env::var("EXOMONAD_SWARM_RUN_ID")
         .map_err(|_| NodeError::MissingContext("EXOMONAD_SWARM_RUN_ID"))?;
@@ -188,7 +193,8 @@ pub fn bootstrap<D: Exomonad<Caps = Runtime>>(
         tmux_session,
         own_pane.clone(),
         papers.kind,
-    );
+    )
+    .with_agent_backend(papers.agent_type, papers.codex.clone());
 
     Ok(NodeContext {
         runtime: Arc::new(runtime),

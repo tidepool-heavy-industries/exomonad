@@ -1,6 +1,7 @@
 default_role = "tl"
 project_dir = "."
 tmux_session = "EXOMONAD"
+backend = "codex"
 port = 7433
 yolo = true
 otlp_endpoint = "http://localhost:4317"
@@ -10,8 +11,25 @@ type = "stdio"
 command = "vendor/notebooklm-mcp/result/bin/notebooklm-mcp"
 args = []
 
-# Run ephemeral workers on Kimi-K2 via the local claude-code-proxy (still Claude processes,
-# so Teams/hooks/MCP are unchanged). "kimi" is a built-in named brain; omit a role ⇒ it
+# Codex node-mode model policy. Root uses the TL profile too.
+[codex.roles.tl]
+model = "gpt-5.6-sol"
+reasoning_effort = "high"
+
+[codex.roles.dev]
+model = "gpt-5.6-sol"
+reasoning_effort = "low"
+
+[codex.roles.worker]
+model = "gpt-5.6-sol"
+reasoning_effort = "low"
+
+[codex.roles.reviewer]
+model = "gpt-5.6-sol"
+reasoning_effort = "low"
+
+# Claude-backend compatibility: run ephemeral workers on Kimi-K2 via the local proxy.
+# This section is inert while backend = "codex". "kimi" is a built-in named brain; omit a role ⇒ it
 # stays the default model. The reviewer stays default Sonnet Claude (Kimi was unreliable for
 # the review gate). Full-table form available for a custom backend.
 [launch_profile]

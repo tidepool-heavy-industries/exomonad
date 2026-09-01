@@ -15,6 +15,7 @@ The single concrete `Runtime` struct that implements **every** `exo-caps` trait.
 | `bus` | `impl Bus` — **the genuinely-new piece.** Append a line to the target's jsonl inbox; resolve `Addressee`→`InboxPath` (Parent = papers pointer; child = fold `children.jsonl`, and a **tombstoned** child is `BusError::Tombstoned`, not a silent append into a black hole); stamp the envelope (including a fresh UUID `id` — the spill pointer **copies** the entry's id rather than minting a second one, since pointer + side-file are one logical message); append + flush, no fsync. A line > `PIPE_BUF` (4096) is **spilled** to a `.spill/` side-file + replaced by a small claim-check pointer (`IngestionEntry::spill`), so the wire line is always one atomic append while the payload (e.g. a rich verdict) can be arbitrarily large; `inbound::resolve_spilled` loads it back. **Instrumented with detailed success/failure logs.** |
 | `spawner` | `impl Spawner` — the recursion (birth + teardown) **and the ledger writer seam** (`append_child_record`, `record_reaped_if_active`, `detect_child_deaths` — see "The ledger writer seam" below). `read_child_records` returns `Ok(Vec::new())` immediately when `self.is_inline()` (chokepoint for `any_child_busy` + `read_children` + shutdown live-children count). See below. |
 | `tmux` | `impl Tmux` — `paste` delegates to exomonad-shared `TmuxIpc::inject_input` (hardened buffer-paste; in v2 used ONLY for launch-command injection into holding shells — message delivery is the listen wake channel, see `exo-node/CLAUDE.md`); `list_panes` (`tmux list-panes -a`) is the one liveness probe both `Topology` and `ChildLiveness` consume (an `Err` is a probe failure, never "no panes"). |
+| `codex` | Small stock-CLI adapter: render node-scoped `codex`/`codex resume`/`codex fork` TUI commands with `-c` MCP overrides, atomically read/write real thread bindings, deliver through `codex queue`, and archive with `codex archive`. |
 | `liveness` | `impl ChildLiveness` — any *direct* child's pane currently exist? A direct `Tmux::list_panes` probe over the **non-terminal** children of the ledger fold; probe failure ⇒ assume busy (never manufacture a false idle). There used to be an in-memory busy-bit map here too (mutated at birth in `spawner`, on child-deliver in `bus`, on a Claude Code `Stop`-hook-derived `ChildIdle` report in `exo-node`), combined with the pane probe as a floor — removed, since `Stop` fires on every turn-end (including a legitimate async-wait yield) and the bit was routinely wrong. Pure truth table split out + unit-tested. |
 | `fs` `kv` `process` | The remaining cap impls. |
 | `node_config` | `write_node_agent_config(settings_path, mcp_path, papers)` — writes a node's MCP server + hooks to **private files** (siblings of its papers, via `paths::node_config_paths`), NOT the cwd. `claude` is pointed at them with `--settings <settings_path> --mcp-config <mcp_path>` (added in `build_agent_command`), which **merge** over the cwd config (plain flags — no `--strict-mcp-config`/`--setting-sources`, so the user's own `.mcp.json`/settings survive). This is what stops an **inline worker** (shared cwd) from clobbering the parent's `.claude/settings.local.json`/`.mcp.json`, and keeps `.mcp.json` out of the repo entirely. The role steering protocol is delivered via launch-time `--append-system-prompt`, not config. |
@@ -27,7 +28,8 @@ The single concrete `Runtime` struct that implements **every** `exo-caps` trait.
 
 The one generic `Spawner::spawn<S: SpawnSpec>` reads `(role, kind, name, task,
 fork_session)` off the domain spec (the domain tool fixed the role/kind) and funnels through one
-private `birth(BirthCore)` tail. The agent backend is `RoleKind::agent_type(role)`; the branch is
+private `birth(BirthCore)` tail. A Codex parent forces Codex for its descendants; otherwise the
+agent backend is `RoleKind::agent_type(role)`. The branch is
 safe-generated for a Worktree child or the parent's branch for an Inline one. The prompt arrives
 **pre-rendered** (`spec.into_task()` — the domain owns `render_spec_prompt` now), and the node's spec
 is persisted to `.exo/acceptance.md` by the spawning **domain tool** via the `Fs` cap, **not** by
@@ -40,7 +42,22 @@ race guard** — do not reorder:
 4. Write the child's `node.json` papers (`parent_inbox` = my own inbox).
 5. Write the node's MCP config (`write_node_agent_config`), then `Tmux::paste` the launch command (via exomonad-shared's `build_agent_command` + `write_prompt_file` — prompt goes in a file, never inline) into the holding shell. The role protocol (override-or-const) is passed via `--append-system-prompt`. The launch model (`SpawnSpec::model_override()` else `RoleKind::model()` → `BirthCore.model`, with a launch profile's own model winning over both) becomes `build_agent_command`'s `--model` flag — `sonnet` for dev/worker/reviewer leaves, `opus` for a spawned TL. `birth_finish` resolves it **once**, stamps it (with `BirthCore.directives_hash`) into the child's `ChildRecord::Spawned`, and reuses that same binding at the `ClaudeInvocation` — so the ledger records what the child was *actually* launched with, not a re-derivation that could drift. **Every spawned node gets an explicit model** — `None` ("inherit the launcher's default") is reserved for `root` alone, since root is never spawned via `birth` (it's the human's own top-level `exo init` session); a spawned node inheriting "whatever the launcher's default happens to be" would burn whatever tier the human's own interactive session is set to (which may be a cheap/fast model picked for chat, not subagent work) on real decomposition/implementation work.
 
-**Do not collapse steps 2+5** into a one-shot `new_pane(cwd, launch_cmd)` — that reopens the orphan window the two-phase split closes. Message delivery to every child is the listen wake channel (tmux-paste delivery and CC Agent Teams delivery are both retired — see `exo-node/CLAUDE.md`), so no Teams-enabling env var is set at any child's launch. `birth_finish` also stamps `kind: core.kind` into the child's papers so bootstrap reads it back and calls `Runtime::is_inline()` correctly.
+For Codex, step 5 pastes an ordinary stock-TUI command into the holding pane: `codex <birth-prompt>`
+for a fresh child, or `codex fork <parent-thread> <birth-prompt>` when `fork_session` is requested.
+Every node-specific setting is a launch-time `-c` override: Exomonad MCP command/cwd/env forwarding,
+developer instructions, model, and reasoning effort. The prompt is still read from a file, and the
+TUI stays fully interactive. Exomonad does not invent a Codex UUID: the MCP sidecar records the
+controlled TUI's resumable local rollout UUID during MCP startup. Until that happens,
+inbound messages remain in the durable inbox. Exo then delivers with `codex queue`; the cursor
+advances only after that command accepts the message, so unavailable threads remain queued for retry.
+
+Exomonad stays in Codex's normal deferred MCP inventory. Code mode exports those namespaced tools
+through its nested `ALL_TOOLS`/`tools` surface, so the model can discover and invoke
+`mcp__exomonad__*` from `functions.exec`. Do **not** put it in
+`direct_only_tool_namespaces`: Codex intentionally omits such namespaces from the nested code-mode
+surface, which is exactly the wrong side of the boundary for this host.
+
+**Do not collapse steps 2+5** into a one-shot `new_pane(cwd, launch_cmd)` — that reopens the orphan window the two-phase split closes. Message delivery uses the harness-native wake path (`codex queue` or Claude's listen channel); tmux-paste delivery and CC Agent Teams delivery are both retired. No Teams-enabling env var is set at any child's launch. `birth_finish` also stamps `kind: core.kind` into the child's papers so bootstrap reads it back and calls `Runtime::is_inline()` correctly.
 
 ### Launch profiles (`RoleKind::launch_profile_env_prefix`) — per-role non-default brain
 

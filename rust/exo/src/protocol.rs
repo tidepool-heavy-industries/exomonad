@@ -27,8 +27,8 @@ Build context until you can see the tree. Then become the tree.
 1. PLAN: Research and read until the decomposition is clear.
 2. FORK: Split into parallel TLs (fork_wave) or Sonnet leaves (spawn_dev/spawn_worker). Each TL runs scaffold-fork-converge independently.
 3. IDLE: After spawning, STOP. End your turn with no further output. Conserve your context window.
-   Messages from children arrive as notifications from your `exo listen` monitor (armed as your first action — see the session-start WAKE CHANNEL instruction) and wake you BETWEEN turns.
-   Until that monitor is armed, messages queue durably and CANNOT reach you; they drain the moment it connects. No polling, no checking, no busy-waiting.
+   Messages from children arrive through your harness wake channel and wake you BETWEEN turns.
+   Until that channel is ready, messages queue durably; they drain the moment it becomes ready. No polling, no checking, no busy-waiting.
 4. MERGE: When a child signals [READY], fold its branch with the `merge` tool — NOT raw `git merge`. The tool folds AND reclaims the child's pane + worktree; raw git leaks them. Verify the build after each merge — parallel TLs may interact.
 5. REPEAT: If more waves, goto 1.
 
@@ -72,8 +72,8 @@ Build context until you can see the tree. Then become the tree.
 1. SCAFFOLD: Write the shared foundation (types, stubs, CLAUDE.md). Commit it — children fork from this commit.
 2. SPLIT + EXTEND: Fork sub-TLs for complex subtrees. Spawn Sonnet leaves for focused tasks. Everything parallel that can be parallel.
 3. IDLE: After spawning, STOP. End your turn with no further output. Conserve your context window.
-   Messages from your parent and children arrive as notifications from your `exo listen` monitor (armed as your first action — see the session-start WAKE CHANNEL instruction) and wake you BETWEEN turns.
-   Until that monitor is armed, messages queue durably and CANNOT reach you; they drain the moment it connects. No polling, no checking, no busy-waiting.
+   Messages from your parent and children arrive through your harness wake channel and wake you BETWEEN turns.
+   Until that channel is ready, messages queue durably; they drain the moment it becomes ready. No polling, no checking, no busy-waiting.
 4. FOLD: Fold each child's branch with the `merge` tool when it signals [READY] — NOT raw `git merge` (the tool also reclaims the child's pane + worktree; raw git leaks them). Integration commit. What you learned sharpens the next wave.
 5. REPEAT: If more waves, goto 2. If done, commit and `submit_branch` upward. Your parent folds you in turn.
 
@@ -107,7 +107,7 @@ Read CLAUDE.md first. Follow the spec exactly — the anti-patterns section is m
 4. Commit your changes (`git add <specific files>` — NEVER `git add .` or `git add -A`)
 5. Before calling `submit_branch`, kill any background process you started, or explicitly hand it off by naming its PID and log path in your submit note — after the fold your worktree is deleted and an orphaned job runs against a dead directory.
 6. Call `submit_branch` to request review of your branch
-7. If the reviewer returns feedback (it arrives as a notification from your `exo listen` monitor), address every Error finding, commit your changes, and re-submit (a new commit gets a fresh review). Warning, Info, and Hint findings are optional but recommended.
+7. If the reviewer returns feedback through your harness wake channel, address every Error finding, commit your changes, and re-submit (a new commit gets a fresh review). Warning, Info, and Hint findings are optional but recommended.
 8. Use `notify_parent` only to report status or escalate a blocker
 
 ## Boundaries

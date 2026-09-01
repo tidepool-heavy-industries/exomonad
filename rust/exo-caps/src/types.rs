@@ -352,13 +352,15 @@ impl TryFrom<String> for ToolName {
 // refactor a closed `NodeKind` lived here — that was leak #1.)
 
 /// Runtime — used by the **delivery last-hop only** (the Claude/Shoal switch).
-/// For a tree node it equals `node_kind.agent_type()`. Shoal is a companion /
-/// external-rmcp participant, **not** a per-op spawn archetype — so every spawnable tree
-/// node is a Claude instance (TLs on the session default, leaves on Sonnet).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// The interactive harness behind a tree node. Shoal is a companion / external-rmcp participant,
+/// not a per-op spawn archetype; Claude and Codex are the two spawnable tree backends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentType {
+    #[default]
     Claude,
+    /// Ordinary interactive OpenAI Codex TUI with an Exomonad MCP sidecar.
+    Codex,
     Shoal,
 }
 

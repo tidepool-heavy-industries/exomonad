@@ -14,22 +14,22 @@ use serde::Deserialize;
 
 /// Sender-side wake-channel note appended to a message tool's response — the "your recipient
 /// can't hear yet" signal lands where someone can act on it, at the moment they act. `None`
-/// (a live listener) keeps the output clean.
+/// (a ready harness wake path) keeps the output clean.
 pub(crate) fn wake_note(status: WakeStatus) -> Option<&'static str> {
     match status {
         WakeStatus::Listening => None,
         WakeStatus::NotListening => Some(
-            "⚠ recipient has no active listener — the message is queued durably and delivers \
-             when they arm (or re-arm) their wake monitor",
+            "⚠ recipient has no active wake channel — the message is queued durably and \
+             delivers when its harness wake path becomes ready",
         ),
         WakeStatus::Unknown => Some(
             "note: recipient wake status unknown (no fresh status snapshot — a just-spawned node \
-             may not have armed its monitor yet); the message is queued durably either way",
+             may not have initialized its wake path yet); the message is queued durably either way",
         ),
     }
 }
 
-/// `"delivered"`, plus the wake note when the recipient's listener isn't confirmed live.
+/// `"delivered"`, plus the wake note when the recipient's wake path isn't confirmed ready.
 pub(crate) async fn delivered_output<C: Bus + Sync>(ctx: &C, to: &Addressee) -> ToolOutput {
     match wake_note(ctx.wake_status(to).await) {
         None => ToolOutput::text("delivered"),
@@ -202,7 +202,7 @@ mod tests {
         let text = res["text"].as_str().unwrap();
         assert!(text.starts_with("delivered"), "delivery still succeeds");
         assert!(
-            text.contains("⚠ recipient has no active listener"),
+            text.contains("⚠ recipient has no active wake channel"),
             "sender must see the wake warning: {text}"
         );
     }

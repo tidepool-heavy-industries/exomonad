@@ -55,6 +55,36 @@ exomonad init       # Creates tmux session with Server + TL windows
 
 You're now in a tmux session. Switch to the **TL window** and run `claude`. ExoMonad's MCP tools are available immediately — Claude can spawn agents, file PRs, and coordinate work.
 
+### Active node mode (`exo`)
+
+The smaller Rust-only node-mode implementation is launched with `exo init`. It defaults to Codex:
+the root and every child are ordinary independent Codex TUIs in tmux panes. Exo injects its MCP
+server as session-local `-c` configuration, learns each TUI's real thread UUID from MCP metadata,
+and pushes messages with `codex queue`; it does not type messages into panes or run a shared server.
+
+```bash
+cd your-project
+exo init                         # Codex backend (default)
+exo init --backend claude        # compatibility backend
+```
+
+Project configuration can select the backend and tune Codex by role:
+
+```toml
+backend = "codex"
+
+[codex.roles.tl]
+model = "gpt-5.6-sol"
+reasoning_effort = "high"
+
+[codex.roles.dev]
+model = "gpt-5.6-sol"
+reasoning_effort = "low"
+```
+
+Worker and reviewer roles also default to `gpt-5.6-sol` with low reasoning. `exo init --recreate`
+rebuilds the tmux run and resumes the root Codex conversation from its stable thread binding.
+
 ### Use on any project
 
 ExoMonad works on any git repository. After installing, just init:

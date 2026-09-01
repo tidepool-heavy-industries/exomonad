@@ -124,14 +124,14 @@ WASM build pipeline → [`haskell/wasm-guest/CLAUDE.md`](haskell/wasm-guest/CLAU
 
 Spawn a recursive tree of heterogeneous agents:
 
-- **`fork_wave`** — N parallel Claude TL children, each in its own worktree + branch, context inherited by default.
-- **`spawn_dev`** (v2; `spawn_gemini` in Classic) — a dev leaf in its own worktree + branch with a self-contained spec; commits and calls `submit_branch` when ready. v2 leaves are Sonnet Claude.
-- **`spawn_worker`** — ephemeral worker in a tmux pane (no branch, no merge); reports via `notify_parent`. v2: Sonnet Claude.
+- **`fork_wave`** — N parallel TL children, each in its own worktree + branch, context optionally forked.
+- **`spawn_dev`** (v2; `spawn_gemini` in Classic) — a dev leaf in its own worktree + branch with a self-contained spec; commits and calls `submit_branch` when ready.
+- **`spawn_worker`** — ephemeral worker in a tmux pane (no branch, no merge); reports via `notify_parent`.
 - **`merge`** — fold a child's submitted branch into yours (v2: local `git merge`; Classic: PR via `merge_pr`).
 
-**Agent types:** v2 node-mode is all Claude 🤖 — Opus TLs (spawned `tl`; root inherits the human's own session model instead, since it's never spawned via `birth`) + Sonnet leaves (dev/worker/reviewer) — plus Shoal 🌊 (custom binary agents over rmcp + HTTP-over-UDS) as an external companion backend. (Gemini 💎 was the v2 leaf runtime before the cut and is now Classic-only.) **Identity** = birth-branch (immutable, deterministic); root = `root`. The filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/`.
+**Agent types:** v2 node-mode defaults to independent stock Codex TUIs in tmux panes. Exo supplies node-local MCP configuration on the Codex command line, records the real thread UUID from MCP metadata, and uses `codex queue` for delivery. Spawned TLs default to `gpt-5.6-sol` high reasoning; dev/worker/reviewer leaves default to the same model at low reasoning. `backend = "claude"` or `exo init --backend claude` preserves the Opus/Sonnet Claude tree. **Identity** = birth-branch (immutable, deterministic); root = `root`.
 
-**Coordination is push-based** via the sidecar: a child calls `notify_parent` (or `send_message` for peer-to-peer), the message lands on the bus, and the recipient's sidecar hands it to that agent's Monitor-armed `exo listen` client — each message becomes a harness notification (`[from: X]`) that wakes the agent between turns. Every node arms that monitor as its first action (the SessionStart hook injects the exact command); until it's armed, messages queue durably on the bus and drain the moment it connects. The TL idles — no polling, no blocking. (Delivery history: CC Agent Teams native delivery was retired at CC 2.1.178 — a solo session-lead never drains its teammate inbox; its tmux-paste successor was cut too — typing into the TUI was fragile and hit the human mid-keystroke. tmux survives for spawning + observability only; exo owns its delivery channel.)
+**Coordination is push-based** via the sidecar: a child calls `notify_parent` (or `send_message`), the message lands on the durable bus, and the recipient sidecar pushes it into the harness. Codex uses `codex queue`; Claude uses the Monitor-armed `exo listen` channel. The cursor advances only after the last hop accepts the message, so disconnected recipients queue without tmux-paste delivery. tmux survives for spawning, the interactive TUIs, and observability.
 
 Tool/role matrix → [`.claude/rules/exomonad.md`](.claude/rules/exomonad.md). Root protocol → `.exo/roles/devswarm/context/root.md`.
 

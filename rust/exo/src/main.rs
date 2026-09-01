@@ -5,7 +5,7 @@
 //!
 //! ```text
 //!   exo init [--session <s>] [--recreate]   # bootstrap a node-mode ROOT (own tmux session, no server)
-//!   exo node --papers <path>                # run the node-mode sidecar for the node described by <path>
+//!   exo node [--papers <path>]              # path may instead come from $EXOMONAD_PAPERS
 //!   exo hook <event> --papers <path>        # handle a CC hook via the node's exo gates
 //!   exo listen --papers <path>              # wake-channel client (run under Claude Code's Monitor tool)
 //! ```
@@ -44,14 +44,17 @@ enum Commands {
         /// Tear down an existing session of the same name first.
         #[arg(long)]
         recreate: bool,
+        /// Agent harness for this run (overrides `.exo/config*.toml`).
+        #[arg(long, value_enum)]
+        backend: Option<config::Backend>,
     },
 
     /// Run the swarm-sidecar node mode: self-ID from papers, then the two-loop
     /// sidecar (outbound MCP serve + inbound ingestion-inbox watch).
     Node {
-        /// Path to this node's birth papers (`node.json`), written by the parent at spawn.
+        /// Path to this node's birth papers (`node.json`). Defaults to $EXOMONAD_PAPERS.
         #[arg(long)]
-        papers: std::path::PathBuf,
+        papers: Option<std::path::PathBuf>,
     },
 
     /// Handle a hook via `exo` against a node's papers, with NO central server.
@@ -96,7 +99,11 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Init { session, recreate } => {
+        Commands::Init {
+            session,
+            recreate,
+            backend,
+        } => {
             let cfg = config::discover().context("loading exo config")?;
             init::run(
                 &cfg.tmux_session,
@@ -110,11 +117,16 @@ async fn main() -> anyhow::Result<()> {
                 &cfg.confine_socket,
                 session,
                 recreate,
+                backend.unwrap_or(cfg.backend),
+                &cfg.codex_env,
             )
             .await
         }
 
         Commands::Node { papers } => {
+            let papers = papers
+                .or_else(|| std::env::var_os("EXOMONAD_PAPERS").map(std::path::PathBuf::from))
+                .context("exo node requires --papers or $EXOMONAD_PAPERS")?;
             let cwd = std::env::current_dir().context("resolving node cwd")?;
             // Monomorphize the engine once at the `exo` domain — the engine never names a concrete
             // role/system/spawn; it resolves everything through `ExoDomain`'s `Exomonad` impl.
