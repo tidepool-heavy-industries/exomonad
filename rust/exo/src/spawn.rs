@@ -72,9 +72,9 @@ impl SpawnSpec for ExoSpawn {
 /// [`ExoSpawn`] carries. Domain-owned (moved out of the runtime with the Spawner collapse) — the
 /// engine births a child from an already-rendered task, so the formatting is the domain's concern.
 ///
-/// `boundary` is the prose forbidden-actions list — rendered under "ANTI-PATTERNS (DO NOT):".
-/// `file_boundary` is the distinct, mechanically-checked allowed-paths list — rendered under
-/// "ALLOWED PATHS" right after it. The two answer different questions ("what must you not do" vs
+/// `boundary` is the prose forbidden-actions list — rendered under "CONSTRAINTS".
+/// `file_boundary` is the distinct, mechanically-checked allowed-paths list — rendered earlier
+/// under "ALLOWED PATHS". The two answer different questions ("what must you not do" vs
 /// "where may your diff land") and must never be conflated: `file_boundary` is also persisted
 /// parent-side and checked against the child's actual diff at merge time (see `boundary.rs`),
 /// while `boundary` is pure prose the child reads and nothing else ever checks.
@@ -89,12 +89,15 @@ pub fn render_spec_prompt(
     context: Option<&String>,
     done_criteria: &[String],
 ) -> String {
-    let mut prompt = task.to_string();
+    let mut prompt = String::from(
+        "EXECUTION CONTRACT:\nWork autonomously in your assigned scope. Follow your role protocol for git, verification, escalation, and handoff.\n\nOBJECTIVE:\n",
+    );
+    prompt.push_str(task);
 
-    if !boundary.is_empty() {
-        prompt.push_str("\n\nANTI-PATTERNS (DO NOT):");
-        for b in boundary {
-            prompt.push_str(&format!("\n- {b}"));
+    if !done_criteria.is_empty() {
+        prompt.push_str("\n\nDONE WHEN:");
+        for d in done_criteria {
+            prompt.push_str(&format!("\n- {d}"));
         }
     }
     if !file_boundary.is_empty() {
@@ -107,13 +110,25 @@ pub fn render_spec_prompt(
         }
     }
     if !read_first.is_empty() {
-        prompt.push_str("\n\nREAD FIRST:");
+        prompt.push_str("\n\nREAD FIRST (only the context needed to begin):");
         for rf in read_first {
             prompt.push_str(&format!("\n- {rf}"));
         }
     }
+    if !boundary.is_empty() {
+        prompt.push_str("\n\nCONSTRAINTS:");
+        for b in boundary {
+            prompt.push_str(&format!("\n- {b}"));
+        }
+    }
+    if let Some(ctx) = context {
+        if !ctx.is_empty() {
+            prompt.push_str("\n\nCONTEXT:\n");
+            prompt.push_str(ctx);
+        }
+    }
     if !steps.is_empty() {
-        prompt.push_str("\n\nSTEPS:");
+        prompt.push_str("\n\nSTEPS (if useful):");
         for (i, step) in steps.iter().enumerate() {
             prompt.push_str(&format!("\n{}. {}", i + 1, step));
         }
@@ -124,18 +139,9 @@ pub fn render_spec_prompt(
             prompt.push_str(&format!("\n- {v}"));
         }
     }
-    if let Some(ctx) = context {
-        if !ctx.is_empty() {
-            prompt.push_str("\n\nCONTEXT:\n");
-            prompt.push_str(ctx);
-        }
-    }
-    if !done_criteria.is_empty() {
-        prompt.push_str("\n\nDONE CRITERIA:");
-        for d in done_criteria {
-            prompt.push_str(&format!("\n- {d}"));
-        }
-    }
+    prompt.push_str(
+        "\n\nHANDOFF:\nReturn a concise outcome and verification receipt through the completion path required by your role protocol.",
+    );
     prompt
 }
 
@@ -173,23 +179,37 @@ mod tests {
             Some(&"some context".to_string()),
             &["all green".into()],
         );
-        assert!(p.contains("do work"));
-        assert!(p.contains("ANTI-PATTERNS (DO NOT):\n- no delete"));
-        assert!(p.contains("READ FIRST:\n- README.md"));
-        assert!(p.contains("STEPS:\n1. step 1\n2. step 2"));
+        assert!(p.contains("OBJECTIVE:\ndo work"));
+        assert!(p.contains("CONSTRAINTS:\n- no delete"));
+        assert!(p.contains("READ FIRST (only the context needed to begin):\n- README.md"));
+        assert!(p.contains("STEPS (if useful):\n1. step 1\n2. step 2"));
         assert!(p.contains("VERIFY:\n- cargo test"));
         assert!(p.contains("CONTEXT:\nsome context"));
-        assert!(p.contains("DONE CRITERIA:\n- all green"));
-        assert_eq!(
-            render_spec_prompt("task", &[], &[], &[], &[], &[], None, &[]),
-            "task"
-        );
+        assert!(p.contains("DONE WHEN:\n- all green"));
+        let positions = [
+            "EXECUTION CONTRACT:",
+            "OBJECTIVE:",
+            "DONE WHEN:",
+            "READ FIRST",
+            "CONSTRAINTS:",
+            "CONTEXT:",
+            "STEPS (if useful):",
+            "VERIFY:",
+            "HANDOFF:",
+        ]
+        .map(|heading| p.find(heading).unwrap());
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     }
 
     #[test]
     fn render_spec_prompt_empty_context_omitted() {
         let p = render_spec_prompt("task", &[], &[], &[], &[], &[], Some(&"".to_string()), &[]);
         assert!(!p.contains("CONTEXT:"));
+        assert!(!p.contains("DONE WHEN:"));
+        assert!(!p.contains("READ FIRST"));
+        assert!(!p.contains("CONSTRAINTS:"));
+        assert!(!p.contains("STEPS (if useful):"));
+        assert!(!p.contains("VERIFY:"));
     }
 
     #[test]
@@ -209,12 +229,12 @@ mod tests {
         assert!(p.contains("- src/tools"));
         // The two sections stay distinct: `boundary` entries never appear under ALLOWED PATHS and
         // vice versa.
-        assert!(p.contains("ANTI-PATTERNS (DO NOT):\n- no delete"));
-        let anti_idx = p.find("ANTI-PATTERNS").unwrap();
+        assert!(p.contains("CONSTRAINTS:\n- no delete"));
+        let constraints_idx = p.find("CONSTRAINTS:").unwrap();
         let allowed_idx = p.find("ALLOWED PATHS").unwrap();
         assert!(
-            anti_idx < allowed_idx,
-            "ALLOWED PATHS must follow ANTI-PATTERNS"
+            allowed_idx < constraints_idx,
+            "mechanical scope must precede prose constraints"
         );
     }
 

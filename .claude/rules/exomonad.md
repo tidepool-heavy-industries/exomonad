@@ -39,7 +39,7 @@ Use exomonad MCP tools for orchestration. Git operations use the `git` CLI direc
 Every role runs as a Claude instance; the **model** varies per role (`RoleKind::model`):
 
 - **Root**: inherits the launcher's default (the human's own top-level `exo init` session — never spawned via `birth`, so this is the human's own model choice).
-- **Tl (spawned Tech Lead)**: Opus. Decomposes, specs, scaffolds, spawns, merges. Never implements directly.
+- **Tl (spawned Tech Lead)**: Opus. Decomposes, specs, scaffolds, spawns, and merges. Delegates substantial independent work by default; may directly handle small work, integration, conflicts, diagnostics, or work where delegation costs more than execution.
 - **Dev (leaf)**: Sonnet. Implements a focused spec, commits, `submit_branch`. No spawning.
 - **Worker**: Sonnet. Ephemeral pane, no branch. Research or in-place edits. May run on an alternate launch-profile brain (e.g. Kimi) if configured.
 - **Reviewer**: Sonnet (or a launch-profile brain). Short-lived, spawned by `submit_branch` when reviewers are enabled; reads the diff read-only and calls `verdict`.
@@ -108,7 +108,7 @@ The TL does NOT iterate on children's work. Convergence is **leaf + reviewer**, 
 4. **If reviewers are disabled** (the default) or `dangerously_skip_reviewer: true` is passed, `submit_branch` forwards `[READY]` straight to the parent, flagged as unreviewed.
 5. TL calls `merge` when `[READY]` arrives.
 
-The TL never manually reviews code, never fixes a leaf's implementation. There is no Copilot in v2 — Copilot review and `file_pr`/`merge_pr` are Classic-only.
+The structured reviewer owns branch review. A TL owns integration, conflict resolution, and verification after folds. There is no Copilot in v2 — Copilot review and `file_pr`/`merge_pr` are Classic-only.
 
 `merge` accepts any local ref, not just a tracked child's branch — this is the supported succession escape hatch for dead-TL recovery (folding an orphaned descendant's branch back into a live ancestor); pane/worktree reclaim only works for your own ledger children and is best-effort otherwise. An optional `gate` command runs after the merge commits and before teardown; a failed gate leaves the child alive (merge stays committed, teardown is skipped) so it can fix its work and be re-merged.
 
@@ -126,4 +126,4 @@ Review round-tripping is tracked via a durable `ReviewLog` (`ReviewRound`) persi
 - `send_message` for peer-to-peer messaging to a named child (tree-edges only)
 - Messages arrive as `[from: X, kind: Y]` notifications from the recipient's Monitor-armed `exo listen` client, delivered by its own sidecar off the durable bus (large payloads arrive as a one-line `@`-file reference to read). Every node arms that monitor as its **first action** — the SessionStart hook injects the exact command. An unarmed node's messages **queue durably** (senders see a ⚠ "no active listener" note in their tool responses; `tree` shows `wake:-`) and drain the moment the monitor connects. CC Agent Teams native delivery was retired (as of Claude Code 2.1.178 a solo session-lead never drains its own Teams inbox), and its tmux-paste successor was cut as delivery too (fragile TUI typing, indistinguishable from user input) — tmux survives for spawning and human observability only. `exo` owns its delivery channel end to end; no native CC team tools are used.
 - The notification vocabulary is `[READY]` (converged, parent should merge), `[idle]`, `[FAILED: id]`, `[CHILD DIED: name]` (the watchdog observed a child's pane dead while un-reaped — its ledger state is `Died`; check `tree`, then merge what its branch holds or respawn), and `[CHILDREN DIED: N]` (the batched form — one message per watchdog tick when several deaths land in the same scan, e.g. a mass teardown or the first scan over a pre-lifecycle ledger). Acknowledge `Died` tombstones with `exo doctor --fix`, which records `Reaped` for reclaimed corpses and for dead children with no worktree left. There is no Copilot-era vocabulary (`[FIXES PUSHED]`, `[PR READY]`, `[REVIEW TIMEOUT]`) in v2.
-- TL idles between spawning and receiving notifications — no polling.
+- Child events are pushed. A TL never polls; it continues useful non-overlapping work and yields only when nothing useful remains.

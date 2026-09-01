@@ -22,8 +22,7 @@ use exo_caps::{AgentName, CapError, CapResult, Fs, FsError};
 pub const DIRECTIVES_DIR: &str = ".exo/directives";
 
 /// The header [`Directives::apply`] opens its appended section with.
-pub const DIRECTIVES_HEADER: &str =
-    "STANDING DIRECTIVES (inherited from your spawner — follow these):";
+pub const DIRECTIVES_HEADER: &str = "INHERITED DIRECTIVES (apply throughout this task):";
 
 /// A node's loaded standing directives: `(filename, content)` pairs, **sorted by filename**.
 ///
@@ -69,7 +68,8 @@ impl Directives {
     }
 
     /// Append the directives to a child's rendered spec as a trailing section:
-    /// `\n\n{DIRECTIVES_HEADER}\n` then, per file, a `## {name}` header and the file's content.
+    /// `\n\n{DIRECTIVES_HEADER}\n` then each filename as a plain label and its content. Directive
+    /// files often carry their own headings, so the renderer adds no redundant heading layer.
     ///
     /// No-op (returns `task` unchanged) when [`is_empty`](Directives::is_empty).
     pub fn apply(&self, task: String) -> String {
@@ -80,7 +80,7 @@ impl Directives {
         out.push_str("\n\n");
         out.push_str(DIRECTIVES_HEADER);
         for (name, content) in &self.files {
-            out.push_str(&format!("\n\n## {name}\n{content}"));
+            out.push_str(&format!("\n\n{name}:\n{content}"));
         }
         out
     }
@@ -304,7 +304,8 @@ mod tests {
         let out = d.apply(task.clone());
         assert!(out.starts_with(&task));
         assert!(out.contains(DIRECTIVES_HEADER));
-        assert!(out.contains("## a.md"));
+        assert!(out.contains("\na.md:\n"));
+        assert!(!out.contains("## a.md"));
         assert!(out.contains("alpha content"));
     }
 

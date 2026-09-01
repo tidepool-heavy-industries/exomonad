@@ -252,7 +252,7 @@ pub struct SpawnWorkerArgs {
     pub done_criteria: Vec<String>,
     #[serde(default)]
     pub context: Option<String>,
-    /// Prose DO-NOT rules injected into the child's task under "ANTI-PATTERNS (DO NOT):" — known
+    /// Prose rules injected into the child's task under "CONSTRAINTS" — known
     /// failure modes to avoid. This is NOT an allowed-paths list and nothing checks it
     /// mechanically; for that, worktree tools take `file_boundary` instead.
     #[serde(default)]
@@ -280,8 +280,8 @@ impl<R: Spawner + Fs + Send + Sync> Tool<R> for SpawnWorker {
          is nothing to merge — for work that should land on its own branch, use `spawn_dev`. \
          Set `model` to override this child's model tier for this one spawn, capped at your own \
          role's tier; ignored if this role is redirected by a launch profile, since that \
-         profile's proxy serves exactly one model. After spawning, return immediately — idle and \
-         wait, do not poll.";
+         profile's proxy serves exactly one model. Never poll after spawning: events are pushed. \
+         Continue useful non-overlapping work, or yield when none remains.";
     type Args = SpawnWorkerArgs;
 
     async fn run(ctx: &R, args: SpawnWorkerArgs) -> CapResult<ToolOutput> {
@@ -331,7 +331,7 @@ pub struct SpawnDevArgs {
     pub done_criteria: Vec<String>,
     #[serde(default)]
     pub context: Option<String>,
-    /// Prose DO-NOT rules injected into the child's task under "ANTI-PATTERNS (DO NOT):" — known
+    /// Prose rules injected into the child's task under "CONSTRAINTS" — known
     /// failure modes to avoid. This is NOT an allowed-paths list — for that, use `file_boundary`,
     /// which the child also sees (under "ALLOWED PATHS") and which is additionally checked
     /// mechanically at merge time.
@@ -379,7 +379,8 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for SpawnDev {
          capped at your own role's tier; ignored if this role is redirected by a launch profile. \
          Duplicate `name` (including a previously reaped one) is refused before any resource is \
          created — on an ambiguous spawn error, check `tree` before retrying; never blind-respawn. \
-         After spawning, return immediately — idle and wait for [READY], do not poll.";
+         Never poll after spawning: [READY] is pushed. Continue useful non-overlapping work, or \
+         yield when none remains.";
     type Args = SpawnDevArgs;
 
     async fn run(ctx: &R, args: SpawnDevArgs) -> CapResult<ToolOutput> {
@@ -449,7 +450,7 @@ pub struct ForkChildArgs {
     pub done_criteria: Vec<String>,
     #[serde(default)]
     pub context: Option<String>,
-    /// Prose DO-NOT rules injected into the child's task under "ANTI-PATTERNS (DO NOT):" — known
+    /// Prose rules injected into the child's task under "CONSTRAINTS" — known
     /// failure modes to avoid. This is NOT an allowed-paths list — for that, use `file_boundary`,
     /// which the child also sees (under "ALLOWED PATHS") and which is additionally checked
     /// mechanically at merge time.
@@ -511,9 +512,9 @@ impl<R: Spawner + Fs + Git + Send + Sync> Tool<R> for ForkWave {
          role redirected by a launch profile. Set `preview: true` to render every child's final \
          assembled spec and spawn nothing — works even on a dirty tree. Duplicate `name` \
          (including a previously reaped one) is refused before any resource is created — on an \
-         ambiguous spawn error, check `tree` before retrying; never blind-respawn. After \
-         spawning, return immediately — idle and wait, do not poll; children's messages arrive \
-         between your turns.";
+         ambiguous spawn error, check `tree` before retrying; never blind-respawn. Never poll \
+         after spawning: child events are pushed. Continue useful non-overlapping work, or yield \
+         when none remains.";
     type Args = ForkWaveArgs;
 
     async fn run(ctx: &R, args: ForkWaveArgs) -> CapResult<ToolOutput> {
@@ -767,8 +768,8 @@ mod tests {
         match spawn {
             Call::Spawn { task, .. } => {
                 // The structured fields are rendered into the single task body by the domain.
-                assert!(task.contains("STEPS:\n1. step 1"));
-                assert!(task.contains("ANTI-PATTERNS (DO NOT):\n- boundary 1"));
+                assert!(task.contains("STEPS (if useful):\n1. step 1"));
+                assert!(task.contains("CONSTRAINTS:\n- boundary 1"));
             }
             _ => panic!("wrong call"),
         }
@@ -832,7 +833,7 @@ mod tests {
             .expect("spawn recorded");
         assert_eq!(spec, spawned_task);
         assert!(spec.contains("distinctive dev task"));
-        assert!(spec.contains("STEPS:\n1. step 1"));
+        assert!(spec.contains("STEPS (if useful):\n1. step 1"));
     }
 
     #[tokio::test]
@@ -1467,7 +1468,7 @@ mod tests {
             .expect("spawn recorded");
         assert!(task.contains("ALLOWED PATHS"));
         assert!(task.contains("- rust/exo/src/tools/spawn.rs"));
-        assert!(task.contains("ANTI-PATTERNS (DO NOT):\n- do not touch prod config"));
+        assert!(task.contains("CONSTRAINTS:\n- do not touch prod config"));
     }
 
     #[tokio::test]

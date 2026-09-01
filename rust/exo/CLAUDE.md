@@ -85,9 +85,10 @@ one by ordinary message; adopting it is a file write.
 `directives.rs` is the whole implementation. Every spawn path does three things with the loaded
 bundle (`load_directives` is called **once per tool invocation**, not once per child):
 
-1. **Injects** it as text into the child's spec (`Directives::apply` appends a
-   `STANDING DIRECTIVES (inherited from your spawner — follow these):` section, one `## {file}`
-   block per file). This is what actually makes the child obey, and it is the only mechanism that
+1. **Injects** it as text into the child's spec (`Directives::apply` appends an
+   `INHERITED DIRECTIVES (apply throughout this task):` section, with filenames as plain labels so
+   directive content keeps its own heading hierarchy). This is what actually makes the child obey,
+   and it is the only mechanism that
    works for an inline worker with no worktree of its own. It reaches the **reviewer** too —
    `submit_branch` applies it to the review task, since a directive like "reject any new `unwrap()`
    in library code" is worthless if the one child judging the diff never sees it.
@@ -137,9 +138,9 @@ one model, so overriding it would 404.
 ## Fold-time file boundary
 
 A spawn spec has two distinct fields, rendered as two distinct sections, and they must never be
-confused: `boundary` is prose the child reads — a `DO NOT` list rendered under `ANTI-PATTERNS (DO
-NOT):` — while `file_boundary` is the allowed-paths list, rendered under a separate `ALLOWED PATHS`
-section right after it. Spec authors used to put allowed paths into `boundary` (there was nowhere
+confused: `boundary` is prose the child reads under `CONSTRAINTS`, while `file_boundary` is the
+allowed-paths list, rendered earlier under a separate `ALLOWED PATHS` section. Spec authors used to
+put allowed paths into `boundary` (there was nowhere
 else to put them — a child never saw its own `file_boundary` at all, only the parent that spawned
 it did), which renders as a forbidden list and reads backwards: children halted, reading their own
 work-paths as things they must NOT touch. `render_spec_prompt` now renders both, so the child sees

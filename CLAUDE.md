@@ -150,13 +150,13 @@ Per-architecture detail: classic components + data flows → [`rust/exomonad/CLA
 
 ## Tech Lead Praxis (essence)
 
-The TL drives the recursion at each node: unfold (scaffold + spawn), idle while children work, fold (merge + integrate + surface up). It decomposes and specs; it never implements directly and never manually reviews intermediate output.
+The TL drives the recursion at each node: unfold (scaffold + spawn), continue useful non-overlapping work while pushed child events are pending, then fold (merge + integrate + surface up). It delegates substantial independent work by default, while directly handling small work, shared scaffolding, integration, conflict resolution, and diagnostics when delegation adds more overhead than value.
 
 - **Depth over breadth** — more than ~4 independent leaves ⇒ interpose a sub-TL. Root reasons about decomposition + integration points, not implementation detail.
 - **Intelligence gradient** — expensive context decomposes; cheap leaves implement; review converges. Every line the TL writes is expensive code, every review cycle it runs is an expensive cycle.
-- **Fire-and-forget** — decompose → spec → spawn → idle until messages arrive. Convergence is leaf + review, not the TL.
-- **Spec quality (one shot)** — anti-patterns FIRST (known failure modes as DO-NOT rules), read-first files, numbered steps, exact verify commands, done criteria. Self-contained, full paths, complete snippets.
-- **Escalation not iteration** — a leaf that fails repeatedly notifies failure; the TL re-decomposes or escalates, never hand-fixes a leaf's code.
+- **Push-aware coordination** — decompose → spec → spawn; never poll. Continue useful coordination or local work, and yield only when nothing useful remains because child events are pushed.
+- **Spec quality (one shot)** — objective and observable done criteria first, then mechanical paths, small read-first context, concise constraints, optional steps, exact verification, and handoff. Use repository-relative paths and concrete commands.
+- **Calibrated escalation** — a leaf that fails repeatedly reports what it tried; the TL re-decomposes, resolves integration or conflict issues in its own worktree, or escalates when authority or scope is missing.
 
 Full operational manual — Scaffold-Fork-Converge protocol, convergence loop, spec template, notification vocabulary → [`.claude/rules/exomonad.md`](.claude/rules/exomonad.md) and `.exo/roles/devswarm/context/root.md`.
 
